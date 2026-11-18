@@ -6,8 +6,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -17,8 +17,8 @@ import (
 // response.
 type imageService struct {
 	modelCallService
-	// logBodies mirrors the audit logger config. The endpoints are not
-	// ingress-managed, so no request snapshot exists for the audit middleware
+	// logBodies mirrors the request logger config. The endpoints are not
+	// ingress-managed, so no request snapshot exists for the request log middleware
 	// to read the request body from; the service captures it here instead.
 	// Responses are captured here too, as an image gallery rather than the raw
 	// JSON, so a base64 payload never hits the generic 1 MB truncation.
@@ -29,12 +29,12 @@ type imageService struct {
 	logBodies       bool
 	logImageInputs  bool
 	logImageOutputs bool
-	media           *auditlog.MediaCapturer
+	media           *requestlog.MediaCapturer
 }
 
 // inputCapture returns the media capture for uploaded images (edit sources
 // and masks), or nil when they are not to be stored.
-func (s *imageService) inputCapture(c *echo.Context) *auditlog.MediaCapture {
+func (s *imageService) inputCapture(c *echo.Context) *requestlog.MediaCapture {
 	if !s.logBodies || !s.logImageInputs {
 		return nil
 	}
@@ -43,7 +43,7 @@ func (s *imageService) inputCapture(c *echo.Context) *auditlog.MediaCapture {
 
 // outputCapture returns the media capture for generated images, or nil when
 // they are not to be stored.
-func (s *imageService) outputCapture(c *echo.Context) *auditlog.MediaCapture {
+func (s *imageService) outputCapture(c *echo.Context) *requestlog.MediaCapture {
 	if !s.logBodies || !s.logImageOutputs {
 		return nil
 	}
@@ -70,7 +70,7 @@ func (s *imageService) CreateImage(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 	if s.logBodies {
-		auditlog.EnrichEntryWithRawRequestBody(c, body)
+		requestlog.EnrichEntryWithRawRequestBody(c, body)
 	}
 	req, err := core.DecodeImageGenerationRequest(body, env)
 	if err != nil {
@@ -111,11 +111,11 @@ func (s *imageService) CreateImage(c *echo.Context) error {
 }
 
 // respondImages writes the JSON response and, when body logging is on, records
-// it in the audit entry as an image body: envelope metadata plus each image
+// it in the request log entry as an image body: envelope metadata plus each image
 // stored in the media store (gated by logImageOutputs) or a sized placeholder.
 func (s *imageService) respondImages(c *echo.Context, resp *core.ImageGenerationResponse) error {
 	if s.logBodies {
-		auditlog.EnrichEntryWithResponseBody(c, auditlog.BuildImageResponseBody(s.outputCapture(c), resp))
+		requestlog.EnrichEntryWithResponseBody(c, requestlog.BuildImageResponseBody(s.outputCapture(c), resp))
 	}
 	return c.JSON(http.StatusOK, resp)
 }

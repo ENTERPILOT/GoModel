@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
@@ -63,8 +65,9 @@ type upsertProviderCredentialRequest struct {
 	ServiceAccountJSON       string `json:"service_account_json,omitempty"`
 	ServiceAccountJSONBase64 string `json:"service_account_json_base64,omitempty"`
 	GCPScope                 string `json:"gcp_scope,omitempty"`
-	// ProxyURL may be sent back exactly as the view rendered it (password
-	// masked) to keep the stored proxy credentials.
+	// ProxyURL may be sent back with the password masked, as the view rendered
+	// it, to keep the stored proxy password, also when the rest of the URL is
+	// edited.
 	ProxyURL string   `json:"proxy_url,omitempty"`
 	Models   []string `json:"models,omitempty"`
 	// ModelsMode overrides the global configured provider models mode for
@@ -337,7 +340,10 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 	if isRedactedCredentialValue(req.ServiceAccountJSONBase64) {
 		kept = append(kept, serviceAccountJSONBase64)
 	}
-	proxyURL := mergeRedactedProxyURL(req.ProxyURL, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ProxyURL }))
+	proxyURL, err := mergeRedactedProxyURL(req.ProxyURL, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ProxyURL }))
+	if err != nil {
+		return providers.ManagedProviderCredential{}, nil, err
+	}
 	if proxyURL != strings.TrimSpace(req.ProxyURL) {
 		kept = append(kept, proxyURL)
 	}
@@ -433,15 +439,51 @@ func mergeRedactedValue(field, incoming, stored string) (string, error) {
 	return stored, nil
 }
 
-// mergeRedactedProxyURL keeps the stored proxy URL when the client echoes the
-// masked form the view rendered ("socks5://user:xxxxx@host:1080"), so editing
-// another field never strips the proxy password. Any other value replaces it.
-func mergeRedactedProxyURL(incoming, stored string) string {
+// mergeRedactedProxyURL keeps the stored proxy password when the client echoes
+// the masked form the view rendered ("socks5://user:xxxxx@host:1080"), even if
+// it changes another part of the same URL such as the scheme, host, port, or
+// username. A masked password with no stored one behind it is rejected, so the
+// mask is never saved as the password. Any other value replaces the stored URL
+// as sent.
+func mergeRedactedProxyURL(incoming, stored string) (string, error) {
 	incoming = strings.TrimSpace(incoming)
 	if incoming != "" && stored != "" && incoming == redactProxyURL(stored) {
-		return stored
+		return stored, nil
 	}
-	return incoming
+	inURL, err := httpclient.ParseProxyURL(incoming)
+	if err != nil || !isMaskedProxyPassword(inURL.User) {
+		return incoming, nil
+	}
+	// url.URL.Redacted masks a password that is present but empty too, so
+	// only an absent one leaves nothing to restore. A stored URL holding a
+	// secret reference does not parse, and its password was never masked.
+	password, ok := "", false
+	if storedURL, err := httpclient.ParseProxyURL(stored); err == nil {
+		password, ok = storedURL.User.Password()
+	}
+	if !ok {
+		return "", core.NewInvalidRequestError(providers.CredentialFieldProxyURL+" password is redacted but has no stored value to preserve; provide the real value", nil).
+			WithParam(providers.CredentialFieldProxyURL)
+	}
+	inURL.User = url.UserPassword(inURL.User.Username(), password)
+	return inURL.String(), nil
+}
+
+// proxyPasswordMask is what url.URL.Redacted replaces a password with, and
+// therefore what the dashboard echoes back in a masked proxy URL.
+const proxyPasswordMask = "xxxxx"
+
+// isMaskedProxyPassword reports whether the userinfo carries the display mask
+// instead of a real password.
+func isMaskedProxyPassword(user *url.Userinfo) bool {
+	if user == nil {
+		return false
+	}
+	password, ok := user.Password()
+	if !ok {
+		return false
+	}
+	return password == proxyPasswordMask || isRedactedCredentialValue(password)
 }
 
 // isRedactedCredentialValue recognizes both the current display mask and

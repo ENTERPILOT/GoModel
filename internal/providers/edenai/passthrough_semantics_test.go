@@ -17,7 +17,7 @@ func TestPassthroughSemanticEnricher(t *testing.T) {
 		normalizedEndpoint string
 		wantOperation      string
 		wantGenAIOperation string
-		wantAuditPath      string
+		wantRequestLogPath string
 	}{
 		{
 			name:               "chat completions",
@@ -25,7 +25,7 @@ func TestPassthroughSemanticEnricher(t *testing.T) {
 			normalizedEndpoint: "chat/completions",
 			wantOperation:      "edenai.chat_completions",
 			wantGenAIOperation: "chat",
-			wantAuditPath:      "/v1/chat/completions",
+			wantRequestLogPath: "/v1/chat/completions",
 		},
 		{
 			name:               "embeddings",
@@ -33,7 +33,7 @@ func TestPassthroughSemanticEnricher(t *testing.T) {
 			normalizedEndpoint: "embeddings",
 			wantOperation:      "edenai.embeddings",
 			wantGenAIOperation: "embeddings",
-			wantAuditPath:      "/v1/embeddings",
+			wantRequestLogPath: "/v1/embeddings",
 		},
 	}
 
@@ -46,7 +46,7 @@ func TestPassthroughSemanticEnricher(t *testing.T) {
 			require.NotNil(t, got, "Enrich() returned nil")
 			assert.Equal(t, tt.wantOperation, got.SemanticOperation)
 			assert.Equal(t, tt.wantGenAIOperation, got.GenAIOperation)
-			assert.Equal(t, tt.wantAuditPath, got.AuditPath)
+			assert.Equal(t, tt.wantRequestLogPath, got.RequestLogPath)
 		})
 	}
 }
@@ -54,7 +54,7 @@ func TestPassthroughSemanticEnricher(t *testing.T) {
 // TestPassthroughSemanticEnricher_ResponsesIsNotOpenAIShaped asserts Eden's
 // native /responses route is deliberately absent from the table. Eden's
 // /v3/responses is not the OpenAI Responses API, so labelling it
-// "edenai.responses" with a /v1/responses audit path would record a request as
+// "edenai.responses" with a /v1/responses request log path would record a request as
 // something it is not. It must fall through to the generic /p/edenai/... path.
 func TestPassthroughSemanticEnricher_ResponsesIsNotOpenAIShaped(t *testing.T) {
 	got := passthroughSemanticEnricher.Enrich(nil, nil, &core.PassthroughRouteInfo{
@@ -63,5 +63,5 @@ func TestPassthroughSemanticEnricher_ResponsesIsNotOpenAIShaped(t *testing.T) {
 	})
 	require.NotNil(t, got, "Enrich() returned nil")
 	assert.Empty(t, got.SemanticOperation, "SemanticOperation = %q, want empty: Eden /responses must not be advertised as OpenAI Responses", got.SemanticOperation)
-	assert.Equal(t, "/p/edenai/responses", got.AuditPath)
+	assert.Equal(t, "/p/edenai/responses", got.RequestLogPath)
 }

@@ -37,14 +37,14 @@ const (
 	// sqliteOptimizeInterval is how often the planner statistics are checked.
 	sqliteOptimizeInterval = time.Hour
 	// sqliteOptimizeTimeout bounds one check, which holds the single
-	// connection. It stays well under the 30-second usage and audit flush
+	// connection. It stays well under the 30-second usage and request log flush
 	// deadlines and bounds how long the startup check delays serving.
 	sqliteOptimizeTimeout = 10 * time.Second
 	// sqliteOptimize runs ANALYZE (0x02) on every table (0x10000) whose
 	// statistics are missing or whose row count changed tenfold since it was
 	// last analyzed, so it is cheap when nothing changed. It leaves out 0x10,
 	// which would lower analysis_limit to 2000. Without statistics the planner
-	// picks poor indexes for the usage and audit log queries.
+	// picks poor indexes for the usage and request log queries.
 	sqliteOptimize = "PRAGMA optimize=0x10002"
 )
 
@@ -88,7 +88,7 @@ func NewSQLite(cfg SQLiteConfig) (SQLiteStorage, error) {
 
 	// Serialize all SQLite access through a single connection.
 	// SQLite only permits one writer at a time. With multiple open connections,
-	// concurrent flush loops (audit log + usage tracking) cause SQLITE_BUSY errors.
+	// concurrent flush loops (request log + usage tracking) cause SQLITE_BUSY errors.
 	// A single connection lets database/sql queue callers in Go, eliminating contention.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)

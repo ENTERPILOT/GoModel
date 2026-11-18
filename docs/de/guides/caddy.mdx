@@ -17,7 +17,7 @@ Dafür eignet sich das vor allem:
 
 - **Nicht authentifizierten Traffic am Edge abweisen.** Requests ohne verwendbaren Key
   erreichen das Gateway nie, sodass Scanner und falsch konfigurierte Clients keine
-  Verbindungen zu ihm öffnen und nicht in seinem Audit-Log landen. GoModel authentifiziert weiterhin jeden
+  Verbindungen zu ihm öffnen und nicht in seinem Request-Log landen. GoModel authentifiziert weiterhin jeden
   Request, den es bedient; die Prüfung am Edge ist ein vorgeschalteter Filter, kein Ersatz.
 - **Andere Dienste über GoModel-Keys absichern.** Ein internes Dashboard, eine Dokumentationsseite
   oder ein Metrik-Endpunkt auf demselben Host kann einen gültigen GoModel-Key verlangen,

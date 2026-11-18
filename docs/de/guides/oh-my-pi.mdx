@@ -51,13 +51,13 @@ mit `GOMODEL_MASTER_KEY` an. Gehen Sie zu `API Keys -> Create API Key` und dann:
 3. Lassen Sie **Dashboard access** deaktiviert.
 4. Erstellen Sie den Key und kopieren Sie den `sk_gom_...`-Wert. Er wird nur einmal angezeigt.
 
-Der gebundene User Path gibt omp einen eigenen Bereich für Nutzung und Audit. Wenn Sie
+Der gebundene User Path gibt omp einen eigenen Bereich für Nutzung und Request-Logs. Wenn Sie
 gatewayweite [Richtlinien für den Modellzugriff](/de/features/user-path#modellzugriff) verwenden,
 erlauben Sie für `/agents/omp` die Selektoren, die omp benötigt.
 
 <Warning>
   Verwenden Sie in omp diesen verwalteten Key, nicht `GOMODEL_MASTER_KEY`. Ein verwalteter Key ohne
-  Dashboard-Zugriff kann Modell-Endpunkte aufrufen, aber keine Audit-Logs lesen, keine Keys
+  Dashboard-Zugriff kann Modell-Endpunkte aufrufen, aber keine Request-Logs lesen, keine Keys
   erstellen und keine Gateway-Einstellungen ändern.
 </Warning>
 
@@ -175,15 +175,15 @@ providers:
         maxTokens: 128000
 ```
 
-Beide Wege laufen über denselben Gateway-Key, dieselben Budgets und denselben Audit-Trail. Der
+Beide Wege laufen über denselben Gateway-Key, dieselben Budgets und dasselbe Request-Log. Der
 OpenAI-kompatible Weg mit automatischer Erkennung ist der empfohlene Standard; verwenden Sie das
 Anthropic-Wire-Format, wenn Sie ausdrücklich durchgängig die Semantik der Messages API wünschen.
 
 ## 6. Traffic in GoModel prüfen
 
-Öffnen Sie die Audit-Logs im GoModel-Dashboard:
+Öffnen Sie die Seite „Anfragen“ im GoModel-Dashboard:
 
-[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+[http://localhost:8080/admin/dashboard/requests](http://localhost:8080/admin/dashboard/requests)
 
 Prüfen Sie die Streaming-Requests von omp an `POST /v1/chat/completions` unter dem User Path
 `/agents/omp` und ob GoModel sie an den vorgesehenen Provider routet. Melden Sie sich mit dem

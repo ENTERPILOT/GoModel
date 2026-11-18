@@ -152,4 +152,4 @@ for await (const model of client.models.list()) {
 - 如果 GoModel 运行在 Docker 中，而 OpenClaw 不在 Docker 中，通常使用 `http://localhost:8080` 即可。
 - 如果两者运行在不同的容器中，请使用共享的 Docker 网络和容器主机名，而不是 `localhost`。
 - 您可以在 `models.providers.gomodel.models` 下添加更多条目，以提供多个由 GoModel 支持的模型。
-- 作为 AI 网关，GoModel 还通过一个兼容 OpenAI 的端点为您提供集中式认证、审计日志、用量分析和提供商抽象。
+- 作为 AI 网关，GoModel 还通过一个兼容 OpenAI 的端点为您提供集中式认证、请求日志、用量分析和提供商抽象。

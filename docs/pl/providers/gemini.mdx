@@ -48,6 +48,11 @@ Google domyślnie przechowuje requesty do Gemini API w nowych projektach w płat
 planie. W trybie natywnym `store: false` z Chat Completions jest przekazywane jako
 rezygnacja per request w Gemini; endpoint kompatybilny z OpenAI nie ma takiego pola.
 
+W natywnym trybie AI Studio na `/v1/messages/count_tokens` odpowiada własne
+`countTokens` Gemini, więc wynik obejmuje narzut per request, który nalicza
+Gemini 4. Tryb `openai_compatible`, Vertex oraz requesty, dla których wywołanie
+`countTokens` się nie powiedzie, dostają oszacowanie GoModel.
+
 ## Bazowe URL-e
 
 GoModel utrzymuje osobne wewnętrzne adresy bazowe dla natywnego Gemini i
@@ -116,7 +121,7 @@ obraz w base64, może mieć do 32 MiB; pluginy strumienia domyślnie mieszczą
 najwyżej 4 MiB, więc większy obraz kończy strumień, który przez nie przechodzi.
 Gdy takie pluginy są włączone, żądaj obrazów 2K i 4K bez streamingu.
 
-Każdy obraz to kilka megabajtów base64. Logi audytowe przechwytują maksymalnie 1 MB
+Każdy obraz to kilka megabajtów base64. Logi requestów przechwytują maksymalnie 1 MB
 body odpowiedzi, więc zalogowane body jest obcinane i odpowiednio oznaczane. Cache
 odpowiedzi przechowuje całą odpowiedź.
 
@@ -132,16 +137,38 @@ W trybie natywnym `reasoning_effort` (lub `reasoning.effort`) jest tłumaczone n
 | Gemini 3 Pro, 3.1 Pro, 3.7 Flash, 3.8 Flash, Gemini 4 | `thinkingLevel: low` | `thinkingLevel` bez zmian |
 
 W Gemini 3 i 4 nie da się wyłączyć thinkingu, a modele Pro, 3.7 i 3.8
-Flash oraz Gemini 4 (`gemini-4-argon`, ...) odrzucają `minimal`, więc GoModel wysyła
-najniższy poziom akceptowany przez te modele, zamiast zwracać błąd 400 od Google. Jawne
+Flash, Gemini 4 (`gemini-4-argon`, ...) oraz aliasy `-latest` odrzucają `minimal`, więc GoModel wysyła
+najniższy poziom akceptowany przez te modele, zamiast zwracać błąd 400 od Google.
+Podobnie `xhigh` akceptuje tylko Gemini 4 Hydrogen, więc każdy inny model Gemini dostaje
+`high` (w Gemini 2.5 budżet dla `high`). Jawne
 `extra_body.google.thinking_config` jest przekazywane bez zmian, gdy ustawia
 `thinking_budget` lub `thinking_level`; w przeciwnym razie `reasoning_effort` dodaje
-do niego swój poziom lub budżet. To samo ograniczanie obowiązuje w trybie `openai_compatible`, w którym endpoint Google
+do niego swój poziom lub budżet. To samo ograniczanie obowiązuje dla Gemini 3 i 4 w trybie `openai_compatible`, w którym endpoint Google
 przekazuje `reasoning_effort` jako poziom thinkingu i odrzuca te same wartości.
 
 W Gemini 4 tokeny thinkingu wliczają się do `max_tokens`, a długa odpowiedź, która
 osiągnie limit wyjścia per request, kończy się z `length` (`CONTINUATION` w Gemini);
 GoModel jej nie wznawia.
+
+Google rozlicza tokeny thinkingu jako wyjściowe. Jego endpoint zgodny z OpenAI
+wlicza je do `total_tokens`, ale pomija w `completion_tokens`, dlatego w trybie
+`openai_compatible` GoModel dolicza je z powrotem, zanim zapisze użycie i
+odpowie klientowi. Tak jak w trybie natywnym liczba tokenów wyjściowych zawiera
+wtedy thinking: Chat Completions podaje go w `completion_tokens` i
+`completion_tokens_details.reasoning_tokens`, a Responses API w `output_tokens`
+i `output_tokens_details.reasoning_tokens`. Zapisane tokeny wyjściowe i koszt
+odpowiednio rosną. To, ile zostanie doliczone, zależy od odpowiedzi:
+
+- **Tokeny reasoningowe wyszczególnione**: doliczana jest najwyżej ta liczba, a
+  jawne `0` nie dolicza niczego. `reasoning_tokens` podaje wyszczególnioną
+  liczbę albo, gdy jest ona większa, liczbę tokenów wyjściowych, niezależnie
+  od tego, czy cokolwiek doliczono, więc nigdy nie przekracza liczby tokenów
+  wyjściowych.
+- **Niewyszczególnione** (kształt zarejestrowany dla Gemini 2.5 Flash i
+  3 Flash): cała część `total_tokens` ponad tokeny promptu i odpowiedzi jest
+  doliczana i raportowana jako tokeny reasoningowe. Może ona zawierać tokeny
+  promptu wbudowanych narzędzi Google, które są wtedy wyceniane jak thinking:
+  według stawki wyjściowej albo `reasoning_output_per_mtok`, gdy model ją ma.
 
 ## Parametry samplingu w Gemini 3 i 4
 

@@ -39,7 +39,7 @@ type authKeyResponse struct {
 	EffectiveModels []string `json:"effective_models"`
 	// LastUsedAvailable reports whether the last-used lookup ran successfully
 	// for this response (even when it found no entries). Without it the
-	// dashboard cannot tell "audit has nothing for this key" from "audit data
+	// dashboard cannot tell "the request log has nothing for this key" from "request log data
 	// was unavailable".
 	LastUsedAvailable bool `json:"last_used_available,omitempty"`
 }
@@ -71,14 +71,14 @@ func (h *Handler) ListAuthKeys(c *echo.Context) error {
 		}
 		row.EffectiveModels = h.effectiveModels(ctx, catalog)
 	}
-	// Last-used timestamps come from the audit log (the only write-time record
+	// Last-used timestamps come from the request log (the only write-time record
 	// of key activity). The availability flag distinguishes a successful
-	// lookup with no entries from an unavailable audit store: a lookup failure
+	// lookup with no entries from an unavailable request log store: a lookup failure
 	// degrades to no last_used_at fields — the dashboard shows its honest
 	// fallback states instead.
 	lastUsedAvailable := false
-	if h.auditReader != nil && len(keyIDs) > 0 {
-		lastUsed, err := h.auditReader.GetLastUsedByAuthKeys(c.Request().Context(), keyIDs)
+	if h.requestLogReader != nil && len(keyIDs) > 0 {
+		lastUsed, err := h.requestLogReader.GetLastUsedByAuthKeys(c.Request().Context(), keyIDs)
 		if err != nil {
 			slog.Warn("failed to load auth key last used", "error", err)
 		} else {
@@ -244,6 +244,19 @@ func (h *Handler) virtualModelTargets(selectors []string) []string {
 	return out
 }
 
+type updateAuthKeyNameRequest struct {
+	Name string `json:"name"`
+}
+
+// UpdateAuthKeyName handles PUT /admin/auth-keys/:id/name. The name is
+// trimmed, must not be empty, and need not be unique.
+func (h *Handler) UpdateAuthKeyName(c *echo.Context) error {
+	var req updateAuthKeyNameRequest
+	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
+		return h.authKeys.UpdateName(ctx, id, req.Name)
+	})
+}
+
 type updateAuthKeyLabelsRequest struct {
 	Labels []string `json:"labels"`
 }
@@ -373,8 +386,8 @@ func allowedModelsOutOfScopeError() error {
 		WithCode(codeAllowedModelsOutOfScope)
 }
 
-// requireNotOwnAuthKey stops a managed key from changing its own labels,
-// model allowlist, or access flags, so it cannot lift restrictions placed on
+// requireNotOwnAuthKey stops a managed key from changing its own name,
+// labels, model allowlist, or access flags, so it cannot lift restrictions placed on
 // it. Deactivating itself stays allowed.
 func requireNotOwnAuthKey(c *echo.Context, id string) error {
 	if own := core.GetAuthKeyID(c.Request().Context()); own != "" && own == id {

@@ -41,7 +41,7 @@ Lambdas, or a small VM next to your app. It does not need a dedicated node pool.
 
 ## Choose a storage backend
 
-GoModel persists audit logs, usage records, budgets, virtual models, managed API
+GoModel persists request logs, usage records, budgets, virtual models, managed API
 keys, and other admin state through `STORAGE_TYPE`.
 
 | Backend | `STORAGE_TYPE` | Use it when |
@@ -69,7 +69,7 @@ database, they each get their own, so usage, budgets, and managed API keys
 diverge silently. A key created on one pod does not exist on the other.
 
 SQLite also runs with a single open connection by design, to keep one writer and
-avoid lock contention. Every audit flush, usage flush, and budget check
+avoid lock contention. Every request log flush, usage flush, and budget check
 serializes through it, which is a throughput ceiling under sustained load.
 
 The connection uses a 64 MiB page cache and memory-maps up to 256 MiB of the
@@ -83,7 +83,7 @@ high concurrency with budgets or rate limits enabled.
 <Warning>
   **The Docker image does not declare a volume.** The default database path
   resolves to `/app/data/gomodel.db` inside the image, which is an image-layer
-  directory. Without an explicit volume mount, every audit log, usage record,
+  directory. Without an explicit volume mount, every request log entry, usage record,
   budget, managed API key, and stored credential is lost when the container is
   replaced. Always mount a volume at `/app/data`, or move to Postgres/MongoDB.
   The gateway logs a warning at startup when it detects this situation, and the
@@ -190,7 +190,7 @@ volume, restrict access, and classify backups accordingly.
 - **Client credential headers are redacted before they are persisted.** With
   `LOGGING_LOG_HEADERS=true`, `Authorization`, `x-api-key`, `Cookie`, and the
   other credential headers are replaced with `[REDACTED]` on the write path, so
-  the audit store never receives them. So is any header whose name looks like a
+  the request log never receives them. So is any header whose name looks like a
   credential: one ending in `token`, `-key` or `-auth`, or containing
   `authorization`, `api-key`, `apikey`, `secret`, `password`, `signature` or
   `jwt`. `Idempotency-Key` and `Sec-WebSocket-Key` are kept.
@@ -236,6 +236,10 @@ SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
 - Once TLS is on, the port no longer answers plain HTTP. `gomodel --health` and
   `gomodel --ready`, which the Docker `HEALTHCHECK` runs, switch to HTTPS
   automatically.
+- Responses carry `Strict-Transport-Security: max-age=15552000` (180 days,
+  without `includeSubDomains` or `preload`), so browsers keep using HTTPS for
+  this host. Plain HTTP behind a TLS-terminating proxy sends no HSTS header;
+  set it at the proxy.
 
 **Kubernetes with cert-manager.** Issue the certificate into a Secret and mount
 it as a volume. Do not use `subPath`: the kubelet does not update `subPath`
@@ -436,7 +440,7 @@ coordinate across instances.
 | --- | --- | --- |
 | [Budgets](/features/budgets) enforcement | Durable (database) | Correct across replicas. Spend is read from the shared usage table. |
 | [Usage and cost records](/features/cost-tracking) | Durable (database) | Aggregated correctly. |
-| Audit logs | Durable (database) | Complete across replicas. |
+| Request logs | Durable (database) | Complete across replicas. |
 | [SSO](/pro/sso) sign-out (Pro) | Durable (database) | A signed-out session is rejected on every replica within about 2 seconds. |
 | [Rate limits](/features/rate-limits) | In memory, shared through the database | Replicas enforce one limit together, approximately: each sees the others' counts within about two flush intervals. A restart restores the last saved request and token counts once; a crash can lose those since the last flush. A reset clears those windows on every replica; active concurrency slots stay held until their requests finish. |
 | Circuit breakers | In-memory, per process | Each replica learns an outage separately, so upstream sees up to `N x failure_threshold` failures before any breaker opens. |
@@ -463,7 +467,7 @@ together they can again admit up to about `N x` the limit.
 A dashboard streams live logs from the replica it is connected to. That
 replica shows its own requests the moment they start, with in-flight and
 streaming previews. While at least one dashboard is connected, it also reads
-the audit and usage rows the other replicas persisted, every 2 seconds, and
+the request log and usage rows the other replicas persisted, every 2 seconds, and
 streams them into the same view. It adds no database writes: each replica
 stamps the batches it already writes with its own id, and with no dashboard
 open no replica reads anything.
@@ -477,15 +481,15 @@ Requests served by another replica:
 - appear as completed entries, with status, duration, model, provider, usage
   and cost, but no in-flight or per-chunk streaming preview; bodies load from
   the database when you expand the entry;
-- appear only if they were persisted. Audit entries and usage entries come
-  from separate features: a replica with audit logging off contributes no
-  audit entries, and one with usage tracking off no usage entries. The
-  replica your dashboard is connected to shows another replica's audit
-  entries only with audit logging on itself, and its usage entries only with
+- appear only if they were persisted. Request log entries and usage entries come
+  from separate features: a replica with request logging off contributes no
+  request log entries, and one with usage tracking off no usage entries. The
+  replica your dashboard is connected to shows another replica's request log
+  entries only with request logging on itself, and its usage entries only with
   usage tracking on;
 - are slotted into the list by request time, below anything newer.
 
-Under heavy traffic, at most 200 audit and 200 usage entries from other
+Under heavy traffic, at most 200 request log and 200 usage entries from other
 replicas are streamed per poll; when there are more, the newest 200 are
 selected. The rest are still in the list after a refresh. A dashboard that reconnects, or a replica whose reads
 failed for a while, catches up on what the other replicas persisted in the
@@ -557,7 +561,7 @@ volume, and refuses more than one replica until you switch `storage.type` to
 </Note>
 
 On `SIGTERM` the gateway drains in-flight HTTP work for 10 seconds, then
-finishes teardown within 30 seconds, flushing buffered usage and audit entries
+finishes teardown within 30 seconds, flushing buffered usage and request log entries
 on the way out. Neither timeout is configurable. In-flight streamed responses
 are cut at the 10-second mark, so a long completion in progress during a rolling
 deploy will be truncated. Set `terminationGracePeriodSeconds` above 30 (45 is a
@@ -565,11 +569,11 @@ reasonable choice) so the teardown is not racing SIGKILL.
 
 ## Data retention and disk growth
 
-Audit logging and usage tracking write a row per request, and both sweep hourly.
+Request logging and usage tracking write a row per request, and both sweep hourly.
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| `LOGGING_RETENTION_DAYS` | `30` | Audit entries older than this are removed. |
+| `LOGGING_RETENTION_DAYS` | `30` | Request log entries older than this are removed. |
 | `USAGE_RETENTION_DAYS` | `90` | Usage records older than this are removed. |
 | `LOGGING_LOG_BODIES` | `true` | Captures full request and response bodies, up to 1 MB each. |
 
@@ -581,19 +585,19 @@ Audit logging and usage tracking write a row per request, and both sweep hourly.
   prompt is persisted for the full retention window.
 
   In regulated environments, or anywhere prompts carry personal data, set
-  `LOGGING_LOG_BODIES=false` and keep the metadata-only audit trail.
+  `LOGGING_LOG_BODIES=false` and keep the metadata-only request log.
 </Warning>
 
 Two further points at volume:
 
-- **Usage and audit writes are buffered and dropped, not blocked, when the
+- **Usage and request log writes are buffered and dropped, not blocked, when the
   buffer fills.** A burst or a slow database can silently lose usage entries,
   which means lost cost data and under-charged budgets. Alert on
   `gomodel_usage_entries_dropped_total` (see
   [Alerting on Lost Usage](/guides/prometheus-metrics#alerting-on-lost-usage)),
   or, without metrics, on the `usage log buffer full`,
   `usage logger closed` and `failed to write usage batch` log messages. A
-  dropped audit entry logs `audit log buffer full`.
+  dropped request log entry logs `request log buffer full`.
 - **Budget checks query the usage table on every request.** Keep
   `USAGE_RETENTION_DAYS` tight when budgets are enabled, and prefer Postgres
   over SQLite, whose single connection makes this the dominant cost.

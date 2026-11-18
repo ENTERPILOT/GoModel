@@ -92,7 +92,7 @@ func TestDeriveWhiteBoxPrompt_PassthroughRouteParams(t *testing.T) {
 	require.Equal(t, "responses", info.RawEndpoint)
 	require.Equal(t, "gpt-5-mini", info.Model)
 	require.True(t, info.Stream)
-	require.Equal(t, "/p/openai/responses", info.AuditPath)
+	require.Equal(t, "/p/openai/responses", info.RequestLogPath)
 	require.Nil(t, env.CachedChatRequest())
 	require.Nil(t, env.CachedResponsesRequest())
 	require.Nil(t, env.CachedEmbeddingRequest())
