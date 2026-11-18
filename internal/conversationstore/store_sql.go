@@ -53,7 +53,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 		ttl:         DefaultPersistentStoreTTL,
 		stopCleanup: make(chan struct{}),
 	}
-	go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
+	go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, storage.SingleReplicaSweep(sqlx.PostgreSQLPool(db), cleanupLockKey, store.cleanup))
 	return store, nil
 }
 

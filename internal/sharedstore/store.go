@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/ext"
@@ -20,6 +21,10 @@ import (
 // SweepInterval is how often expired entries are deleted. Reads already hide
 // them, so the sweep only bounds the table's size.
 const SweepInterval = time.Hour
+
+// sweepLockKey is the PostgreSQL advisory lock that keeps the sweep to one
+// replica at a time (see storage.SingleReplicaSweep).
+const sweepLockKey int64 = 0x676d72742d736872 // "gmrt-shr"
 
 // backend is one storage engine's half of a Store. Times are unix seconds;
 // an expiresAt of 0 never expires, and put only ever receives 0 or a future
@@ -48,15 +53,19 @@ var _ ext.SharedStore = (*Store)(nil)
 // the expiry sweep. Close stops the sweep; the connection stays owned by the
 // storage layer.
 func New(ctx context.Context, shared storage.Storage) (*Store, error) {
+	var pool *pgxpool.Pool // set on PostgreSQL, for the sweep lock
 	b, err := storage.ResolveSQLBackend[backend](ctx, shared,
-		func(db sqlx.DB) (backend, error) { return newSQLBackend(ctx, db) },
+		func(db sqlx.DB) (backend, error) {
+			pool = sqlx.PostgreSQLPool(db)
+			return newSQLBackend(ctx, db)
+		},
 		func(db *mongo.Database) (backend, error) { return newMongoBackend(ctx, db) },
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create shared store: %w", err)
 	}
 	store := newStore(b, time.Now)
-	go storage.RunCleanupLoop(store.stop, SweepInterval, store.sweep)
+	go storage.RunCleanupLoop(store.stop, SweepInterval, storage.SingleReplicaSweep(pool, sweepLockKey, store.sweep))
 	return store, nil
 }
 
