@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	batchstore "github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -15,6 +14,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/mediastore"
 	"github.com/enterpilot/gomodel/internal/realtime"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -35,7 +35,7 @@ type Handler struct {
 	exposedModelLister              ExposedModelLister
 	keepOnlyAliasesAtModelsEndpoint bool
 	vllmDiscoveryCompat             bool
-	logger                          auditlog.LoggerInterface
+	logger                          requestlog.LoggerInterface
 	usageLogger                     usage.LoggerInterface
 	budgetChecker                   BudgetChecker
 	rateLimiter                     RateLimiter
@@ -44,9 +44,9 @@ type Handler struct {
 	pricingResolver                 usage.PricingResolver
 	batchStore                      batchstore.Store
 	fileStore                       filestore.Store
-	// mediaCapturer stores audited audio and image payloads outside the
-	// audit document; nil records placeholders only.
-	mediaCapturer *auditlog.MediaCapturer
+	// mediaCapturer stores logged audio and image payloads outside the
+	// request log document; nil records placeholders only.
+	mediaCapturer *requestlog.MediaCapturer
 	responseStore responsestore.Store
 	// storesMu guards responseStore, conversationStore, and translatedSvc wiring.
 	storesMu                     sync.RWMutex
@@ -79,7 +79,7 @@ type Handler struct {
 // provider (typically the Router) and optional resolvers.
 func newHandlerWithAuthorizer(
 	provider core.RoutableProvider,
-	logger auditlog.LoggerInterface,
+	logger requestlog.LoggerInterface,
 	usageLogger usage.LoggerInterface,
 	pricingResolver usage.PricingResolver,
 	modelResolver RequestModelResolver,
@@ -129,8 +129,8 @@ func (h *Handler) SetFileStore(store filestore.Store) {
 	h.fileStore = store
 }
 
-// SetMediaStore routes audited audio and image payloads into the media store,
-// retained as long as the audit entries that reference them. nil is ignored.
+// SetMediaStore routes logged audio and image payloads into the media store,
+// retained as long as the request log entries that reference them. nil is ignored.
 func (h *Handler) SetMediaStore(store *mediastore.Service) {
 	if store == nil {
 		return
@@ -139,7 +139,7 @@ func (h *Handler) SetMediaStore(store *mediastore.Service) {
 	if h.logger != nil {
 		retentionDays = h.logger.Config().RetentionDays
 	}
-	h.mediaCapturer = auditlog.NewMediaCapturer(store, retentionDays)
+	h.mediaCapturer = requestlog.NewMediaCapturer(store, retentionDays)
 }
 
 // SetResponseStore replaces the response snapshot store used by lifecycle endpoints.

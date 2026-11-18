@@ -1,5 +1,6 @@
 // Path-based client-side router for /admin/dashboard/{page}. Route aliases:
-// /admin/dashboard/audit -> audit-logs,
+// /admin/dashboard/audit-logs and /admin/dashboard/audit -> requests (the
+// page's former slugs; old links and bookmarks keep working),
 // /admin/dashboard/settings/guardrails -> guardrails.
 
 import { gomodelPath, unprefixedPath } from "$lib/api/paths.js";
@@ -12,7 +13,7 @@ export const PAGES = [
   "models",
   "playground",
   "workflows",
-  "audit-logs",
+  "requests",
   "guardrails",
   "mcp-servers",
   "providers-config",
@@ -37,8 +38,8 @@ export function parseRoute(pathname) {
   const rest = path.replace("/admin/dashboard", "").replace(/^\//, "");
   const parts = rest.split("/");
   let page = parts[0];
-  if (page === "audit") {
-    page = "audit-logs";
+  if (page === "audit-logs" || page === "audit") {
+    page = "requests";
   }
   const sub = parts[1] || null;
   if (page === "settings" && sub === "guardrails") {

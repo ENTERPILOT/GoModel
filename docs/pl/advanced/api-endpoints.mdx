@@ -185,7 +185,7 @@ Przekaż `id` jako `voice` do `/v1/audio/speech`; `name` to etykieta do
 wyświetlenia, która domyślnie przyjmuje wartość `id`. `model` jest rozwiązywany
 i autoryzowany dokładnie tak jak w `/v1/audio/speech`, łącznie z aliasami
 i modelami wirtualnymi. Wywołanie nie jest rozliczane i nie wlicza się do
-budżetów. Każde wywołanie (poza OpenAI) odpytuje dostawcę, więc limity żądań
+budżetów. Każde wywołanie odpytuje dostawcę, więc limity żądań
 obowiązują tak jak w `/v1/audio/speech`.
 
 | Provider | Źródło upstream |
@@ -193,7 +193,7 @@ obowiązują tak jak w `/v1/audio/speech`.
 | [audio.cpp](/pl/providers/audiocpp) | `GET /v1/audio/voices?model=` |
 | [ElevenLabs](/pl/providers/elevenlabs) | `GET /v2/voices` (głosy workspace'u, dla każdego modelu; najwyżej pierwsze 2000) |
 | [MiniMax](/pl/providers/minimax) | `POST /v1/get_voice` (głosy systemowe, sklonowane i wygenerowane) |
-| OpenAI (`api.openai.com` i hosty regionalne, np. `eu.api.openai.com`) | Statyczna lista wbudowanych głosów, bez wywołania upstream: `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`, `marin`, `cedar`; dla rodziny `tts-1` (`tts-1`, `tts-1-hd` i ich snapshoty) dziewięć, które obsługuje (bez `ballad`, `verse`, `marin`, `cedar`). Własne głosy (custom voices) nie są listowane: OpenAI nie ma do tego API. Listowane są tylko modele text-to-speech; modele realtime i chat, które mają inny zestaw głosów, zwracają opisane niżej `400` |
+| OpenAI (`api.openai.com` i hosty regionalne, np. `eu.api.openai.com`) | Wbudowane głosy ze statycznej listy, a po nich własne głosy (custom voices) organizacji z `GET /v1/audio/voices`. Wbudowane: `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`, `marin`, `cedar`; dla rodziny `tts-1` (`tts-1`, `tts-1-hd` i ich snapshoty) dziewięć, które obsługuje (bez `ballad`, `verse`, `marin`, `cedar`). Własne: głosy utworzone z nagrania; głosy wygenerowane z promptu są pomijane, bo endpoint speech ich nie przyjmuje. Jeśli wywołanie upstream się nie powiedzie, np. dla klucza API bez uprawnienia `api.voices.read`, wbudowane głosy i tak są zwracane. Listowane są tylko modele text-to-speech; modele realtime i chat, które mają inny zestaw głosów, zwracają opisane niżej `400` |
 | Providery typu `openai` z własnym `base_url` | `GET {base_url}/audio/voices?model=` – self-hostowane serwery, takie jak Kokoro-FastAPI, Speaches, LocalAI czy xn-ptts |
 
 Provider bez listy głosów – w tym hostowane API zgodne z OpenAI, których `/audio/voices` odpowiada 404 lub 405 – zwraca `400` `invalid_request_error`

@@ -1,6 +1,6 @@
 ---
 title: "Etykietowanie"
-description: "Przypisuj requestom etykiety z nagłówków HTTP lub kluczy API i rozbijaj użycie oraz logi audytowe według etykiet."
+description: "Przypisuj requestom etykiety z nagłówków HTTP lub kluczy API i rozbijaj użycie oraz logi requestów według etykiet."
 icon: "tags"
 keywords: ["etykiety", "labels", "tagowanie", "tagging", "etykiety requestów", "request labels", "tagowanie nagłówkami", "przypisywanie kosztów", "cost attribution"]
 ---
@@ -15,7 +15,7 @@ mogą działać jednocześnie:
 - **Etykiety kluczy API** — etykiety przypisane do zarządzanego klucza API, stosowane do każdego requestu uwierzytelnionego tym kluczem.
 
 Etykiety z obu źródeł są scalane i deduplikowane. Są zapisywane we
-wpisach użycia i wpisach logu audytowego oraz zasilają rozbicie użycia według etykiet
+wpisach użycia i wpisach logu requestów oraz zasilają rozbicie użycia według etykiet
 w dashboardzie.
 
 ## Etykiety kluczy API
@@ -210,7 +210,7 @@ odczytuje je jako etykiety z:
 GoModel usuwa je, zanim request dotrze do providera, który by je
 odrzucił: OpenAI nie ma parametru `tags`, a wartości w jego `metadata` muszą być
 stringami. Pozostałe klucze `metadata` są przekazywane dalej, a `metadata.tags` w postaci stringa
-pozostaje nietknięte jako zwykłe metadane OpenAI. Logi audytowe zachowują body w postaci
+pozostaje nietknięte jako zwykłe metadane OpenAI. Logi requestów zachowują body w postaci
 wysłanej przez klienta.
 
 Jeden request wnosi najwyżej **32** różne tagi, liczone łącznie z
@@ -244,9 +244,9 @@ w postaci wysłanej przez klienta, więc provider odrzucający `tags` zwraca sw�
 - **Dashboard użycia** — strona użycia pokazuje rozbicie według etykiet
   (`GET /admin/usage/labels`). Request z kilkoma etykietami jest liczony raz pod
   każdą z nich.
-- **Log requestów** — chipy etykiet przy każdym requeście, z możliwością filtrowania parametrem
+- **Log użycia** — chipy etykiet przy każdym requeście na stronie użycia, z możliwością filtrowania parametrem
   zapytania `label` w `GET /admin/usage/log`.
-- **Logi audytowe** — zapisywane w `data.labels` w każdym wpisie (logowanie audytowe jest
+- **Logi requestów** — zapisywane w `data.labels` w każdym wpisie (logowanie requestów jest
   domyślnie włączone).
 - **Strona kluczy API** — etykiety każdego klucza są wyświetlane obok jego ścieżki użytkownika.
 - **Budżety** — budżet może być ograniczony do etykiety i limitować wydatki każdego

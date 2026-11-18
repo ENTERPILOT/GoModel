@@ -1,6 +1,6 @@
 ---
 title: "Labeling"
-description: "Versehen Sie Requests über HTTP-Header oder API-Keys mit Labels und schlüsseln Sie Nutzung und Audit-Logs nach Label auf."
+description: "Versehen Sie Requests über HTTP-Header oder API-Keys mit Labels und schlüsseln Sie Nutzung und Request-Logs nach Label auf."
 icon: "tags"
 keywords: ["Labels", "labels", "Tagging", "Request-Labels", "Header-Tagging", "Kostenzuordnung", "cost attribution"]
 ---
@@ -16,7 +16,7 @@ gelten:
 - **API-Key-Labels** – Labels, die an einen verwalteten API-Key gebunden sind und für jeden damit authentifizierten Request gelten.
 
 Labels aus beiden Quellen werden zusammengeführt und dedupliziert. Sie werden
-in Nutzungs- und Audit-Log-Einträgen erfasst und speisen die Aufschlüsselung
+in Nutzungs- und Request-Log-Einträgen erfasst und speisen die Aufschlüsselung
 der Nutzung nach Label im Dashboard.
 
 ## API-Key-Labels
@@ -216,7 +216,7 @@ GoModel entfernt sie, bevor der Request den Provider erreicht, der sie sonst
 ablehnen würde: OpenAI kennt keinen Parameter `tags`, und die Werte in
 `metadata` müssen Strings sein. Andere `metadata`-Keys werden durchgereicht,
 und ein String in `metadata.tags` bleibt als gewöhnliche OpenAI-Metadaten
-unverändert. Audit-Logs speichern den Body so, wie der Client ihn gesendet hat.
+unverändert. Request-Logs speichern den Body so, wie der Client ihn gesendet hat.
 
 Ein Request steuert höchstens **32** unterschiedliche Tags bei, gezählt über
 den Header und beide Body-Felder in dieser Reihenfolge; der Rest wird
@@ -252,9 +252,10 @@ Provider, der `tags` ablehnt, gibt seinen Fehler zurück.
 - **Nutzungs-Dashboard** – die Nutzungsseite zeigt eine Aufschlüsselung nach
   Label (`GET /admin/usage/labels`). Ein Request mit mehreren Labels zählt
   einmal unter jedem davon.
-- **Request-Log** – Label-Chips pro Request, filterbar mit dem Query-Parameter
+- **Nutzungs-Log** – Label-Chips pro Request auf der Nutzungsseite, filterbar mit dem
+  Query-Parameter
   `label` bei `GET /admin/usage/log`.
-- **Audit-Logs** – erfasst unter `data.labels` in jedem Eintrag (Audit-Logging
+- **Request-Logs** – erfasst unter `data.labels` in jedem Eintrag (Request-Logging
   ist standardmäßig aktiviert).
 - **Seite API Keys** – die Labels jedes Keys werden neben seinem User Path
   aufgeführt.

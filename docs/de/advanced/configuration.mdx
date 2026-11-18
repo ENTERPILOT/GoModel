@@ -63,13 +63,13 @@ Der gängigste Weg, GoModel zu konfigurieren. Setzen Sie eine der folgenden Vari
 
 Request-Bodys dürfen mit `Content-Encoding: gzip` (oder `x-gzip`) oder `zstd`
 komprimiert sein; die TypeSafe-SDKs komprimieren Bodys ab 1 KiB standardmäßig
-mit zstd. Das Gateway dekodiert sie vor dem Routing, sodass Guardrails, Audit
+mit zstd. Das Gateway dekodiert sie vor dem Routing, sodass Guardrails, Request-Logging
 und Provider den unkomprimierten Body sehen, und `BODY_SIZE_LIMIT` gilt sowohl
 für die komprimierte als auch für die dekodierte Größe (`413`, wenn eine davon
 überschritten wird). Andere Kodierungen liefern `415`. Ein Body wird erst
 gelesen und dekodiert, nachdem der Request authentifiziert ist. Vom Body eines
 Requests ohne gültige Zugangsdaten wird daher nichts gelesen, und sein
-Audit-Eintrag enthält keinen Request-Body. Ein solcher Request erhält `401`,
+Request-Log-Eintrag enthält keinen Request-Body. Ein solcher Request erhält `401`,
 auch wenn sein Body dekodiert über dem Limit läge; nur eine angegebene Größe über
 dem Limit liefert weiterhin `413`.
 
@@ -79,14 +79,14 @@ zu lesen. Jeder Schreibvorgang zum Client erhält eine neue Frist. Der Timeout
 greift daher nur, wenn der Socket des Clients so lange voll bleibt, niemals
 während ein langsames Modell nichts zu senden hat. Greift er, wird die
 Verbindung geschlossen, der Upstream-Request an den Provider abgebrochen und
-der Audit-Eintrag vermerkt `client_stalled`, auch wenn der Stream aus dem
+der Request-Log-Eintrag vermerkt `client_stalled`, auch wenn der Stream aus dem
 Response-Cache bedient wurde. Erhöhen Sie den Wert für Clients, die das Lesen
 eines Streams berechtigterweise länger als eine Minute pausieren; setzen Sie
 `0`, um ihn zu deaktivieren.
 
 #### Client-Adressen hinter einem Proxy
 
-Jede Client-Adresse, die GoModel meldet – in Audit-Einträgen, Rate-Limit-Keys,
+Jede Client-Adresse, die GoModel meldet – in Request-Log-Einträgen, Rate-Limit-Keys,
 Logs –, ist die Adresse der Verbindung, die das Gateway erreicht hat. Hinter
 einem Reverse Proxy zeigen daher alle den Proxy. Setzen Sie
 `SERVER_TRUSTED_PROXIES` auf die Netzwerke, in denen Ihre eigenen Proxys
@@ -164,7 +164,7 @@ ausgegeben sind, setzen Sie `MASTER_KEY_DISABLED=true`
 (`server.master_key_disabled` in YAML), um ihn stillzulegen. Dann bleiben diese
 Keys – zusammen mit einer eventuell betriebenen Authentifizierungserweiterung
 wie SSO – der einzige Zugang. User Paths, Budgets, Rate-Limits und
-Audit-Trails pro Key gelten dann für jeden Request, einschließlich der Admin
+Request-Logs pro Key gelten dann für jeden Request, einschließlich der Admin
 API.
 
 ```bash
@@ -252,8 +252,8 @@ Den vollständigen Leitfaden finden Sie unter [MCP Gateway](/de/features/mcp-gat
 
 #### Logging
 
-Ausgabe des Laufzeit-Loggers. Für den persistierten API-Audit-Trail
-(Request-/Response-Bodys, Header) siehe [Audit-Logging](/de/advanced/configuration#audit-logging) weiter
+Ausgabe des Laufzeit-Loggers. Für das persistierte API-Request-Log
+(Request-/Response-Bodys, Header) siehe [Request-Logging](/de/advanced/configuration#request-logging) weiter
 unten.
 
 | Variable     | Beschreibung                                                                                                                                                                       | Standardwert              |
@@ -294,7 +294,7 @@ unten.
 
 #### Speicher
 
-Der Speicher wird gemeinsam von Audit-Logging, Nutzungserfassung und künftigen Features wie IAM verwendet.
+Der Speicher wird gemeinsam von Request-Logging, Nutzungserfassung und künftigen Features wie IAM verwendet.
 
 | Variable             | Beschreibung                                   | Standardwert           |
 | -------------------- | --------------------------------------------- | ----------------- |
@@ -323,7 +323,7 @@ Der Speicher wird gemeinsam von Audit-Logging, Nutzungserfassung und künftigen 
 
 #### Medienspeicher
 
-Mediendateien – die Audio- und Bilddaten, die für das Audit-Log erfasst werden,
+Mediendateien – die Audio- und Bilddaten, die für das Request-Log erfasst werden,
 wenn `LOGGING_LOG_AUDIO_BODIES` oder `LOGGING_LOG_IMAGE_BODIES` aktiv ist –
 werden außerhalb der Datenbank abgelegt. Ihre Metadaten liegen im oben
 beschriebenen Speicher-Backend; nur die Bytes landen hier. So sind sie in der
@@ -340,18 +340,18 @@ ein `./data`-Verzeichnis existiert, andernfalls das benutzerspezifische
 Datenverzeichnis des Betriebssystems. Binden Sie in Containern dort ein Volume
 ein; bei mehreren Replikas verwenden Sie einen gemeinsamen Mount (EFS, einen
 S3-FUSE-Mount), damit jede Instanz jede Datei ausliefern kann. Dateien werden so
-lange aufbewahrt wie die Audit-Einträge, die auf sie verweisen
+lange aufbewahrt wie die Request-Log-Einträge, die auf sie verweisen
 (`LOGGING_RETENTION_DAYS`), und durch einen stündlichen Bereinigungslauf
 entfernt.
 
-#### Audit-Logging
+#### Request-Logging
 
 | Variable                          | Beschreibung                                | Standardwert |
 | --------------------------------- | ------------------------------------------ | ------- |
-| `LOGGING_ENABLED`                 | Aktiviert das Audit-Logging                       | `true`  |
+| `LOGGING_ENABLED`                 | Aktiviert das Request-Logging                     | `true`  |
 | `LOGGING_LOG_BODIES`              | Protokolliert Request-/Response-Bodys                | `true`  |
 | `LOGGING_LOG_REVISION_BODIES`     | Protokolliert umgeschriebene Bodys von Request-Rewritern und Prompt-Guardrails | `true`  |
-| `LOGGING_LOG_GUARDRAIL_STEPS`     | Eine Audit-Revision pro bearbeitender Prompt-Guardrail (aus: eine pro Kette) | `true`  |
+| `LOGGING_LOG_GUARDRAIL_STEPS`     | Eine Request-Revision pro bearbeitender Prompt-Guardrail (aus: eine pro Kette) | `true`  |
 | `LOGGING_LOG_AUDIO_BODIES`        | Protokolliert Ein- und Ausgaben der Audio-Endpunkte          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES`        | Protokolliert Ein- und Ausgaben der Bild-Endpunkte          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | Welche Bild-Bytes gespeichert werden: `all`, `input`, `output` | `all` |
@@ -362,21 +362,21 @@ entfernt.
 | `LOGGING_FLUSH_INTERVAL`          | Schreibintervall in Sekunden                  | `5`     |
 | `LOGGING_RETENTION_DAYS`          | Automatisches Löschen nach N Tagen (0 = nie)     | `30`    |
 
-Audit-Einträge enthalten die Client-Adresse, die das Gateway ermittelt hat.
+Request-Log-Einträge enthalten die Client-Adresse, die das Gateway ermittelt hat.
 Hinter einem Reverse Proxy ist das der Proxy, bis Sie dessen Netzwerk in
 `SERVER_TRUSTED_PROXIES` eintragen – siehe [Client-Adressen hinter einem
 Proxy](/de/advanced/configuration#client-adressen-hinter-einem-proxy).
 
-Echtzeit-Vorschauen im Dashboard und persistierte Audit-Logs sind getrennte
+Echtzeit-Vorschauen im Dashboard und persistierte Request-Logs sind getrennte
 Features. Mit `DASHBOARD_LIVE_LOGS_ENABLED=true` und `LOGGING_ENABLED=false`
 können Requests live erscheinen, werden aber nicht gespeichert und
-verschwinden nach dem Neuladen der Seite. Ist das Audit-Logging aktiviert,
+verschwinden nach dem Neuladen der Seite. Ist das Request-Logging aktiviert,
 erfolgen die Schreibvorgänge asynchron, und es kann bis zu
 `LOGGING_FLUSH_INTERVAL` Sekunden dauern, bis Einträge über die API für
 gespeicherte Logs sichtbar sind.
 
 <Note>
-  Unter PostgreSQL nutzt die Volltextsuche des Audit-Logs einen Trigramm-Index
+  Unter PostgreSQL nutzt die Volltextsuche des Request-Logs einen Trigramm-Index
   aus der mitgelieferten Erweiterung `pg_trgm`. GoModel installiert die
   Erweiterung und baut den Index beim Start auf, sofern seine Datenbankrolle das
   darf. Andernfalls funktioniert die Suche weiterhin, durchsucht aber jeden
@@ -386,7 +386,7 @@ gespeicherte Logs sichtbar sind.
 </Note>
 
 <Tip>
-  Wählen Sie bei großen Audit-Tabellen neben dem Suchfeld der Audit-Logs im
+  Wählen Sie bei großen Request-Log-Tabellen neben dem Suchfeld der Seite „Anfragen“ im
   Dashboard ein Feld statt **Alle Felder**. **Nutzerpfad** und **Modell** finden
   Werte, die mit der Eingabe beginnen (Groß-/Kleinschreibung zählt, `voxina`
   findet also `/voxinate/events/…`; **Modell** prüft das angefragte und das
@@ -411,7 +411,7 @@ gespeicherte Logs sichtbar sind.
   geändert hat (zum Beispiel die Token-Komprimierung von GoModel Pro), und jede
   Prompt-Guardrail, die den Prompt bearbeitet hat, den Request in dem Zustand,
   in dem sie ihn weitergegeben haben, zusammen mit dem ursprünglichen
-  Client-Body im Audit-Eintrag. So lässt sich eine Kette von Änderungen Schritt
+  Client-Body im Request-Log-Eintrag. So lässt sich eine Kette von Änderungen Schritt
   für Schritt nachvollziehen. `LOGGING_LOG_GUARDRAIL_STEPS` steuert diese
   Erfassung pro Schritt (die Request-Bodys werden außerhalb des Request-Pfads
   kodiert): Schalten Sie es ab, um die Änderungen einer Kette als eine einzige
@@ -419,7 +419,7 @@ gespeicherte Logs sichtbar sind.
   Schritt. Wenn Sie `LOGGING_LOG_REVISION_BODIES` deaktivieren, bleiben die
   Revisions-Metadaten (Name des Rewriters, Bytegrößen, eingesparte Tokens,
   Details der Änderung) erhalten, die zusätzlichen Body-Kopien entfallen aber.
-  Das halbiert den Audit-Speicher pro umgeschriebenem Request ungefähr.
+  Das halbiert den Request-Log-Speicher pro umgeschriebenem Request ungefähr.
 </Note>
 
 <Note>
@@ -429,7 +429,7 @@ gespeicherte Logs sichtbar sind.
   Audio (Base64, begrenzt auf 8 MB), damit das Dashboard es abspielen kann, und
   `/v1/audio/transcriptions` speichert das hochgeladene Audio (Base64, begrenzt
   auf 8 MB, ebenfalls abspielbar) samt Upload-Metadaten. Der Standardwert ist
-  `false`, weil Audio-Payloads groß sind und den Audit-Speicher schnell
+  `false`, weil Audio-Payloads groß sind und den Request-Log-Speicher schnell
   wachsen lassen. Ist Body-Logging aktiv, diese Option aber nicht, werden
   Audio-Bodys (die Speech-Response und der Transkriptions-Upload, der seine
   Metadaten behält) als schlanker Platzhalter
@@ -446,7 +446,7 @@ gespeicherte Logs sichtbar sind.
   `.../embed`, Gemini `:embedContent` und `:batchEmbedContents`).
   Embedding-Eingaben können ganze Dokumente oder Base64-Bilder sein und die
   Responses sind Float-Vektoren, sodass Massen-Indexierungsjobs den
-  Audit-Speicher schnell wachsen lassen. Ist Body-Logging aktiv, diese Option
+  Request-Log-Speicher schnell wachsen lassen. Ist Body-Logging aktiv, diese Option
   aber nicht, behalten Embedding-Einträge ihre Metadaten (Modell, Provider,
   Status, Timing, User-Pfad, Usage) und verwerfen Request- und Response-Body.
   Der Standardwert ist `true`, was das bisherige Verhalten beibehält.
@@ -462,7 +462,7 @@ gespeicherte Logs sichtbar sind.
   sie anzeigen kann. `LOGGING_LOG_IMAGE_BODIES_SCOPE` schränkt dies auf `input`
   (nur Uploads) oder `output` (nur Ergebnisse) ein; der Standardwert `all`
   speichert beides. Der Standardwert ist `false`, weil Bild-Payloads groß sind
-  und den Audit-Speicher schnell wachsen lassen. Ist Body-Logging aktiv, diese
+  und den Request-Log-Speicher schnell wachsen lassen. Ist Body-Logging aktiv, diese
   Option aber nicht, behalten Bildeinträge alles außer den Pixeln: Prompt und
   Parameter, die Response-Hülle (`usage`, `size`, `quality`), gehostete URLs
   und pro Bild einen Platzhalter mit Größenangabe
@@ -544,14 +544,14 @@ Zuordnungsregeln und die Durchsetzung in Workflows.
 | ------------------------------------- | ------------------------------------------------ | ------- |
 | `ADMIN_ENDPOINTS_ENABLED`             | Aktiviert die Admin-REST-API                        | `true`  |
 | `ADMIN_UI_ENABLED`                    | Aktiviert die Oberfläche des Admin-Dashboards                    | `true`  |
-| `DASHBOARD_LIVE_LOGS_ENABLED`         | Streamt Echtzeit-Vorschauen von Audit und Nutzung ins Dashboard   | `true`  |
+| `DASHBOARD_LIVE_LOGS_ENABLED`         | Streamt Echtzeit-Vorschauen von Request-Logs und Nutzung ins Dashboard | `true`  |
 | `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | Replay-Fenster im Arbeitsspeicher für Live-Ereignisse im Dashboard | `10000` |
 | `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Maximale Anzahl an Ereignissen, die einem sich neu verbindenden Client erneut gesendet werden   | `1000`  |
 | `DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS` | Heartbeat-Intervall eines inaktiven Streams in Sekunden      | `15`    |
 
-Live-Logs im Dashboard sind kompakte Vorschauen für die Seiten Audit Logs und
-Usage. Sie aktualisieren Zeilen, bevor das asynchrone Schreiben in die
-Datenbank abgeschlossen ist. Die gespeicherten Audit- und Nutzungstabellen
+Live-Logs im Dashboard sind kompakte Vorschauen für die Seiten „Anfragen“ und
+„Usage“. Sie aktualisieren Zeilen, bevor das asynchrone Schreiben in die
+Datenbank abgeschlossen ist. Die gespeicherten Request-Log- und Nutzungstabellen
 bleiben die maßgebliche Quelle; verbindet sich ein Browser mit einem Cursor
 außerhalb des Replay-Fensters neu, lädt das Dashboard die Daten über die
 regulären REST-APIs neu.

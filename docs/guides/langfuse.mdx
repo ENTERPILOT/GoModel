@@ -20,7 +20,7 @@ complementary ways:
 - **Application traces.** The Langfuse SDK's OpenAI drop-in wrapper, pointed
   at GoModel as its base URL. Langfuse records full prompts, completions, and
   token usage; GoModel supplies the routing, failover, caching, and its own
-  [audit log](/advanced/configuration#audit-logging) and cost tracking underneath.
+  [request log](/advanced/configuration#request-logging) and cost tracking underneath.
 
 Use either on its own, or both together — with W3C trace context propagation
 they merge into a single Langfuse trace per request (see
@@ -123,7 +123,7 @@ files appear as their type only, and very long text is truncated; see
 <Warning>
   Content capture sends every sampled prompt and completion to Langfuse. Keep
   it off when that data must not leave the gateway; the
-  [audit log](/advanced/configuration#audit-logging) records it in your own
+  [request log](/advanced/configuration#request-logging) records it in your own
   storage instead.
 </Warning>
 
@@ -156,7 +156,7 @@ call, streaming included, and prices them from its model catalog. Because the
 base URL is GoModel, one client reaches every configured provider through
 provider-prefixed model ids (`openai/gpt-5-mini`, `gemini/gemini-2.5-flash`,
 [virtual models](/features/virtual-models)), and every call still gets
-GoModel's failover, caching, budgets, and audit trail. The
+GoModel's failover, caching, budgets, and request log. The
 [JS/TS wrapper](https://langfuse.com/integrations/model-providers/openai-js)
 works the same way.
 

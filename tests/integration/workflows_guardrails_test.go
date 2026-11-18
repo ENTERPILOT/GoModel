@@ -14,18 +14,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/workflows"
 	"github.com/enterpilot/gomodel/tests/integration/dbassert"
 )
 
-func TestManagedAuthKeyWorkflow_AuditAndUsageValidity_PostgreSQL(t *testing.T) {
+func TestManagedAuthKeyWorkflow_RequestLogAndUsageValidity_PostgreSQL(t *testing.T) {
 	fixture := SetupTestServer(t, TestServerConfig{
 		DBType:                "postgresql",
-		AuditLogEnabled:       true,
+		RequestLogEnabled:     true,
 		UsageEnabled:          true,
 		LogBodies:             true,
 		LogHeaders:            true,
@@ -76,38 +76,38 @@ func TestManagedAuthKeyWorkflow_AuditAndUsageValidity_PostgreSQL(t *testing.T) {
 
 	fixture.FlushAndClose(t)
 
-	auditEntries := dbassert.QueryAuditLogsByRequestID(t, fixture.PgPool, requestID)
-	require.Len(t, auditEntries, 1, "expected one audit log entry")
-	auditEntry := auditEntries[0]
+	requestLogEntries := dbassert.QueryRequestLogsByRequestID(t, fixture.PgPool, requestID)
+	require.Len(t, requestLogEntries, 1, "expected one request log entry")
+	requestLogEntry := requestLogEntries[0]
 
-	dbassert.AssertAuditLogFieldCompleteness(t, auditEntry)
-	dbassert.AssertAuditLogMatches(t, dbassert.ExpectedAuditLog{
+	dbassert.AssertRequestLogFieldCompleteness(t, requestLogEntry)
+	dbassert.AssertRequestLogMatches(t, dbassert.ExpectedRequestLog{
 		Provider:   "test",
 		StatusCode: http.StatusOK,
 		Method:     http.MethodPost,
 		Path:       "/v1/chat/completions",
 		RequestID:  requestID,
-	}, auditEntry)
-	dbassert.AssertAuditLogDurationPositive(t, auditEntry)
-	dbassert.AssertNoErrorType(t, auditEntry)
-	dbassert.AssertAuditLogHasData(t, auditEntry)
-	dbassert.AssertAuditLogHasBody(t, auditEntry, true, true)
-	dbassert.AssertAuditLogHasHeaders(t, auditEntry, true, true)
+	}, requestLogEntry)
+	dbassert.AssertRequestLogDurationPositive(t, requestLogEntry)
+	dbassert.AssertNoErrorType(t, requestLogEntry)
+	dbassert.AssertRequestLogHasData(t, requestLogEntry)
+	dbassert.AssertRequestLogHasBody(t, requestLogEntry, true, true)
+	dbassert.AssertRequestLogHasHeaders(t, requestLogEntry, true, true)
 
-	assert.True(t, strings.HasSuffix(auditEntry.Model, "gpt-4"), "expected requested model to end with gpt-4, got %q", auditEntry.Model)
-	assert.Equal(t, workflow.ID, auditEntry.WorkflowVersionID)
-	assert.Equal(t, issuedKey.ID, auditEntry.AuthKeyID)
-	assert.Equal(t, auditlog.AuthMethodAPIKey, auditEntry.AuthMethod)
-	assert.Equal(t, issuedKey.UserPath, auditEntry.UserPath)
-	assert.Empty(t, auditEntry.CacheType)
+	assert.True(t, strings.HasSuffix(requestLogEntry.Model, "gpt-4"), "expected requested model to end with gpt-4, got %q", requestLogEntry.Model)
+	assert.Equal(t, workflow.ID, requestLogEntry.WorkflowVersionID)
+	assert.Equal(t, issuedKey.ID, requestLogEntry.AuthKeyID)
+	assert.Equal(t, requestlog.AuthMethodAPIKey, requestLogEntry.AuthMethod)
+	assert.Equal(t, issuedKey.UserPath, requestLogEntry.UserPath)
+	assert.Empty(t, requestLogEntry.CacheType)
 
-	require.NotNil(t, auditEntry.Data)
-	require.NotNil(t, auditEntry.Data.WorkflowFeatures)
-	assert.False(t, auditEntry.Data.WorkflowFeatures.Cache)
-	assert.True(t, auditEntry.Data.WorkflowFeatures.Audit)
-	assert.True(t, auditEntry.Data.WorkflowFeatures.Usage)
-	assert.False(t, auditEntry.Data.WorkflowFeatures.Guardrails)
-	assert.False(t, auditEntry.Data.WorkflowFeatures.Failover)
+	require.NotNil(t, requestLogEntry.Data)
+	require.NotNil(t, requestLogEntry.Data.WorkflowFeatures)
+	assert.False(t, requestLogEntry.Data.WorkflowFeatures.Cache)
+	assert.True(t, requestLogEntry.Data.WorkflowFeatures.Audit)
+	assert.True(t, requestLogEntry.Data.WorkflowFeatures.Usage)
+	assert.False(t, requestLogEntry.Data.WorkflowFeatures.Guardrails)
+	assert.False(t, requestLogEntry.Data.WorkflowFeatures.Failover)
 
 	usageEntries := dbassert.QueryUsageByRequestID(t, fixture.PgPool, requestID)
 	require.Len(t, usageEntries, 1, "expected one usage entry")
@@ -127,10 +127,10 @@ func TestManagedAuthKeyWorkflow_AuditAndUsageValidity_PostgreSQL(t *testing.T) {
 	assert.Empty(t, usageEntry.CacheType)
 }
 
-func TestGuardrailWorkflow_RewritesUpstreamRequestAndPreservesAuditUsage_PostgreSQL(t *testing.T) {
+func TestGuardrailWorkflow_RewritesUpstreamRequestAndPreservesRequestLogUsage_PostgreSQL(t *testing.T) {
 	fixture := SetupTestServer(t, TestServerConfig{
 		DBType:                "postgresql",
-		AuditLogEnabled:       true,
+		RequestLogEnabled:     true,
 		UsageEnabled:          true,
 		LogBodies:             true,
 		LogHeaders:            true,
@@ -209,33 +209,33 @@ func TestGuardrailWorkflow_RewritesUpstreamRequestAndPreservesAuditUsage_Postgre
 
 	fixture.FlushAndClose(t)
 
-	auditEntries := dbassert.QueryAuditLogsByRequestID(t, fixture.PgPool, requestID)
-	require.Len(t, auditEntries, 1, "expected one audit log entry")
-	auditEntry := auditEntries[0]
+	requestLogEntries := dbassert.QueryRequestLogsByRequestID(t, fixture.PgPool, requestID)
+	require.Len(t, requestLogEntries, 1, "expected one request log entry")
+	requestLogEntry := requestLogEntries[0]
 
-	dbassert.AssertAuditLogFieldCompleteness(t, auditEntry)
-	dbassert.AssertAuditLogMatches(t, dbassert.ExpectedAuditLog{
+	dbassert.AssertRequestLogFieldCompleteness(t, requestLogEntry)
+	dbassert.AssertRequestLogMatches(t, dbassert.ExpectedRequestLog{
 		Provider:   "test",
 		StatusCode: http.StatusOK,
 		Method:     http.MethodPost,
 		Path:       "/v1/chat/completions",
 		RequestID:  requestID,
-	}, auditEntry)
-	dbassert.AssertAuditLogDurationPositive(t, auditEntry)
-	dbassert.AssertNoErrorType(t, auditEntry)
-	dbassert.AssertAuditLogHasData(t, auditEntry)
+	}, requestLogEntry)
+	dbassert.AssertRequestLogDurationPositive(t, requestLogEntry)
+	dbassert.AssertNoErrorType(t, requestLogEntry)
+	dbassert.AssertRequestLogHasData(t, requestLogEntry)
 
-	assert.True(t, strings.HasSuffix(auditEntry.Model, "gpt-4"), "expected requested model to end with gpt-4, got %q", auditEntry.Model)
-	assert.Equal(t, workflow.ID, auditEntry.WorkflowVersionID)
-	assert.Equal(t, auditlog.AuthMethodMasterKey, auditEntry.AuthMethod)
+	assert.True(t, strings.HasSuffix(requestLogEntry.Model, "gpt-4"), "expected requested model to end with gpt-4, got %q", requestLogEntry.Model)
+	assert.Equal(t, workflow.ID, requestLogEntry.WorkflowVersionID)
+	assert.Equal(t, requestlog.AuthMethodMasterKey, requestLogEntry.AuthMethod)
 
-	require.NotNil(t, auditEntry.Data)
-	require.NotNil(t, auditEntry.Data.WorkflowFeatures)
-	assert.False(t, auditEntry.Data.WorkflowFeatures.Cache)
-	assert.True(t, auditEntry.Data.WorkflowFeatures.Audit)
-	assert.True(t, auditEntry.Data.WorkflowFeatures.Usage)
-	assert.True(t, auditEntry.Data.WorkflowFeatures.Guardrails)
-	assert.False(t, auditEntry.Data.WorkflowFeatures.Failover)
+	require.NotNil(t, requestLogEntry.Data)
+	require.NotNil(t, requestLogEntry.Data.WorkflowFeatures)
+	assert.False(t, requestLogEntry.Data.WorkflowFeatures.Cache)
+	assert.True(t, requestLogEntry.Data.WorkflowFeatures.Audit)
+	assert.True(t, requestLogEntry.Data.WorkflowFeatures.Usage)
+	assert.True(t, requestLogEntry.Data.WorkflowFeatures.Guardrails)
+	assert.False(t, requestLogEntry.Data.WorkflowFeatures.Failover)
 
 	usageEntries := dbassert.QueryUsageByRequestID(t, fixture.PgPool, requestID)
 	require.Len(t, usageEntries, 1, "expected one usage entry")

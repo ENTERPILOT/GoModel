@@ -46,12 +46,12 @@ type GatewayError struct {
 	// Original error for debugging (not exposed to clients)
 	Err error `json:"-"`
 	// ResponseBody and ResponseHeaders carry the raw upstream error response so
-	// failed provider attempts can be audited. Never serialized to API clients.
+	// failed provider attempts can be recorded in the request log. Never serialized to API clients.
 	ResponseBody    []byte      `json:"-"`
 	ResponseHeaders http.Header `json:"-"`
 }
 
-// maxGatewayErrorBodyBytes caps the raw upstream error body retained for audit.
+// maxGatewayErrorBodyBytes caps the raw upstream error body retained for the request log.
 const maxGatewayErrorBodyBytes = 64 * 1024
 
 // captureGatewayErrorBody returns a bounded copy of an upstream error body so
@@ -161,7 +161,7 @@ func (e *GatewayError) WithCode(code string) *GatewayError {
 }
 
 // WithResponseBody attaches a bounded copy of the raw upstream response body
-// for auditing. Providers that report failures inside a 2xx body use this to
+// for request logging. Providers that report failures inside a 2xx body use this to
 // retain the same evidence ParseProviderError captures for non-2xx responses.
 func (e *GatewayError) WithResponseBody(body []byte) *GatewayError {
 	e.ResponseBody = captureGatewayErrorBody(body)

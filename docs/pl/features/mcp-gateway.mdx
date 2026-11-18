@@ -24,11 +24,11 @@ tak samo, jak już stoi między Twoimi aplikacjami a providerami modeli:
   operatora przycinają rozbudowane serwery, dzięki czemu kontekst agenta pozostaje mały.
 - **Obserwowalność.** Każde wywołanie narzędzia staje się wpisem użycia (serwer,
   narzędzie, czas trwania, rozmiary, flaga błędu, etykiety, ścieżka użytkownika),
-  a requesty MCP pojawiają się w logu audytowym i logu requestów jak każdy inny
+  a requesty MCP pojawiają się w logu requestów i na stronie użycia jak każdy inny
   ruch do modeli – opisane metodą JSON-RPC, a w przypadku wywołań także nazwą
   narzędzia lub promptu, więc wiersz `tools/call` pokazuje `github_create_issue`,
   a nie samą ścieżkę. Przy `LOGGING_LOG_BODIES=true` ramki requestu i odpowiedzi
-  JSON-RPC są też zapisywane we wpisie audytowym (łącznie z argumentami i wynikami
+  JSON-RPC są też zapisywane we wpisie logu requestów (łącznie z argumentami i wynikami
   narzędzi), z takim samym limitem przechwytywania 1 MB jak w innych endpointach.
   Rate limity i budżety ścieżek użytkowników obejmują także requesty MCP.
 

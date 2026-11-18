@@ -79,7 +79,7 @@ type ServerConfig struct {
 	UserPathHeader string `yaml:"user_path_header" env:"USER_PATH_HEADER"`
 	// EnabledPassthroughProviders lists the provider types enabled on
 	// /p/{provider}/... passthrough routes. Default:
-	// ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "jev"].
+	// ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner", "edenai", "jev"].
 	EnabledPassthroughProviders []string `yaml:"enabled_passthrough_providers" env:"ENABLED_PASSTHROUGH_PROVIDERS"`
 	// RealtimeEnabled exposes the realtime (speech-to-speech) websocket endpoints
 	// at /v1/realtime and /v1/realtime/translations, their WebRTC signaling
@@ -127,7 +127,7 @@ type ServerConfig struct {
 	StreamStallTimeout int `yaml:"stream_stall_timeout" env:"STREAM_STALL_TIMEOUT"`
 
 	// TrustedProxies lists the networks your own proxies sit on, enabling
-	// header-based client addresses everywhere the gateway reports one (audit
+	// header-based client addresses everywhere the gateway reports one (request log
 	// entries, rate limit keys, logs). Entries are CIDR networks, bare
 	// addresses (a single host), or the presets "loopback" and "private".
 	//

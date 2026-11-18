@@ -15,8 +15,12 @@
 #
 #   usage: tests/e2e/upgrade-compat.sh [sqlite|postgresql|mongodb|all]
 #
-#   UPGRADE_BASELINE_REF   git ref to compare against  (default: origin/main)
+#   UPGRADE_BASELINE_REF   git ref to upgrade from     (default: the newest
+#                          v* release tag HEAD contains)
 #   UPGRADE_PORT           gateway port                (default: 18190)
+#
+# The baseline must be an ancestor of HEAD. A branch that is behind its
+# baseline would otherwise test a downgrade and still report a pass.
 #
 # Needs .env with provider credentials (two scenarios call a real model), plus
 # the docker infra from `make infra` for the postgresql and mongodb backends.
@@ -26,7 +30,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 BACKEND="${1:-all}"
-BASELINE_REF="${UPGRADE_BASELINE_REF:-origin/main}"
 GW_PORT="${UPGRADE_PORT:-18190}"
 BASE="http://localhost:$GW_PORT"
 
@@ -39,6 +42,19 @@ MONGO_DB="${UPGRADE_MONGO_DATABASE:-gomodel_upgrade_compat}"
 MONGO_CONTAINER="${UPGRADE_MONGO_CONTAINER:-gomodel-mongodb-1}"
 
 die() { echo "error: $*" >&2; exit 1; }
+
+# The default is the release a user would upgrade from. Describing HEAD, rather
+# than taking the newest tag in the repository, keeps it an ancestor of HEAD.
+BASELINE_REF="${UPGRADE_BASELINE_REF:-$(git -C "$REPO_ROOT" describe --tags --abbrev=0 --match 'v*' HEAD 2>/dev/null || true)}"
+[[ -n "$BASELINE_REF" ]] \
+  || die "no v* release tag is reachable from HEAD; fetch tags or set UPGRADE_BASELINE_REF"
+git -C "$REPO_ROOT" rev-parse --verify --quiet "$BASELINE_REF^{commit}" >/dev/null \
+  || die "baseline ref $BASELINE_REF does not name a commit"
+# A baseline holding commits HEAD lacks (origin/main seen from a branch that is
+# behind it) makes the working tree the older side: a downgrade, not an upgrade.
+git -C "$REPO_ROOT" merge-base --is-ancestor "$BASELINE_REF^{commit}" HEAD \
+  || die "baseline $BASELINE_REF is not an ancestor of HEAD, so this would not test an upgrade; update the branch or set UPGRADE_BASELINE_REF to a ref HEAD contains"
+export UPGRADE_BASELINE_REF="$BASELINE_REF"
 
 if [[ "$BACKEND" == "all" ]]; then
   status=0
@@ -126,10 +142,15 @@ start_gw() {
   local bin="$1" tag="$2" env_args=()
   while IFS= read -r line; do [[ -n "$line" ]] && env_args+=("$line"); done < <(storage_env)
 
+  # With no Redis the model cache is a file, by default the per-user one that
+  # every other gateway on the machine reads and writes. The baseline and the
+  # upgraded binary share this private directory instead, as an upgrade in
+  # place would; it starts empty because $WORK does.
   (
     cd "$WORK"
     nohup env PORT="$GW_PORT" BASE_PATH= \
       "${env_args[@]}" \
+      GOMODEL_CACHE_DIR="$WORK/cache" \
       LOGGING_ENABLED=true LOGGING_LOG_BODIES=true LOGGING_LOG_HEADERS=true \
       GUARDRAILS_ENABLED=true \
       RESPONSE_CACHE_SIMPLE_ENABLED=false SEMANTIC_CACHE_ENABLED=false \
@@ -240,7 +261,7 @@ seed() {
     '{"scope_provider":"openai","scope_model":"gpt-4.1-mini","scope_user_path":"/compat","name":"compat-workflow","description":"upgrade compat workflow","workflow_payload":{"schema_version":1,"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"failover":false},"guardrails":[]}}' \
     > "$WORK/workflow.json"
 
-  # A real chat call fills the usage and audit-log stores.
+  # A real chat call fills the usage and request-log stores.
   vpost /v1/chat/completions \
     '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly COMPAT_OK"}],"max_tokens":16,"temperature":0}' \
     > "$WORK/chat.json"
@@ -318,7 +339,7 @@ snapshot() {
   curl -fsS "$BASE/admin/provider-credentials" \
     | jq -S 'map(select(.name|startswith("compat")))' > "$out/provider-credentials.json"
   curl -fsS "$BASE/admin/model-pricing-overrides" | jq -S '.' > "$out/pricing-overrides.json"
-  # last_used_at comes from the newest audit entry for the key, and the vget
+  # last_used_at comes from the newest request log entry for the key, and the vget
   # reads below add one, so only its presence is compared.
   curl -fsS "$BASE/admin/auth-keys" \
     | jq -S 'if type=="array" then map(select(.name|startswith("compat")) | .last_used_at |= (. != null)) else . end' > "$out/auth-keys.json"
@@ -340,10 +361,11 @@ snapshot() {
   curl -fsS "$BASE/admin/usage/summary?days=7" \
     | jq -S 'del(.server_time, .generated_at)' > "$out/usage-summary.json"
   # Only the POSTs the seed made are compared: snapshot itself reads back the
-  # conversation, response and file over /v1, and those GETs are audited too, so
+  # conversation, response and file over /v1, and those GETs are logged too, so
   # counting every entry would measure the snapshot rather than the upgrade.
-  # The model lives on requested_model/resolved_model — an audit entry has no
+  # The model lives on requested_model/resolved_model — a request log entry has no
   # .model field.
+  # The pre-rename path, so the snapshot also works against older releases.
   curl -fsS "$BASE/admin/audit/log?limit=20" \
     | jq -S '[(.entries // .logs // [])[] | select(.method == "POST")
               | [.path, .requested_model, .resolved_model, .status_code]] | sort' \
@@ -471,7 +493,7 @@ write_check "provider-credential upsert" jput /admin/provider-credentials '{"nam
 write_check "pricing override upsert" jput /admin/model-pricing-overrides '{"selector":"openai/gpt-4.1-mini","pricing":{"input_per_mtok":2.25,"output_per_mtok":9.75}}'
 write_check "auth-key create" jpost /admin/auth-keys '{"name":"compat-key-2","user_path":"/compat"}'
 write_check "workflow create" jpost /admin/workflows '{"scope_provider":"openai","scope_model":"gpt-4.1","scope_user_path":"/compat","name":"compat-workflow-2","workflow_payload":{"schema_version":1,"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"failover":false},"guardrails":[]}}'
-write_check "chat completion (usage + audit)" vpost /v1/chat/completions '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly UPGRADE_OK"}],"max_tokens":16,"temperature":0}'
+write_check "chat completion (usage + request log)" vpost /v1/chat/completions '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly UPGRADE_OK"}],"max_tokens":16,"temperature":0}'
 write_check "response snapshot" vpost /v1/responses '{"model":"gpt-4.1-mini","input":"Reply with exactly UPGRADE_RESP_OK","store":true,"max_output_tokens":16}'
 write_check "conversation create" vpost /v1/conversations '{"metadata":{"purpose":"post-upgrade"}}'
 

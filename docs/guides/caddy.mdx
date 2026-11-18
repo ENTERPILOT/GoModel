@@ -17,7 +17,7 @@ Two things this is good for:
 
 - **Reject unauthenticated traffic at the edge.** Requests without a usable key
   never reach the gateway, so scanners and misconfigured clients do not open
-  connections to it or land in its audit log. GoModel still authenticates every
+  connections to it or land in its request log. GoModel still authenticates every
   request it serves; the edge check is a filter in front, not a replacement.
 - **Gate other services on GoModel keys.** An internal dashboard, a docs site,
   or a metrics endpoint on the same host can require a valid GoModel key

@@ -1,5 +1,5 @@
 // Package live provides realtime dashboard event fan-out: every event this
-// process publishes, plus, in a multi-replica deployment, the audit and usage
+// process publishes, plus, in a multi-replica deployment, the request log and usage
 // rows its peers persist (see StartRemote).
 package live
 
@@ -14,24 +14,24 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 const (
-	EventAuditStarted   = auditlog.LiveEventAuditStarted
-	EventAuditUpdated   = auditlog.LiveEventAuditUpdated
-	EventAuditStream    = auditlog.LiveEventAuditStream
-	EventAuditCompleted = auditlog.LiveEventAuditCompleted
-	EventAuditFailed    = auditlog.LiveEventAuditFailed
-	EventAuditFlushed   = auditlog.LiveEventAuditFlushed
-	EventAuditRemoved   = auditlog.LiveEventAuditRemoved
-	EventUsageCompleted = usage.LiveEventUsageCompleted
-	EventUsageFailed    = usage.LiveEventUsageFailed
-	EventUsageFlushed   = usage.LiveEventUsageFlushed
-	EventHeartbeat      = "heartbeat"
-	EventReset          = "reset"
+	EventRequestLogStarted   = requestlog.LiveEventRequestLogStarted
+	EventRequestLogUpdated   = requestlog.LiveEventRequestLogUpdated
+	EventRequestLogStream    = requestlog.LiveEventRequestLogStream
+	EventRequestLogCompleted = requestlog.LiveEventRequestLogCompleted
+	EventRequestLogFailed    = requestlog.LiveEventRequestLogFailed
+	EventRequestLogFlushed   = requestlog.LiveEventRequestLogFlushed
+	EventRequestLogRemoved   = requestlog.LiveEventRequestLogRemoved
+	EventUsageCompleted      = usage.LiveEventUsageCompleted
+	EventUsageFailed         = usage.LiveEventUsageFailed
+	EventUsageFlushed        = usage.LiveEventUsageFlushed
+	EventHeartbeat           = "heartbeat"
+	EventReset               = "reset"
 )
 
 const (
@@ -108,11 +108,11 @@ type Broker struct {
 	// events is a circular buffer of the most recent events. While it is
 	// filling, head is 0 and events are ordered; once full, head indexes the
 	// oldest event and each publish overwrites it in place (O(1)).
-	events      []Event
-	head        int
-	subscribers map[uint64]chan Event
-	activeAudit map[snapshotKey]auditSnapshot
-	activeUsage map[snapshotKey]Event
+	events           []Event
+	head             int
+	subscribers      map[uint64]chan Event
+	activeRequestLog map[snapshotKey]requestLogSnapshot
+	activeUsage      map[snapshotKey]Event
 
 	// present is closed while at least one subscriber is connected, and
 	// absent while none is; each is replaced when the state flips. The
@@ -126,13 +126,13 @@ type Broker struct {
 	remote *remoteFeed
 }
 
-// auditSnapshot is the accumulated live state of one in-flight request: the
+// requestLogSnapshot is the accumulated live state of one in-flight request: the
 // event a fresh subscriber replays, and the typed preview it was encoded from
 // so the next event of the same request merges onto a struct rather than
 // decoding and re-encoding JSON.
-type auditSnapshot struct {
+type requestLogSnapshot struct {
 	event   Event
-	preview auditPreview
+	preview requestLogPreview
 }
 
 // NewBroker creates a live event broker. A disabled broker is safe to use.
@@ -164,7 +164,7 @@ func NewBroker(cfg Config) *Broker {
 		subscriberBuffer: cfg.SubscriberBuffer,
 		heartbeat:        cfg.Heartbeat,
 		subscribers:      make(map[uint64]chan Event),
-		activeAudit:      make(map[snapshotKey]auditSnapshot),
+		activeRequestLog: make(map[snapshotKey]requestLogSnapshot),
 		activeUsage:      make(map[snapshotKey]Event),
 		present:          make(chan struct{}),
 		absent:           absent,
@@ -281,8 +281,8 @@ func (b *Broker) eventAtLocked(i int) Event {
 }
 
 func (b *Broker) activeSnapshotsLocked() []Event {
-	snapshots := make([]Event, 0, len(b.activeAudit)+len(b.activeUsage))
-	for _, snapshot := range b.activeAudit {
+	snapshots := make([]Event, 0, len(b.activeRequestLog)+len(b.activeUsage))
+	for _, snapshot := range b.activeRequestLog {
 		snapshots = append(snapshots, snapshot.event)
 	}
 	for _, event := range b.activeUsage {
@@ -368,7 +368,7 @@ func (b *Broker) publish(eventType, entryID, requestID string, timestamp time.Ti
 }
 
 // publishEvent buffers a usage event for replay and fans it out to
-// subscribers. Audit events take publishAuditPreview instead, which
+// subscribers. Request log events take publishRequestLogPreview instead, which
 // accumulates their active snapshot from the typed preview.
 func (b *Broker) publishEvent(eventType, entryID, requestID string, timestamp time.Time, data json.RawMessage) {
 	if b == nil || !b.enabled {
@@ -389,13 +389,13 @@ func (b *Broker) publishEvent(eventType, entryID, requestID string, timestamp ti
 	b.bufferAndFanoutLocked(event, nil)
 }
 
-// publishAuditPreview accumulates the retained preview onto the request's
+// publishRequestLogPreview accumulates the retained preview onto the request's
 // active snapshot, encodes the result once, and buffers and fans out the
 // event. fanoutData, when non-nil, replaces the retained payload on the copy
 // sent to live subscribers — used to deliver request/response bodies to
 // connected dashboards without retaining them in the replay ring or active
 // snapshots, which outlive the request.
-func (b *Broker) publishAuditPreview(eventType, entryID string, retained auditPreview, fanoutData json.RawMessage) {
+func (b *Broker) publishRequestLogPreview(eventType, entryID string, retained requestLogPreview, fanoutData json.RawMessage) {
 	if b == nil || !b.enabled {
 		return
 	}
@@ -410,16 +410,16 @@ func (b *Broker) publishAuditPreview(eventType, entryID string, retained auditPr
 		return
 	}
 
-	keys := auditActiveKeys(retained.RequestID, entryID)
-	terminal := auditEventTerminal(eventType)
+	keys := requestLogActiveKeys(retained.RequestID, entryID)
+	terminal := requestLogEventTerminal(eventType)
 	if terminal {
-		deleteActiveSnapshot(b.activeAudit, keys)
-	} else if previous, ok := findActiveSnapshot(b.activeAudit, keys); ok {
-		retained = mergeAuditPreview(previous.preview, retained)
+		deleteActiveSnapshot(b.activeRequestLog, keys)
+	} else if previous, ok := findActiveSnapshot(b.activeRequestLog, keys); ok {
+		retained = mergeRequestLogPreview(previous.preview, retained)
 	} else {
 		// The snapshot outlives the request, so it takes its own copies of
 		// what the entry goes on mutating; later merges may then keep them.
-		retained.Data = mergeAuditPreviewData(nil, retained.Data)
+		retained.Data = mergeRequestLogPreviewData(nil, retained.Data)
 	}
 
 	data, err := json.Marshal(retained)
@@ -432,7 +432,7 @@ func (b *Broker) publishAuditPreview(eventType, entryID string, retained auditPr
 		if fanoutData == nil && len(b.subscribers) > 0 {
 			fanoutData = data
 		}
-		retained = compactAuditPreviewForRetention(retained)
+		retained = compactRequestLogPreviewForRetention(retained)
 		if data, err = json.Marshal(retained); err != nil {
 			return
 		}
@@ -453,8 +453,8 @@ func (b *Broker) publishAuditPreview(eventType, entryID string, retained auditPr
 
 	event := b.nextEventLocked(eventType, retained.RequestID, retained.Timestamp, data)
 	if !terminal && keys.canonical != (snapshotKey{}) {
-		b.activeAudit[keys.canonical] = auditSnapshot{event: event, preview: retained}
-		deleteActiveSnapshotAliases(b.activeAudit, keys)
+		b.activeRequestLog[keys.canonical] = requestLogSnapshot{event: event, preview: retained}
+		deleteActiveSnapshotAliases(b.activeRequestLog, keys)
 	}
 	b.bufferAndFanoutLocked(event, fanoutData)
 }
@@ -549,7 +549,7 @@ type activeSnapshotKeys struct {
 	alias     snapshotKey
 }
 
-func auditActiveKeys(requestID, id string) activeSnapshotKeys {
+func requestLogActiveKeys(requestID, id string) activeSnapshotKeys {
 	requestID = strings.TrimSpace(requestID)
 	id = strings.TrimSpace(id)
 	keys := activeSnapshotKeys{}
@@ -631,10 +631,10 @@ func truncateRetainedText(text string, overflow int) string {
 	return text[:keep] + retainedTextTruncationMarker
 }
 
-// mergeAuditPreview accumulates patch onto base and returns the result.
+// mergeRequestLogPreview accumulates patch onto base and returns the result.
 //
 // It replaces a JSON merge of the two encoded previews, which cost two decodes
-// and a re-encode on every audit event — the bulk of the broker's per-request
+// and a re-encode on every request log event — the bulk of the broker's per-request
 // work, paid whether or not a dashboard is connected. The rule is the one that
 // merge implied: a member the patch omits leaves the base value in place, and
 // `omitempty` decides what the patch omits, so a zero field never erases what
@@ -642,9 +642,9 @@ func truncateRetainedText(text string, overflow int) string {
 // scalars are replaced whole.
 //
 // Values the patch contributes are copied rather than referenced: the preview
-// is built from the live audit entry, which the request goes on mutating,
+// is built from the live request log entry, which the request goes on mutating,
 // while a snapshot outlives it.
-func mergeAuditPreview(base, patch auditPreview) auditPreview {
+func mergeRequestLogPreview(base, patch requestLogPreview) requestLogPreview {
 	merged := base
 	// id and timestamp carry no omitempty, so every patch supplies them.
 	merged.ID = patch.ID
@@ -671,11 +671,11 @@ func mergeAuditPreview(base, patch auditPreview) auditPreview {
 	overlay(&merged.ErrorMessage, patch.ErrorMessage)
 	overlay(&merged.LiveState, patch.LiveState)
 	overlay(&merged.LivePending, patch.LivePending)
-	merged.Data = mergeAuditPreviewData(base.Data, patch.Data)
+	merged.Data = mergeRequestLogPreviewData(base.Data, patch.Data)
 	return merged
 }
 
-func mergeAuditPreviewData(base, patch *auditPreviewData) *auditPreviewData {
+func mergeRequestLogPreviewData(base, patch *requestLogPreviewData) *requestLogPreviewData {
 	if patch == nil {
 		return base
 	}
@@ -709,7 +709,7 @@ func mergeAuditPreviewData(base, patch *auditPreviewData) *auditPreviewData {
 		merged.WorkflowFeatures = clonePtr(patch.WorkflowFeatures)
 	}
 	if patch.Failover != nil {
-		failover := auditlog.FailoverSnapshot{}
+		failover := requestlog.FailoverSnapshot{}
 		if merged.Failover != nil {
 			failover = *merged.Failover
 		}
@@ -791,7 +791,7 @@ func containsStringMap(base, patch map[string]string) bool {
 // mergeEventData recursively merges two JSON objects, with patch members
 // winning on conflict. Whenever either side is not a JSON object, patch wins.
 // Usage events, whose payload is one flat entry, still accumulate this way;
-// audit events take mergeAuditPreview.
+// request log events take mergeRequestLogPreview.
 func mergeEventData(base, patch json.RawMessage) json.RawMessage {
 	var baseObject map[string]json.RawMessage
 	var patchObject map[string]json.RawMessage
@@ -811,7 +811,7 @@ func mergeEventData(base, patch json.RawMessage) json.RawMessage {
 	return merged
 }
 
-// PublishAuditEvent publishes a compact audit log preview event. Connected
+// PublishRequestLogEvent publishes a compact request log preview event. Connected
 // subscribers receive the full preview, including any captured bodies; the
 // copy retained for replay strips bodies (flagging them as captured so the
 // dashboard hydrates them from the persisted entry) and is size-capped, so
@@ -821,12 +821,12 @@ func mergeEventData(base, patch json.RawMessage) json.RawMessage {
 // bulk of the payload, and with no dashboard open (the common case) nobody
 // would read them. A subscriber that connects between that check and the
 // publish receives the retained copy, which is what replay gives it anyway.
-func (b *Broker) PublishAuditEvent(eventType string, entry *auditlog.LogEntry) {
+func (b *Broker) PublishRequestLogEvent(eventType string, entry *requestlog.LogEntry) {
 	if b == nil || !b.enabled || entry == nil {
 		return
 	}
-	payload := auditPreviewFromEntry(eventType, entry)
-	retained, stripped := stripAuditPreviewBodies(payload)
+	payload := requestLogPreviewFromEntry(eventType, entry)
+	retained, stripped := stripRequestLogPreviewBodies(payload)
 	var fanoutData json.RawMessage
 	if stripped && b.subscriberCount.Load() > 0 {
 		var err error
@@ -834,15 +834,15 @@ func (b *Broker) PublishAuditEvent(eventType string, entry *auditlog.LogEntry) {
 			return
 		}
 	}
-	b.publishAuditPreview(eventType, entry.ID, retained, fanoutData)
+	b.publishRequestLogPreview(eventType, entry.ID, retained, fanoutData)
 }
 
-// stripAuditPreviewBodies returns a preview copy without request/response
+// stripRequestLogPreviewBodies returns a preview copy without request/response
 // bodies, marking each stripped body as captured. A partial (mid-stream)
 // response body is not marked captured — it is not in the persisted entry —
 // and the partial flag itself is dropped so it cannot go stale in merged
 // active snapshots. Reports whether anything was stripped.
-func stripAuditPreviewBodies(preview auditPreview) (auditPreview, bool) {
+func stripRequestLogPreviewBodies(preview requestLogPreview) (requestLogPreview, bool) {
 	if preview.Data == nil || (preview.Data.RequestBody == nil && preview.Data.ResponseBody == nil) {
 		return preview, false
 	}
@@ -860,16 +860,16 @@ func stripAuditPreviewBodies(preview auditPreview) (auditPreview, bool) {
 	return preview, true
 }
 
-// compactAuditPreviewForRetention reduces a preview to its top-level fields
+// compactRequestLogPreviewForRetention reduces a preview to its top-level fields
 // plus body-capture flags, for events whose remaining data (headers, error
 // payloads) still exceeds the retained-size cap. It runs after
-// stripAuditPreviewBodies, so a body is "captured" either because this preview
+// stripRequestLogPreviewBodies, so a body is "captured" either because this preview
 // still carries one or because stripping already flagged it.
-func compactAuditPreviewForRetention(preview auditPreview) auditPreview {
+func compactRequestLogPreviewForRetention(preview requestLogPreview) requestLogPreview {
 	if preview.Data == nil {
 		return preview
 	}
-	preview.Data = &auditPreviewData{
+	preview.Data = &requestLogPreviewData{
 		RequestBodyCaptured:        preview.Data.RequestBody != nil || preview.Data.RequestBodyCaptured,
 		ResponseBodyCaptured:       (preview.Data.ResponseBody != nil && !preview.Data.ResponseBodyPartial) || preview.Data.ResponseBodyCaptured,
 		RequestBodyTooBigToHandle:  preview.Data.RequestBodyTooBigToHandle,
@@ -878,19 +878,19 @@ func compactAuditPreviewForRetention(preview auditPreview) auditPreview {
 	return preview
 }
 
-// PublishRemoteAuditEntry publishes an audit entry another replica persisted,
+// PublishRemoteRequestLogEntry publishes a request log entry another replica persisted,
 // as the audit.flushed event that replica's own dashboards received, marked
 // with its write stamp. The preview carries no bodies, only whether each was
 // captured, so remote traffic costs the stream only the compact preview; the
 // dashboard loads them from the stored entry.
-func (b *Broker) PublishRemoteAuditEntry(entry *auditlog.EntryPreview, writtenAt int64) {
+func (b *Broker) PublishRemoteRequestLogEntry(entry *requestlog.EntryPreview, writtenAt int64) {
 	if b == nil || !b.enabled || entry == nil {
 		return
 	}
-	preview := auditPreviewFromEntry(EventAuditFlushed, &entry.LogEntry)
+	preview := requestLogPreviewFromEntry(EventRequestLogFlushed, &entry.LogEntry)
 	preview.RemoteWrittenAt = writtenAt
 	if entry.RequestBodyCaptured || entry.ResponseBodyCaptured {
-		data := auditPreviewData{}
+		data := requestLogPreviewData{}
 		if preview.Data != nil {
 			data = *preview.Data
 		}
@@ -898,11 +898,11 @@ func (b *Broker) PublishRemoteAuditEntry(entry *auditlog.EntryPreview, writtenAt
 		data.ResponseBodyCaptured = entry.ResponseBodyCaptured
 		preview.Data = &data
 	}
-	b.publishAuditPreview(EventAuditFlushed, entry.ID, preview, nil)
+	b.publishRequestLogPreview(EventRequestLogFlushed, entry.ID, preview, nil)
 }
 
 // remoteUsagePreview is a usage entry another replica persisted, marked with
-// its write stamp like a remote audit preview (auditPreview.RemoteWrittenAt).
+// its write stamp like a remote request log preview (requestLogPreview.RemoteWrittenAt).
 type remoteUsagePreview struct {
 	usage.UsageLogEntry
 	RemoteWrittenAt int64 `json:"_remote_written_at,omitempty"`
@@ -931,32 +931,32 @@ func (b *Broker) PublishUsageEvent(eventType string, entry *usage.UsageEntry) {
 	b.publish(eventType, entry.ID, entry.RequestID, entry.Timestamp, payload)
 }
 
-type auditPreview struct {
-	ID                string            `json:"id"`
-	RequestID         string            `json:"request_id,omitempty"`
-	Timestamp         time.Time         `json:"timestamp"`
-	DurationNs        *int64            `json:"duration_ns,omitempty"`
-	RequestedModel    string            `json:"requested_model,omitempty"`
-	ResolvedModel     string            `json:"resolved_model,omitempty"`
-	Provider          string            `json:"provider,omitempty"`
-	ProviderName      string            `json:"provider_name,omitempty"`
-	AliasUsed         bool              `json:"alias_used,omitempty"`
-	WorkflowVersionID string            `json:"workflow_version_id,omitempty"`
-	CacheType         string            `json:"cache_type,omitempty"`
-	StatusCode        *int              `json:"status_code,omitempty"`
-	AuthKeyID         string            `json:"auth_key_id,omitempty"`
-	AuthMethod        string            `json:"auth_method,omitempty"`
-	ClientIP          string            `json:"client_ip,omitempty"`
-	Method            string            `json:"method,omitempty"`
-	Path              string            `json:"path,omitempty"`
-	UserPath          string            `json:"user_path,omitempty"`
-	SessionID         string            `json:"session_id,omitempty"`
-	Stream            bool              `json:"stream,omitempty"`
-	ErrorType         string            `json:"error_type,omitempty"`
-	ErrorMessage      string            `json:"error_message,omitempty"`
-	Data              *auditPreviewData `json:"data,omitempty"`
-	LiveState         string            `json:"_live_state,omitempty"`
-	LivePending       bool              `json:"_live_pending,omitempty"`
+type requestLogPreview struct {
+	ID                string                 `json:"id"`
+	RequestID         string                 `json:"request_id,omitempty"`
+	Timestamp         time.Time              `json:"timestamp"`
+	DurationNs        *int64                 `json:"duration_ns,omitempty"`
+	RequestedModel    string                 `json:"requested_model,omitempty"`
+	ResolvedModel     string                 `json:"resolved_model,omitempty"`
+	Provider          string                 `json:"provider,omitempty"`
+	ProviderName      string                 `json:"provider_name,omitempty"`
+	AliasUsed         bool                   `json:"alias_used,omitempty"`
+	WorkflowVersionID string                 `json:"workflow_version_id,omitempty"`
+	CacheType         string                 `json:"cache_type,omitempty"`
+	StatusCode        *int                   `json:"status_code,omitempty"`
+	AuthKeyID         string                 `json:"auth_key_id,omitempty"`
+	AuthMethod        string                 `json:"auth_method,omitempty"`
+	ClientIP          string                 `json:"client_ip,omitempty"`
+	Method            string                 `json:"method,omitempty"`
+	Path              string                 `json:"path,omitempty"`
+	UserPath          string                 `json:"user_path,omitempty"`
+	SessionID         string                 `json:"session_id,omitempty"`
+	Stream            bool                   `json:"stream,omitempty"`
+	ErrorType         string                 `json:"error_type,omitempty"`
+	ErrorMessage      string                 `json:"error_message,omitempty"`
+	Data              *requestLogPreviewData `json:"data,omitempty"`
+	LiveState         string                 `json:"_live_state,omitempty"`
+	LivePending       bool                   `json:"_live_pending,omitempty"`
 	// RemoteWrittenAt marks an entry another replica persisted with that
 	// replica's write stamp (unix microseconds, its clock). A dashboard
 	// compares it with a fetched page's as_of to tell the rows that page
@@ -964,43 +964,43 @@ type auditPreview struct {
 	RemoteWrittenAt int64 `json:"_remote_written_at,omitempty"`
 }
 
-type auditPreviewData struct {
-	UserAgent                  string                             `json:"user_agent,omitempty"`
-	APIKeyHash                 string                             `json:"api_key_hash,omitempty"`
-	WorkflowFeatures           *auditlog.WorkflowFeaturesSnapshot `json:"workflow_features,omitempty"`
-	Failover                   *auditlog.FailoverSnapshot         `json:"failover,omitempty"`
-	Temperature                *float64                           `json:"temperature,omitempty"`
-	MaxTokens                  *int                               `json:"max_tokens,omitempty"`
-	ErrorMessage               string                             `json:"error_message,omitempty"`
-	ErrorCode                  string                             `json:"error_code,omitempty"`
-	RequestHeaders             map[string]string                  `json:"request_headers,omitempty"`
-	ResponseHeaders            map[string]string                  `json:"response_headers,omitempty"`
-	RequestBody                any                                `json:"request_body,omitempty"`
-	ResponseBody               any                                `json:"response_body,omitempty"`
-	RequestBodyTooBigToHandle  bool                               `json:"request_body_too_big_to_handle,omitempty"`
-	ResponseBodyTooBigToHandle bool                               `json:"response_body_too_big_to_handle,omitempty"`
+type requestLogPreviewData struct {
+	UserAgent                  string                               `json:"user_agent,omitempty"`
+	APIKeyHash                 string                               `json:"api_key_hash,omitempty"`
+	WorkflowFeatures           *requestlog.WorkflowFeaturesSnapshot `json:"workflow_features,omitempty"`
+	Failover                   *requestlog.FailoverSnapshot         `json:"failover,omitempty"`
+	Temperature                *float64                             `json:"temperature,omitempty"`
+	MaxTokens                  *int                                 `json:"max_tokens,omitempty"`
+	ErrorMessage               string                               `json:"error_message,omitempty"`
+	ErrorCode                  string                               `json:"error_code,omitempty"`
+	RequestHeaders             map[string]string                    `json:"request_headers,omitempty"`
+	ResponseHeaders            map[string]string                    `json:"response_headers,omitempty"`
+	RequestBody                any                                  `json:"request_body,omitempty"`
+	ResponseBody               any                                  `json:"response_body,omitempty"`
+	RequestBodyTooBigToHandle  bool                                 `json:"request_body_too_big_to_handle,omitempty"`
+	ResponseBodyTooBigToHandle bool                                 `json:"response_body_too_big_to_handle,omitempty"`
 	// ResponseBodyPartial marks a response body still being reconstructed from
 	// a running stream (audit.stream events). Set only on fan-out copies; the
 	// flag is cleared when bodies are stripped for retention so it cannot go
 	// stale in merged active snapshots.
 	ResponseBodyPartial bool `json:"response_body_partial,omitempty"`
 	// RequestBodyCaptured/ResponseBodyCaptured mark replay copies whose bodies
-	// were stripped from broker retention; the persisted audit entry has them.
+	// were stripped from broker retention; the persisted request log entry has them.
 	RequestBodyCaptured  bool `json:"request_body_captured,omitempty"`
 	ResponseBodyCaptured bool `json:"response_body_captured,omitempty"`
-	// Attempts carries the provider attempt summaries so the live audit row can
+	// Attempts carries the provider attempt summaries so the live request log row can
 	// surface the failover/retry indicator without waiting for the persisted
 	// entry. Per-attempt response bodies/headers are omitted to keep the live
 	// stream compact; they hydrate when the entry detail is fetched.
-	Attempts []auditlog.AttemptSnapshot `json:"attempts,omitempty"`
+	Attempts []requestlog.AttemptSnapshot `json:"attempts,omitempty"`
 	// Guardrails carries the guardrail outcome trail so the live workflow
 	// chart colors its steps as phases finish. The plugin-provided detail is
 	// omitted to keep the stream compact; it hydrates with the entry detail.
-	Guardrails []auditlog.GuardrailOutcomeSnapshot `json:"guardrails,omitempty"`
+	Guardrails []requestlog.GuardrailOutcomeSnapshot `json:"guardrails,omitempty"`
 }
 
-func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPreview {
-	preview := auditPreview{
+func requestLogPreviewFromEntry(eventType string, entry *requestlog.LogEntry) requestLogPreview {
+	preview := requestLogPreview{
 		ID:                entry.ID,
 		RequestID:         entry.RequestID,
 		Timestamp:         entry.Timestamp.UTC(),
@@ -1021,7 +1021,7 @@ func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPrev
 		Stream:            entry.Stream,
 		ErrorType:         entry.ErrorType,
 		LiveState:         eventType,
-		LivePending:       !auditEventTerminal(eventType),
+		LivePending:       !requestLogEventTerminal(eventType),
 	}
 	if entry.DurationNs > 0 {
 		duration := entry.DurationNs
@@ -1033,27 +1033,27 @@ func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPrev
 	}
 	if entry.Data != nil {
 		preview.ErrorMessage = entry.Data.ErrorMessage
-		data := auditPreviewData{
+		data := requestLogPreviewData{
 			WorkflowFeatures: entry.Data.WorkflowFeatures,
 			Failover:         entry.Data.Failover,
 			Attempts:         compactAttemptsForPreview(entry.Data.Attempts),
 			Guardrails:       compactGuardrailsForPreview(entry.Data.Guardrails),
 		}
-		if auditPreviewIncludesLiveRequestMetadata(eventType) {
+		if requestLogPreviewIncludesLiveRequestMetadata(eventType) {
 			data.UserAgent = entry.Data.UserAgent
 			data.APIKeyHash = entry.Data.APIKeyHash
 			data.RequestHeaders = entry.Data.RequestHeaders
 		}
-		if auditPreviewIncludesLiveRequestBody(eventType) {
+		if requestLogPreviewIncludesLiveRequestBody(eventType) {
 			data.RequestBody = entry.Data.RequestBody
 			data.RequestBodyTooBigToHandle = entry.Data.RequestBodyTooBigToHandle
 		}
-		if auditPreviewIncludesLiveResponseBody(eventType) {
+		if requestLogPreviewIncludesLiveResponseBody(eventType) {
 			data.ResponseBody = entry.Data.ResponseBody
 			data.ResponseBodyPartial = entry.Data.ResponseBody != nil
 			data.ResponseBodyTooBigToHandle = entry.Data.ResponseBodyTooBigToHandle
 		}
-		if auditPreviewIncludesCapturedData(eventType) {
+		if requestLogPreviewIncludesCapturedData(eventType) {
 			data.UserAgent = entry.Data.UserAgent
 			data.APIKeyHash = entry.Data.APIKeyHash
 			data.Temperature = entry.Data.Temperature
@@ -1074,27 +1074,27 @@ func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPrev
 	return preview
 }
 
-func auditPreviewIncludesLiveRequestMetadata(eventType string) bool {
-	return eventType == EventAuditStarted || eventType == EventAuditUpdated
+func requestLogPreviewIncludesLiveRequestMetadata(eventType string) bool {
+	return eventType == EventRequestLogStarted || eventType == EventRequestLogUpdated
 }
 
-func auditPreviewIncludesLiveRequestBody(eventType string) bool {
-	return eventType == EventAuditUpdated
+func requestLogPreviewIncludesLiveRequestBody(eventType string) bool {
+	return eventType == EventRequestLogUpdated
 }
 
-// auditPreviewIncludesLiveResponseBody reports event types that carry the
+// requestLogPreviewIncludesLiveResponseBody reports event types that carry the
 // in-flight partial response body. Deliberately not audit.updated: metadata
 // updates would otherwise fan out heavy handler-set bodies (e.g. audio)
 // mid-request that completion events deliver anyway.
-func auditPreviewIncludesLiveResponseBody(eventType string) bool {
-	return eventType == EventAuditStream
+func requestLogPreviewIncludesLiveResponseBody(eventType string) bool {
+	return eventType == EventRequestLogStream
 }
 
-func auditPreviewIncludesCapturedData(eventType string) bool {
-	return eventType == EventAuditCompleted || eventType == EventAuditFlushed || eventType == EventAuditFailed
+func requestLogPreviewIncludesCapturedData(eventType string) bool {
+	return eventType == EventRequestLogCompleted || eventType == EventRequestLogFlushed || eventType == EventRequestLogFailed
 }
 
-func (d auditPreviewData) hasValues() bool {
+func (d requestLogPreviewData) hasValues() bool {
 	return d.UserAgent != "" ||
 		d.APIKeyHash != "" ||
 		d.WorkflowFeatures != nil ||
@@ -1118,11 +1118,11 @@ func (d auditPreviewData) hasValues() bool {
 
 // compactGuardrailsForPreview copies the guardrail outcomes for a live
 // preview without the plugin-provided detail.
-func compactGuardrailsForPreview(outcomes []auditlog.GuardrailOutcomeSnapshot) []auditlog.GuardrailOutcomeSnapshot {
+func compactGuardrailsForPreview(outcomes []requestlog.GuardrailOutcomeSnapshot) []requestlog.GuardrailOutcomeSnapshot {
 	if len(outcomes) == 0 {
 		return nil
 	}
-	compact := make([]auditlog.GuardrailOutcomeSnapshot, len(outcomes))
+	compact := make([]requestlog.GuardrailOutcomeSnapshot, len(outcomes))
 	for i, outcome := range outcomes {
 		outcome.Detail = nil
 		compact[i] = outcome
@@ -1133,11 +1133,11 @@ func compactGuardrailsForPreview(outcomes []auditlog.GuardrailOutcomeSnapshot) [
 // compactAttemptsForPreview copies the attempt summaries for a live preview
 // while dropping the per-attempt response body/headers, which are heavy and
 // hydrate later from the persisted entry detail.
-func compactAttemptsForPreview(attempts []auditlog.AttemptSnapshot) []auditlog.AttemptSnapshot {
+func compactAttemptsForPreview(attempts []requestlog.AttemptSnapshot) []requestlog.AttemptSnapshot {
 	if len(attempts) == 0 {
 		return nil
 	}
-	compact := make([]auditlog.AttemptSnapshot, len(attempts))
+	compact := make([]requestlog.AttemptSnapshot, len(attempts))
 	for i, attempt := range attempts {
 		attempt.ResponseBody = nil
 		attempt.ResponseHeaders = nil
@@ -1146,8 +1146,8 @@ func compactAttemptsForPreview(attempts []auditlog.AttemptSnapshot) []auditlog.A
 	return compact
 }
 
-func auditEventTerminal(eventType string) bool {
-	return eventType == EventAuditFailed || eventType == EventAuditFlushed || eventType == EventAuditRemoved
+func requestLogEventTerminal(eventType string) bool {
+	return eventType == EventRequestLogFailed || eventType == EventRequestLogFlushed || eventType == EventRequestLogRemoved
 }
 
 func usagePreviewFromEntry(entry *usage.UsageEntry) usage.UsageLogEntry {

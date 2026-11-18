@@ -176,7 +176,7 @@ func TestPassthrough_RequiresRequest(t *testing.T) {
 	assert.Contains(t, err.Error(), "passthrough request is required")
 }
 
-// The enricher names the native routes so the audit log records what a
+// The enricher names the native routes so the request log records what a
 // passthrough call actually did rather than an opaque /p/audiocpp/... path.
 func TestPassthroughSemantics_NameNativeRoutes(t *testing.T) {
 	enriched := passthroughSemanticEnricher.Enrich(nil, nil, &core.PassthroughRouteInfo{
@@ -185,9 +185,9 @@ func TestPassthroughSemantics_NameNativeRoutes(t *testing.T) {
 	require.NotNil(t, enriched)
 	assert.Equal(t, "audiocpp.audio_transcriptions_live", enriched.SemanticOperation)
 	assert.Equal(t, string(core.OperationAudioTranscriptions), enriched.GenAIOperation)
-	assert.Equal(t, "/v1/audio/transcriptions/live", enriched.AuditPath)
+	assert.Equal(t, "/v1/audio/transcriptions/live", enriched.RequestLogPath)
 
 	unknown := passthroughSemanticEnricher.Enrich(nil, nil, &core.PassthroughRouteInfo{RawEndpoint: "/health"})
 	require.NotNil(t, unknown)
-	assert.Equal(t, "/p/audiocpp/health", unknown.AuditPath)
+	assert.Equal(t, "/p/audiocpp/health", unknown.RequestLogPath)
 }

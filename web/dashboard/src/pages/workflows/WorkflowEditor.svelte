@@ -147,11 +147,11 @@
         onclick={() => (wf.form.features.cache = !wf.form.features.cache)}
       />
     {/if}
-    {#if runtimeConfig.auditVisible()}
+    {#if runtimeConfig.requestLogsVisible()}
       <EnabledToggle
         enabled={wf.form.features.audit}
-        label={m.workflows_audit()}
-        text={m.workflows_audit()}
+        label={m.workflows_request_logs()}
+        text={m.workflows_request_logs()}
         onclick={() => (wf.form.features.audit = !wf.form.features.audit)}
       />
     {/if}

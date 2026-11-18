@@ -11,7 +11,7 @@ keywords: ["GoModel Pro", "SAML", "SAML 2.0", "SSO", "single sign-on", "jednokro
 
 `protocol: saml` sprawia, że gateway działa jako dostawca usług (service
 provider) SAML 2.0 zamiast klienta OIDC. Sesje, ścieżki użytkowników,
-[mapowanie grup](/pl/pro/sso#mapowanie-grup), wylogowanie i audyt działają
+[mapowanie grup](/pl/pro/sso#mapowanie-grup), wylogowanie i zdarzenia logowania działają
 dokładnie tak, jak opisano dla [OIDC SSO](/pl/pro/sso); zmienia się tylko
 sposób potwierdzania logowania.
 
@@ -21,7 +21,7 @@ sposób potwierdzania logowania.
   środowisku. Przy `protocol: oidc` nie może być ustawione żadne ustawienie
   `saml`. W przeciwnym razie uruchamianie zostaje przerwane.
 - **Zmiana protokołu zmienia każdy identyfikator principala.** Identyfikator
-  zapisywany we wpisach audytowych jest wyprowadzany z protokołu, dostawcy
+  zapisywany we wpisach logu requestów jest wyprowadzany z protokołu, dostawcy
   tożsamości i podmiotu, więc ta sama osoba po zmianie występuje jako nowy
   principal.
 
@@ -221,7 +221,7 @@ extensions:
 
 Logowanie udaje się tylko wtedy, gdy spełnione są wszystkie poniższe warunki.
 Każde niepowodzenie ma własny
-[powód audytowy](/pl/pro/sso#powody-odrzuconych-logowań).
+[powód odrzucenia](/pl/pro/sso#powody-odrzuconych-logowań).
 
 - **Odpowiada na logowanie rozpoczęte przez tę przeglądarkę.** Podpisane
   ciasteczko transakcji (ważne 10 minut), `RelayState` i `InResponseTo` muszą
