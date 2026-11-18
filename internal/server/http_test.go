@@ -555,6 +555,7 @@ func TestMetricsEndpointRequireAuth(t *testing.T) {
 		authenticator BearerTokenAuthenticator
 		extraSkip     []string
 		endpoint      string
+		requestPath   string // defaults to endpoint
 		token         string
 		want          int
 	}{
@@ -562,7 +563,9 @@ func TestMetricsEndpointRequireAuth(t *testing.T) {
 		{name: "required: refused without a credential", requireAuth: true, want: http.StatusUnauthorized},
 		{name: "required: refused with a wrong credential", requireAuth: true, token: "wrong", want: http.StatusUnauthorized},
 		{name: "required: served with the master key", requireAuth: true, token: masterKey, want: http.StatusOK},
-		{name: "required: served with a managed key", requireAuth: true, authenticator: managedKeys, token: "managed-token", want: http.StatusOK},
+		{name: "required: served with a managed key and no master key", requireAuth: true, noMasterKey: true, authenticator: managedKeys, token: "managed-token", want: http.StatusOK},
+		{name: "required: refused without a credential when only managed keys exist", requireAuth: true, noMasterKey: true, authenticator: managedKeys, want: http.StatusUnauthorized},
+		{name: "required: a route pattern falls back to /metrics", requireAuth: true, extraSkip: []string{"/open/*"}, endpoint: "/open/*", requestPath: "/open/anything", want: http.StatusNotFound},
 		{name: "required: custom endpoint refused without a credential", requireAuth: true, endpoint: "/internal/prometheus", want: http.StatusUnauthorized},
 		{name: "required: custom endpoint served with the master key", requireAuth: true, endpoint: "/internal/prometheus", token: masterKey, want: http.StatusOK},
 		{name: "required: refused under another exempt prefix", requireAuth: true, extraSkip: []string{"/internal/*"}, endpoint: "/internal/prometheus", want: http.StatusUnauthorized},
@@ -588,7 +591,11 @@ func TestMetricsEndpointRequireAuth(t *testing.T) {
 				cfg.MasterKey = ""
 			}
 			srv := New(&mockProvider{}, cfg)
-			req := httptest.NewRequest(http.MethodGet, endpoint, nil)
+			requestPath := tt.requestPath
+			if requestPath == "" {
+				requestPath = endpoint
+			}
+			req := httptest.NewRequest(http.MethodGet, requestPath, nil)
 			if tt.token != "" {
 				req.Header.Set("Authorization", "Bearer "+tt.token)
 			}

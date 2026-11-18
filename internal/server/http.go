@@ -297,7 +297,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		metricsPath = config.ResolveMetricsEndpointWithPprof(cfg.MetricsEndpoint, cfg.PprofEnabled)
 		// Prevent metrics endpoint from shadowing API routes (security: auth bypass)
 		if metricsPath != configuredPath && cfg.MetricsEndpoint != "" {
-			slog.Warn("metrics endpoint conflicts with API routes, using /metrics instead",
+			slog.Warn("metrics endpoint conflicts with API routes or is a route pattern, using /metrics instead",
 				"configured", cfg.MetricsEndpoint,
 				"normalized", configuredPath)
 		}

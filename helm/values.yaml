@@ -83,8 +83,8 @@ updateStrategy: {}
 
 metrics:
   # -- Expose Prometheus metrics at /metrics. Unauthenticated unless
-  # env.METRICS_REQUIRE_AUTH is "true" and the gateway has a master key or
-  # managed keys; an ingress or HTTPRoute on / exposes it too.
+  # env.METRICS_REQUIRE_AUTH is "true" on a gateway that requires credentials;
+  # an ingress or HTTPRoute on / exposes it too.
   enabled: true
   serviceMonitor:
     # -- Create a ServiceMonitor for the Prometheus Operator.

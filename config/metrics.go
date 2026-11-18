@@ -17,8 +17,8 @@ type MetricsConfig struct {
 
 	// RequireAuth keeps the metrics endpoint behind the gateway's normal
 	// bearer authentication instead of serving it without a credential. It
-	// does not turn authentication on: a gateway with no master key and no
-	// managed keys still serves the endpoint openly.
+	// does not turn authentication on: a gateway that accepts requests
+	// without a credential serves the endpoint openly too.
 	// Default: false
 	RequireAuth bool `yaml:"require_auth" env:"METRICS_REQUIRE_AUTH"`
 
@@ -78,6 +78,11 @@ func ResolveMetricsEndpoint(endpoint string) string {
 	metricsPath := "/metrics"
 	if endpoint != "" {
 		metricsPath = path.Clean("/" + endpoint)
+	}
+	// A router pattern would serve metrics on every path it matches, and its
+	// authentication rule, exempt or required, is compared as a literal path.
+	if strings.ContainsAny(metricsPath, "*:") {
+		return "/metrics"
 	}
 	for _, prefix := range reservedMetricsPrefixes {
 		if metricsPath == prefix || strings.HasPrefix(metricsPath, prefix+"/") {
