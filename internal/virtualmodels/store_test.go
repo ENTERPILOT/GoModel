@@ -18,7 +18,7 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 
 		redirect := VirtualModel{
 			Source:          "fast",
-			Targets:         []Target{{Provider: "openai", Model: "gpt-4o"}},
+			Targets:         []Target{{Provider: "openai", Model: "gpt-4o", ReasoningEffort: "high"}},
 			Description:     "primary",
 			Slowdown:        new(0.4),
 			ReasoningEffort: "medium",
@@ -60,6 +60,7 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		require.Len(t, gotRedirect.Targets, 1)
 		require.Equal(t, "gpt-4o", gotRedirect.Targets[0].Model)
 		require.Equal(t, "openai", gotRedirect.Targets[0].Provider)
+		assert.Equal(t, "high", gotRedirect.Targets[0].ReasoningEffort)
 		require.NotNil(t, gotRedirect.Slowdown)
 		require.Equal(t, 0.4, *gotRedirect.Slowdown)
 		assert.Equal(t, "medium", gotRedirect.ReasoningEffort)

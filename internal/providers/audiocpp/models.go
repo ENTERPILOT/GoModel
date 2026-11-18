@@ -7,6 +7,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // modelsResponse mirrors audiocpp_server's /v1/models payload. It restates the
@@ -56,10 +57,6 @@ func (r *modelsResponse) toCore() *core.ModelsResponse {
 }
 
 func (e modelEntry) toCore() core.Model {
-	object := strings.TrimSpace(e.Object)
-	if object == "" {
-		object = "model"
-	}
 	metadata := core.ModelMetadata{
 		Family:     strings.TrimSpace(e.Family),
 		Modes:      modesForTask(e.Task),
@@ -72,7 +69,7 @@ func (e modelEntry) toCore() core.Model {
 	}
 	return core.Model{
 		ID:       strings.TrimSpace(e.ID),
-		Object:   object,
+		Object:   providers.ModelObject(e.Object),
 		OwnedBy:  strings.TrimSpace(e.OwnedBy),
 		Metadata: &metadata,
 	}

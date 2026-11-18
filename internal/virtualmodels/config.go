@@ -67,9 +67,10 @@ func configTargets(entry config.VirtualModelConfig) []Target {
 		targets := make([]Target, 0, len(entry.Targets))
 		for _, target := range entry.Targets {
 			targets = append(targets, Target{
-				Provider: target.Provider,
-				Model:    target.Model,
-				Weight:   target.Weight,
+				Provider:        target.Provider,
+				Model:           target.Model,
+				Weight:          target.Weight,
+				ReasoningEffort: target.ReasoningEffort,
 			})
 		}
 		return targets
