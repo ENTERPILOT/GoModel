@@ -1,6 +1,6 @@
 // Package tagging labels requests based on configurable HTTP headers. Each
 // rule names one header whose value carries request labels; labels flow into
-// usage tracking and audit logs, and rules can mark their header as
+// usage tracking and request logs, and rules can mark their header as
 // do-not-pass so it is never forwarded to upstream providers.
 package tagging
 

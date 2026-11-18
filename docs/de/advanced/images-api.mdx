@@ -233,7 +233,7 @@ Inferenz-Orchestrator**. Im Vergleich zu `/v1/chat/completions`:
 - **Kein Failover, keine Guardrails, kein Response-Cache** – diese Stufen
   werden übersprungen. Requests werden dennoch autorisiert, gegen Budgets
   geprüft, Rate-Limits unterworfen, gemessen und in das
-  [Audit-Log](/de/advanced/admin-endpoints) geschrieben.
+  [Request-Log](/de/advanced/admin-endpoints) geschrieben.
 - **Kein Streaming** – `stream: true` wird mit `400` abgelehnt, weil
   gestreamte Bildgenerierung als Server-Sent Events geliefert wird, die diese
   Endpunkte nicht weiterreichen. Lassen Sie `stream` weg (oder setzen Sie es
@@ -281,9 +281,9 @@ Im OpenAI-kompatiblen Modus wird die Generierung an Geminis Endpunkt
 `/openai/images/generations` weitergeleitet, und Bearbeitungen werden
 abgelehnt (diese Schnittstelle hat keinen Bearbeitungs-Endpunkt).
 
-## Audit-Logging
+## Request-Logging
 
-Bild-Requests erscheinen im Audit-Log wie jede andere Modellinteraktion. Wenn
+Bild-Requests erscheinen im Request-Log wie jede andere Modellinteraktion. Wenn
 `LOGGING_LOG_BODIES` aktiviert ist:
 
 - Der Generierungs-Request wird als JSON gespeichert. Ein Bearbeitungs-Request
@@ -294,7 +294,7 @@ Bild-Requests erscheinen im Audit-Log wie jede andere Modellinteraktion. Wenn
   zurückgegebenem Bild. Gehostete URLs bleiben als Links erhalten.
 
 Die Pixel selbst werden **nicht** gespeichert, es sei denn,
-[`LOGGING_LOG_IMAGE_BODIES=true`](/de/advanced/configuration#audit-logging) ist
+[`LOGGING_LOG_IMAGE_BODIES=true`](/de/advanced/configuration#request-logging) ist
 gesetzt. Ist die Option aktiv, werden Uploads und generierte Bilder in den
 [Medienspeicher](/de/advanced/configuration#medienspeicher) geschrieben, und
 jedes Element enthält eine `media_id`, die das Dashboard über
@@ -304,5 +304,5 @@ beschränkt dies auf `input` (Uploads für Bearbeitungen) oder `output`
 (`stored: false`). In beiden Fällen bleibt der Eintrag klein und vollständig –
 er erreicht nie die allgemeine Kürzung von Bodys bei 1 MB, selbst bei großen
 `b64_json`-Ergebnissen, und es gibt keine Obergrenze für gespeicherte Bilder
-pro Eintrag. Dateien werden so lange aufbewahrt wie die Audit-Einträge, die
+pro Eintrag. Dateien werden so lange aufbewahrt wie die Request-Log-Einträge, die
 auf sie verweisen (`LOGGING_RETENTION_DAYS`).

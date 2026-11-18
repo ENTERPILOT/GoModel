@@ -183,7 +183,7 @@ func (s *translatedInferenceService) decisionWorkflow(c *echo.Context, model str
 	requested := core.NewRequestedModelSelector(model, "")
 	resolution, ok := s.unlistedJevResolution(c.Request().Context(), requested)
 	if ok {
-		enrichAuditEntryWithRequestedModel(c, requested)
+		enrichRequestLogEntryWithRequestedModel(c, requested)
 	} else {
 		var err error
 		resolution, err = resolveAndStoreRequestModelResolution(c, s.provider, s.modelResolver, nil, model, "")

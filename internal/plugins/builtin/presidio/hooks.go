@@ -12,7 +12,7 @@ import (
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
-// Decision codes recorded in the audit trail.
+// Decision codes recorded in the request log.
 const (
 	// Code marks a detection when the action is block, respond, or warn.
 	Code = "presidio_pii"

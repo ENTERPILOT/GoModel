@@ -17,6 +17,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"path"
 	"strings"
 
 	"github.com/enterpilot/gomodel/config"
@@ -35,6 +36,7 @@ var content embed.FS
 type Handler struct {
 	indexHTML []byte
 	csp       string
+	assets    fs.FS
 	staticFS  http.Handler
 	basePath  string
 }
@@ -47,14 +49,23 @@ func NewWithBasePath(basePath string) (*Handler, error) {
 // NewWithDemoMode creates a dashboard handler and controls whether the demo
 // warning is rendered by the SPA.
 func NewWithDemoMode(basePath string, demoMode bool) (*Handler, error) {
+	return newHandler(content, basePath, demoMode)
+}
+
+// newHandler builds a handler over assets, which holds static/dist.
+func newHandler(assets fs.FS, basePath string, demoMode bool) (*Handler, error) {
 	basePath = config.NormalizeBasePath(basePath)
 
-	indexHTML, err := buildIndexHTML(content, basePath, demoMode)
+	indexHTML, err := buildIndexHTML(assets, basePath, demoMode)
 	if err != nil {
 		return nil, err
 	}
 
-	staticSub, err := fs.Sub(content, "static/dist")
+	staticSub, err := fs.Sub(assets, "static/dist")
+	if err != nil {
+		return nil, err
+	}
+	static, err := newStaticAssets(staticSub)
 	if err != nil {
 		return nil, err
 	}
@@ -62,9 +73,10 @@ func NewWithDemoMode(basePath string, demoMode bool) (*Handler, error) {
 	return &Handler{
 		indexHTML: indexHTML,
 		csp:       contentSecurityPolicy(runtimeGlobals(basePath, demoMode)),
+		assets:    staticSub,
 		staticFS: http.StripPrefix(
 			"/admin/static/",
-			http.FileServer(http.FS(staticSub)),
+			static,
 		),
 		basePath: basePath,
 	}, nil
@@ -111,7 +123,7 @@ func runtimeGlobals(basePath string, demoMode bool) string {
 // contentSecurityPolicy limits the dashboard to its own origin. Scripts run
 // only from the bundle and the runtime globals; the dashboard holds an admin
 // credential, so an injected script must not run. Styles allow inline
-// attributes, which the SPA templates use. Audit previews render media as
+// attributes, which the SPA templates use. Request log previews render media as
 // data: and blob: URLs. The page cannot be framed.
 func contentSecurityPolicy(inlineScript string) string {
 	sum := sha256.Sum256([]byte(inlineScript))
@@ -130,18 +142,18 @@ func contentSecurityPolicy(inlineScript string) string {
 	}, "; ")
 }
 
-// Index serves GET /admin/dashboard and every /admin/dashboard/* route — the
-// SPA handles routing client-side.
+// Index serves GET and HEAD /admin/dashboard and every /admin/dashboard/*
+// route — the SPA handles routing client-side.
 func (h *Handler) Index(c *echo.Context) error {
 	header := c.Response().Header()
 	header.Set("Content-Type", "text/html; charset=utf-8")
 	// The entry point references hashed assets; it must always be fresh.
 	header.Set("Cache-Control", "no-cache")
-	header.Set("Content-Security-Policy", h.csp)
-	header.Set("X-Frame-Options", "DENY")
-	header.Set("X-Content-Type-Options", "nosniff")
-	header.Set("Referrer-Policy", "no-referrer")
+	h.setSecurityHeaders(header)
 	c.Response().WriteHeader(http.StatusOK)
+	if c.Request().Method == http.MethodHead {
+		return nil
+	}
 	_, err := bytes.NewReader(h.indexHTML).WriteTo(c.Response())
 	if err != nil {
 		slog.Error("failed to write admin dashboard response", "path", c.Request().URL.Path, "error", err)
@@ -149,13 +161,41 @@ func (h *Handler) Index(c *echo.Context) error {
 	return err
 }
 
-// Static serves GET /admin/static/* — embedded SPA assets.
+// setSecurityHeaders applies the browser hardening headers every dashboard
+// response carries, the page and its assets alike.
+func (h *Handler) setSecurityHeaders(header http.Header) {
+	header.Set("Content-Security-Policy", h.csp)
+	header.Set("X-Frame-Options", "DENY")
+	header.Set("X-Content-Type-Options", "nosniff")
+	header.Set("Referrer-Policy", "no-referrer")
+}
+
+// Static serves GET and HEAD /admin/static/* — embedded SPA assets. It serves files
+// only: a directory answers 404 instead of a listing, and so does index.html,
+// which Index alone serves, with the runtime globals its CSP expects.
 func (h *Handler) Static(c *echo.Context) error {
-	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
+	header := c.Response().Header()
+	h.setSecurityHeaders(header)
+	urlPath := c.Request().URL.Path
+	if !h.isAsset(strings.TrimPrefix(urlPath, "/admin/static/")) {
+		http.NotFound(c.Response(), c.Request())
+		return nil
+	}
 	// Vite emits content-hashed filenames under assets/, safe to cache hard.
-	if strings.Contains(c.Request().URL.Path, "/assets/") {
-		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	if strings.Contains(urlPath, "/assets/") {
+		header.Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
 	h.staticFS.ServeHTTP(c.Response(), c.Request())
 	return nil
+}
+
+// isAsset reports whether name, a path below /admin/static/, is a file the
+// static route serves.
+func (h *Handler) isAsset(name string) bool {
+	name = strings.TrimPrefix(path.Clean("/"+name), "/")
+	if path.Base(name) == "index.html" {
+		return false
+	}
+	info, err := fs.Stat(h.assets, name)
+	return err == nil && !info.IsDir()
 }

@@ -5,15 +5,15 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 type passthroughService struct {
 	provider                     core.RoutableProvider
 	modelAuthorizer              RequestModelAuthorizer
-	logger                       auditlog.LoggerInterface
+	logger                       requestlog.LoggerInterface
 	usageLogger                  usage.LoggerInterface
 	budgetChecker                BudgetChecker
 	rateLimiter                  RateLimiter
@@ -88,9 +88,9 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 
 	workflow := core.GetWorkflow(c.Request().Context())
 	if workflow != nil {
-		auditlog.EnrichEntryWithWorkflow(c, workflow)
+		requestlog.EnrichEntryWithWorkflow(c, workflow)
 	} else {
-		auditlog.EnrichEntry(c, info.Model, providerType)
+		requestlog.EnrichEntry(c, info.Model, providerType)
 	}
 	return s.proxyPassthroughResponse(c, providerType, providerName, endpoint, info, resp)
 }

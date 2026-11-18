@@ -10,8 +10,8 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/tidwall/gjson"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // liteLLMTagsHeader is the header LiteLLM clients send tags in, separated by
@@ -42,13 +42,13 @@ var liteLLMTagEndpoints = map[string]bool{
 // when it is a list, and removes them before the request goes upstream:
 // providers reject them, since "tags" is no OpenAI parameter and OpenAI
 // metadata values are strings. A string metadata.tags is valid OpenAI
-// metadata and is left alone. The audit entry keeps the body the client
+// metadata and is left alone. The request log entry keeps the body the client
 // sent. Tags past the caps are dropped as labels but still stripped.
 //
 // It runs after authentication, so only authenticated requests are read, and
 // before request rewriters and workflow resolution, which see the cleaned
 // body.
-func LiteLLMTags(auditLogger auditlog.LoggerInterface) echo.MiddlewareFunc {
+func LiteLLMTags(requestLogger requestlog.LoggerInterface) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			req := c.Request()
@@ -62,7 +62,7 @@ func LiteLLMTags(auditLogger auditlog.LoggerInterface) echo.MiddlewareFunc {
 					return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
 				}
 				if cleaned, bodyLabels, changed := takeBodyTags(body); changed {
-					pinOriginalAuditRequestBody(c, auditLogger)
+					pinOriginalRequestLogRequestBody(c, requestLogger)
 					applyRewrittenBody(c, cleaned)
 					labels = append(labels, bodyLabels...)
 				}

@@ -156,7 +156,7 @@ console.log(message.content[0].text);
 
 在 API 处于 Beta 阶段期间，透传的范围被有意限制得较窄。
 
-- `openai`、`anthropic`、`openrouter`、`kilo`、`zai`、`sglang`、`vllm`、`llamacpp`、`llmd`、`deepseek`、`edenai` 和 `jev`
+- `openai`、`anthropic`、`openrouter`、`kilo`、`zai`、`sglang`、`vllm`、`llamacpp`、`llmd`、`deepseek`、`hetzner`、`edenai` 和 `jev`
   默认启用。
 - Chutes 支持透传，但需要运维人员显式启用，因为透传可能会转发不标识模型的提供商原生路由。
   只有在您确实打算暴露该接口时，才将 `chutes` 添加到 `ENABLED_PASSTHROUGH_PROVIDERS`。
@@ -179,7 +179,7 @@ console.log(message.content[0].text);
 ```env
 ENABLE_PASSTHROUGH_ROUTES=true
 ALLOW_PASSTHROUGH_V1_ALIAS=true
-ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,sglang,vllm,llamacpp,llmd,deepseek,edenai,jev
+ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,sglang,vllm,llamacpp,llmd,deepseek,hetzner,edenai,jev
 ```
 
 将 `ENABLED_PASSTHROUGH_PROVIDERS` 设置为您希望暴露的提供商类型。

@@ -40,7 +40,7 @@ The contract replay suite and its golden files are described in `tests/contract/
 
 ### Store suites on every backend
 
-Every persistence domain (usage, audit log, budgets, rate limits, auth keys,
+Every persistence domain (usage, request log, budgets, rate limits, auth keys,
 workflows, ...) ships a SQL store and a MongoDB store. Their unit suites are
 written once against the domain's `Store` interface and run on each backend
 that is reachable:
@@ -60,7 +60,7 @@ an unreachable server fails the run. CI sets both in the unit job. Locally:
 # stores use transactions, so a plain mongod is not enough)
 sh tools/ci/mongo-replset.sh start && sh tools/ci/mongo-replset.sh wait
 MONGO_TEST_DSN='mongodb://localhost:27017/?replicaSet=rs&directConnection=true' go test ./internal/...
-docker rm -f gomodel-mongo
+docker rm -f -v gomodel-mongo
 ```
 
 Set `MONGO_PORT` only when 27017 is already taken, for example by the

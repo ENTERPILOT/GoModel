@@ -14,6 +14,18 @@ import (
 // chunk per tool call and a finish chunk; then a usage chunk when
 // includeUsage is set, and [DONE].
 func SynthesizeChatStream(resp *core.ChatResponse, includeUsage bool) []byte {
+	return append(synthesizeChatChunks(resp, includeUsage, true), doneEventBytes...)
+}
+
+// SynthesizeTruncatedChatStream renders a chat completion assembled from a
+// provider stream that stopped before its end. It is SynthesizeChatStream
+// without the finish chunks and [DONE], so the stream still ends early and
+// is reported as incomplete downstream instead of as a finished answer.
+func SynthesizeTruncatedChatStream(resp *core.ChatResponse, includeUsage bool) []byte {
+	return synthesizeChatChunks(resp, includeUsage, false)
+}
+
+func synthesizeChatChunks(resp *core.ChatResponse, includeUsage, finish bool) []byte {
 	var out []byte
 	envelope := chatTerminalChunk{
 		ID:                resp.ID,
@@ -75,6 +87,9 @@ func SynthesizeChatStream(resp *core.ChatResponse, includeUsage bool) []byte {
 				"function": map[string]any{"name": call.Function.Name, "arguments": call.Function.Arguments},
 			}}})
 		}
+		if !finish {
+			continue
+		}
 		reason := choice.FinishReason
 		if reason == "" {
 			reason = "stop"
@@ -85,7 +100,7 @@ func SynthesizeChatStream(resp *core.ChatResponse, includeUsage bool) []byte {
 		usage := resp.Usage
 		emit(nil, &usage)
 	}
-	return append(out, doneEventBytes...)
+	return out
 }
 
 // SynthesizeResponsesStream renders a Responses API response as an event

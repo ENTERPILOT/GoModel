@@ -1,0 +1,623 @@
+package requestlog
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync/atomic"
+	"time"
+	"unicode/utf8"
+
+	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
+)
+
+// SQLReader implements Reader for SQL databases.
+type SQLReader struct {
+	db      sqlx.DB
+	dialect readerDialect
+
+	// searchIndexed caches that the trigram search index exists, so free-text
+	// search matches the indexed searchText expression instead of sweeping
+	// each column. The store builds the index in the background, so until it
+	// is seen each search re-probes; the probe is a catalog lookup.
+	searchIndexed atomic.Bool
+}
+
+// NewSQLReader creates a request log reader over a SQL database.
+func NewSQLReader(db sqlx.DB) (*SQLReader, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database connection is required")
+	}
+	return &SQLReader{db: db, dialect: readerDialectFor(db.Dialect())}, nil
+}
+
+// searchIsIndexed reports whether free-text search can use the trigram index.
+func (r *SQLReader) searchIsIndexed(ctx context.Context) bool {
+	if r.searchIndexed.Load() {
+		return true
+	}
+	if !hasTrigramSearchIndex(ctx, r.db) {
+		return false
+	}
+	r.searchIndexed.Store(true)
+	return true
+}
+
+// readerDialect holds the handful of spellings the two engines genuinely
+// disagree on. Everything else in this reader is one query for both.
+type readerDialect struct {
+	// like is the case-insensitive match operator. SQLite's LIKE already
+	// ignores case for ASCII; PostgreSQL's does not, and needs ILIKE.
+	like string
+
+	// idColumn and attemptIDColumn reference the primary key. A PostgreSQL
+	// database created before the stores were unified still has UUID columns
+	// there — CREATE TABLE IF NOT EXISTS did not reshape it — so both are cast
+	// to text before comparing with a string.
+	idColumn        string
+	attemptIDColumn string
+
+	// userPath is the user_path column under byte-wise ordering, so the
+	// subtree filter's range bounds mean "prefix" and the planner can serve
+	// them from the index userPathIndexes creates on the same expression.
+	// SQLite's default BINARY collation already compares bytes; PostgreSQL's
+	// default collation is locale-aware and must be overridden.
+	userPath string
+
+	// requestedModel and resolvedModel are the model columns under byte-wise
+	// ordering, for the same reason: the model prefix filter is a range the
+	// indexes modelIndexes creates on these expressions can serve.
+	requestedModel string
+	resolvedModel  string
+
+	// errorMessage, responseID and previousResponseID extract JSON fields.
+	// The PostgreSQL spellings match the expressions jsonPathIndexes creates,
+	// which is what lets the planner use those indexes.
+	errorMessage       string
+	responseID         string
+	previousResponseID string
+
+	// timestampBound converts a date-range boundary. SQLite compares the
+	// column as text, so the boundary must be a prefix of the stored RFC3339
+	// form: a full RFC3339 boundary would sort *after* a fractional-second
+	// timestamp in the same second and pull the next day's first rows in.
+	timestampBound func(time.Time) any
+
+	// statsHour buckets a row into its UTC hour. SQLite's strftime also
+	// normalises the stored timestamp variants (space separator, fractional
+	// seconds, offsets) that its text column may hold.
+	statsHour string
+}
+
+func readerDialectFor(dialect sqlx.Dialect) readerDialect {
+	if dialect == sqlx.PostgreSQL {
+		return readerDialect{
+			like:               "ILIKE",
+			idColumn:           "id::text",
+			attemptIDColumn:    "audit_log_id::text",
+			userPath:           `user_path COLLATE "C"`,
+			requestedModel:     `requested_model COLLATE "C"`,
+			resolvedModel:      `resolved_model COLLATE "C"`,
+			errorMessage:       postgresErrorMessage,
+			responseID:         `data #>> '{response_body,id}'`,
+			previousResponseID: `data #>> '{request_body,previous_response_id}'`,
+			timestampBound:     func(t time.Time) any { return t.UTC() },
+			statsHour:          `date_trunc('hour', timestamp AT TIME ZONE 'UTC')`,
+		}
+	}
+	return readerDialect{
+		like:               "LIKE",
+		idColumn:           "id",
+		attemptIDColumn:    "audit_log_id",
+		userPath:           "user_path",
+		requestedModel:     "requested_model",
+		resolvedModel:      "resolved_model",
+		errorMessage:       `json_extract(data, '$.error_message')`,
+		responseID:         `json_extract(data, '$.response_body.id')`,
+		previousResponseID: `json_extract(data, '$.request_body.previous_response_id')`,
+		timestampBound:     func(t time.Time) any { return t.UTC().Format(sqliteTimestampBoundaryLayout) },
+		statsHour:          `strftime('%Y-%m-%dT%H', REPLACE(timestamp, ' ', 'T'))`,
+	}
+}
+
+const sqliteTimestampBoundaryLayout = "2006-01-02T15:04:05"
+
+const logColumns = `id, timestamp, duration_ns, requested_model, resolved_model,
+	provider, provider_name, alias_used, workflow_version_id, cache_type, status_code,
+	request_id, principal_id, auth_key_id, auth_method, client_ip, method, path, user_path, session_id,
+	stream, error_type, data`
+
+const selectLogColumns = `SELECT ` + logColumns + `
+	FROM audit_logs`
+
+// qualifiedLogColumns is logColumns with a table alias on every name, for the
+// queries that join audit_logs against a derived table carrying its own id.
+func qualifiedLogColumns(alias string) string {
+	names := strings.FieldsFunc(logColumns, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\n' || r == '\t'
+	})
+	for i, name := range names {
+		names[i] = alias + "." + name
+	}
+	return strings.Join(names, ", ")
+}
+
+// GetLogs returns a paginated list of request log entries.
+func (r *SQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogListResult, error) {
+	limit, offset := clampLimitOffset(params.Limit, params.Offset)
+
+	conditions, args, err := r.logFilters(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	where := sqlutil.BuildWhereClause(conditions)
+
+	var total int
+	if err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs"+where, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("failed to count request log entries: %w", err)
+	}
+
+	rows, err := r.db.Query(ctx,
+		selectLogColumns+where+" ORDER BY timestamp DESC, "+r.dialect.idColumn+" DESC LIMIT ? OFFSET ?",
+		append(append([]any(nil), args...), limit, offset)...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query request logs: %w", err)
+	}
+	defer rows.Close()
+
+	entries := make([]LogEntry, 0)
+	for rows.Next() {
+		entry, err := scanSQLLogEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, *entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating request log rows: %w", err)
+	}
+	rows.Close()
+
+	if !params.OmitAttempts {
+		if err := r.loadAttempts(ctx, entries, true); err != nil {
+			return nil, err
+		}
+	}
+	return &LogListResult{Entries: entries, Total: total, Limit: limit, Offset: offset}, nil
+}
+
+// logFilters builds the WHERE conditions for a log query. Placeholders are
+// written as `?` throughout; the adapter renumbers them for PostgreSQL.
+func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]string, []any, error) {
+	userPath, err := normalizeRequestLogUserPathFilter(params.UserPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	userPathPrefix, err := normalizeRequestLogUserPathPrefix(params.UserPathPrefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	modelPrefix, err := normalizeRequestLogPrefix("model_prefix", params.ModelPrefix)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var conditions []string
+	var args []any
+	add := func(condition string, values ...any) {
+		conditions = append(conditions, condition)
+		args = append(args, values...)
+	}
+	contains := func(value string) string {
+		return "%" + sqlutil.EscapeLikeWildcards(value) + "%"
+	}
+
+	if !params.StartDate.IsZero() {
+		add("timestamp >= ?", r.dialect.timestampBound(params.StartDate))
+	}
+	if !params.EndDate.IsZero() {
+		add("timestamp < ?", r.dialect.timestampBound(params.EndDate.AddDate(0, 0, 1)))
+	}
+	if !params.beforeTimestamp.IsZero() && params.beforeID != "" {
+		cursorTime := r.db.Dialect().TimestampArg(params.beforeTimestamp)
+		add("(timestamp < ? OR (timestamp = ? AND "+r.dialect.idColumn+" < ?))",
+			cursorTime, cursorTime, params.beforeID)
+	}
+	if params.RequestedModel != "" {
+		add(r.likeClause("requested_model"), contains(params.RequestedModel))
+	}
+	if modelPrefix != "" {
+		requested, requestedArgs := requestLogPrefixSQLPredicate(r.dialect.requestedModel, modelPrefix)
+		resolved, resolvedArgs := requestLogPrefixSQLPredicate(r.dialect.resolvedModel, modelPrefix)
+		add("("+requested+" OR "+resolved+")", append(requestedArgs, resolvedArgs...)...)
+	}
+	if params.Provider != "" {
+		add("("+r.likeClause("provider")+" OR "+r.likeClause("provider_name")+")",
+			contains(params.Provider), contains(params.Provider))
+	}
+	if params.Method != "" {
+		add("method = ?", params.Method)
+	}
+	if params.Path != "" {
+		add(r.likeClause("path"), contains(params.Path))
+	}
+	if userPath != "" {
+		if params.ExactUserPath {
+			add(requestLogExactUserPathSQLPredicate(userPath, r.dialect.userPath), userPath)
+		} else {
+			lower, upper := requestLogUserPathSubtreeBounds(userPath)
+			add(requestLogUserPathSQLPredicate(userPath, r.dialect.userPath), userPath, lower, upper)
+		}
+	}
+	if userPathPrefix != "" {
+		condition, values := requestLogPrefixSQLPredicate(r.dialect.userPath, userPathPrefix)
+		add(condition, values...)
+	}
+	if params.ErrorType != "" {
+		add(r.likeClause("error_type"), contains(params.ErrorType))
+	}
+	if params.SessionID != "" {
+		add("session_id = ?", params.SessionID)
+	}
+	if params.RequestID != "" {
+		add("request_id = ?", params.RequestID)
+	}
+	if params.StatusCode != nil {
+		add("status_code = ?", *params.StatusCode)
+	}
+	if params.Stream != nil {
+		add("stream = ?", *params.Stream)
+	}
+	if len(params.ExcludeOperations) > 0 {
+		condition, values := excludeOperationsSQLFilter(params.ExcludeOperations)
+		add(condition, values...)
+	}
+	if params.Search != "" {
+		condition, values := r.searchFilter(params.Search, r.searchIsIndexed(ctx))
+		add(condition, values...)
+	}
+	return conditions, args, nil
+}
+
+// searchFilter builds the free-text search condition.
+//
+// A term shaped like a canonical UUID is a pasted identifier (request id,
+// API key id, session id, or an entry id): those are matched by equality
+// against the indexed identity columns, so the planner answers from index
+// lookups instead of the leading-wildcard LIKE scan every other term needs.
+// The trade is deliberate: a full UUID that only appears inside an error
+// message no longer matches, and identifiers live in these columns.
+func (r *SQLReader) searchFilter(search string, indexed bool) (string, []any) {
+	if isCanonicalUUID(search) {
+		// Equality is case-sensitive (unlike the LIKE path), and pasted UUIDs
+		// may be uppercase while stored ones are not; match both spellings.
+		lower := strings.ToLower(search)
+		columns := []string{r.dialect.idColumn, "request_id", "auth_key_id", "session_id"}
+		clauses := make([]string, 0, len(columns))
+		values := make([]any, 0, 2*len(columns))
+		for _, column := range columns {
+			clauses = append(clauses, column+" IN (?, ?)")
+			values = append(values, search, lower)
+		}
+		return "(" + strings.Join(clauses, " OR ") + ")", values
+	}
+
+	pattern := "%" + sqlutil.EscapeLikeWildcards(search) + "%"
+	// With the trigram index, one match against the indexed expression is an
+	// index lookup. Shorter terms yield no trigram and would scan the whole
+	// index only to recheck every row, so they keep the column sweep. pg_trgm
+	// counts characters, not bytes: a single CJK character is one character.
+	if indexed && utf8.RuneCountInString(search) >= minTrigramSearchLength {
+		return r.likeClause(searchText(r.dialect.errorMessage)), []any{pattern}
+	}
+	clauses := make([]string, 0, len(searchColumns)+1)
+	values := make([]any, 0, len(searchColumns)+1)
+	for _, column := range searchColumns {
+		clauses = append(clauses, r.likeClause(column))
+		values = append(values, pattern)
+	}
+	// The error-message clause parses the row's JSON data blob — by far the
+	// most expensive term here. Error messages are only ever written together
+	// with a non-empty error_type (EnrichEntryWithError and the streaming
+	// error recorders), so gate the parse behind that plain column and
+	// healthy rows never pay it. The gate is a CASE, not a plain AND:
+	// PostgreSQL may reorder AND predicates, while CASE is documented not to
+	// evaluate arms it does not need.
+	clauses = append(clauses,
+		"(CASE WHEN error_type IS NOT NULL AND error_type <> '' THEN "+
+			r.likeClause(r.dialect.errorMessage)+" ELSE FALSE END)")
+	values = append(values, pattern)
+	return "(" + strings.Join(clauses, " OR ") + ")", values
+}
+
+// isCanonicalUUID reports whether s is a full 8-4-4-4-12 hex UUID.
+func isCanonicalUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range []byte(s) {
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+			if !isHex {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (r *SQLReader) likeClause(column string) string {
+	return column + " " + r.dialect.like + ` ? ESCAPE '\'`
+}
+
+// GetLogByID returns a single request log entry by ID.
+func (r *SQLReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error) {
+	return r.queryLogEntryWithAttempts(ctx,
+		selectLogColumns+" WHERE "+r.dialect.idColumn+" = ? LIMIT 1", id)
+}
+
+func (r *SQLReader) GetInteractionParent(ctx context.Context, id string) (*InteractionParent, error) {
+	var parent InteractionParent
+	err := r.db.QueryRow(ctx,
+		"SELECT COALESCE(user_path, ''), COALESCE(session_id, '') FROM audit_logs WHERE "+
+			r.dialect.idColumn+" = ? LIMIT 1", id,
+	).Scan(&parent.UserPath, &parent.SessionID)
+	if errors.Is(err, sqlx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan interaction parent: %w", err)
+	}
+	return &parent, nil
+}
+
+func (r *SQLReader) GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error) {
+	return buildConversation(ctx, logID, limit, r.getConversationLogByID, r.GetLogs,
+		r.findByResponseID, r.findByPreviousResponseID)
+}
+
+func (r *SQLReader) getConversationLogByID(ctx context.Context, id string) (*LogEntry, error) {
+	return r.queryLogEntry(ctx,
+		selectLogColumns+" WHERE "+r.dialect.idColumn+" = ? LIMIT 1", id)
+}
+
+func (r *SQLReader) findByResponseID(ctx context.Context, responseID string) (*LogEntry, error) {
+	return r.queryLogEntry(ctx,
+		selectLogColumns+" WHERE "+r.dialect.responseID+" = ? ORDER BY timestamp ASC LIMIT 1", responseID)
+}
+
+func (r *SQLReader) findByPreviousResponseID(ctx context.Context, previousResponseID string) (*LogEntry, error) {
+	return r.queryLogEntry(ctx,
+		selectLogColumns+" WHERE "+r.dialect.previousResponseID+" = ? ORDER BY timestamp ASC LIMIT 1", previousResponseID)
+}
+
+// queryLogEntry runs a single-row request log query without hydrating provider
+// attempts. Conversation and parent lookups never expose attempt history.
+func (r *SQLReader) queryLogEntry(ctx context.Context, query, arg string) (*LogEntry, error) {
+	rows, err := r.db.Query(ctx, query, arg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query request log: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("failed to read request log row: %w", err)
+		}
+		return nil, nil
+	}
+	return scanSQLLogEntry(rows)
+}
+
+// queryLogEntryWithAttempts runs a single-row request log query, scans the entry,
+// and hydrates its provider attempts. Returns (nil, nil) when no row matches.
+func (r *SQLReader) queryLogEntryWithAttempts(ctx context.Context, query, arg string) (*LogEntry, error) {
+	entry, err := r.queryLogEntry(ctx, query, arg)
+	if err != nil {
+		return nil, err
+	}
+	if entry == nil {
+		return nil, nil
+	}
+
+	hydrated := []LogEntry{*entry}
+	if err := r.loadAttempts(ctx, hydrated, true); err != nil {
+		return nil, err
+	}
+	*entry = hydrated[0]
+	return entry, nil
+}
+
+// loadAttempts hydrates the entries' provider attempts. Without bodies, each
+// attempt's response body and headers stay in the database.
+func (r *SQLReader) loadAttempts(ctx context.Context, entries []LogEntry, bodies bool) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	// Batch all entries into a single query keyed by audit_log_id to avoid an
+	// N+1 read (one query per returned log) when hydrating a page of entries.
+	// A page is capped at 100 rows, well inside SQLite's parameter limit.
+	ids := make([]any, len(entries))
+	index := make(map[string]int, len(entries))
+	for i := range entries {
+		ids[i] = entries[i].ID
+		index[entries[i].ID] = i
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	responseColumns := "response_body, response_headers"
+	if !bodies {
+		responseColumns = "NULL, NULL"
+	}
+
+	rows, err := r.db.Query(ctx, fmt.Sprintf(`
+		SELECT %s, seq, kind, provider_type, provider_name, model, status_code, success,
+			error_type, error_code, error_message, %s, started_at, duration_ns
+		FROM audit_log_attempts
+		WHERE %s IN (%s)
+		ORDER BY audit_log_id ASC, seq ASC
+	`, r.dialect.attemptIDColumn, responseColumns, r.dialect.attemptIDColumn, placeholders), ids...)
+	if err != nil {
+		// A database written before attempts existed has no such table; its
+		// logs simply carry no attempts.
+		if isMissingRequestLogAttemptsTable(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to query request log attempts: %w", err)
+	}
+	defer rows.Close()
+
+	grouped := make(map[string][]AttemptSnapshot, len(entries))
+	for rows.Next() {
+		requestLogID, attempt, err := scanSQLAttempt(rows)
+		if err != nil {
+			return err
+		}
+		grouped[requestLogID] = append(grouped[requestLogID], attempt)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating request log attempts: %w", err)
+	}
+
+	for id, attempts := range grouped {
+		if i, ok := index[id]; ok && len(attempts) > 0 {
+			ensureLogData(&entries[i]).Attempts = normalizeAttemptSnapshots(attempts)
+		}
+	}
+	return nil
+}
+
+func scanSQLLogEntry(scanner sqlx.Row) (*LogEntry, error) {
+	var (
+		entry             LogEntry
+		timestamp         sqlx.Timestamp
+		providerName      *string
+		workflowVersionID *string
+		cacheType         *string
+		principalID       *string
+		authKeyID         *string
+		authMethod        *string
+		userPath          *string
+		sessionID         *string
+		errorType         *string
+		dataJSON          *string
+	)
+
+	if err := scanner.Scan(
+		&entry.ID, &timestamp, &entry.DurationNs, &entry.RequestedModel, &entry.ResolvedModel,
+		&entry.Provider, &providerName, &entry.AliasUsed, &workflowVersionID, &cacheType,
+		&entry.StatusCode, &entry.RequestID, &principalID, &authKeyID, &authMethod, &entry.ClientIP,
+		&entry.Method, &entry.Path, &userPath, &sessionID, &entry.Stream, &errorType, &dataJSON,
+	); err != nil {
+		return nil, fmt.Errorf("failed to scan request log row: %w", err)
+	}
+
+	if !timestamp.Valid && timestamp.Raw != "" {
+		slog.Warn("failed to parse request log timestamp", "id", entry.ID, "raw_timestamp", timestamp.Raw)
+	}
+	entry.Timestamp = timestamp.Time
+	entry.WorkflowVersionID = sqlutil.DerefTrimmed(workflowVersionID)
+	entry.PrincipalID = derefString(principalID)
+	entry.AuthKeyID = derefString(authKeyID)
+	entry.AuthMethod = derefString(authMethod)
+	entry.UserPath = derefString(userPath)
+	entry.SessionID = derefString(sessionID)
+	entry.ErrorType = derefString(errorType)
+	entry.CacheType = normalizeCacheType(derefString(cacheType))
+	entry.ProviderName = displayRequestLogProviderName(derefString(providerName), entry.Provider)
+
+	if dataJSON != nil && *dataJSON != "" {
+		var data LogData
+		if err := json.Unmarshal([]byte(*dataJSON), &data); err != nil {
+			slog.Warn("failed to unmarshal request log data JSON", "id", entry.ID, "error", err)
+		} else {
+			entry.Data = &data
+		}
+	}
+	return &entry, nil
+}
+
+func scanSQLAttempt(scanner sqlx.Row) (string, AttemptSnapshot, error) {
+	var (
+		requestLogID    string
+		attempt         AttemptSnapshot
+		providerType    *string
+		providerName    *string
+		model           *string
+		errorType       *string
+		errorCode       *string
+		errorMessage    *string
+		responseBody    *string
+		responseHeaders *string
+		startedAt       sqlx.Timestamp
+	)
+
+	if err := scanner.Scan(
+		&requestLogID, &attempt.Seq, &attempt.Kind, &providerType, &providerName, &model,
+		&attempt.StatusCode, &attempt.Success, &errorType, &errorCode, &errorMessage,
+		&responseBody, &responseHeaders, &startedAt, &attempt.DurationNs,
+	); err != nil {
+		return "", AttemptSnapshot{}, fmt.Errorf("failed to scan request log attempt: %w", err)
+	}
+
+	attempt.ProviderType = derefString(providerType)
+	attempt.ProviderName = derefString(providerName)
+	attempt.Model = derefString(model)
+	attempt.ErrorType = derefString(errorType)
+	attempt.ErrorCode = derefString(errorCode)
+	attempt.ErrorMessage = derefString(errorMessage)
+	attempt.ResponseBody = unmarshalAttemptBody(responseBody)
+	attempt.ResponseHeaders = unmarshalAttemptHeaders(responseHeaders)
+	if !startedAt.Valid && startedAt.Raw != "" {
+		slog.Warn("failed to parse request log attempt timestamp", "id", requestLogID, "raw_timestamp", startedAt.Raw)
+	}
+	attempt.StartedAt = startedAt.Time
+	return requestLogID, attempt, nil
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func isMissingRequestLogAttemptsTable(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "audit_log_attempts") &&
+		(strings.Contains(message, "no such table") || strings.Contains(message, "does not exist"))
+}
+
+// excludeOperationsSQLFilter drops paths belonging to any of the operations.
+// Exact paths also match with one trailing slash, as DescribeEndpoint does.
+// The prefixes hold no LIKE wildcards, so they need no escaping.
+func excludeOperationsSQLFilter(ops []core.Operation) (string, []any) {
+	var clauses []string
+	var args []any
+	for _, op := range ops {
+		paths, _ := core.PathsForOperation(op)
+		for _, exact := range paths.Exact {
+			clauses = append(clauses, "path = ?", "path = ?")
+			args = append(args, exact, exact+"/")
+		}
+		for _, prefix := range paths.Prefixes {
+			clauses = append(clauses, "path = ?", "path LIKE ?")
+			args = append(args, prefix, prefix+"/%")
+		}
+	}
+	return "(path IS NULL OR NOT (" + strings.Join(clauses, " OR ") + "))", args
+}

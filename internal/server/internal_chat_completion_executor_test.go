@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 )
 
@@ -27,9 +27,9 @@ func (p *contextCapturingProvider) ChatCompletion(ctx context.Context, req *core
 	return p.capturingProvider.ChatCompletion(ctx, req)
 }
 
-func TestInternalChatCompletionExecutor_UsesTranslatedPlanAndAuditMetadata(t *testing.T) {
-	logger := &capturingAuditLogger{
-		config: auditlog.Config{Enabled: true},
+func TestInternalChatCompletionExecutor_UsesTranslatedPlanAndRequestLogMetadata(t *testing.T) {
+	logger := &capturingRequestLogger{
+		config: requestlog.Config{Enabled: true},
 	}
 	provider := &contextCapturingProvider{
 		supportedModels: []string{"rewrite-model"},
@@ -71,7 +71,7 @@ func TestInternalChatCompletionExecutor_UsesTranslatedPlanAndAuditMetadata(t *te
 				},
 			}, nil
 		}),
-		AuditLogger: logger,
+		RequestLogger: logger,
 	})
 
 	ctx := core.WithRequestSnapshot(context.Background(), &core.RequestSnapshot{
@@ -104,8 +104,8 @@ func TestInternalChatCompletionExecutor_UsesTranslatedPlanAndAuditMetadata(t *te
 }
 
 func TestInternalChatCompletionExecutor_DoesNotReuseParentWorkflowResolution(t *testing.T) {
-	logger := &capturingAuditLogger{
-		config: auditlog.Config{Enabled: true},
+	logger := &capturingRequestLogger{
+		config: requestlog.Config{Enabled: true},
 	}
 	provider := &contextCapturingProvider{
 		supportedModels: []string{"gpt-4o-mini"},
@@ -131,7 +131,7 @@ func TestInternalChatCompletionExecutor_DoesNotReuseParentWorkflowResolution(t *
 	}
 
 	executor := NewInternalChatCompletionExecutor(provider, InternalChatCompletionExecutorConfig{
-		AuditLogger: logger,
+		RequestLogger: logger,
 	})
 
 	parentCtx := core.WithWorkflow(context.Background(), &core.Workflow{
@@ -163,16 +163,16 @@ func TestInternalChatCompletionExecutor_DoesNotReuseParentWorkflowResolution(t *
 	require.Equal(t, "openai/gpt-4o-mini", entry.ResolvedModel)
 }
 
-func TestInternalChatCompletionExecutor_PreservesBoundedAuditCapture(t *testing.T) {
-	logger := &capturingAuditLogger{
-		config: auditlog.Config{
+func TestInternalChatCompletionExecutor_PreservesBoundedRequestLogCapture(t *testing.T) {
+	logger := &capturingRequestLogger{
+		config: requestlog.Config{
 			Enabled:    true,
 			LogBodies:  true,
 			LogHeaders: true,
 		},
 	}
-	bigPrompt := strings.Repeat("x", auditlog.MaxBodyCapture+2048)
-	bigResponse := strings.Repeat("y", auditlog.MaxBodyCapture+2048)
+	bigPrompt := strings.Repeat("x", requestlog.MaxBodyCapture+2048)
+	bigResponse := strings.Repeat("y", requestlog.MaxBodyCapture+2048)
 	provider := &contextCapturingProvider{
 		supportedModels: []string{"rewrite-model"},
 		providerTypes: map[string]string{
@@ -197,7 +197,7 @@ func TestInternalChatCompletionExecutor_PreservesBoundedAuditCapture(t *testing.
 	}
 
 	executor := NewInternalChatCompletionExecutor(provider, InternalChatCompletionExecutorConfig{
-		AuditLogger: logger,
+		RequestLogger: logger,
 	})
 
 	ctx := context.Background()

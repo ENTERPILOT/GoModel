@@ -3,8 +3,10 @@ package core
 import "strings"
 
 // credentialHeaders lists HTTP headers whose values carry secrets (API keys,
-// tokens, cookies). It is the single source of truth for audit-log header
-// redaction and for rejecting these headers as tagging label sources.
+// tokens, cookies). It is the single source of truth for the headers the
+// gateway refuses to forward, to let plugins edit, or to use as tagging label
+// sources. Request-log redaction starts from it and also covers names that
+// merely look like a credential (requestlog.RedactHeaders).
 var credentialHeaders = map[string]struct{}{
 	"authorization":       {},
 	"proxy-authorization": {},
@@ -34,7 +36,7 @@ const maxCredentialHeaderLen = 32
 // Matching is case-insensitive, ignores surrounding whitespace, and treats
 // "_" as "-": CGI-style servers and some proxies fold one into the other, so
 // X_Api_Key reaches them as x-api-key. It runs
-// for every header of every audited request, so the fold happens in a stack
+// for every header of every logged request, so the fold happens in a stack
 // buffer rather than through strings.ToLower.
 func IsCredentialHeader(name string) bool {
 	name = strings.TrimSpace(name)

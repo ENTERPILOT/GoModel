@@ -64,13 +64,13 @@ sowie die String-Form `"reasoning_effort": "..."` aus Chat Completions (ein
 nicht leeres `reasoning.effort` hat Vorrang, wenn beide vorhanden sind; ein leeres Objekt fällt
 auf die String-Form zurück) und übersetzt sie in die nativen Steuerungen von Claude. Die
 fünf akzeptierten Stufen sind `low`, `medium`, `high`, `xhigh` und `max`; Werte
-werden ohne Berücksichtigung der Groß-/Kleinschreibung abgeglichen. `none` schaltet Thinking ab, wo das Modell es zulässt (siehe unten); jeder andere Wert wird auf `low` herabgestuft und
+werden ohne Berücksichtigung der Groß-/Kleinschreibung abgeglichen. `none` schaltet Thinking ab, wo das Modell es zulässt, und wird bei Modellen, die immer denken, zu `low` (siehe unten); jeder andere Wert wird auf `low` herabgestuft und
 protokolliert. Die Übersetzung
 hängt davon ab, ob das Modell **Adaptive Thinking** unterstützt.
 
 | Modellgeneration | Thinking-Konfiguration | Ziel des Effort-Werts |
 | ---------------- | --------------- | ------------------ |
-| Adaptiv – `claude-fable-5`, `claude-fable-5-1`, `claude-mythos-5`, `claude-mythos-5-1`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` (und jeweils datierte Snapshots) | `thinking: {type: "adaptive"}` | `output_config.effort` (durchgereicht) |
+| Adaptiv – `claude-fable-5`, `claude-fable-5-1`, `claude-fable-5-2`, `claude-mythos-5`, `claude-mythos-5-1`, `claude-mythos-5-2`, `claude-opus-5`, `claude-opus-5-5`, `claude-sonnet-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` (und jeweils datierte Snapshots) | `thinking: {type: "adaptive"}` | `output_config.effort` (durchgereicht) |
 | Legacy (alle anderen, z. B. `claude-opus-4-5`, `claude-3-5-sonnet`) | `thinking: {type: "enabled", budget_tokens: N}` | auf ein Token-Budget abgebildet |
 
 <Note>
@@ -99,7 +99,7 @@ daher werden sie bei Legacy-Modellen auf das `high`-Budget begrenzt, statt
   nutzen Opus 4.6 bis 4.8, Sonnet 4.6 und Sonnet 5.5 kein Extended Thinking, während
   Opus 5, Sonnet 5 und Haiku 5.5 von sich aus denken. Senden Sie
   `reasoning.effort: "none"`, um das abzuschalten: GoModel sendet diesen drei Modellen
-  `thinking: {type: "disabled"}`. Fable 5/5.1, Mythos 5/5.1 und Opus 5.5 denken immer
+  `thinking: {type: "disabled"}`. Fable 5.x, Mythos 5.x und Opus 5.5 denken immer
   (siehe den Hinweis zum dauerhaft aktiven Thinking unten). Effort ist eine separate
   Steuerung, die den gesamten Token-Verbrauch (Text und Tool-Aufrufe) regelt, unabhängig davon, ob
   Thinking aktiv ist, und Anthropic setzt sie standardmäßig auf `high`, wenn nichts angegeben ist. Sie ist ein
@@ -117,17 +117,20 @@ daher werden sie bei Legacy-Modellen auf das `high`-Budget begrenzt, statt
 </Note>
 
 <Note>
-  Bei Fable 5/5.1, Mythos 5/5.1 und Opus 5.5 ist Thinking immer aktiv, unabhängig davon, ob
-  Sie `reasoning` senden, und `none` kann es nicht abschalten; `reasoning.effort` stellt nur seine Tiefe ein. Die dafür
-  verbrauchten Tokens werden in Chat-Completions-Responses als `usage.completion_reasoning_tokens`
-  gemeldet. Der Reasoning-Text selbst wird nicht zurückgegeben, nur die
-  Anzahl der Tokens.
+  Bei Fable 5.x, Mythos 5.x und Opus 5.5 ist Thinking immer aktiv, unabhängig davon, ob
+  Sie `reasoning` senden; `reasoning.effort` stellt nur seine Tiefe ein. `none` kann es nicht
+  abschalten, daher sendet GoModel `low`, die niedrigste Stufe, die diese Modelle akzeptieren,
+  statt sie bei ihrem Standard-Effort zu belassen. Die dafür verbrauchten Tokens werden in
+  Chat-Completions-Responses als `usage.completion_reasoning_tokens` gemeldet. Der Reasoning-Text
+  wird nur zurückgegeben, wenn Sie `reasoning.summary` (`auto`, `concise` oder `detailed`) setzen:
+  GoModel sendet dann `thinking.display: "summarized"`, und die Zusammenfassung kommt als
+  `reasoning_content` in Chat Completions und im `content` des Reasoning-Items auf `/v1/responses` zurück.
 </Note>
 
 ## Sampling-Parameter
 
-Anthropic hat `temperature` und `top_p` bei Fable 5/5.1, Mythos 5/5.1,
-Opus 5, Sonnet 5 und Opus 4.8/4.7 entfernt – jeder Wert, einschließlich des OpenAI-SDK-Standards
+Anthropic hat `temperature` und `top_p` bei Fable 5.x, Mythos 5.x,
+Opus 5/5.5, Sonnet 5/5.5, Haiku 5.5 und Opus 4.8/4.7 entfernt – jeder Wert, einschließlich des OpenAI-SDK-Standards
 `temperature: 1`, wird upstream mit 400 abgelehnt. GoModel entfernt
 bei diesen Modellen beide Felder und protokolliert die verworfenen Werte, sodass Clients, die
 immer eine Temperatur senden, weiter funktionieren. Ältere Modelle erhalten sie weiterhin
@@ -228,9 +231,9 @@ die Completion, bevor Sie `message.content` parsen:
   mitten in einem Wert abgeschnitten. Erhöhen Sie `max_tokens` und versuchen Sie es erneut.
 - `finish_reason: "tool_calls"` – das Modell hat ein Tool aufgerufen, statt zu antworten,
   daher ist `message.content` leer.
-- `finish_reason: "refusal"` – Claude hat den Request abgelehnt; GoModel reicht
-  den Ablehnungs-Stop-Reason von Anthropic unverändert durch, und es gibt kein JSON zum
-  Parsen.
+- `finish_reason: "content_filter"` – Claude hat den Request abgelehnt (Anthropics
+  Stop-Reason `refusal`), und es gibt kein JSON zum Parsen. Auf `/v1/responses` ist das
+  `status: "incomplete"` mit `incomplete_details.reason: "content_filter"`.
 
 Nur `finish_reason: "stop"` mit nicht leerem Inhalt sollte an einen JSON-Parser
 übergeben werden; behandeln Sie alles andere als Fehler, statt es zu parsen.
@@ -252,7 +255,7 @@ Anthropic kann einen Turn nicht auf eine Teilmenge der deklarierten Tools beschr
 mit `tool_choice: any`, wenn der Modus `required` ist, und andernfalls mit `auto`. Bei
 Modellen, die keine erzwungene Tool-Nutzung akzeptieren, wird `required` stattdessen zu `auto` plus einer
 System-Anweisung; siehe
-[Erzwungene Tool-Auswahl bei Fable 5.1](/de/providers/anthropic#erzwungene-tool-auswahl-bei-fable-5-1). Eine Teilmenge,
+[Erzwungene Tool-Auswahl](/de/providers/anthropic#erzwungene-tool-auswahl). Eine Teilmenge,
 die keine deklarierte Funktion nennt, wird mit 400 abgelehnt.
 
 `allowed_tools` gibt es, damit ein Client in jedem Turn dieselbe Tool-Liste senden und seinen Prompt-Cache behalten kann. Eine Einschränkung ändert die upstream gesendeten Tool-Definitionen, und bei Claude-Modellen stehen diese im gecachten Präfix vor dem System-Prompt. Eine Teilmenge, die sich zwischen Turns ändert, macht den Cache daher ungültig.
@@ -263,16 +266,16 @@ die keine deklarierte Funktion nennt, wird mit 400 abgelehnt.
 Entsprechung. GoModel protokolliert den angeforderten Wert und entfernt ihn, statt den
 Request scheitern zu lassen. Bitten Sie stattdessen im Prompt um kürzere oder längere Antworten.
 
-## Erzwungene Tool-Auswahl bei Fable 5.1
+## Erzwungene Tool-Auswahl
 
-Fable 5.1 und Mythos 5.1 akzeptieren nur `tool_choice: "auto"` und `"none"`;
+Fable 5.1/5.2, Mythos 5.1/5.2, Opus 5.5 und Sonnet 5.5 akzeptieren nur `tool_choice: "auto"` und `"none"`;
 das Erzwingen eines Aufrufs mit `"required"` oder `{"type": "function", ...}` führt bei Anthropic
 zu einem 400. GoModel folgt dem von Anthropic dokumentierten Ersatz: Die Auswahl
 wird auf `auto` herabgestuft, und an den System-Prompt wird eine Anweisung angehängt –
 „You must respond by calling one of the provided tools.“ bei `required` oder
 „You must respond by calling the tool named `<name>`.“ bei einer benannten Funktion.
-Die Herabstufung wird protokolliert. `parallel_tool_calls: false` wird weiterhin berücksichtigt. Fable 5
-und alle anderen Claude-Modelle behalten die erzwungene Tool-Nutzung unverändert bei.
+Die Herabstufung wird protokolliert. `parallel_tool_calls: false` wird weiterhin berücksichtigt. Fable 5,
+Opus 5, Haiku 5.5 und alle anderen Claude-Modelle behalten die erzwungene Tool-Nutzung unverändert bei.
 
 <Warning>
   Die Anweisung ist eine starke Vorgabe, keine feste Garantie: Das Modell kann weiterhin

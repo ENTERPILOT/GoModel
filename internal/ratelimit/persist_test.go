@@ -208,14 +208,17 @@ func TestPeerSumIgnoresSharedRowOnPerChildRule(t *testing.T) {
 	require.Nil(t, err)
 }
 
+// A generation whose load failed still saves what it counts, in rows of its
+// own: the windows other writers persisted stay as they were.
 func TestFailedLoadDoesNotReplacePersistedWindows(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		now := time.Now().Unix()
 		store := &failLoadStore{err: errors.New("store down")}
-		store.counters = []WindowSnapshot{{
+		persisted := WindowSnapshot{
 			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
-			RequestsWindowStart: now, RequestsCurrent: 9,
-		}}
+			RequestsWindowStart: now, RequestsCurrent: 9, UpdatedAt: now,
+		}
+		store.counters = []WindowSnapshot{persisted}
 		err := store.UpsertRules(context.Background(), []Rule{{
 			Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
 			MaxRequests: new(int64(10)), Source: SourceManual,
@@ -229,12 +232,16 @@ func TestFailedLoadDoesNotReplacePersistedWindows(t *testing.T) {
 		service.Start(context.Background())
 		_, err = service.Acquire(onPath("/team"), time.Now().UTC())
 		require.NoError(t, err)
-
-		service.Close()
-		// Several flush intervals pass on the bubble's clock without a write.
 		time.Sleep(3 * interval)
-		require.Len(t, store.counters, 1)
-		require.Equal(t, int64(9), store.counters[0].RequestsCurrent)
+		service.Close()
+
+		require.Len(t, store.counters, 2)
+		byWriter := make(map[string]WindowSnapshot, 2)
+		for _, counter := range store.counters {
+			byWriter[counter.Writer] = counter
+		}
+		require.Equal(t, int64(9), byWriter[persisted.Writer].RequestsCurrent, "the persisted window is untouched")
+		require.Equal(t, int64(1), byWriter[service.writer].RequestsCurrent, "the generation saves its own count")
 	})
 }
 
