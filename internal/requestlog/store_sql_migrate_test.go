@@ -361,3 +361,81 @@ func TestNewSQLStoreAbsorbsAfterAnInterruptedRename(t *testing.T) {
 		assert.NotEqual(t, relationTable, relationKindOf(t, db, legacyAttemptsTable))
 	})
 }
+
+// With the request log tables short of a column the legacy ones hold, moving
+// the rows would drop what it holds. A reader, which cannot migrate the
+// tables, leaves the rows where they are; the store migrates and then moves.
+func TestReaderLeavesLegacyRowsItCannotFullyMove(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		tables := make([]string, len(sqlTables))
+		copy(tables, sqlTables)
+		short := strings.Replace(tables[1], "response_body TEXT,", "", 1)
+		require.NotEqual(t, tables[1], short, "the fixture no longer matches the table")
+		tables[1] = short
+		require.NoError(t, db.Schema(ctx, tables...))
+		createLegacySchema(t, db)
+		writeLegacyEntry(t, db, "written-during-rollback", time.Unix(1700000000, 0).UTC())
+		_, err := db.Exec(ctx, `UPDATE audit_log_attempts SET response_body = ?`, `{"kept":true}`)
+		require.NoError(t, err)
+
+		_, err = newAdoptingSQLReader(db)
+		require.NoError(t, err)
+		assert.Equal(t, relationTable, relationKindOf(t, db, legacyAttemptsTable), "the reader left the rows in place")
+
+		startSQLStore(t, db)
+		var body string
+		require.NoError(t, db.QueryRow(ctx, `SELECT response_body FROM request_log_attempts`).Scan(&body))
+		assert.JSONEq(t, `{"kept":true}`, body)
+	})
+}
+
+// A replica on the older release can be writing the recreated legacy tables
+// while they are absorbed. Its write must not fall between the copy and the
+// drop.
+func TestNewSQLStoreAbsorbWaitsForALegacyWriter(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		if db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("only PostgreSQL runs more than one gateway on a database")
+		}
+		ctx := context.Background()
+		startSQLStore(t, db)
+		createLegacySchema(t, db)
+
+		// The older replica has inserted and not committed yet.
+		inserted, release, written := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+		go func() {
+			written <- db.InTx(ctx, func(q sqlx.Querier) error {
+				entry := testLogEntry("committed-during-absorb", time.Unix(1700000000, 0).UTC())
+				insert := legacyNames.Replace(insertRequestLogPrefix) + requestLogRowPlaceholder
+				if _, err := q.Exec(ctx, insert, requestLogValues(db.Dialect(), entry)...); err != nil {
+					return err
+				}
+				close(inserted)
+				<-release
+				return nil
+			})
+		}()
+		<-inserted
+
+		started := make(chan error, 1)
+		go func() {
+			store, err := NewSQLStore(ctx, db, 0)
+			if err == nil {
+				store.indexBuild.Wait()
+				err = store.Close()
+			}
+			started <- err
+		}()
+		select {
+		case err := <-started:
+			t.Fatalf("the start did not wait for the legacy writer: %v", err)
+		case <-time.After(300 * time.Millisecond):
+		}
+		close(release)
+		require.NoError(t, <-written)
+		require.NoError(t, <-started)
+
+		require.NotNil(t, readEntry(t, db, "committed-during-absorb"))
+	})
+}

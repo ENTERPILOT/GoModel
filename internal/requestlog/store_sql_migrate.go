@@ -63,9 +63,9 @@ func adoptLegacyStorage(ctx context.Context, db sqlx.DB) error {
 // When request_logs exists as well, an older binary ran against the database
 // after the rename (a rollback) and recreated the legacy tables: with absorb,
 // its rows are moved over and the tables dropped. That needs both request log
-// tables in place, so the store asks for it only once it has created and
-// migrated them; a start interrupted between the rename and that point may
-// have left one missing.
+// tables in their current shape, so the store asks for it only once it has
+// created and migrated them, and it is skipped while they cannot take every
+// legacy column (see absorbTargetsReady).
 //
 // PostgreSQL then gets views under the legacy names. Replicas still on the
 // older release read and write through them for the rest of a rolling
@@ -118,15 +118,30 @@ func adoptLegacyTables(ctx context.Context, db sqlx.DB, absorb bool) error {
 	return nil
 }
 
-// absorbTargetsReady reports whether every legacy table has its request log
-// table to move rows into.
+// absorbTargetsReady reports whether the request log tables can take every
+// column of the legacy tables. They cannot while a start interrupted before
+// the tables were created and migrated has left one missing or short of a
+// column; moving the rows then would drop what that column holds.
 func absorbTargetsReady(ctx context.Context, q sqlx.Querier, dialect sqlx.Dialect) (bool, error) {
-	legacyAttempts, err := relationKind(ctx, q, dialect, legacyAttemptsTable)
-	if err != nil || legacyAttempts != relationTable {
-		return err == nil, err
+	for _, pair := range [][2]string{{legacyRequestLogTable, requestLogTable}, {legacyAttemptsTable, attemptsTable}} {
+		legacy, err := tableColumns(ctx, q, dialect, pair[0])
+		if err != nil {
+			return false, err
+		}
+		target, err := tableColumns(ctx, q, dialect, pair[1])
+		if err != nil {
+			return false, err
+		}
+		for _, column := range legacy {
+			if column == legacyAttemptsLogID {
+				column = attemptsLogID
+			}
+			if !slices.Contains(target, column) {
+				return false, nil
+			}
+		}
 	}
-	attempts, err := relationKind(ctx, q, dialect, attemptsTable)
-	return attempts == relationTable, err
+	return true, nil
 }
 
 // renameLegacyTables renames the legacy tables, the attempt table's foreign
@@ -268,6 +283,23 @@ func renamedIndex(name string) (renamed string, ok bool) {
 // request log tables into them, then drops the legacy tables. Rows are matched
 // on the columns both sides have, so an older binary's narrower table is fine.
 func absorbLegacyTables(ctx context.Context, q sqlx.Querier, dialect sqlx.Dialect) error {
+	attempts, err := relationKind(ctx, q, dialect, legacyAttemptsTable)
+	if err != nil {
+		return err
+	}
+	if dialect == sqlx.PostgreSQL {
+		// A replica on the older release may be writing these tables. Without
+		// the lock, a row it commits between the copy and the drop is lost;
+		// with it, that write waits and then goes through the views. Entries
+		// before attempts, the order the writers take them in.
+		lock := "LOCK TABLE " + legacyRequestLogTable
+		if attempts == relationTable {
+			lock += ", " + legacyAttemptsTable
+		}
+		if _, err := q.Exec(ctx, lock+" IN ACCESS EXCLUSIVE MODE"); err != nil {
+			return err
+		}
+	}
 	columns, err := sharedColumns(ctx, q, dialect, legacyRequestLogTable, requestLogTable)
 	if err != nil {
 		return err
@@ -280,10 +312,6 @@ func absorbLegacyTables(ctx context.Context, q sqlx.Querier, dialect sqlx.Dialec
 			" WHERE 1 = 1 ON CONFLICT (id) DO NOTHING",
 	}
 
-	attempts, err := relationKind(ctx, q, dialect, legacyAttemptsTable)
-	if err != nil {
-		return err
-	}
 	if attempts == relationTable {
 		columns, err := sharedColumns(ctx, q, dialect, legacyAttemptsTable, attemptsTable)
 		if err != nil {
