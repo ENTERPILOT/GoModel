@@ -177,21 +177,21 @@ func TestPassthrough_RequiresRequest(t *testing.T) {
 	assert.Contains(t, err.Error(), "passthrough request is required")
 }
 
-// The enricher names the evaluation route so the audit log records what a
+// The enricher names the evaluation route so the request log records what a
 // passthrough call did rather than an opaque /p/jev/... path.
 func TestPassthroughSemantics_NameNativeRoutes(t *testing.T) {
 	enriched := passthroughSemanticEnricher.Enrich(nil, nil, &core.PassthroughRouteInfo{RawEndpoint: "/systemone"})
 	require.NotNil(t, enriched)
 	assert.Equal(t, "jev.systemone", enriched.SemanticOperation)
 	assert.Empty(t, enriched.GenAIOperation)
-	assert.Equal(t, "/v1/systemone", enriched.AuditPath)
+	assert.Equal(t, "/v1/systemone", enriched.RequestLogPath)
 
 	permute := passthroughSemanticEnricher.Enrich(nil, nil, &core.PassthroughRouteInfo{RawEndpoint: "systemone/permute"})
 	require.NotNil(t, permute)
 	assert.Equal(t, "jev.systemone_permute", permute.SemanticOperation)
-	assert.Equal(t, "/v1/systemone/permute", permute.AuditPath)
+	assert.Equal(t, "/v1/systemone/permute", permute.RequestLogPath)
 
 	unknown := passthroughSemanticEnricher.Enrich(nil, nil, &core.PassthroughRouteInfo{RawEndpoint: "/models"})
 	require.NotNil(t, unknown)
-	assert.Equal(t, "/p/jev/models", unknown.AuditPath)
+	assert.Equal(t, "/p/jev/models", unknown.RequestLogPath)
 }

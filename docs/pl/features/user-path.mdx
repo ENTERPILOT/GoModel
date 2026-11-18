@@ -1,6 +1,6 @@
 ---
 title: "User Path"
-description: "Używaj user_path do ograniczania zakresu kluczy, dostępu do modeli, list modeli, workflow, użycia i logów audytowych."
+description: "Używaj user_path do ograniczania zakresu kluczy, dostępu do modeli, list modeli, workflow, użycia i logów requestów."
 icon: "route"
 keywords: ["user_path", "ścieżka użytkownika", "multi-tenancy", "wielodostępność", "scoping", "kontrola dostępu", "access control", "izolacja zespołów", "team isolation"]
 ---
@@ -10,7 +10,7 @@ keywords: ["user_path", "ścieżka użytkownika", "multi-tenancy", "wielodostęp
 `user_path` to znormalizowana hierarchia wywołującego, na przykład
 `/team/alpha` lub `/team/alpha/service`.
 
-GoModel używa jej, aby dostęp do modeli, workflow, budżety, użycie i dane audytowe
+GoModel używa jej, aby dostęp do modeli, workflow, budżety, użycie i dane z logu requestów
 były przypisane do właściwego zespołu, tenanta, usługi lub klienta.
 
 ## Klucze API
@@ -45,7 +45,7 @@ Nazwę nagłówka możesz zmienić przez `USER_PATH_HEADER` lub
 `X-GoModel-User-Path`.
 
 Jeśli klucz API ma własny `user_path`, wygrywa klucz. GoModel nadpisuje
-wartość nagłówka ścieżką przypisaną do klucza, zanim zostaną uruchomione dopasowanie workflow, logowanie audytowe,
+wartość nagłówka ścieżką przypisaną do klucza, zanim zostaną uruchomione dopasowanie workflow, logowanie requestów,
 śledzenie użycia i kontrole dostępu do modeli.
 
 ### Klucze bez przypisanej ścieżki
@@ -156,7 +156,7 @@ różne reguły dostępu do modeli.
 ## Workflow
 
 Workflow mogą też zawierać `scope_user_path`, dzięki czemu różne zespoły lub usługi mogą
-korzystać z różnych ustawień budżetu, cache’u, audytu, użycia, guardrails i failoveru.
+korzystać z różnych ustawień budżetu, cache’u, logowania requestów, użycia, guardrails i failoveru.
 
 Ścieżkę użytkownika możesz łączyć z zakresem providera i modelu, na przykład:
 

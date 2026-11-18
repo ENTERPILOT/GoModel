@@ -73,9 +73,9 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				// No Default: the dashboard would store it with the instance, so a
-				// warn would carry the block-phrased text as its audit note.
+				// warn would carry the block-phrased text as its request log note.
 				Key: "message", Label: "Message", Input: pluginapi.InputText,
-				Help:        "Error message for block, assistant reply for respond, and audit note for warn. Left empty, block and respond fall back to " + DefaultMessage + " and warn records no note.",
+				Help:        "Error message for block, assistant reply for respond, and request log note for warn. Left empty, block and respond fall back to " + DefaultMessage + " and warn records no note.",
 				Placeholder: DefaultMessage,
 			},
 			pluginapi.BlockStatusField(),

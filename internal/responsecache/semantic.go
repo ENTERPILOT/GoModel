@@ -120,6 +120,13 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 		return next()
 	}
 
+	// A streamed Messages reply is an Anthropic event stream, which
+	// validateCacheableSSE does not accept yet. Nothing is ever stored for it,
+	// so a lookup could not hit and would only spend an embedding call.
+	if path == messagesPath && isStreamingRequest(path, body) {
+		return next()
+	}
+
 	ctx := ex.Context()
 	plan := core.GetWorkflow(ctx)
 
@@ -447,7 +454,8 @@ var paramsHashPromptFields = map[string]struct{}{
 // paramsHashCallerFields identify the caller or steer provider-side prompt
 // caching. They never change what the model generates, so they are left out
 // of the hash, except on responsesPath: a Responses object echoes them back,
-// and a hit must not hand one caller's values to another.
+// and a hit must not hand one caller's values to another. The exact-cache key
+// leaves them out on the same terms (see cacheKeyRequestBody).
 var paramsHashCallerFields = map[string]struct{}{
 	"user":                   {},
 	"metadata":               {},

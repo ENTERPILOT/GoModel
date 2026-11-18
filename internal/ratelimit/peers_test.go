@@ -31,13 +31,14 @@ func (c *fakeClock) Advance(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
-// clusterStore is a memStore on a fake clock, recording the since of every
-// load.
+// clusterStore is a memStore on a fake clock, recording the since and the
+// excluded writer of every load.
 type clusterStore struct {
 	memStore
-	clock *fakeClock
-	loads []int64
-	saves int
+	clock    *fakeClock
+	loads    []int64
+	excludes []string
+	saves    int
 }
 
 func newClusterStore(t *testing.T, rules ...Rule) *clusterStore {
@@ -49,9 +50,10 @@ func newClusterStore(t *testing.T, rules ...Rule) *clusterStore {
 	return store
 }
 
-func (s *clusterStore) LoadCounters(ctx context.Context, since int64) ([]WindowSnapshot, error) {
+func (s *clusterStore) LoadCounters(ctx context.Context, since int64, exclude string) ([]WindowSnapshot, error) {
 	s.loads = append(s.loads, since)
-	return s.memStore.LoadCounters(ctx, since)
+	s.excludes = append(s.excludes, exclude)
+	return s.memStore.LoadCounters(ctx, since, exclude)
 }
 
 func (s *clusterStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
@@ -291,11 +293,11 @@ type failingLoadStore struct {
 	err error
 }
 
-func (s *failingLoadStore) LoadCounters(ctx context.Context, since int64) ([]WindowSnapshot, error) {
+func (s *failingLoadStore) LoadCounters(ctx context.Context, since int64, exclude string) ([]WindowSnapshot, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
-	return s.clusterStore.LoadCounters(ctx, since)
+	return s.clusterStore.LoadCounters(ctx, since, exclude)
 }
 
 // A store that stays unreadable must not keep a stopped peer's slots taken:
@@ -342,6 +344,55 @@ func TestPeerInFlightExpiresWhileLoadsFail(t *testing.T) {
 	b.persistMu.Unlock()
 }
 
+// One failed load at start must not cut a replica off from the others: it
+// keeps saving its counts, and reads theirs as soon as the store answers.
+func TestFailedStartLoadRejoinsOnTheNextFlush(t *testing.T) {
+	ctx := context.Background()
+	shared := newClusterStore(t, Rule{
+		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+		MaxRequests: new(int64(3)), Source: SourceManual,
+	})
+	a := replica(t, shared)
+	now := shared.clock.Now
+	for range 2 {
+		_, err := a.Acquire(onPath("/team"), now())
+		require.NoError(t, err)
+	}
+	a.flush(ctx)
+
+	store := &failingLoadStore{clusterStore: shared, err: errors.New("store down")}
+	b, err := NewService(ctx, store, WithFlushInterval(0))
+	require.NoError(t, err)
+	t.Cleanup(b.Close)
+	b.now = now
+	b.Start(ctx)
+	b.flushInterval = time.Second
+
+	// Without this the flush below would prove nothing: the test calls it
+	// itself, and Start alone decides whether the service ever would.
+	b.lifeMu.Lock()
+	state := b.persistState
+	b.lifeMu.Unlock()
+	require.Equal(t, persistActive, state, "a failed load at start still activates persistence")
+
+	_, err = b.Acquire(onPath("/team"), now())
+	require.NoError(t, err, "the peer's counts are unknown while the store is unreadable")
+
+	store.err = nil
+	b.flush(ctx)
+	assert.Equal(t, int64(0), shared.loads[len(shared.loads)-1], "nothing was loaded yet, so the first load that works reads everything")
+	statuses := b.StatusesForUserPath("/team", now())
+	require.Len(t, statuses, 1)
+	assert.Equal(t, int64(3), statuses[0].RequestsUsed, "the peer's two requests plus its own")
+	_, err = b.Acquire(onPath("/team"), now())
+	require.Error(t, err, "the limit is shared again")
+
+	a.flush(ctx)
+	statuses = a.StatusesForUserPath("/team", now())
+	require.Len(t, statuses, 1)
+	assert.Equal(t, int64(3), statuses[0].RequestsUsed, "the peer sees what this replica saved")
+}
+
 func TestIncrementalLoadKeepsUnchangedRowsAndDropsRolledOutOnes(t *testing.T) {
 	ctx := context.Background()
 	store := newClusterStore(t, Rule{
@@ -357,6 +408,7 @@ func TestIncrementalLoadKeepsUnchangedRowsAndDropsRolledOutOnes(t *testing.T) {
 	a.flush(ctx)
 	b.flush(ctx)
 	require.Equal(t, int64(3), requestsUsed(t, b, now()))
+	assert.Equal(t, []string{a.writer, b.writer, a.writer, b.writer}, store.excludes, "a replica never reads its own rows back")
 	since := store.loads[len(store.loads)-1]
 	assert.Equal(t, now().Add(-peerLoadOverlap).Unix(), since, "a flush loads only rows saved since the last load")
 
@@ -368,7 +420,7 @@ func TestIncrementalLoadKeepsUnchangedRowsAndDropsRolledOutOnes(t *testing.T) {
 	store.clock.Advance(30 * time.Second)
 	b.flush(ctx)
 	b.flush(ctx)
-	rows, err := store.memStore.LoadCounters(ctx, store.loads[len(store.loads)-1])
+	rows, err := store.memStore.LoadCounters(ctx, store.loads[len(store.loads)-1], b.writer)
 	require.NoError(t, err)
 	require.Empty(t, rows)
 	assert.Equal(t, int64(3), requestsUsed(t, b, now()))

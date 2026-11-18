@@ -1,0 +1,1354 @@
+// Pure-logic tests for the Requests page, ported from the legacy list test
+// suite (Alpine/DOM-harness cases are covered by the Svelte components and
+// were not ported).
+
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  requestCacheRatioLabel,
+  requestLogEffectiveTab,
+  requestGuardrailActionClass,
+  requestGuardrailRows,
+  requestGuardrailVerdict,
+  requestGuardrailsPane,
+  requestCacheRatioPillLabel,
+  requestCacheSharePercent,
+  changedRequestRevisions,
+  requestEntryErrorMessage,
+  requestEntryLiveInProgress,
+  requestHasCachedTokens,
+  requestLogAllowsLiveEntries,
+  requestLogWithLiveEntries,
+  requestNoChangeSteps,
+  requestLogPanes,
+  requestPromptCacheHighlight,
+  requestLogRequestPane,
+  requestRevisionPane,
+  requestRevisions,
+  requestLogResponsePane,
+  requestLogRetentionHighlight,
+  requestLogRetentionPrefix,
+  requestLogRetentionText,
+  requestRevisionPercentLabel,
+  groupedRequestLogWithLiveEntries,
+  requestIsThreadHead,
+  requestLogFromSessions,
+  requestSessionCount,
+  requestSessionId,
+  requestLogTabKeydownTarget,
+  REQUEST_LOG_SEARCH_FIELDS,
+  requestLogSearchField,
+  buildRequestLogQuery,
+  buildRequestLogSessionQuery,
+  pruneThreadMap,
+  toggleExpandedThread,
+  requestOutputTokensPerSecond,
+  formatDurationNs,
+  formatJSON,
+  formatTokensPerSecond,
+  toggleExpandedEntry,
+  mergeRequestThreadChildren,
+  pruneExpandedEntries,
+} from "../src/pages/requests/request-log-logic.js";
+
+const noFilters = {
+  search: "",
+  method: "",
+  statusCode: "",
+  stream: "",
+  customStartDate: null,
+  customEndDate: null,
+};
+
+test("requestLogRetentionText describes finite and indefinite retention", () => {
+  assert.equal(requestLogRetentionText("30"), "Request logs are retained for 30 days.");
+  assert.equal(requestLogRetentionText("1"), "Request logs are retained for 1 day.");
+  assert.equal(requestLogRetentionText("0"), "Request logs are retained indefinitely.");
+});
+
+test("requestLogRetentionText hides missing or invalid retention values", () => {
+  assert.equal(requestLogRetentionText(undefined), "");
+  assert.equal(requestLogRetentionText("-1"), "");
+  assert.equal(requestLogRetentionText("unknown"), "");
+});
+
+test("requestLogRetentionPrefix and requestLogRetentionHighlight split finite and indefinite retention", () => {
+  assert.equal(requestLogRetentionPrefix("30"), "Request logs are retained for ");
+  assert.equal(requestLogRetentionHighlight("30"), "30 days");
+
+  assert.equal(requestLogRetentionPrefix("1"), "Request logs are retained for ");
+  assert.equal(requestLogRetentionHighlight("1"), "1 day");
+
+  assert.equal(requestLogRetentionPrefix("0"), "Request logs are retained ");
+  assert.equal(requestLogRetentionHighlight("0"), "indefinitely");
+});
+
+test("requestLogRetentionPrefix and requestLogRetentionHighlight hide missing or invalid retention values", () => {
+  assert.equal(requestLogRetentionPrefix(undefined), "");
+  assert.equal(requestLogRetentionHighlight(undefined), "");
+  assert.equal(requestLogRetentionPrefix("-1"), "");
+  assert.equal(requestLogRetentionHighlight("-1"), "");
+});
+
+test("requestLogRequestPane returns the shared request-pane contract", () => {
+  const entry = {
+    data: {
+      request_headers: { authorization: "Bearer redacted" },
+      request_body: { model: "gpt-5", stream: false },
+      request_body_too_big_to_handle: true,
+    },
+  };
+
+  const pane = requestLogRequestPane(entry);
+
+  assert.equal(pane.title, "Request");
+  assert.equal(pane.entry, entry);
+  assert.deepEqual(pane.copyHeaders, entry.data.request_headers);
+  assert.deepEqual(pane.copyBody, entry.data.request_body);
+  assert.equal(pane.showErrorMessage, false);
+  assert.equal(pane.errorMessage, null);
+  assert.equal(pane.showHeaders, true);
+  assert.deepEqual(pane.headers, entry.data.request_headers);
+  assert.equal(pane.showBody, true);
+  assert.deepEqual(pane.body, entry.data.request_body);
+  assert.equal(pane.showEmpty, false);
+  assert.equal(pane.emptyMessage, "Request details were not captured.");
+  assert.equal(pane.showTooLarge, true);
+  assert.equal(pane.tooLargeMessage, "Request body was too large to capture.");
+});
+
+test("requestLogResponsePane returns the shared response-pane contract", () => {
+  const entry = {
+    data: {
+      error_message: "provider timeout",
+      response_headers: { "x-request-id": "abc123" },
+      response_body: { id: "resp_123" },
+      response_body_too_big_to_handle: false,
+    },
+  };
+
+  const pane = requestLogResponsePane(entry);
+
+  assert.equal(pane.title, "Response");
+  assert.equal(pane.entry, entry);
+  assert.deepEqual(pane.copyHeaders, entry.data.response_headers);
+  assert.deepEqual(pane.copyBody, entry.data.response_body);
+  assert.equal(pane.showErrorMessage, true);
+  assert.equal(pane.errorMessage, "provider timeout");
+  assert.equal(pane.showHeaders, true);
+  assert.equal(pane.showBody, true);
+  assert.equal(pane.showEmpty, false);
+  assert.equal(pane.emptyMessage, "Response details were not captured.");
+  assert.equal(pane.showTooLarge, false);
+  assert.equal(pane.tooLargeMessage, "Response body was too large to capture.");
+});
+
+test("requestEntryLiveInProgress stays true while a partial response body is streaming", () => {
+  const streaming = {
+    _live: true,
+    _live_pending: true,
+    _live_state: "audit.stream",
+    _response_partial: true,
+    status_code: 200,
+    data: { response_body: { choices: [] } },
+  };
+
+  assert.equal(requestEntryLiveInProgress(streaming), true);
+  assert.equal(
+    requestEntryLiveInProgress({
+      ...streaming,
+      _live_state: "audit.completed",
+      _response_partial: false,
+      duration_ns: 1000,
+    }),
+    false,
+  );
+});
+
+test("request log panes surface pending spinners and streaming badges for live rows", () => {
+  const waiting = {
+    _live: true,
+    _live_pending: true,
+    _live_state: "audit.updated",
+    data: {},
+  };
+  const waitingResponse = requestLogResponsePane(waiting);
+  assert.equal(waitingResponse.showPending, true);
+  assert.equal(waitingResponse.showEmpty, false);
+  assert.equal(waitingResponse.pendingMessage, "Response in progress…");
+  const waitingRequest = requestLogRequestPane(waiting);
+  assert.equal(waitingRequest.showPending, true);
+  assert.equal(waitingRequest.showEmpty, false);
+  assert.equal(waitingRequest.pendingMessage, "Waiting for request data…");
+
+  const streaming = {
+    _live: true,
+    _live_pending: true,
+    _live_state: "audit.stream",
+    _response_partial: true,
+    status_code: 200,
+    data: {
+      response_body: {
+        choices: [{ index: 0, message: { role: "assistant", content: "partial" } }],
+      },
+    },
+  };
+  const streamingPane = requestLogResponsePane(streaming);
+  assert.equal(streamingPane.streaming, true);
+  assert.equal(streamingPane.showBody, true);
+  assert.equal(streamingPane.showPending, false);
+
+  // A stale partial flag on an already-settled entry must not keep the badge.
+  const settled = {
+    ...streaming,
+    _live_state: "audit.completed",
+    duration_ns: 1000,
+  };
+  assert.equal(requestLogResponsePane(settled).streaming, false);
+
+  const persisted = { data: {} };
+  const persistedPane = requestLogResponsePane(persisted);
+  assert.equal(persistedPane.showPending, false);
+  assert.equal(persistedPane.showEmpty, true);
+  assert.equal(persistedPane.streaming, false);
+});
+
+test("request log cache helpers summarize cached prompt usage and derive a preview from the request body", () => {
+  const extractSegments = (body) => [body.instructions, body.messages[0].content];
+
+  const entry = {
+    usage: {
+      input_tokens: 200,
+      cached_input_tokens: 150,
+      cache_write_input_tokens: 32,
+      estimated_cached_characters: 600,
+    },
+    data: {
+      request_body: {
+        instructions: "You are a meticulous assistant.",
+        messages: [{ role: "user", content: "Summarize the attached policy memo." }],
+      },
+    },
+  };
+
+  assert.equal(requestHasCachedTokens(entry), true);
+  assert.equal(requestCacheSharePercent(entry), 75);
+  assert.equal(requestCacheRatioLabel(entry), "75.0% cached");
+  assert.equal(requestCacheRatioPillLabel(entry), "75.0% cached");
+  assert.deepEqual(requestPromptCacheHighlight(entry, extractSegments), {
+    characters: 600,
+    segments: [
+      "You are a meticulous assistant.",
+      "Summarize the attached policy memo.",
+    ],
+  });
+
+  const pane = requestLogRequestPane(entry, extractSegments);
+  assert.equal(pane.bodyCacheRatioLabel, "75.0% cached");
+  assert.deepEqual(pane.promptCacheHighlight, {
+    characters: 600,
+    segments: [
+      "You are a meticulous assistant.",
+      "Summarize the attached policy memo.",
+    ],
+  });
+});
+
+test("requestEntryLiveInProgress marks only live rows still waiting for a response", () => {
+  assert.equal(
+    requestEntryLiveInProgress({
+      _live: true,
+      _live_pending: true,
+      _live_state: "audit.started",
+    }),
+    true,
+  );
+
+  assert.equal(
+    requestEntryLiveInProgress({
+      _live: true,
+      _live_pending: true,
+      _live_state: "audit.completed",
+      status_code: 200,
+      duration_ns: 123000000,
+    }),
+    false,
+  );
+
+  assert.equal(
+    requestEntryLiveInProgress({
+      _live: false,
+      _live_pending: false,
+    }),
+    false,
+  );
+});
+
+test("formatDurationNs rejects non-finite values", () => {
+  assert.equal(formatDurationNs("not-a-number"), "-");
+  assert.equal(formatDurationNs(Number.NaN), "-");
+  assert.equal(formatDurationNs(Number.POSITIVE_INFINITY), "-");
+  assert.equal(formatDurationNs(0), "pending");
+  assert.equal(formatDurationNs("1500"), "2 µs");
+  assert.equal(formatDurationNs(1230000000), "1.23 s");
+});
+
+test("requestOutputTokensPerSecond divides output tokens by total duration", () => {
+  const entry = (fields) => ({
+    path: "/v1/chat/completions",
+    duration_ns: 2000000000,
+    usage: { output_tokens: 84 },
+    ...fields,
+  });
+  const cases = [
+    { name: "chat", entry: entry({}), want: 42 },
+    { name: "responses", entry: entry({ path: "/v1/responses" }), want: 42 },
+    { name: "anthropic messages", entry: entry({ path: "/v1/messages" }), want: 42 },
+    { name: "passthrough", entry: entry({ path: "/p/openai/chat/completions" }), want: 42 },
+    { name: "passthrough v1 alias", entry: entry({ path: "/p/openai/v1/responses" }), want: 42 },
+    { name: "passthrough messages", entry: entry({ path: "/p/anthropic/messages?beta=true" }), want: 42 },
+    { name: "passthrough images", entry: entry({ path: "/p/openai/images/generations" }), want: null },
+    { name: "passthrough unknown", entry: entry({ path: "/p/openai/models" }), want: null },
+    { name: "exact cache hit", entry: entry({ cache_type: "exact" }), want: null },
+    { name: "semantic cache hit", entry: entry({ cache_type: "Semantic" }), want: null },
+    { name: "string fields", entry: entry({ duration_ns: "500000000", usage: { output_tokens: "10" } }), want: 20 },
+    { name: "embeddings", entry: entry({ path: "/v1/embeddings" }), want: null },
+    { name: "images", entry: entry({ path: "/v1/images/generations" }), want: null },
+    { name: "unknown path", entry: entry({ path: "/admin/x" }), want: null },
+    { name: "no usage", entry: entry({ usage: undefined }), want: null },
+    { name: "zero output tokens", entry: entry({ usage: { output_tokens: 0 } }), want: null },
+    { name: "pending duration", entry: entry({ duration_ns: 0 }), want: null },
+    { name: "missing duration", entry: entry({ duration_ns: undefined }), want: null },
+    { name: "null entry", entry: null, want: null },
+  ];
+  for (const c of cases) {
+    assert.equal(requestOutputTokensPerSecond(c.entry), c.want, c.name);
+  }
+});
+
+test("formatTokensPerSecond keeps one decimal below 100", () => {
+  assert.equal(formatTokensPerSecond(42.06), "42.1 tok/s");
+  assert.equal(formatTokensPerSecond(7), "7.0 tok/s");
+  assert.equal(formatTokensPerSecond(99.96), "100 tok/s");
+  assert.equal(formatTokensPerSecond(123.6), "124 tok/s");
+  assert.equal(formatTokensPerSecond(1234.4), "1,234 tok/s");
+  assert.equal(formatTokensPerSecond(1 / 30), "<0.1 tok/s");
+  assert.equal(formatTokensPerSecond(0.05), "0.1 tok/s");
+  assert.equal(formatTokensPerSecond(null), "");
+  assert.equal(formatTokensPerSecond(0), "");
+  assert.equal(formatTokensPerSecond(Number.NaN), "");
+});
+
+test("requestLogResponsePane surfaces error message from captured error body", () => {
+  const entry = {
+    data: {
+      response_body: {
+        error: {
+          type: "provider_error",
+          message: "http2: timeout awaiting response headers",
+        },
+      },
+    },
+  };
+
+  const pane = requestLogResponsePane(entry);
+
+  assert.equal(
+    requestEntryErrorMessage(entry),
+    "http2: timeout awaiting response headers",
+  );
+  assert.equal(pane.showErrorMessage, true);
+  assert.equal(pane.errorMessage, "http2: timeout awaiting response headers");
+  assert.equal(pane.showEmpty, false);
+});
+
+test("requestEntryErrorMessage extracts JSON encoded gateway error text", () => {
+  const entry = {
+    data: {
+      error_message:
+        '{"error":{"message":"circuit breaker is open - provider temporarily unavailable"}}',
+    },
+  };
+
+  assert.equal(
+    requestEntryErrorMessage(entry),
+    "circuit breaker is open - provider temporarily unavailable",
+  );
+});
+
+test("requestEntryErrorMessage ignores successful response fields", () => {
+  const entry = {
+    data: {
+      response_body: {
+        id: "chatcmpl_123",
+        choices: [{ message: { content: "hello" } }],
+      },
+    },
+  };
+
+  assert.equal(requestEntryErrorMessage(entry), "");
+  assert.equal(requestLogResponsePane(entry).showErrorMessage, false);
+});
+
+test("requestEntryErrorMessage ignores nested error objects on successful responses without top-level error shape", () => {
+  const entry = {
+    status_code: 200,
+    data: {
+      response_body: {
+        output: {
+          error: {
+            message: "should not be treated as a response error",
+          },
+        },
+      },
+    },
+  };
+
+  assert.equal(requestEntryErrorMessage(entry), "");
+});
+
+test("requestEntryErrorMessage reads top-level provider error shapes without relying on status code", () => {
+  const entry = {
+    data: {
+      response_body: {
+        message: "provider timeout",
+        type: "provider_error",
+      },
+    },
+  };
+
+  assert.equal(requestEntryErrorMessage(entry), "provider timeout");
+});
+
+test("requestLogWithLiveEntries preserves live preview rows that are not flushed yet", () => {
+  const payload = {
+    entries: [{ id: "request-log-db", request_id: "req-db" }],
+    total: 1,
+    limit: 25,
+    offset: 0,
+  };
+  const current = [
+    {
+      id: "request-log-live",
+      request_id: "req-live",
+      _live: true,
+      _live_pending: true,
+      _request_log_flushed: false,
+    },
+  ];
+
+  const next = requestLogWithLiveEntries(payload, current, noFilters);
+
+  assert.equal(next.entries.length, 2);
+  assert.equal(next.entries[0].id, "request-log-live");
+  assert.equal(next.entries[1].id, "request-log-db");
+  assert.equal(next.total, 2);
+});
+
+test("requestLogWithLiveEntries lets persisted rows replace matching live previews", () => {
+  const payload = {
+    entries: [{ id: "request-log-db", request_id: "req-live" }],
+    total: 1,
+    limit: 25,
+    offset: 0,
+  };
+  const current = [
+    {
+      id: "request-log-live",
+      request_id: "req-live",
+      _live: true,
+      _live_pending: true,
+      _request_log_flushed: false,
+    },
+  ];
+
+  const next = requestLogWithLiveEntries(payload, current, noFilters);
+
+  assert.equal(next.entries.length, 1);
+  assert.equal(next.entries[0].id, "request-log-db");
+  assert.equal(next.total, 1);
+});
+
+test("requestLogAllowsLiveEntries respects filters and custom date ranges", () => {
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+
+  assert.equal(requestLogAllowsLiveEntries({ offset: 0 }, noFilters), true);
+  assert.equal(requestLogAllowsLiveEntries({ offset: 25 }, noFilters), false);
+  assert.equal(
+    requestLogAllowsLiveEntries({ offset: 0 }, { ...noFilters, search: "x" }),
+    false,
+  );
+
+  assert.equal(
+    requestLogAllowsLiveEntries(
+      { offset: 0 },
+      { ...noFilters, customStartDate: tomorrow },
+    ),
+    false,
+  );
+  assert.equal(
+    requestLogAllowsLiveEntries(
+      { offset: 0 },
+      { ...noFilters, customEndDate: yesterday },
+    ),
+    false,
+  );
+  assert.equal(
+    requestLogAllowsLiveEntries(
+      { offset: 0 },
+      { ...noFilters, customStartDate: yesterday, customEndDate: tomorrow },
+    ),
+    true,
+  );
+});
+
+test("buildRequestLogQuery sends the consolidated request log search and select filters only", () => {
+  const qs = buildRequestLogQuery({
+    dateQuery: "days=30",
+    limit: 25,
+    offset: 0,
+    search: "team/alpha",
+    method: "POST",
+    statusCode: "500",
+    stream: "true",
+  });
+
+  assert.match(qs, /^days=30&limit=25&offset=0/);
+  assert.match(qs, /search=team%2Falpha/);
+  assert.match(qs, /method=POST/);
+  assert.match(qs, /status_code=500/);
+  assert.match(qs, /stream=true/);
+  assert.doesNotMatch(qs, /[?&](model|provider|path|user_path)=/);
+});
+
+test("buildRequestLogQuery sends a field search to that field's indexed parameter", () => {
+  const cases = [
+    ["", "search=team%2Falpha"],
+    ["user_path", "user_path_prefix=team%2Falpha"],
+    ["model", "model_prefix=team%2Falpha"],
+    ["request_id", "request_id=team%2Falpha"],
+    ["session_id", "session_id=team%2Falpha"],
+    ["provider", "provider=team%2Falpha"],
+    ["error_type", "error_type=team%2Falpha"],
+    ["unknown", "search=team%2Falpha"],
+  ];
+  for (const [searchField, expected] of cases) {
+    const qs = buildRequestLogQuery({
+      dateQuery: "days=30",
+      limit: 25,
+      offset: 0,
+      search: "  team/alpha ",
+      searchField,
+    });
+    assert.equal(qs, "days=30&limit=25&offset=0&" + expected, searchField);
+  }
+});
+
+test("buildRequestLogQuery skips a blank field search", () => {
+  const qs = buildRequestLogQuery({
+    dateQuery: "days=30",
+    limit: 25,
+    offset: 0,
+    search: "   ",
+    searchField: "user_path",
+  });
+  assert.equal(qs, "days=30&limit=25&offset=0");
+});
+
+test("request log search fields default to all fields and have labels", () => {
+  assert.equal(REQUEST_LOG_SEARCH_FIELDS[0].key, "");
+  assert.equal(requestLogSearchField(undefined).param, "search");
+  assert.equal(requestLogSearchField("model").param, "model_prefix");
+  for (const field of REQUEST_LOG_SEARCH_FIELDS) {
+    assert.ok(field.label(), field.key);
+    assert.ok(field.placeholder(), field.key);
+  }
+});
+
+test("buildRequestLogQuery omits unset filters", () => {
+  const qs = buildRequestLogQuery({
+    dateQuery: "start_date=2026-07-01&end_date=2026-07-15",
+    limit: 25,
+    offset: 50,
+    search: "",
+    method: "",
+    statusCode: "",
+    stream: "",
+  });
+
+  assert.equal(qs, "start_date=2026-07-01&end_date=2026-07-15&limit=25&offset=50");
+});
+
+test("toggleExpandedEntry keeps at most one request row expanded", () => {
+  const next = toggleExpandedEntry({}, { id: "request-log-1" });
+  assert.deepEqual(next, { "request-log-1": true });
+
+  // Opening another row folds the first; toggling that row again collapses it.
+  const second = toggleExpandedEntry(next, { id: "request-log-2" });
+  assert.deepEqual(second, { "request-log-2": true });
+  assert.deepEqual(toggleExpandedEntry(second, { id: "request-log-2" }), {});
+
+  // Keyless entries leave the map untouched.
+  assert.deepEqual(toggleExpandedEntry(next, { id: "request-log-1" }), {});
+  assert.equal(toggleExpandedEntry(next, {}), next);
+});
+
+test("pruneExpandedEntries drops expanded state for rows no longer on the page", () => {
+  const pruned = pruneExpandedEntries(
+    { "request-log-1": true, "request-log-2": true },
+    [{ id: "request-log-2" }, { id: "request-log-3" }],
+  );
+
+  assert.deepEqual(pruned, { "request-log-2": true });
+
+  // No change returns the same map instance.
+  const unchanged = { "request-log-2": true };
+  assert.equal(pruneExpandedEntries(unchanged, [{ id: "request-log-2" }]), unchanged);
+});
+
+test("requestLogTabKeydownTarget roves the tablist with arrow and home/end keys", () => {
+  const entry = {
+    data: {
+      request_body: { model: "gpt-5" },
+      response_body: { ok: true },
+    },
+  };
+
+  // A plain entry (no failed attempts) yields exactly the request + response tabs.
+  const ids = requestLogPanes(entry).map((p) => p.id);
+  assert.equal(ids.join(","), "request,response");
+
+  // Next/previous, wrapping at the ends.
+  assert.equal(requestLogTabKeydownTarget("ArrowRight", ids, "request"), "response");
+  assert.equal(requestLogTabKeydownTarget("ArrowDown", ids, "request"), "response");
+  assert.equal(requestLogTabKeydownTarget("ArrowRight", ids, "response"), "request");
+  assert.equal(requestLogTabKeydownTarget("ArrowLeft", ids, "request"), "response");
+  assert.equal(requestLogTabKeydownTarget("ArrowUp", ids, "request"), "response");
+
+  // Home/End jump to the ends.
+  assert.equal(requestLogTabKeydownTarget("Home", ids, "response"), "request");
+  assert.equal(requestLogTabKeydownTarget("End", ids, "request"), "response");
+
+  // Unhandled keys leave the selection untouched.
+  assert.equal(requestLogTabKeydownTarget("Tab", ids, "request"), null);
+  assert.equal(requestLogTabKeydownTarget("a", ids, "request"), null);
+});
+
+test("requestLogPanes inserts request revision tabs between request and response", () => {
+  const revision = {
+    seq: 1,
+    rewriter: "pro-token-compression",
+    bytes_before: 1572,
+    bytes_after: 1249,
+    body: { model: "gpt-5", compressed: true },
+    detail: { tokens_saved_estimate: 89, blocks_replaced: 1 },
+  };
+  const entry = {
+    data: {
+      request_body: { model: "gpt-5" },
+      response_body: { ok: true },
+      request_revisions: [revision],
+    },
+  };
+
+  assert.equal(
+    requestLogPanes(entry)
+      .map((p) => p.id)
+      .join(","),
+    "request,revision-1,response",
+  );
+
+  const pane = requestRevisionPane(entry, revision);
+  assert.equal(pane.title, "Rewritten");
+  assert.equal(pane.kind, "pro-token-compression");
+  assert.equal(pane.seq, 0); // a single revision hides the #seq chip
+  assert.equal(pane.headersTitle, "What changed");
+  assert.equal(pane.headers.bytes, "1572 → 1249");
+  assert.equal(pane.headers.detail.tokens_saved_estimate, 89);
+  assert.equal(pane.savingsLabel, "-21%");
+  assert.equal(pane.showBody, true);
+  assert.equal(pane.showTooLarge, false);
+
+  // Without a captured body the pane explains why instead of showing JSON.
+  const bare = requestRevisionPane(entry, {
+    seq: 2,
+    rewriter: "x",
+    bytes_before: 10,
+    bytes_after: 8,
+  });
+  assert.equal(bare.showBody, false);
+  assert.equal(bare.showTooLarge, true);
+
+  // Multiple revisions keep their sequence chips and stable tab ids.
+  entry.data.request_revisions = [revision, { ...revision, seq: 2 }];
+  assert.equal(
+    requestLogPanes(entry)
+      .map((p) => p.id)
+      .join(","),
+    "request,revision-1,revision-2,response",
+  );
+  assert.equal(requestRevisionPane(entry, revision).seq, 1);
+});
+
+test("rewriters that changed nothing become Request-tab pills, not tabs", () => {
+  const entry = {
+    data: {
+      request_body: { model: "gpt-5" },
+      response_body: { ok: true },
+      request_revisions: [
+        {
+          seq: 1,
+          rewriter: "pro-token-compression",
+          bytes_before: 165689,
+          bytes_after: 165689,
+          no_change: true,
+        },
+      ],
+    },
+  };
+
+  // The step is recorded, but it spends no tab.
+  assert.equal(
+    requestLogPanes(entry)
+      .map((p) => p.id)
+      .join(","),
+    "request,response",
+  );
+  assert.equal(changedRequestRevisions(entry).length, 0);
+
+  const steps = requestNoChangeSteps(entry);
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0].id, "step-1");
+  assert.equal(steps[0].rewriter, "pro-token-compression");
+  assert.equal(steps[0].label, "pro-token-compression: no change");
+  assert.match(steps[0].title, /forwarded the request unchanged/);
+  assert.deepEqual(requestLogRequestPane(entry).noChangeSteps, steps);
+
+  // Mixed chains: only the rewrite that changed the body gets a pane, and a
+  // lone changed revision still hides its #seq chip.
+  entry.data.request_revisions.push({
+    seq: 2,
+    rewriter: "swap",
+    bytes_before: 165689,
+    bytes_after: 120000,
+  });
+  assert.equal(
+    requestLogPanes(entry)
+      .map((p) => p.id)
+      .join(","),
+    "request,revision-2,response",
+  );
+  assert.equal(requestNoChangeSteps(entry).length, 1);
+  assert.equal(
+    requestRevisionPane(entry, entry.data.request_revisions[1]).seq,
+    0,
+  );
+
+  // Entries written before no-change tracking have no flag and stay tabs.
+  const legacy = {
+    data: {
+      request_revisions: [{ seq: 1, rewriter: "swap", bytes_before: 10, bytes_after: 8 }],
+    },
+  };
+  assert.equal(changedRequestRevisions(legacy).length, 1);
+  assert.equal(requestNoChangeSteps(legacy).length, 0);
+});
+
+test("requestRevisionPercentLabel reports the share of the body removed", () => {
+  assert.equal(
+    requestRevisionPercentLabel({ bytes_before: 1572, bytes_after: 1249 }),
+    "-21%",
+  );
+  assert.equal(
+    requestRevisionPercentLabel({ bytes_before: 1000, bytes_after: 560 }),
+    "-44%",
+  );
+  assert.equal(
+    requestRevisionPercentLabel({ bytes_before: 1000, bytes_after: 954 }),
+    "-4.6%",
+  );
+  // Missing sizes or a revision that grew the body renders no percent.
+  assert.equal(requestRevisionPercentLabel({ bytes_before: 0, bytes_after: 10 }), "");
+  assert.equal(
+    requestRevisionPercentLabel({ bytes_before: 100, bytes_after: 120 }),
+    "",
+  );
+  assert.equal(requestRevisionPercentLabel({}), "");
+  assert.equal(requestRevisionPercentLabel(null), "");
+});
+
+test("entries without revisions render no revision tabs", () => {
+  const entry = {
+    data: { request_body: { model: "gpt-5" }, response_body: { ok: true } },
+  };
+  assert.equal(
+    requestLogPanes(entry)
+      .map((p) => p.id)
+      .join(","),
+    "request,response",
+  );
+  assert.equal(requestRevisions(entry).length, 0);
+});
+
+test("per-attempt response panes carry the tried model for the tab badge", () => {
+  const entry = {
+    data: {
+      request_body: { model: "virtual-model-a" },
+      response_body: { ok: true },
+      attempts: [
+        {
+          seq: 1,
+          kind: "primary",
+          provider_name: "provider-a",
+          model: "provider-a/Qwen/Qwen3.6-35B-A3B-FP8",
+          status_code: 503,
+          success: false,
+        },
+        {
+          seq: 2,
+          kind: "failover",
+          provider_name: "provider-b",
+          model: "provider-b/glm-5.3-flash",
+          status_code: 400,
+          success: false,
+        },
+        {
+          seq: 3,
+          kind: "failover",
+          provider_name: "provider-b",
+          model: "provider-b/glm-5.3-flash",
+          status_code: 200,
+          success: true,
+        },
+      ],
+    },
+  };
+
+  const panes = requestLogPanes(entry);
+  assert.equal(
+    panes.map((p) => p.id).join(","),
+    "request,response-1,response-2,response-3",
+  );
+
+  // Each failover pane carries the requested → tried model strip: the model
+  // the request named and the concrete model that attempt targeted. Without
+  // an alias resolution the source chip reads "requested", not "virtual".
+  const first = panes.find((p) => p.id === "response-1").pane;
+  assert.deepEqual(first.modelStrip, {
+    label: "requested",
+    source: "virtual-model-a",
+    tried: "provider-a/Qwen/Qwen3.6-35B-A3B-FP8",
+  });
+  const second = panes.find((p) => p.id === "response-2").pane;
+  assert.deepEqual(second.modelStrip, {
+    label: "requested",
+    source: "virtual-model-a",
+    tried: "provider-b/glm-5.3-flash",
+  });
+
+  // Alias-resolved entries label the source "virtual" and prefer top-level
+  // requested_model over entry.model and the request body (the same
+  // precedence the metadata row uses).
+  const aliased = {
+    requested_model: "smart-vm",
+    model: "entry-model",
+    alias_used: true,
+    data: {
+      request_body: { model: "body-model" },
+      attempts: [
+        { seq: 1, kind: "primary", model: "provider-a/qwen-35b", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "provider-b/glm-flash", status_code: 200, success: true },
+      ],
+    },
+  };
+  assert.deepEqual(requestLogPanes(aliased).find((p) => p.id === "response-1").pane.modelStrip, {
+    label: "virtual",
+    source: "smart-vm",
+    tried: "provider-a/qwen-35b",
+  });
+
+  // Without requested_model, top-level entry.model steps in before the body.
+  const entryModel = {
+    model: "entry-model",
+    data: {
+      attempts: [
+        { seq: 1, kind: "primary", model: "provider-a/qwen-35b", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "provider-b/glm-flash", status_code: 200, success: true },
+      ],
+    },
+  };
+  assert.deepEqual(requestLogPanes(entryModel).find((p) => p.id === "response-1").pane.modelStrip, {
+    label: "requested",
+    source: "entry-model",
+    tried: "provider-a/qwen-35b",
+  });
+
+  // Without any request-model value anywhere, no strip renders at all — a
+  // lone "tried" chip would read as if the request model were unknown by
+  // design, which it is not.
+  const noSource = {
+    data: {
+      attempts: [
+        { seq: 1, kind: "primary", model: "provider-a/qwen-35b", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "provider-b/glm-flash", status_code: 200, success: true },
+      ],
+    },
+  };
+  const noSourcePanes = requestLogPanes(noSource);
+  assert.ok(!noSourcePanes.find((p) => p.id === "response-1").pane.modelStrip);
+  assert.ok(!noSourcePanes.find((p) => p.id === "response-2").pane.modelStrip);
+
+  // A single successful attempt collapses to the plain response tab, which
+  // carries no model strip (the row's model column already names it).
+  const single = {
+    data: {
+      request_body: { model: "m" },
+      response_body: { ok: true },
+      attempts: [{ seq: 1, kind: "primary", model: "m", status_code: 200, success: true }],
+    },
+  };
+  const singlePanes = requestLogPanes(single);
+  assert.equal(singlePanes.map((p) => p.id).join(","), "request,response");
+  assert.ok(!singlePanes.find((p) => p.id === "response").pane.modelStrip);
+
+  // A single FAILED attempt keeps the per-attempt path but still hides the
+  // strip — the same `single` rule as the seq/kind/status chips.
+  const loneFailure = {
+    data: {
+      request_body: { model: "m" },
+      attempts: [{ seq: 1, kind: "primary", model: "m", status_code: 503, success: false }],
+    },
+  };
+  const lonePanes = requestLogPanes(loneFailure);
+  assert.equal(lonePanes.map((p) => p.id).join(","), "request,response-1");
+  assert.ok(!lonePanes.find((p) => p.id === "response-1").pane.modelStrip);
+
+  // Entries that predate per-attempt model capture render no strip instead of
+  // the "-" placeholder.
+  const legacy = {
+    data: {
+      request_body: { model: "m" },
+      attempts: [
+        { seq: 1, kind: "primary", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "m", status_code: 200, success: true },
+      ],
+    },
+  };
+  const legacyPanes = requestLogPanes(legacy);
+  assert.ok(!legacyPanes.find((p) => p.id === "response-1").pane.modelStrip);
+  assert.deepEqual(legacyPanes.find((p) => p.id === "response-2").pane.modelStrip, {
+    label: "requested",
+    source: "m",
+    tried: "m",
+  });
+});
+
+test("formatJSON pretty-prints JSON strings and objects, passing other text through", () => {
+  assert.equal(formatJSON(null), "Not captured");
+  assert.equal(formatJSON(""), "Not captured");
+  assert.equal(formatJSON('{"a":1}'), '{\n  "a": 1\n}');
+  assert.equal(formatJSON("plain text"), "plain text");
+  assert.equal(formatJSON({ a: 1 }), '{\n  "a": 1\n}');
+});
+
+// --- Session grouping helpers ------------------------------------------------
+
+test("buildRequestLogSessionQuery encodes the session id and omits active list filters", () => {
+  const qs = buildRequestLogSessionQuery({ sessionId: "team/app|s 1", limit: 100 });
+  assert.equal(qs, "session_id=team%2Fapp%7Cs%201&limit=100&offset=0");
+});
+
+test("session head helpers handle missing ids and counts", () => {
+  assert.equal(requestSessionId({ session_id: " s-1 " }), "s-1");
+  assert.equal(requestSessionId({}), "");
+  assert.equal(requestSessionCount({ session_count: 5 }), 5);
+  assert.equal(requestSessionCount({ session_count: 0 }), 1);
+  assert.equal(requestSessionCount({}), 1);
+  assert.equal(requestIsThreadHead({ session_id: "s-1", session_count: 2 }), true);
+  assert.equal(requestIsThreadHead({ session_id: "s-1", session_count: 1 }), false);
+  assert.equal(requestIsThreadHead({ session_count: 3 }), false);
+});
+
+test("requestLogFromSessions maps thread summaries into head entries", () => {
+  const payload = {
+    sessions: [
+      {
+        request_count: 6,
+        latest: { id: "log-3", session_id: "s-1", status_code: 200 },
+      },
+      { request_count: 1, latest: { id: "solo", status_code: 200 } },
+      { request_count: 2 }, // no latest: dropped
+    ],
+    total: 12,
+    limit: 25,
+    offset: 25,
+  };
+  const mapped = requestLogFromSessions(payload);
+  assert.equal(mapped.entries.length, 2);
+  assert.equal(mapped.entries[0].id, "log-3");
+  assert.equal(mapped.entries[0].session_count, 6);
+  assert.equal(mapped.entries[1].id, "solo");
+  assert.equal(mapped.entries[1].session_count, 1);
+  assert.equal(mapped.total, 12);
+  assert.equal(mapped.offset, 25);
+  assert.equal(mapped.as_of, undefined);
+  assert.equal(requestLogFromSessions({ ...payload, as_of: 1700 }).as_of, 1700, "as_of is kept");
+});
+
+test("mergeRequestThreadChildren drops heads by id and request_id", () => {
+  const merged = mergeRequestThreadChildren(
+    null,
+    [
+      { id: "log-3", request_id: "req-3" },
+      { id: "log-2", request_id: "req-2" },
+      { id: "other", request_id: "req-3" },
+      { id: "log-1" },
+    ],
+    [{ id: "log-3", request_id: "req-3" }],
+  );
+  assert.deepEqual(
+    merged.entries.map((entry) => entry.id),
+    ["log-2", "log-1"],
+  );
+  assert.equal(merged.preservedCount, 0);
+});
+
+test("mergeRequestThreadChildren preserves unpersisted live entries on top", () => {
+  const previous = {
+    loading: true,
+    loaded: false,
+    entries: [
+      // Still pending: the server does not know it yet.
+      { id: "live-2", request_id: "req-live-2", _live: true },
+      // Already persisted: the fetched page returns it, so dedup by identity.
+      { id: "live-1", request_id: "req-live-1", _live: true },
+      // Not live: must not survive a full fetch that omits it.
+      { id: "stale", request_id: "req-stale" },
+    ],
+    total: 3,
+  };
+  const merged = mergeRequestThreadChildren(
+    previous,
+    [
+      { id: "head", request_id: "req-head" },
+      { id: "live-1", request_id: "req-live-1" },
+      { id: "old-1", request_id: "req-old-1" },
+    ],
+    [{ id: "head", request_id: "req-head" }],
+  );
+  assert.deepEqual(
+    merged.entries.map((entry) => entry.id),
+    ["live-2", "live-1", "old-1"],
+  );
+  assert.equal(merged.preservedCount, 1);
+});
+
+test("mergeRequestThreadChildren keeps a head demoted while the fetch was in flight", () => {
+  // Race: a new live request replaced the thread head during the session-page
+  // fetch. The original head is now a demoted child — excluding only the
+  // CURRENT head must keep it in the merged children.
+  const originalHead = { id: "old-head", request_id: "req-old" };
+  const currentHead = { id: "new-head", request_id: "req-new" };
+  const previous = {
+    loading: true,
+    loaded: false,
+    // foldLiveRequestLogIntoThread prepended the demoted head into the slot.
+    entries: [{ ...originalHead }],
+    total: 1,
+  };
+  const merged = mergeRequestThreadChildren(
+    previous,
+    [{ ...originalHead }, { id: "old-1", request_id: "req-1" }],
+    [currentHead],
+  );
+  assert.deepEqual(
+    merged.entries.map((entry) => entry.id),
+    ["old-head", "old-1"],
+  );
+  assert.equal(merged.preservedCount, 0);
+});
+
+test("toggleExpandedThread flips per-session and pruneThreadMap drops off-page threads", () => {
+  let map = toggleExpandedThread({}, "s-1");
+  assert.deepEqual(map, { "s-1": true });
+  map = toggleExpandedThread(map, "s-2");
+  map = toggleExpandedThread(map, "s-1");
+  assert.deepEqual(map, { "s-2": true });
+  assert.equal(toggleExpandedThread(map, ""), map);
+
+  const pruned = pruneThreadMap(
+    { "s-2": true, gone: true },
+    [{ session_id: "s-2" }, { id: "solo" }],
+  );
+  assert.deepEqual(pruned, { "s-2": true });
+  // No change returns the same instance (reactivity-friendly).
+  const same = { "s-2": true };
+  assert.equal(pruneThreadMap(same, [{ session_id: "s-2" }]), same);
+});
+
+test("groupedRequestLogWithLiveEntries folds pending previews into fetched heads", () => {
+  const payload = {
+    entries: [
+      { id: "head-a", session_id: "s-a", session_count: 3 },
+      { id: "solo", session_id: "" },
+    ],
+    total: 2,
+    limit: 25,
+    offset: 0,
+  };
+  const pendingSameSession = {
+    id: "live-1",
+    session_id: "s-a",
+    session_count: 4,
+    _live: true,
+    _live_pending: true,
+  };
+  const pendingNewSession = {
+    id: "live-2",
+    session_id: "s-b",
+    _live: true,
+    _live_pending: true,
+  };
+  const next = groupedRequestLogWithLiveEntries(
+    payload,
+    [pendingSameSession, pendingNewSession],
+    {},
+  );
+  // s-b preview prepends as a new singleton thread; s-a preview replaces its head.
+  assert.deepEqual(
+    next.entries.map((entry) => entry.id),
+    ["live-2", "live-1", "solo"],
+  );
+  assert.equal(next.entries[1].session_count, 4);
+  assert.equal(next.total, 3);
+});
+
+test("groupedRequestLogWithLiveEntries increments counts for a new singleton preview", () => {
+  const payload = {
+    entries: [
+      {
+        id: "head-a",
+        session_id: "s-a",
+        session_count: 6,
+      },
+    ],
+    total: 1,
+    limit: 25,
+    offset: 0,
+  };
+  const pending = {
+    id: "live-1",
+    session_id: "s-a",
+    session_count: 1,
+    _live: true,
+    _live_pending: true,
+  };
+
+  const next = groupedRequestLogWithLiveEntries(payload, [pending], {});
+
+  assert.deepEqual(next.entries.map((entry) => entry.id), ["live-1"]);
+  assert.equal(next.entries[0].session_count, 7);
+  assert.equal(next.total, 1);
+});
+
+test("groupedRequestLogWithLiveEntries keeps persisted rows over matching previews", () => {
+  const payload = {
+    entries: [{ id: "head-a", request_id: "req-1", session_id: "s-a", session_count: 2 }],
+    total: 1,
+    limit: 25,
+    offset: 0,
+  };
+  const pending = {
+    id: "head-a",
+    request_id: "req-1",
+    session_id: "s-a",
+    _live: true,
+    _live_pending: true,
+  };
+  const next = groupedRequestLogWithLiveEntries(payload, [pending], {});
+  assert.deepEqual(next.entries.map((entry) => entry.id), ["head-a"]);
+  assert.equal(next.entries[0].session_count, 2);
+  assert.equal(next.total, 1);
+});
+
+// ─── Guardrail outcomes ───
+
+test("requestLogPanes adds a Guardrails tab only when a guardrail ran", () => {
+  const entry = {
+    status_code: 403,
+    data: {
+      request_body: { model: "gpt-5" },
+      response_body: { error: { message: "blocked" } },
+      guardrails: [
+        {
+          seq: 1,
+          phase: "prompt",
+          step: 10,
+          instance: "pii-filter",
+          type: "string_replace",
+          action: "allow",
+          edited: true,
+          target: "request",
+          duration_ns: 2500000,
+        },
+        {
+          seq: 2,
+          phase: "prompt",
+          step: 20,
+          instance: "policy",
+          action: "block",
+          code: "content_policy",
+          message: "Not allowed",
+          detail: { matched: ["x"] },
+          duration_ns: 900000,
+        },
+      ],
+    },
+  };
+  const panes = requestLogPanes(entry);
+  assert.equal(panes.map((p) => p.id).join(","), "request,response,guardrails");
+  const pane = panes[2].pane;
+  assert.equal(pane.type, "guardrails");
+  assert.equal(pane.title, "Guardrails");
+  assert.deepEqual(pane.badge, { text: "Blocked", class: "status-error" });
+  assert.deepEqual(pane.rows[0], {
+    id: "guardrail-1",
+    seq: 1,
+    phase: "Prompt",
+    step: "10",
+    instance: "pii-filter",
+    type: "string_replace",
+    action: "allow",
+    actionLabel: "Passed",
+    actionClass: "status-success",
+    edited: "request",
+    code: "",
+    message: "",
+    failMode: "",
+    streamEvents: "",
+    duration: "2.50 ms",
+    detail: "",
+    error: "",
+  });
+  assert.equal(pane.rows[1].actionLabel, "Blocked");
+  assert.equal(pane.rows[1].actionClass, "status-error");
+  assert.equal(pane.rows[1].code, "content_policy");
+  assert.equal(pane.rows[1].message, "Not allowed");
+  assert.equal(pane.rows[1].detail, formatJSON({ matched: ["x"] }));
+  assert.equal(pane.rows[1].duration, "900 µs");
+
+  // The default tab is untouched by the extra pane.
+  assert.equal(requestLogEffectiveTab(null, entry, panes), "response");
+
+  // No outcomes, no tab.
+  assert.equal(
+    requestLogPanes({ data: { request_body: {}, response_body: {} } })
+      .map((p) => p.id)
+      .join(","),
+    "request,response",
+  );
+});
+
+test("guardrail rows label failures, warnings and stream edits", () => {
+  const rows = requestGuardrailRows({
+    data: {
+      guardrails: [
+        { seq: 1, phase: "prompt", instance: "flaky", action: "failure", fail_mode: "open", error: "timeout after 2s" },
+        { seq: 2, phase: "prompt", instance: "strict", action: "failure", fail_mode: "closed", error: "boom" },
+        { seq: 3, phase: "response", instance: "tone", action: "warn", code: "tone", message: "Harsh" },
+        { seq: 4, phase: "stream", instance: "redact", action: "allow", edited: true, replaced_events: 2, dropped_events: 0 },
+        { seq: 5, phase: "prompt", instance: "canned", action: "respond", code: "faq" },
+      ],
+    },
+  });
+  assert.deepEqual(
+    rows.map((row) => [row.instance, row.actionLabel, row.actionClass, row.failMode, row.edited]),
+    [
+      ["flaky", "Failed", "status-warning", "open", ""],
+      ["strict", "Failed", "status-error", "closed", ""],
+      ["tone", "Warned", "status-warning", "", ""],
+      ["redact", "Passed", "status-success", "", "response"],
+      ["canned", "Answered", "status-error", "", ""],
+    ],
+  );
+  assert.equal(rows[0].error, "timeout after 2s");
+  assert.equal(rows[0].step, "");
+  assert.equal(rows[3].streamEvents, "2 replaced · 0 dropped");
+  assert.equal(rows[3].phase, "Stream");
+  assert.equal(requestGuardrailActionClass({ action: "skipped" }), "status-neutral");
+});
+
+test("requestGuardrailVerdict names the guardrail that stopped or warned on the request", () => {
+  const verdict = (guardrails) => requestGuardrailVerdict({ data: { guardrails } });
+  assert.deepEqual(
+    verdict([
+      { phase: "prompt", instance: "pii", action: "warn" },
+      { phase: "prompt", instance: "policy", action: "block", code: "x" },
+    ]),
+    { tone: "danger", text: "Guardrail: blocked · policy", actionLabel: "Blocked" },
+  );
+  assert.equal(
+    verdict([{ phase: "prompt", instance: "faq", action: "respond" }]).text,
+    "Guardrail: answered · faq",
+  );
+  assert.equal(
+    verdict([{ phase: "prompt", instance: "strict", action: "failure", fail_mode: "closed" }]).text,
+    "Guardrail: failed · strict",
+  );
+  assert.deepEqual(
+    verdict([
+      { phase: "prompt", instance: "ok", action: "allow" },
+      { phase: "prompt", instance: "flaky", action: "failure", fail_mode: "open" },
+    ]),
+    { tone: "warning", text: "Guardrail: failed · flaky", actionLabel: "Failed" },
+  );
+  assert.deepEqual(
+    verdict([{ phase: "response", instance: "tone", action: "warn" }]),
+    { tone: "warning", text: "Guardrail: warned · tone", actionLabel: "Warned" },
+  );
+  assert.equal(verdict([{ phase: "prompt", instance: "ok", action: "allow", edited: true }]), null);
+  assert.equal(verdict([]), null);
+  assert.equal(requestGuardrailsPane({ data: { guardrails: [{ instance: "ok", action: "allow" }] } }).badge.text, "1");
+});
+
+test("legacy entries derive the Guardrails tab from the revision trail", () => {
+  const entry = {
+    status_code: 403,
+    data: {
+      request_body: {},
+      request_revisions: [
+        {
+          seq: 1,
+          rewriter: "policy",
+          bytes_before: 10,
+          bytes_after: 10,
+          no_change: true,
+          detail: { phase: "prompt", action: "block", code: "content_policy", message: "no" },
+        },
+      ],
+    },
+  };
+  const panes = requestLogPanes(entry);
+  // The objection is a no-change revision (a Request-tab pill), and its
+  // outcome shows up on the Guardrails tab.
+  assert.equal(panes.map((p) => p.id).join(","), "request,response,guardrails");
+  assert.equal(panes[2].pane.rows[0].instance, "policy");
+  assert.equal(panes[2].pane.rows[0].actionLabel, "Blocked");
+  assert.equal(requestGuardrailVerdict(entry).text, "Guardrail: blocked · policy");
+  // A plain rewriter revision is not a guardrail outcome.
+  assert.equal(
+    requestLogPanes({
+      data: {
+        request_revisions: [{ seq: 1, rewriter: "compress", bytes_before: 10, bytes_after: 8, body: {} }],
+      },
+    })
+      .map((p) => p.id)
+      .join(","),
+    "request,revision-1,response",
+  );
+});

@@ -64,14 +64,14 @@ i zaloguj się za pomocą `GOMODEL_MASTER_KEY`. Przejdź do
 3. Pozostaw **Dashboard access** wyłączone.
 4. Utwórz klucz i skopiuj wartość `sk_gom_...`. Jest wyświetlana tylko raz.
 
-Przypisana ścieżka użytkownika daje Kimi własny zakres użycia i audytu. Zarządzane klucze są przypisywane
+Przypisana ścieżka użytkownika daje Kimi własny zakres użycia i logów requestów. Zarządzane klucze są przypisywane
 bezpośrednio do ścieżki użytkownika, a ograniczenia modeli konfiguruje się osobno jako
 [polityki dostępu do modeli](/pl/features/user-path#dostęp-do-modeli) obowiązujące w całym gatewayu. Jeśli
 korzystasz z tych polityk, zezwól dla `/agents/kimi` tylko na selektory, których potrzebuje Kimi.
 
 <Warning>
   W Kimi używaj tego zarządzanego klucza, a nie `GOMODEL_MASTER_KEY`. Zarządzany klucz bez
-  dostępu do dashboardu może wywoływać endpointy modeli, ale nie może czytać logów audytowych, tworzyć
+  dostępu do dashboardu może wywoływać endpointy modeli, ale nie może czytać logów requestów, tworzyć
   kluczy ani zmieniać ustawień gatewaya. Master key omija to ograniczenie.
 </Warning>
 
@@ -166,11 +166,11 @@ tool-ok
 
 ## 6. Sprawdź ruch w GoModel
 
-Otwórz logi audytowe w dashboardzie GoModel:
+Otwórz stronę „Requesty” w dashboardzie GoModel:
 
-[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+[http://localhost:8080/admin/dashboard/requests](http://localhost:8080/admin/dashboard/requests)
 
-Na podstawie śladu audytowego potwierdź, że Kimi wysyła requesty streamingowe do
+Na podstawie logu requestów potwierdź, że Kimi wysyła requesty streamingowe do
 `POST /v1/chat/completions` i że GoModel kieruje je do wybranego
 providera. Zaloguj się za pomocą master key lub osobnego zarządzanego klucza z
 dostępem do dashboardu; klucz Kimi celowo nie może otworzyć tej strony.

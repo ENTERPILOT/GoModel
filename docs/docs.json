@@ -76,7 +76,23 @@
         },
         {
             "source": "/api-reference/admin/get-conversation-thread-around-an-audit-log-entry",
-            "destination": "/api-reference/admin/get-the-interaction-session-containing-an-audit-log-entry"
+            "destination": "/api-reference/admin/get-the-interaction-session-containing-a-request-log-entry"
+        },
+        {
+            "source": "/api-reference/admin/get-the-interaction-session-containing-an-audit-log-entry",
+            "destination": "/api-reference/admin/get-the-interaction-session-containing-a-request-log-entry"
+        },
+        {
+            "source": "/api-reference/admin/get-paginated-audit-log-entries",
+            "destination": "/api-reference/admin/get-paginated-request-log-entries"
+        },
+        {
+            "source": "/api-reference/admin/get-paginated-audit-sessions-threads",
+            "destination": "/api-reference/admin/get-paginated-request-log-sessions-threads"
+        },
+        {
+            "source": "/api-reference/admin/get-audit-log-entry-detail",
+            "destination": "/api-reference/admin/get-request-log-entry-detail"
         },
         {
             "source": "/api-reference/admin/get-dashboard-runtime-configuration",
@@ -206,6 +222,7 @@
                                 "pages": [
                                     "pro/overview",
                                     "pro/compression",
+                                    "pro/courtesy-replies",
                                     "pro/sso",
                                     "pro/saml",
                                     "pro/intelligent-routing",
@@ -393,6 +410,7 @@
                                 "pages": [
                                     "de/pro/overview",
                                     "de/pro/compression",
+                                    "de/pro/courtesy-replies",
                                     "de/pro/sso",
                                     "de/pro/saml",
                                     "de/pro/intelligent-routing",
@@ -572,6 +590,7 @@
                                 "pages": [
                                     "zh/pro/overview",
                                     "zh/pro/compression",
+                                    "zh/pro/courtesy-replies",
                                     "zh/pro/sso",
                                     "zh/pro/saml",
                                     "zh/pro/intelligent-routing",
@@ -751,6 +770,7 @@
                                 "pages": [
                                     "pl/pro/overview",
                                     "pl/pro/compression",
+                                    "pl/pro/courtesy-replies",
                                     "pl/pro/sso",
                                     "pl/pro/saml",
                                     "pl/pro/intelligent-routing",

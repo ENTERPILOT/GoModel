@@ -135,15 +135,15 @@ test("Paraglide compiles interpolation and locale-aware plurals", () => {
     "5 dni",
   );
   assert.equal(
-    m.audit_provider_attempts({ count: 1 }, { locale: "pl" }),
+    m.requests_provider_attempts({ count: 1 }, { locale: "pl" }),
     "1 próba dostawcy",
   );
   assert.equal(
-    m.audit_provider_attempts({ count: 2 }, { locale: "pl" }),
+    m.requests_provider_attempts({ count: 2 }, { locale: "pl" }),
     "2 próby dostawców",
   );
   assert.equal(
-    m.audit_provider_attempts({ count: 5 }, { locale: "pl" }),
+    m.requests_provider_attempts({ count: 5 }, { locale: "pl" }),
     "5 prób dostawców",
   );
   assert.equal(
@@ -247,11 +247,11 @@ test("Paraglide compiles German interpolation and locale-aware plurals", () => {
   assert.equal(m.date_picker_days({ count: 1 }, { locale: "de" }), "1 Tag");
   assert.equal(m.date_picker_days({ count: 2 }, { locale: "de" }), "2 Tage");
   assert.equal(
-    m.audit_provider_attempts({ count: 1 }, { locale: "de" }),
+    m.requests_provider_attempts({ count: 1 }, { locale: "de" }),
     "1 Anbieterversuch",
   );
   assert.equal(
-    m.audit_provider_attempts({ count: 2 }, { locale: "de" }),
+    m.requests_provider_attempts({ count: 2 }, { locale: "de" }),
     "2 Anbieterversuche",
   );
   assert.equal(
@@ -344,8 +344,8 @@ test("Paraglide compiles Simplified Chinese interpolation and locale-aware plura
   );
   assert.equal(m.date_picker_days({ count: 1 }, { locale: "zh-CN" }), "1 天");
   assert.equal(m.date_picker_days({ count: 5 }, { locale: "zh-CN" }), "5 天");
-  assert.equal(m.audit_provider_attempts({ count: 1 }, { locale: "zh-CN" }), "1 次供应商尝试");
-  assert.equal(m.audit_provider_attempts({ count: 5 }, { locale: "zh-CN" }), "5 次供应商尝试");
+  assert.equal(m.requests_provider_attempts({ count: 1 }, { locale: "zh-CN" }), "1 次供应商尝试");
+  assert.equal(m.requests_provider_attempts({ count: 5 }, { locale: "zh-CN" }), "5 次供应商尝试");
   assert.equal(
     m.settings_pricing_summary(
       { matched: 1, recalculated: 1 },

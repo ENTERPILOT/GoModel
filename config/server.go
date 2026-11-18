@@ -88,7 +88,7 @@ type ServerConfig struct {
 	StreamStallTimeout int `yaml:"stream_stall_timeout" env:"STREAM_STALL_TIMEOUT"`
 
 	// TrustedProxies lists the networks your own proxies sit on, enabling
-	// header-based client addresses everywhere the gateway reports one (audit
+	// header-based client addresses everywhere the gateway reports one (request log
 	// entries, rate limit keys, logs). Entries are CIDR networks, bare
 	// addresses (a single host), or the presets "loopback" and "private".
 	//

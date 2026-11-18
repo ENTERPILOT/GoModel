@@ -14,8 +14,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/streaming"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -188,7 +188,7 @@ func skipPassthroughRequestHeader(key string, userPathHeader ...string) bool {
 		return true
 	}
 	// A forwarded Accept-Encoding makes Go's transport return the upstream
-	// body still compressed, which blinds the audit and usage SSE observers.
+	// body still compressed, which blinds the request log and usage SSE observers.
 	// Dropping it lets the transport negotiate gzip itself and hand back
 	// decoded bytes; the client then receives an uncompressed response with
 	// the Content-Encoding header removed by the transport.
@@ -259,7 +259,7 @@ func isSSEContentType(headers map[string][]string) bool {
 	return false
 }
 
-func passthroughStreamAuditPath(requestPath, providerType, endpoint string) string {
+func passthroughStreamRequestLogPath(requestPath, providerType, endpoint string) string {
 	normalized := "/" + strings.TrimLeft(strings.SplitN(endpoint, "?", 2)[0], "/")
 	switch providerType {
 	case "openai":
@@ -278,30 +278,30 @@ func passthroughStreamAuditPath(requestPath, providerType, endpoint string) stri
 	return requestPath
 }
 
-func passthroughAuditPath(c *echo.Context, providerType, endpoint string, info *core.PassthroughRouteInfo) string {
+func passthroughRequestLogPath(c *echo.Context, providerType, endpoint string, info *core.PassthroughRouteInfo) string {
 	if info != nil {
-		if auditPath := strings.TrimSpace(info.AuditPath); auditPath != "" {
-			return auditPath
+		if requestLogPath := strings.TrimSpace(info.RequestLogPath); requestLogPath != "" {
+			return requestLogPath
 		}
 	}
 	if c != nil {
 		if workflow := core.GetWorkflow(c.Request().Context()); workflow != nil && workflow.Passthrough != nil {
-			if auditPath := strings.TrimSpace(workflow.Passthrough.AuditPath); auditPath != "" {
-				return auditPath
+			if requestLogPath := strings.TrimSpace(workflow.Passthrough.RequestLogPath); requestLogPath != "" {
+				return requestLogPath
 			}
 		}
 		if env := core.GetWhiteBoxPrompt(c.Request().Context()); env != nil {
 			if info := env.CachedPassthroughRouteInfo(); info != nil {
-				if auditPath := strings.TrimSpace(info.AuditPath); auditPath != "" {
-					return auditPath
+				if requestLogPath := strings.TrimSpace(info.RequestLogPath); requestLogPath != "" {
+					return requestLogPath
 				}
 			}
 		}
 		if requestPath := strings.TrimSpace(c.Request().URL.Path); requestPath != "" {
-			return passthroughStreamAuditPath(requestPath, providerType, endpoint)
+			return passthroughStreamRequestLogPath(requestPath, providerType, endpoint)
 		}
 	}
-	return passthroughStreamAuditPath("", providerType, endpoint)
+	return passthroughStreamRequestLogPath("", providerType, endpoint)
 }
 
 func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerType, providerName, endpoint string, info *core.PassthroughRouteInfo, resp *core.PassthroughResponse) error {
@@ -309,10 +309,10 @@ func (s *passthroughService) proxyPassthroughResponse(c *echo.Context, providerT
 }
 
 // proxyPassthroughResponse relays a provider-native response (JSON or SSE) to
-// the client, attaching audit and usage stream observers plus any
+// the client, attaching request log and usage stream observers plus any
 // extraObservers the caller supplies for SSE responses. It is shared by the
 // /p/ passthrough surface and the /v1/messages native forwarding path.
-func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver, providerType, providerName, endpoint string, info *core.PassthroughRouteInfo, resp *core.PassthroughResponse, extraObservers ...streaming.Observer) error {
+func proxyPassthroughResponse(c *echo.Context, logger requestlog.LoggerInterface, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver, providerType, providerName, endpoint string, info *core.PassthroughRouteInfo, resp *core.PassthroughResponse, extraObservers ...streaming.Observer) error {
 	if resp == nil || resp.Body == nil {
 		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty passthrough response", nil))
 	}
@@ -327,26 +327,26 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	copyPassthroughResponseHeaders(c.Response().Header(), http.Header(resp.Headers))
 
 	if isSSEContentType(resp.Headers) {
-		auditlog.MarkEntryAsStreaming(c, true)
-		auditlog.EnrichEntryWithStream(c, true)
+		requestlog.MarkEntryAsStreaming(c, true)
+		requestlog.EnrichEntryWithStream(c, true)
 		workflow := core.GetWorkflow(c.Request().Context())
-		auditEnabled := logger != nil && logger.Config().Enabled && (workflow == nil || workflow.AuditEnabled())
+		requestLogEnabled := logger != nil && logger.Config().Enabled && (workflow == nil || workflow.RequestLogEnabled())
 
-		entry := auditlog.GetStreamEntryFromContext(c)
-		if auditEnabled && entry != nil {
-			auditlog.PopulateRequestData(entry, c.Request(), logger.Config())
+		entry := requestlog.GetStreamEntryFromContext(c)
+		if requestLogEnabled && entry != nil {
+			requestlog.PopulateRequestData(entry, c.Request(), logger.Config())
 		}
-		streamEntry := auditlog.CreateStreamEntry(c.Request().Context(), entry)
+		streamEntry := requestlog.CreateStreamEntry(c.Request().Context(), entry)
 		if streamEntry != nil {
 			streamEntry.StatusCode = resp.StatusCode
 		}
-		if auditEnabled && streamEntry != nil && logger.Config().LogHeaders {
-			auditlog.PopulateResponseHeaders(streamEntry, c.Response().Header())
+		if requestLogEnabled && streamEntry != nil && logger.Config().LogHeaders {
+			requestlog.PopulateResponseHeaders(streamEntry, c.Response().Header())
 		}
 
 		requestID := requestIDFromContextOrHeader(c.Request())
-		auditPath := passthroughAuditPath(c, providerType, endpoint, info)
-		usagePath := auditPath
+		requestLogPath := passthroughRequestLogPath(c, providerType, endpoint, info)
+		usagePath := requestLogPath
 		if requestPath := strings.TrimSpace(c.Request().URL.Path); requestPath != "" {
 			usagePath = requestPath
 		}
@@ -357,8 +357,8 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		model = resolvedModelFromWorkflow(workflow, model)
 
 		observers := make([]streaming.Observer, 0, 2+len(extraObservers))
-		if auditEnabled && streamEntry != nil {
-			if observer := auditlog.NewStreamLogObserver(logger, streamEntry, auditPath); observer != nil {
+		if requestLogEnabled && streamEntry != nil {
+			if observer := requestlog.NewStreamLogObserver(logger, streamEntry, requestLogPath); observer != nil {
 				observers = append(observers, observer)
 			}
 		}
@@ -374,9 +374,11 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		}
 
 		c.Response().WriteHeader(resp.StatusCode)
+		// The response is committed, so a failure here is recorded and not
+		// returned: the central error handler could only log it a second time,
+		// as a gateway 500, when it is usually the client hanging up.
 		if err := flushStream(c.Response(), wrappedStream); err != nil {
-			recordStreamingError(streamEntry, model, providerType, c.Request().URL.Path, requestID, c.Request().Context(), err)
-			return err
+			recordStreamFailure(c, streamEntry, "stream terminated abnormally", err, "model", model, "provider", providerType)
 		}
 		return nil
 	}
@@ -385,9 +387,9 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	// itself (top-level "usage" for Anthropic messages and OpenAI chat
 	// completions). Tee the relay into a bounded buffer and feed the complete
 	// body to the same observers as a single synthetic event, so usage
-	// accounting and response feedback match the SSE behavior. The audit
+	// accounting and response feedback match the SSE behavior. The request log
 	// stream observer is deliberately absent: non-streaming responses are
-	// audited by the regular audit middleware.
+	// logged by the regular request log middleware.
 	var observers []streaming.Observer
 	if isObservablePassthroughStatus(resp.StatusCode) {
 		observers = passthroughJSONResponseObservers(c, usageLogger, pricingResolver, providerType, providerName, endpoint, info, extraObservers)
@@ -395,7 +397,8 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	if len(observers) == 0 || !isJSONContentType(resp.Headers) {
 		c.Response().WriteHeader(resp.StatusCode)
 		if _, err := io.Copy(c.Response(), resp.Body); err != nil {
-			return err
+			recordResponseFailure(c, err)
+			return nil
 		}
 		if f, ok := c.Response().(http.Flusher); ok {
 			f.Flush()
@@ -407,7 +410,8 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	c.Response().WriteHeader(resp.StatusCode)
 	if _, err := io.Copy(c.Response(), io.TeeReader(resp.Body, capture)); err != nil {
 		// The client received an incomplete body; do not account for it.
-		return err
+		recordResponseFailure(c, err)
+		return nil
 	}
 	if f, ok := c.Response().(http.Flusher); ok {
 		f.Flush()
@@ -453,11 +457,11 @@ func relayPassthroughError(c *echo.Context, providerType string, resp *core.Pass
 		return handleError(c, &gatewayErrorWithResponseHeaders{GatewayError: gatewayErr, headers: headers})
 	}
 
-	// The client receives the provider body; logs and the audit row still carry
+	// The client receives the provider body; logs and the request log row still carry
 	// the classified gateway error, exactly as handleError would record it.
 	logHandledError(c, gatewayErr)
-	enrichAuditEntryWithProviderAttempts(c)
-	auditlog.EnrichEntryWithGatewayError(c, gatewayErr)
+	enrichRequestLogEntryWithProviderAttempts(c)
+	requestlog.EnrichEntryWithGatewayError(c, gatewayErr)
 
 	for key, values := range headers {
 		for _, value := range values {
@@ -467,7 +471,8 @@ func relayPassthroughError(c *echo.Context, providerType string, resp *core.Pass
 	c.Response().Header().Set("Content-Type", passthroughErrorContentType(resp.Headers))
 	c.Response().WriteHeader(resp.StatusCode)
 	if _, err := c.Response().Write(body); err != nil {
-		return err
+		recordResponseFailure(c, err)
+		return nil
 	}
 	if f, ok := c.Response().(http.Flusher); ok {
 		f.Flush()
@@ -574,7 +579,7 @@ func passthroughUsageObserver(c *echo.Context, usageLogger usage.LoggerInterface
 func passthroughJSONResponseObservers(c *echo.Context, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver, providerType, providerName, endpoint string, info *core.PassthroughRouteInfo, extraObservers []streaming.Observer) []streaming.Observer {
 	workflow := core.GetWorkflow(c.Request().Context())
 	requestID := requestIDFromContextOrHeader(c.Request())
-	usagePath := passthroughAuditPath(c, providerType, endpoint, info)
+	usagePath := passthroughRequestLogPath(c, providerType, endpoint, info)
 	if requestPath := strings.TrimSpace(c.Request().URL.Path); requestPath != "" {
 		usagePath = requestPath
 	}

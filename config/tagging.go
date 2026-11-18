@@ -102,7 +102,7 @@ func normalizeTaggingConfig(cfg *TaggingConfig) error {
 		}
 		// Credential-bearing headers must never be tagging label sources:
 		// their values would be persisted as plaintext labels in usage and
-		// audit records, bypassing audit header redaction.
+		// request log records, bypassing request log header redaction.
 		if core.IsCredentialHeader(name) {
 			return fmt.Errorf("tagging.headers[%d]: header %q may carry credentials and cannot be used for tagging", i, name)
 		}

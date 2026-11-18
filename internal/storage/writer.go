@@ -2,12 +2,12 @@ package storage
 
 import "github.com/google/uuid"
 
-// processWriterID names this gateway process in the audit and usage rows it
+// processWriterID names this gateway process in the request log and usage rows it
 // persists. It is fixed for the life of the process, so every configuration
 // generation a reload builds shares it.
 var processWriterID = uuid.NewString()
 
-// WriterID returns the identifier this process stamps on the audit and usage
+// WriterID returns the identifier this process stamps on the request log and usage
 // rows it writes. Another replica's live log view uses it to tell the rows it
 // wrote itself, which it already streamed, from the rows of its peers.
 func WriterID() string {
@@ -21,7 +21,7 @@ type RecentWrite struct {
 	WrittenAt int64
 }
 
-// WriteStamp marks the batch write that persisted an audit or usage entry:
+// WriteStamp marks the batch write that persisted a request log or usage entry:
 // the writing process (WriterID) and its clock in unix microseconds. Entries
 // carry a pointer to it so an unstamped entry costs one word; the MongoDB
 // stores inline it as the writer_id and written_at fields.

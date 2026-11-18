@@ -347,7 +347,7 @@ test("filterAuthKeys userPath keeps the path and its subtree on segment boundari
   assert.equal(authKeyUnderPath(authKey({ user_path: "" }), "/acme"), false);
 });
 
-test("lastUsedCellState shows the timestamp whenever an audit entry exists", () => {
+test("lastUsedCellState shows the timestamp whenever a request log entry exists", () => {
   assert.equal(lastUsedCellState("2026-08-26T23:39:51Z", null, true), "used");
   assert.equal(lastUsedCellState("2026-08-26T23:39:51Z", 0, true), "used");
   assert.equal(lastUsedCellState("2026-08-26T23:39:51Z", 30, true), "used");

@@ -8,6 +8,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -208,14 +209,17 @@ func TestPeerSumIgnoresSharedRowOnPerChildRule(t *testing.T) {
 	require.Nil(t, err)
 }
 
+// A generation whose load failed still saves what it counts, in rows of its
+// own: the windows other writers persisted stay as they were.
 func TestFailedLoadDoesNotReplacePersistedWindows(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		now := time.Now().Unix()
 		store := &failLoadStore{err: errors.New("store down")}
-		store.counters = []WindowSnapshot{{
+		persisted := WindowSnapshot{
 			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
-			RequestsWindowStart: now, RequestsCurrent: 9,
-		}}
+			RequestsWindowStart: now, RequestsCurrent: 9, UpdatedAt: now,
+		}
+		store.counters = []WindowSnapshot{persisted}
 		err := store.UpsertRules(context.Background(), []Rule{{
 			Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
 			MaxRequests: new(int64(10)), Source: SourceManual,
@@ -229,12 +233,16 @@ func TestFailedLoadDoesNotReplacePersistedWindows(t *testing.T) {
 		service.Start(context.Background())
 		_, err = service.Acquire(onPath("/team"), time.Now().UTC())
 		require.NoError(t, err)
-
-		service.Close()
-		// Several flush intervals pass on the bubble's clock without a write.
 		time.Sleep(3 * interval)
-		require.Len(t, store.counters, 1)
-		require.Equal(t, int64(9), store.counters[0].RequestsCurrent)
+		service.Close()
+
+		require.Len(t, store.counters, 2)
+		byWriter := make(map[string]WindowSnapshot, 2)
+		for _, counter := range store.counters {
+			byWriter[counter.Writer] = counter
+		}
+		require.Equal(t, int64(9), byWriter[persisted.Writer].RequestsCurrent, "the persisted window is untouched")
+		require.Equal(t, int64(1), byWriter[service.writer].RequestsCurrent, "the generation saves its own count")
 	})
 }
 
@@ -308,6 +316,61 @@ func TestFlushIntervalZeroOnlyWritesOnClose(t *testing.T) {
 	})
 }
 
+// TestPruneRunsAboutOnceAMinuteWhateverTheFlushInterval: the prune has its
+// own timer, so neither a disabled nor an hourly flush delays it.
+func TestPruneRunsAboutOnceAMinuteWhateverTheFlushInterval(t *testing.T) {
+	for _, interval := range []time.Duration{0, time.Hour} {
+		t.Run(interval.String(), func(t *testing.T) {
+			store := &recordingStore{}
+			synctest.Test(t, func(t *testing.T) {
+				service, err := NewService(context.Background(), store, WithFlushInterval(interval))
+				require.NoError(t, err)
+				service.Start(context.Background())
+
+				time.Sleep(counterPruneInterval)
+				synctest.Wait()
+				require.Equal(t, int64(1), store.prunes.Load(), "one prune in the first minute")
+				require.Zero(t, store.saves.Load(), "no flush yet")
+
+				time.Sleep(5 * counterPruneInterval)
+				synctest.Wait()
+				assert.GreaterOrEqual(t, store.prunes.Load(), int64(5))
+
+				service.Close()
+				prunes := store.prunes.Load()
+				time.Sleep(10 * counterPruneInterval)
+				assert.Equal(t, prunes, store.prunes.Load(), "Close stops the prune timer")
+			})
+		})
+	}
+}
+
+// TestFlushLoopPrunesAboutOnceAMinute: every flush saves and loads, but the
+// prune runs apart from them, first anywhere in the first interval and then
+// once per interval plus jitter.
+func TestFlushLoopPrunesAboutOnceAMinute(t *testing.T) {
+	store := &recordingStore{}
+	synctest.Test(t, func(t *testing.T) {
+		service, err := NewService(context.Background(), store, WithFlushInterval(time.Second))
+		require.NoError(t, err)
+		service.Start(context.Background())
+
+		time.Sleep(counterPruneInterval)
+		synctest.Wait()
+		require.Equal(t, int64(1), store.prunes.Load(), "one prune in the first interval")
+
+		const minutes = 10
+		time.Sleep(minutes * counterPruneInterval)
+		synctest.Wait()
+		prunes := store.prunes.Load()
+		assert.LessOrEqual(t, prunes, int64(1+minutes), "never more than once per interval")
+		assert.GreaterOrEqual(t, prunes, int64(1+minutes*counterPruneInterval/(counterPruneInterval+counterPruneJitter)))
+
+		service.Close()
+		assert.Equal(t, prunes, store.prunes.Load(), "Close leaves the prune to the loop's next run")
+	})
+}
+
 func TestCloseDuringLoadDoesNotRestore(t *testing.T) {
 	now := time.Now().Unix()
 	store := &blockingLoadStore{
@@ -356,7 +419,8 @@ func TestResetRuleReturnsPersistError(t *testing.T) {
 
 type recordingStore struct {
 	memStore
-	saves atomic.Int64
+	saves  atomic.Int64
+	prunes atomic.Int64
 }
 
 func (s *recordingStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
@@ -364,12 +428,17 @@ func (s *recordingStore) SaveCounters(ctx context.Context, snapshots []WindowSna
 	return s.memStore.SaveCounters(ctx, snapshots)
 }
 
+func (s *recordingStore) PruneCounters(ctx context.Context) error {
+	s.prunes.Add(1)
+	return s.memStore.PruneCounters(ctx)
+}
+
 type failLoadStore struct {
 	memStore
 	err error
 }
 
-func (s *failLoadStore) LoadCounters(context.Context, int64) ([]WindowSnapshot, error) {
+func (s *failLoadStore) LoadCounters(context.Context, int64, string) ([]WindowSnapshot, error) {
 	return nil, s.err
 }
 
@@ -388,10 +457,10 @@ type blockingLoadStore struct {
 	release chan struct{}
 }
 
-func (s *blockingLoadStore) LoadCounters(_ context.Context, since int64) ([]WindowSnapshot, error) {
+func (s *blockingLoadStore) LoadCounters(_ context.Context, since int64, exclude string) ([]WindowSnapshot, error) {
 	close(s.started)
 	<-s.release
-	return s.memStore.LoadCounters(context.Background(), since)
+	return s.memStore.LoadCounters(context.Background(), since, exclude)
 }
 
 // TestDeleteRuleStopsEnforcingWhenSnapshotDeleteFails: the rule row is already

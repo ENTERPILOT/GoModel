@@ -160,7 +160,7 @@ func (f liveLogTypeFilter) matches(eventType string) bool {
 }
 
 // maxReusedLiveFrameBuffer caps the frame buffer a connection keeps between
-// writes. Audit events can carry bodies near 1 MiB; keeping such a buffer would
+// writes. Request log events can carry bodies near 1 MiB; keeping such a buffer would
 // pin it for the whole life of a dashboard connection that otherwise sends
 // small frames and heartbeats.
 const maxReusedLiveFrameBuffer = 64 << 10

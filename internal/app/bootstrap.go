@@ -26,7 +26,7 @@ import (
 // only cross-phase intermediates are held here.
 //
 // Phases run in the order phases() lists them. Several depend on that order
-// (hooks before providers, audit before workflows, every fallible step before
+// (hooks before providers, request log before workflows, every fallible step before
 // the server binds); the comment on each phase says why.
 type bootstrap struct {
 	ctx    context.Context
@@ -77,6 +77,7 @@ func newBootstrap(ctx context.Context, cfg Config) *bootstrap {
 	// transport; env vars still take precedence inside httpclient.
 	httpclient.SetConfiguredTimeouts(appCfg.HTTP.Timeout, appCfg.HTTP.ResponseHeaderTimeout)
 	httpclient.SetConfiguredStreamIdleTimeout(appCfg.HTTP.StreamIdleTimeout)
+	httpclient.SetConfiguredMaxIdleConnsPerHost(appCfg.HTTP.MaxIdleConnsPerHost)
 	if appCfg.Offline {
 		catalog := "disabled"
 		if appCfg.Cache.Model.ModelList.URL != "" {

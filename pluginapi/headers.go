@@ -5,7 +5,7 @@ import "net/http"
 // Headers carries the HTTP headers of an exchange.
 type Headers struct {
 	// Request is a copy of the inbound headers with credential headers
-	// redacted. Edits affect upstream passthrough headers and the audit
+	// redacted. Edits affect upstream passthrough headers and the request log
 	// record.
 	Request http.Header
 	// Response is applied to the client response: a header set here is sent

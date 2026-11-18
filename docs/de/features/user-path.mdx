@@ -1,6 +1,6 @@
 ---
 title: "User Path"
-description: "Verwenden Sie user_path, um Keys, Modellzugriff, Modelllisten, Workflows, Nutzung und Audit-Logs einem Bereich zuzuordnen."
+description: "Verwenden Sie user_path, um Keys, Modellzugriff, Modelllisten, Workflows, Nutzung und Request-Logs einem Bereich zuzuordnen."
 icon: "route"
 keywords: ["user_path", "Mandantenfähigkeit", "multi-tenancy", "Bereichsbeschränkung", "Zugriffskontrolle", "access control", "Team-Isolierung"]
 ---
@@ -10,7 +10,7 @@ keywords: ["user_path", "Mandantenfähigkeit", "multi-tenancy", "Bereichsbeschr�
 `user_path` ist eine normalisierte Hierarchie für den Aufrufer, zum Beispiel
 `/team/alpha` oder `/team/alpha/service`.
 
-GoModel verwendet sie, um Modellzugriff, Workflows, Budgets, Nutzung und Audit-Daten
+GoModel verwendet sie, um Modellzugriff, Workflows, Budgets, Nutzung und Request-Log-Daten
 dem richtigen Team, Tenant, Dienst oder Kunden zuzuordnen.
 
 ## API-Keys
@@ -45,7 +45,7 @@ Der Header-Name lässt sich mit `USER_PATH_HEADER` oder
 `X-GoModel-User-Path`.
 
 Hat der API-Key einen eigenen `user_path`, hat der Key Vorrang. GoModel überschreibt den
-Header-Wert mit dem an den Key gebundenen Pfad, bevor Workflow-Abgleich, Audit-Logging,
+Header-Wert mit dem an den Key gebundenen Pfad, bevor Workflow-Abgleich, Request-Logging,
 Nutzungserfassung und Prüfungen des Modellzugriffs laufen.
 
 ### Keys ohne gebundenen Pfad
@@ -157,7 +157,7 @@ unterschiedliche Regeln für den Modellzugriff gelten.
 ## Workflows
 
 Workflows können auch `scope_user_path` enthalten, sodass verschiedene Teams oder Dienste
-unterschiedliche Einstellungen für Budget, Cache, Audit, Nutzung, Guardrails und Failover verwenden können.
+unterschiedliche Einstellungen für Budget, Cache, Request-Logging, Nutzung, Guardrails und Failover verwenden können.
 
 Sie können den User-Path mit Provider- und Modellbereich kombinieren, zum Beispiel:
 
