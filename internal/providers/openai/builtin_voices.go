@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"log/slog"
 	"net/url"
 	"strings"
 
@@ -10,9 +11,10 @@ import (
 
 // openAIVoices lists OpenAI's built-in text-to-speech voices, in the order of
 // the Text to speech guide
-// (https://developers.openai.com/api/docs/guides/text-to-speech). OpenAI has
-// no voice-listing endpoint, so this table must be updated when OpenAI adds
-// voices. legacy marks the voices tts-1 and tts-1-hd also support.
+// (https://developers.openai.com/api/docs/guides/text-to-speech). OpenAI's
+// voice-listing endpoint returns only custom voices, so this table must be
+// updated when OpenAI adds voices. legacy marks the voices tts-1 and tts-1-hd
+// also support.
 var openAIVoices = []struct {
 	id     string
 	legacy bool
@@ -32,12 +34,15 @@ var openAIVoices = []struct {
 	{"cedar", false},
 }
 
-// ListVoices returns OpenAI's built-in voices for a speech model without
-// calling the upstream, which has no voice-listing route. An organization's
-// custom voices are not included: OpenAI has no API to list them. A model that
-// is not a speech model reports voice listing as unsupported: realtime and
-// chat-audio models take a different voice set. A provider pointed at a custom
-// base URL (a self-hosted server) forwards to its /audio/voices instead.
+// ListVoices returns the voices of an OpenAI speech model: the built-in ones
+// from the table above, then the organization's custom voices from the
+// upstream. The custom voices are an addition to a list that is useful without
+// them, so when the upstream call fails (a key without the api.voices.read
+// permission, an outage) the built-in voices are still returned and the
+// failure is logged. A model that is not a speech model reports voice listing
+// as unsupported: realtime and chat-audio models take a different voice set.
+// A provider pointed at a custom base URL (a self-hosted server) forwards to
+// its /audio/voices instead.
 func (p *Provider) ListVoices(ctx context.Context, req *core.AudioVoicesRequest) (*core.AudioVoicesResponse, error) {
 	if req == nil || !isOpenAIHost(p.GetBaseURL()) {
 		return p.CompatibleProvider.ListVoices(ctx, req)
@@ -46,7 +51,12 @@ func (p *Provider) ListVoices(ctx context.Context, req *core.AudioVoicesRequest)
 	if voices == nil {
 		return nil, core.NewAudioVoicesUnsupportedError(req.Model)
 	}
-	return &core.AudioVoicesResponse{Voices: voices}, nil
+	custom, err := p.customVoices(ctx, req.Model)
+	if err != nil {
+		slog.WarnContext(ctx, "openai custom voice listing failed; returning the voices read so far",
+			"provider", p.providerName, "custom_voices", len(custom), "error", err)
+	}
+	return &core.AudioVoicesResponse{Voices: append(voices, custom...)}, nil
 }
 
 // builtinVoices returns the built-in voices a speech model supports: the

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -33,38 +34,163 @@ func voiceList(ids ...string) []core.AudioVoice {
 	return voices
 }
 
+// newNativeVoicesProvider returns a provider configured for OpenAI's own API
+// whose requests reach a fake upstream serving handler.
+func newNativeVoicesProvider(t *testing.T, baseURL string, handler http.HandlerFunc) (*Provider, *providertest.Capture) {
+	t.Helper()
+	server, capture := providertest.Server(t, handler)
+	target, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = &http.Client{Transport: redirectTransport{target: target}}
+	return New(providers.ProviderConfig{APIKey: "sk-test", BaseURL: baseURL}, opts).(*Provider), capture
+}
+
+func voicesHandler(status int, body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}
+}
+
+const noCustomVoices = `{"object":"list","data":[],"first_id":null,"last_id":null,"has_more":false}`
+
+var (
+	allBuiltinVoices    = voiceList("alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar")
+	legacyBuiltinVoices = voiceList("alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer")
+)
+
 func TestListVoices_NativeOpenAIServesBuiltinVoices(t *testing.T) {
-	all := voiceList("alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar")
-	legacy := voiceList("alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer")
 	tests := []struct {
 		name    string
 		baseURL string
 		model   string
 		want    []core.AudioVoice
 	}{
-		{name: "gpt-4o-mini-tts", model: "gpt-4o-mini-tts", want: all},
-		{name: "tts-1", model: "tts-1", want: legacy},
-		{name: "tts-1-hd", model: "tts-1-hd", want: legacy},
-		{name: "tts-1-hd snapshot", model: "tts-1-hd-1106", want: legacy},
-		{name: "gpt-4o-mini-tts snapshot", model: "gpt-4o-mini-tts-2025-12-15", want: all},
-		{name: "explicit OpenAI base URL", baseURL: "https://API.openai.com/v1/", model: "tts-1", want: legacy},
-		{name: "regional OpenAI host", baseURL: "https://eu.api.openai.com/v1", model: "gpt-4o-mini-tts", want: all},
+		{name: "gpt-4o-mini-tts", model: "gpt-4o-mini-tts", want: allBuiltinVoices},
+		{name: "tts-1", model: "tts-1", want: legacyBuiltinVoices},
+		{name: "tts-1-hd", model: "tts-1-hd", want: legacyBuiltinVoices},
+		{name: "tts-1-hd snapshot", model: "tts-1-hd-1106", want: legacyBuiltinVoices},
+		{name: "gpt-4o-mini-tts snapshot", model: "gpt-4o-mini-tts-2025-12-15", want: allBuiltinVoices},
+		{name: "explicit OpenAI base URL", baseURL: "https://API.openai.com/v1/", model: "tts-1", want: legacyBuiltinVoices},
+		{name: "regional OpenAI host", baseURL: "https://eu.api.openai.com/v1", model: "gpt-4o-mini-tts", want: allBuiltinVoices},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server, capture := providertest.JSONServer(t, http.StatusNotFound, `{"error":{"message":"Invalid URL"}}`)
-			target, err := url.Parse(server.URL)
-			require.NoError(t, err)
-			opts := providertest.Options(llmclient.Hooks{})
-			opts.HTTPClient = &http.Client{Transport: redirectTransport{target: target}}
-			provider := New(providers.ProviderConfig{APIKey: "sk-test", BaseURL: tt.baseURL}, opts).(*Provider)
+			provider, _ := newNativeVoicesProvider(t, tt.baseURL, voicesHandler(http.StatusOK, noCustomVoices))
 
 			resp, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: tt.model})
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, resp.Voices)
-			assert.Zero(t, capture.Count(), "OpenAI has no voice listing; no upstream request is expected")
 		})
 	}
+}
+
+// Custom voices follow the built-in ones. Prompt-generated voices are left
+// out: the speech endpoint does not accept them.
+func TestListVoices_NativeOpenAIAppendsCustomVoices(t *testing.T) {
+	provider, capture := newNativeVoicesProvider(t, "", voicesHandler(http.StatusOK, `{"object":"list","data":[
+		{"object":"audio.voice","id":"voice_rec1","name":"Narrator","type":"audio_sample","created_at":1734220800},
+		{"object":"audio.voice","id":"voice_prompt1","name":"Generated","type":"prompt","prompt":"a calm voice"},
+		{"object":"audio.voice","id":"voice_rec2","name":" "},
+		{"object":"audio.voice","id":"","name":"no id"}
+	],"first_id":"voice_rec1","last_id":"voice_rec2","has_more":false}`))
+
+	for _, tt := range []struct {
+		model    string
+		builtins []core.AudioVoice
+	}{
+		{model: "gpt-4o-mini-tts", builtins: allBuiltinVoices},
+		{model: "tts-1", builtins: legacyBuiltinVoices},
+	} {
+		t.Run(tt.model, func(t *testing.T) {
+			resp, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: tt.model})
+			require.NoError(t, err)
+			want := append(append([]core.AudioVoice{}, tt.builtins...),
+				core.AudioVoice{ID: "voice_rec1", Name: "Narrator"},
+				core.AudioVoice{ID: "voice_rec2", Name: "voice_rec2"})
+			assert.Equal(t, want, resp.Voices)
+
+			req := capture.Last(t)
+			assert.Equal(t, http.MethodGet, req.Method)
+			assert.Equal(t, "/v1/audio/voices", req.Path)
+			assert.Equal(t, url.Values{"limit": {"100"}}, req.Query)
+			assert.Equal(t, "Bearer sk-test", req.Header.Get("Authorization"))
+		})
+	}
+}
+
+func TestListVoices_NativeOpenAIFollowsCustomVoicePages(t *testing.T) {
+	pages := map[string]string{
+		"":         `{"data":[{"id":"voice_a","name":"A"}],"last_id":"voice_a","has_more":true}`,
+		"voice_a":  `{"data":[{"id":"voice_b","name":"B"}],"last_id":"voice_b","has_more":true}`,
+		"voice_b":  `{"data":[{"id":"voice_c","name":"C"}],"last_id":"voice_c","has_more":false}`,
+		"voice_c":  `{"data":[{"id":"voice_unreachable","name":"X"}],"has_more":false}`,
+		"voice_zz": `{"data":[]}`,
+	}
+	provider, capture := newNativeVoicesProvider(t, "", func(w http.ResponseWriter, r *http.Request) {
+		voicesHandler(http.StatusOK, pages[r.URL.Query().Get("after")])(w, r)
+	})
+
+	resp, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: "tts-1"})
+	require.NoError(t, err)
+	want := append(append([]core.AudioVoice{}, legacyBuiltinVoices...),
+		core.AudioVoice{ID: "voice_a", Name: "A"}, core.AudioVoice{ID: "voice_b", Name: "B"}, core.AudioVoice{ID: "voice_c", Name: "C"})
+	assert.Equal(t, want, resp.Voices)
+	assert.Equal(t, 3, capture.Count())
+}
+
+// A listing that never ends stops at the page cap instead of crawling on.
+func TestListVoices_NativeOpenAIStopsAtCustomVoicePageCap(t *testing.T) {
+	provider, capture := newNativeVoicesProvider(t, "", func(w http.ResponseWriter, r *http.Request) {
+		id := "voice_" + r.URL.Query().Get("after") + "x"
+		voicesHandler(http.StatusOK, `{"data":[{"id":"`+id+`","name":"n"}],"last_id":"`+id+`","has_more":true}`)(w, r)
+	})
+
+	resp, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: "tts-1"})
+	require.NoError(t, err)
+	assert.Len(t, resp.Voices, len(legacyBuiltinVoices)+maxCustomVoicePages)
+	assert.Equal(t, maxCustomVoicePages, capture.Count())
+}
+
+// The built-in voices do not depend on the custom voice lookup succeeding.
+func TestListVoices_NativeOpenAIKeepsBuiltinVoicesWhenCustomListingFails(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "missing permission", status: http.StatusForbidden, body: `{"error":{"message":"Missing scopes: api.voices.read","type":"invalid_request_error"}}`},
+		{name: "no such route", status: http.StatusNotFound, body: `{"error":{"message":"Invalid URL"}}`},
+		{name: "upstream failure", status: http.StatusInternalServerError, body: `{"error":{"message":"boom","type":"server_error"}}`},
+		{name: "unrecognized body", status: http.StatusOK, body: `{"object":"list"}`},
+		{name: "not JSON", status: http.StatusOK, body: `<html>`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, capture := newNativeVoicesProvider(t, "", voicesHandler(tt.status, tt.body))
+
+			resp, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: "gpt-4o-mini-tts"})
+			require.NoError(t, err)
+			assert.Equal(t, allBuiltinVoices, resp.Voices)
+			assert.Positive(t, capture.Count())
+		})
+	}
+}
+
+func TestListVoices_NativeOpenAIKeepsCustomVoicesReadBeforeAFailure(t *testing.T) {
+	provider, _ := newNativeVoicesProvider(t, "", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("after") == "" {
+			voicesHandler(http.StatusOK, `{"data":[{"id":"voice_a","name":"A"}],"last_id":"voice_a","has_more":true}`)(w, r)
+			return
+		}
+		voicesHandler(http.StatusNotFound, `{"error":{"message":"No voice found with id 'voice_a'"}}`)(w, r)
+	})
+
+	resp, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: "tts-1"})
+	require.NoError(t, err)
+	assert.Equal(t, append(append([]core.AudioVoice{}, legacyBuiltinVoices...), core.AudioVoice{ID: "voice_a", Name: "A"}), resp.Voices)
 }
 
 // Realtime and chat models take other voice sets, so the speech list is not
@@ -72,14 +198,9 @@ func TestListVoices_NativeOpenAIServesBuiltinVoices(t *testing.T) {
 func TestListVoices_NativeOpenAIRejectsNonSpeechModels(t *testing.T) {
 	for _, model := range []string{"gpt-realtime", "gpt-4o-audio-preview", "gpt-4o"} {
 		t.Run(model, func(t *testing.T) {
-			server, capture := providertest.JSONServer(t, http.StatusNotFound, `{"error":{"message":"Invalid URL"}}`)
-			target, err := url.Parse(server.URL)
-			require.NoError(t, err)
-			opts := providertest.Options(llmclient.Hooks{})
-			opts.HTTPClient = &http.Client{Transport: redirectTransport{target: target}}
-			provider := New(providers.ProviderConfig{APIKey: "sk-test"}, opts).(*Provider)
+			provider, capture := newNativeVoicesProvider(t, "", voicesHandler(http.StatusOK, noCustomVoices))
 
-			_, err = provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: model})
+			_, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: model})
 			var gatewayErr *core.GatewayError
 			require.ErrorAs(t, err, &gatewayErr)
 			assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
@@ -87,6 +208,48 @@ func TestListVoices_NativeOpenAIRejectsNonSpeechModels(t *testing.T) {
 			assert.Zero(t, capture.Count())
 		})
 	}
+}
+
+// OpenAI takes a custom voice ID only as an object, while clients that pick a
+// voice from the listing send its id as a string.
+func TestCreateSpeech_NativeOpenAISendsCustomVoiceIDAsObject(t *testing.T) {
+	audio := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("audio-bytes"))
+	}
+	tests := []struct {
+		name string
+		body string
+		want string // raw JSON of the upstream voice member
+	}{
+		{name: "custom voice id string", body: `{"model":"tts-1","input":"hi","voice":"voice_1234"}`, want: `{"id":"voice_1234"}`},
+		{name: "custom voice object unchanged", body: `{"model":"tts-1","input":"hi","voice":{"id":"voice_1234","future":1}}`, want: `{"id":"voice_1234","future":1}`},
+		{name: "built-in voice", body: `{"model":"tts-1","input":"hi","voice":"nova"}`, want: `"nova"`},
+		{name: "default voice", body: `{"model":"tts-1","input":"hi"}`, want: `"alloy"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, capture := newNativeVoicesProvider(t, "", audio)
+			req, err := core.DecodeAudioSpeechRequest([]byte(tt.body), nil)
+			require.NoError(t, err)
+
+			_, err = provider.CreateSpeech(context.Background(), req)
+			require.NoError(t, err)
+
+			var sent map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(capture.Last(t).Body, &sent))
+			assert.JSONEq(t, tt.want, string(sent["voice"]))
+		})
+	}
+
+	t.Run("custom base URL keeps the string", func(t *testing.T) {
+		server, capture := providertest.Server(t, audio)
+		provider := New(providers.ProviderConfig{APIKey: "sk-local", BaseURL: server.URL + "/v1"}, providertest.Options(llmclient.Hooks{})).(*Provider)
+
+		_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{Model: "kokoro", Input: "hi", Voice: "voice_alba"})
+		require.NoError(t, err)
+		assert.Equal(t, "voice_alba", capture.Last(t).JSON(t)["voice"])
+	})
 }
 
 // TestListVoices_SetBaseURLOverrideForwards checks a base URL override away

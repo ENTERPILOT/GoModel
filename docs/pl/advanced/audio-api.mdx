@@ -110,6 +110,12 @@ Pole `id` musi być tekstem zawierającym co najmniej jeden znak inny niż biał
 w przeciwnym razie zwracany jest błąd `400`. Zgodny provider, który nie
 obsługuje własnych głosów, może odrzucić obiekt.
 
+OpenAI przyjmuje własny głos tylko w formie obiektu. Dla OpenAI
+(`api.openai.com` i hosty regionalne) GoModel wysyła więc tekst zaczynający
+się od `voice_` jako `{"id": "voice_…"}`, dzięki czemu `id` z
+[wykrywania głosów](/pl/advanced/api-endpoints#wykrywanie-głosów) działa także
+jako zwykły tekst.
+
 Zsyntetyzowane audio jest **przekazywane na bieżąco, w miarę jak provider je generuje** – zobacz
 [Streaming](#streaming).
 
