@@ -532,14 +532,15 @@ Odbiorca może mimo to zobaczyć ten sam alert dwa razy. Ponowienie powtarza
 `POST`, na który odpowiedź zaginęła w drodze powrotnej, z tym samym `id`, więc
 deduplikuj po `id`. Repliki z SQLite, każda z własną bazą, zgłaszają alert
 osobno, zwykle z innym `id`, bo każda baza nadaje budżetowi własną `revision`
-(repliki uruchomione z kopii tej samej bazy dzielą ją, a z nią `id`). Aby
+(repliki uruchomione z kopii tej samej bazy mogą ją dzielić, a z nią `id`,
+dopóki budżet nie zmieni się na jednej z nich). Aby
 scalić także je, deduplikuj po `budget.scope`, `budget.subject`,
 `budget.effective_subject`, `budget.period_seconds`, `period_start`
 i `threshold_percent`. Ten klucz odrzuca też alert zgłoszony ponownie po zmianie
 kwoty lub podstawy kosztu budżetu w tym samym okresie, bo żadne z jego pól się
 nie zmienia; dodanie `amount` i `cost_basis` nie pomaga, gdy budżet wraca do
-wcześniejszej wartości. Aby zachować te alerty między replikami, daj im wspólną
-bazę.
+wcześniejszej wartości. Aby zachować te alerty, daj replikom wspólną bazę
+i deduplikuj wyłącznie po `id`.
 
 ### Payload webhooka
 

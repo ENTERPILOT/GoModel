@@ -558,15 +558,16 @@ sendet einen `POST` erneut, dessen Antwort auf dem Rückweg verloren ging, mit
 derselben `id`; deduplizieren Sie also auf `id`. Replikate mit SQLite, jedes
 mit eigener Datenbank, lösen die Warnung jeweils aus, meist mit einer anderen
 `id`, weil jede Datenbank dem Budget eine eigene `revision` gibt (Replikate, die
-aus Kopien derselben Datenbank gestartet wurden, teilen sie und damit die `id`).
+aus Kopien derselben Datenbank gestartet wurden, können sie und damit die `id`
+teilen, bis sich das Budget auf einem von ihnen ändert).
 Um auch diese zusammenzuführen, deduplizieren Sie auf `budget.scope`,
 `budget.subject`, `budget.effective_subject`, `budget.period_seconds`,
 `period_start` und `threshold_percent`. Dieser Schlüssel verwirft auch die
 Warnung, die nach einer Änderung von Betrag oder Kostenbasis im selben Zeitraum
 erneut ausgelöst wird, da sich keines seiner Felder ändert; `amount` und
 `cost_basis` hinzuzufügen hilft nicht, wenn ein Budget auf einen früheren Wert
-zurückgesetzt wird. Um diese Warnungen über Replikate hinweg zu behalten, geben
-Sie ihnen eine gemeinsame Datenbank.
+zurückgesetzt wird. Um diese Warnungen zu behalten, geben Sie den Replikaten
+eine gemeinsame Datenbank und deduplizieren Sie nur auf `id`.
 
 ### Webhook-Payload
 
