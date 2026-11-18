@@ -82,7 +82,9 @@ func ExportConfig(ctx context.Context, opts ConfigExportOptions) ([]byte, error)
 	for _, name := range declared.Inactive {
 		doc.Unresolved = append(doc.Unresolved, "providers."+name)
 	}
-	cfg.VirtualModels = exportVirtualModels(cfg.VirtualModels, stored.virtualModels)
+	if cfg.VirtualModels, err = exportVirtualModels(cfg.VirtualModels, stored.virtualModels); err != nil {
+		return nil, err
+	}
 	cfg.Users = exportUsers(cfg.Users, stored.users)
 	cfg.MCP, references = exportMCP(cfg.MCP, stored.mcpServers, stored.mcpVirtual)
 	doc.References = append(doc.References, references...)

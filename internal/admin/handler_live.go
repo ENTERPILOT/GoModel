@@ -33,7 +33,7 @@ func (h *Handler) LiveLogs(c *echo.Context) error {
 
 	res := c.Response()
 	// SSE responses are intentionally long-lived; keep disconnect detection via writes.
-	_ = http.NewResponseController(res).SetWriteDeadline(time.Time{})
+	clearWriteDeadline(c)
 	res.Header().Set(echo.HeaderContentType, "text/event-stream")
 	res.Header().Set(echo.HeaderCacheControl, "no-cache, no-transform")
 	res.Header().Set(echo.HeaderConnection, "keep-alive")

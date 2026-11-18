@@ -34,6 +34,8 @@ providers:
 
 Google 默认会存储新付费层级项目上的 Gemini API 请求。在原生模式下，Chat Completions 的 `store: false` 会作为 Gemini 的按请求退出选项转发；兼容 OpenAI 的端点没有这样的成员。
 
+在原生 AI Studio 模式下，`/v1/messages/count_tokens` 由 Gemini 自己的 `countTokens` 应答，因此计数包含 Gemini 4 按请求计费的额外开销。`openai_compatible` 模式、Vertex 以及 `countTokens` 调用失败的请求使用 GoModel 的估算值。
+
 ## Base URL
 
 GoModel 为原生 Gemini 和兼容 OpenAI 的 API 分别维护内部的 Base URL：
@@ -83,9 +85,14 @@ GoModel 为原生 Gemini 和兼容 OpenAI 的 API 分别维护内部的 Base URL
 | Gemini 3 Flash、3.5、3.6 | `thinkingLevel: minimal` | `thinkingLevel` 按原值 |
 | Gemini 3 Pro、3.1 Pro、3.7 Flash、3.8 Flash、Gemini 4 | `thinkingLevel: low` | `thinkingLevel` 按原值 |
 
-Gemini 3 和 4 无法关闭思考，并且 Pro 系列、3.7 和 3.8 Flash 以及 Gemini 4（`gemini-4-argon` 等）会拒绝 `minimal`，因此 GoModel 会发送这些模型所接受的最低级别，而不是将 Google 的 400 错误返回给您。显式设置的 `extra_body.google.thinking_config` 在设置了 `thinking_budget` 或 `thinking_level` 时会原样转发；否则 `reasoning_effort` 会把其级别或预算添加进去。同样的钳制也适用于 `openai_compatible` 模式，Google 的端点在该模式下会将 `reasoning_effort` 作为思考级别转发，并拒绝相同的取值。
+Gemini 3 和 4 无法关闭思考，并且 Pro 系列、3.7 和 3.8 Flash、Gemini 4（`gemini-4-argon` 等）以及 `-latest` 别名会拒绝 `minimal`，因此 GoModel 会发送这些模型所接受的最低级别，而不是将 Google 的 400 错误返回给您。同样，只有 Gemini 4 Hydrogen 接受 `xhigh`，因此其他 Gemini 模型都会收到 `high`（在 Gemini 2.5 上为 `high` 对应的预算）。显式设置的 `extra_body.google.thinking_config` 在设置了 `thinking_budget` 或 `thinking_level` 时会原样转发；否则 `reasoning_effort` 会把其级别或预算添加进去。同样的钳制也适用于 `openai_compatible` 模式下的 Gemini 3 和 4，Google 的端点在该模式下会将 `reasoning_effort` 作为思考级别转发，并拒绝相同的取值。
 
 在 Gemini 4 上，思考 Token 会计入 `max_tokens`，达到按请求输出上限的长回答会以 `length`（Gemini 的 `CONTINUATION`）结束；GoModel 不会续写它。
+
+Google 按输出费率对思考 Token 计费。其 OpenAI 兼容端点会把它们计入 `total_tokens`，却不计入 `completion_tokens`，因此在 `openai_compatible` 模式下，GoModel 会在记录用量并响应客户端之前把它们加回去。与原生模式一样，输出计数此时包含思考 Token：Chat Completions 通过 `completion_tokens` 和 `completion_tokens_details.reasoning_tokens` 报告，Responses API 通过 `output_tokens` 和 `output_tokens_details.reasoning_tokens` 报告。记录的输出 Token 和成本会相应增加。加回多少取决于响应：
+
+- **单独列出了推理 Token**：最多加回该数量，显式的 `0` 则不加回任何 Token。`reasoning_tokens` 报告所列出的数量；如果该数量大于输出 Token 数，则报告输出 Token 数，无论是否加回了 Token，因此它永远不会超过输出 Token 数。
+- **没有单独列出**（从 Gemini 2.5 Flash 和 3 Flash 录制到的形式）：`total_tokens` 中超出提示与补全 Token 的全部部分都会被加回，并作为推理 Token 报告。其中可能包含 Google 内置工具的提示 Token，它们随后会按思考 Token 计价：按输出费率，或者在模型设有 `reasoning_output_per_mtok` 时按该费率。
 
 ## Gemini 3 和 4 上的采样参数
 

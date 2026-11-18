@@ -21,6 +21,12 @@ func (r *MongoDBReader) GetUsageInvoice(ctx context.Context, params InvoiceParam
 	return readUsageInvoice(ctx, params, r.breakdownGroupsEach)
 }
 
+// GetUsageBenchmark returns the monthly cost per active user of a group,
+// streamed from the same grouped query as the breakdown.
+func (r *MongoDBReader) GetUsageBenchmark(ctx context.Context, params BenchmarkParams) (*Benchmark, error) {
+	return readUsageBenchmark(ctx, params, r.breakdownGroupsEach)
+}
+
 // breakdownGroups returns every (row, column) aggregate of params, at most
 // maxBreakdownGroups+1 of them.
 func (r *MongoDBReader) breakdownGroups(ctx context.Context, params UsageBreakdownParams) ([]breakdownGroup, error) {
@@ -70,8 +76,9 @@ func (r *MongoDBReader) breakdownGroupsEach(ctx context.Context, params UsageBre
 		err := fn(breakdownGroup{
 			Row: row.ID.Row, Column: row.ID.Column, Requests: row.Requests,
 			InputTokens: row.InputTokens, OutputTokens: row.OutputTokens, TotalTokens: row.TotalTokens,
-			TotalCost:  costPtr(row.HasTotalCost, row.TotalCost),
-			BilledCost: costPtr(row.HasBilledCost, row.BilledCost),
+			TotalCost:      costPtr(row.HasTotalCost, row.TotalCost),
+			BilledCost:     costPtr(row.HasBilledCost, row.BilledCost),
+			PricedRequests: row.HasTotalCost, BilledPricedRequests: row.HasBilledCost,
 		})
 		if err != nil {
 			return err

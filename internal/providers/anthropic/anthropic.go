@@ -304,6 +304,7 @@ var adaptiveThinkingPrefixes = []string{
 	"claude-mythos-5",
 	"claude-opus-5",
 	"claude-sonnet-5",
+	"claude-haiku-5-5",
 	"claude-opus-4-8",
 	"claude-opus-4-7",
 	"claude-opus-4-6",
@@ -323,6 +324,7 @@ var samplingRejectedPrefixes = []string{
 	"claude-mythos-5",
 	"claude-opus-5",
 	"claude-sonnet-5",
+	"claude-haiku-5-5",
 	"claude-opus-4-8",
 	"claude-opus-4-7",
 }
@@ -333,10 +335,15 @@ func rejectsSamplingParameters(model string) bool {
 
 // forcedToolChoiceRejectedPrefixes lists the models that no longer accept
 // tool_choice type "any" or "tool" (only "auto" and "none" remain). Fable 5.1
-// introduced the restriction; Fable 5 still honors forced tool use.
+// introduced the restriction; Fable 5.2, Opus 5.5 and Sonnet 5.5 kept it.
+// Fable 5, Opus 5 and Haiku 5.5 still honor forced tool use.
 var forcedToolChoiceRejectedPrefixes = []string{
 	"claude-fable-5-1",
+	"claude-fable-5-2",
 	"claude-mythos-5-1",
+	"claude-mythos-5-2",
+	"claude-opus-5-5",
+	"claude-sonnet-5-5",
 }
 
 func rejectsForcedToolChoice(model string) bool {
@@ -347,9 +354,10 @@ func rejectsForcedToolChoice(model string) bool {
 // omits thinking and accept thinking {"type": "disabled"} to stop it.
 // disabledThinkingRejectedPrefixes lists the point releases those prefixes
 // would also match that reject "disabled": Opus 5.5 always thinks, and Sonnet
-// 5.5 does not think unless asked. Fable and Mythos always think too. Every
-// other model gets no thinking block, which is off for models that can turn
-// it off and never risks a rejection.
+// 5.5 does not think unless asked. alwaysThinkingPrefixes lists the models
+// that cannot stop thinking at all; the least they can do is effort "low".
+// Every other model gets no thinking block, which is off for models that can
+// turn it off and never risks a rejection.
 var (
 	defaultThinkingPrefixes = []string{
 		"claude-opus-5",
@@ -360,12 +368,23 @@ var (
 		"claude-opus-5-5",
 		"claude-sonnet-5-5",
 	}
+	alwaysThinkingPrefixes = []string{
+		"claude-fable-5",
+		"claude-mythos-5",
+		"claude-opus-5-5",
+	}
 )
 
 // thinksByDefault reports whether model needs thinking {"type": "disabled"}
 // to answer without thinking.
 func thinksByDefault(model string) bool {
 	return matchesModelPrefix(model, defaultThinkingPrefixes) && !matchesModelPrefix(model, disabledThinkingRejectedPrefixes)
+}
+
+// alwaysThinks reports whether model thinks on every request and rejects
+// thinking {"type": "disabled"}.
+func alwaysThinks(model string) bool {
+	return matchesModelPrefix(model, alwaysThinkingPrefixes)
 }
 
 // matchesModelPrefix reports whether model is one of the prefixes exactly or
@@ -654,6 +673,10 @@ func normalizeAnthropicStopReason(stopReason string) string {
 		return "stop"
 	case "max_tokens", "model_context_window_exceeded":
 		return "length"
+	case "refusal":
+		// Anthropic's safety classifiers stopped the turn; OpenAI's
+		// finish_reason for filtered output is "content_filter".
+		return "content_filter"
 	default:
 		return stopReason
 	}

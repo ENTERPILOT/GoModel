@@ -58,20 +58,26 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 // so "minimal" is HTTP 400 on the models without that level (Gemini 3 Pro,
 // 3.7 and 3.8 Flash, Gemini 4) and "none" cannot turn thinking off on any
 // Gemini 3 or 4 model. Gemini 2.5 keeps the value: there it is a budget and
-// "none" disables thinking. Gemma is handled by the caller: it has no level
-// at all, so the effort is dropped before this runs.
+// "none" disables thinking. "xhigh" is HTTP 400 on every Gemini 3 and 4 model
+// but Gemini 4 Hydrogen, so it becomes "high" there. The "-latest" aliases
+// reject both values and are clamped like Gemini 3 and 4. Gemma is handled by the
+// caller: it has no level at all, so the effort is dropped before this runs.
 func compatReasoningEffort(model, effort string) string {
-	normalized := strings.ToLower(strings.TrimSpace(effort))
-	if normalized != "none" && normalized != "minimal" {
+	if major, _, ok := geminiGeneration(model); ok && major < 3 || !ok && !isLatestAlias(model) {
 		return effort
 	}
-	if major, _, ok := geminiGeneration(model); !ok || major < 3 {
-		return effort
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "none", "minimal":
+		if supportsMinimalThinking(model) {
+			return "minimal"
+		}
+		return "low"
+	case "xhigh":
+		if !supportsXHighThinking(model) {
+			return "high"
+		}
 	}
-	if supportsMinimalThinking(model) {
-		return "minimal"
-	}
-	return "low"
+	return effort
 }
 
 // withCompatThoughtSignatures gives the unsigned assistant function calls of a
@@ -164,22 +170,23 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	var resp core.ChatResponse
+	var decoded compatChatResponse
 	err = p.client.Do(ctx, llmclient.Request{
 		Method:    http.MethodPost,
 		Endpoint:  "/chat/completions",
 		Operation: llmclient.OperationChat,
 		Model:     req.Model,
 		Body:      body,
-	}, &resp)
+	}, &decoded)
 	if err != nil {
 		return nil, err
 	}
+	resp := &decoded.ChatResponse
 	core.EnsureModel(&resp.Model, req.Model)
 	if resp.Provider == "" {
 		resp.Provider = p.responseProviderName()
 	}
-	return &resp, nil
+	return resp, nil
 }
 
 // prepareNativeRequest applies the backend-specific members a translated
@@ -247,7 +254,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	}
 
 	// Gemini's OpenAI-compatible endpoint returns OpenAI-format SSE; only its
-	// tool-call chunks need repair on the way through.
+	// tool-call and usage chunks need repair on the way through.
 	return newCompatToolCallStream(stream), nil
 }
 

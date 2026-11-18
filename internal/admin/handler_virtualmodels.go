@@ -58,11 +58,14 @@ type upsertVirtualModelRequest struct {
 
 // virtualModelTargetRequest is one load-balancing destination. Model may be a
 // bare id (with provider set) or a "provider/model" selector. Weight biases the
-// round_robin strategy and defaults to 1.
+// round_robin strategy and defaults to 1. ReasoningEffort forces the reasoning
+// effort of requests sent to this target, beating the virtual model's own
+// reasoning_effort.
 type virtualModelTargetRequest struct {
-	Provider string  `json:"provider,omitempty"`
-	Model    string  `json:"model"`
-	Weight   float64 `json:"weight,omitempty"`
+	Provider        string  `json:"provider,omitempty"`
+	Model           string  `json:"model"`
+	Weight          float64 `json:"weight,omitempty"`
+	ReasoningEffort string  `json:"reasoning_effort,omitempty"`
 }
 
 type deleteVirtualModelRequest struct {
@@ -255,6 +258,7 @@ func buildVirtualModelTargets(req upsertVirtualModelRequest) ([]virtualmodels.Ta
 				return nil, core.NewInvalidRequestError("invalid target model "+model+": "+err.Error(), err)
 			}
 			target.Weight = t.Weight
+			target.ReasoningEffort = t.ReasoningEffort
 			targets = append(targets, target)
 		}
 		// A targets list with only blank entries is a malformed redirect, not an
