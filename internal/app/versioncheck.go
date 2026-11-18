@@ -78,7 +78,7 @@ func warnIfDataDirEphemeral(cfg storage.Config) {
 	dir := filepath.Dir(path)
 	if platformdir.Ephemeral(dir) {
 		slog.Warn("data directory is on the container's own filesystem, not a volume: "+
-			"the database (audit logs, usage, budgets, keys) and the install identity are lost when the container is recreated; "+
+			"the database (request logs, usage, budgets, keys) and the install identity are lost when the container is recreated; "+
 			"mount a volume there or use PostgreSQL/MongoDB",
 			"dir", dir)
 	}

@@ -20,7 +20,7 @@ kombinieren:
 - **Anwendungs-Traces.** Der OpenAI-Drop-in-Wrapper des Langfuse SDK, mit GoModel als Base-URL.
   Langfuse zeichnet vollständige Prompts, Completions und Token-Nutzung auf; GoModel liefert
   darunter Routing, Failover, Caching sowie ein eigenes
-  [Audit-Log](/de/advanced/configuration#audit-logging) und eine eigene Kostenerfassung.
+  [Request-Log](/de/advanced/configuration#request-logging) und eine eigene Kostenerfassung.
 
 Verwenden Sie einen der beiden Wege allein oder beide zusammen – mit Weitergabe des
 W3C-Trace-Kontexts werden sie pro Request zu einem einzigen Langfuse-Trace zusammengeführt (siehe
@@ -121,7 +121,7 @@ und sehr langer Text wird gekürzt; siehe
 <Warning>
   Die Erfassung von Inhalten sendet jeden gesampelten Prompt und jede gesampelte Completion an
   Langfuse. Lassen Sie sie deaktiviert, wenn diese Daten das Gateway nicht verlassen dürfen; das
-  [Audit-Log](/de/advanced/configuration#audit-logging) zeichnet sie stattdessen in Ihrem eigenen
+  [Request-Log](/de/advanced/configuration#request-logging) zeichnet sie stattdessen in Ihrem eigenen
   Speicher auf.
 </Warning>
 
@@ -154,7 +154,7 @@ Token-Nutzung auf und bepreist sie anhand seines Modellkatalogs. Da die Base-URL
 erreicht ein einziger Client jeden konfigurierten Provider über Modell-IDs mit Provider-Präfix
 (`openai/gpt-5-mini`, `gemini/gemini-2.5-flash`,
 [virtuelle Modelle](/de/features/virtual-models)), und jeder Aufruf erhält weiterhin Failover,
-Caching, Budgets und den Audit-Trail von GoModel. Der
+Caching, Budgets und das Request-Log von GoModel. Der
 [JS/TS-Wrapper](https://langfuse.com/integrations/model-providers/openai-js) funktioniert genauso.
 
 ## 3. Ein Trace von Ende zu Ende

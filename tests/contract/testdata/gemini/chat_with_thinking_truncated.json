@@ -1,0 +1,20 @@
+{
+  "choices": [
+    {
+      "finish_reason": "length",
+      "index": 0,
+      "message": {
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1794744760,
+  "id": "uKH5ar2bGY-D7M8PoYHKsQc",
+  "model": "gemini-3-flash-preview",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 0,
+    "prompt_tokens": 11,
+    "total_tokens": 57
+  }
+}

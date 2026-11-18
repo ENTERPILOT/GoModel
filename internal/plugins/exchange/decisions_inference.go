@@ -137,10 +137,10 @@ func FromDecisionBody(body []byte) (*pluginapi.DecisionResult, error) {
 			return nil, fmt.Errorf("exchange: decision answer %d is a predicate without a probability between 0 and 1", i)
 		}
 		answer := pluginapi.Answer{
-			Type:        a.Type,
-			Choice:      choiceText(a.Choice),
-			Score:       a.Score,
-			Confidence:  a.Confidence,
+			Type:       a.Type,
+			Choice:     choiceText(a.Choice),
+			Score:      a.Score,
+			Confidence: a.Confidence,
 		}
 		if a.Name != nil {
 			answer.Name = *a.Name

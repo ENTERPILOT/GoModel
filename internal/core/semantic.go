@@ -32,7 +32,7 @@ type RouteHints struct {
 // transport and later enrichment stages.
 //
 // RawEndpoint reflects the route-relative provider endpoint from the inbound
-// path. NormalizedEndpoint, SemanticOperation, and AuditPath are optional and
+// path. NormalizedEndpoint, SemanticOperation, and RequestLogPath are optional and
 // may be filled by later gateway enrichment before execution. Once cached on
 // WhiteBoxPrompt or Workflow, it should be treated as immutable by later
 // request stages.
@@ -50,7 +50,7 @@ type PassthroughRouteInfo struct {
 	// one wins, and the gateway cannot know. Such a request is rejected rather
 	// than forwarded unchecked.
 	ModelAmbiguous bool
-	AuditPath      string
+	RequestLogPath string
 	Model          string
 }
 
@@ -386,7 +386,7 @@ func derivePassthroughRouteInfoFromTransport(snapshot *RequestSnapshot) *Passthr
 		return nil
 	}
 	info := &PassthroughRouteInfo{
-		AuditPath: snapshot.Path,
+		RequestLogPath: snapshot.Path,
 	}
 	if provider := snapshot.routeParams["provider"]; provider != "" {
 		info.Provider = provider
@@ -404,7 +404,7 @@ func derivePassthroughRouteInfoFromTransport(snapshot *RequestSnapshot) *Passthr
 			}
 		}
 	}
-	if info.Provider == "" && info.RawEndpoint == "" && info.AuditPath == "" {
+	if info.Provider == "" && info.RawEndpoint == "" && info.RequestLogPath == "" {
 		return nil
 	}
 	return info

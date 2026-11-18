@@ -11,13 +11,13 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/servertls"
@@ -147,7 +147,7 @@ func (b *bootstrap) initServerConfig() error {
 		BodySizeLimit:                   appCfg.Server.BodySizeLimit,
 		StreamStallTimeout:              time.Duration(appCfg.Server.StreamStallTimeout) * time.Second,
 		PprofEnabled:                    appCfg.Server.PprofEnabled,
-		AuditLogger:                     app.audit.Logger,
+		RequestLogger:                   app.requestLog.Logger,
 		UsageLogger:                     b.serverUsageLogger,
 		BudgetChecker:                   app.budgets.Service,
 		PricingResolver:                 b.pricingResolver,
@@ -280,7 +280,7 @@ func (b *bootstrap) initResponseCache() error {
 		WorkflowPolicyResolver: app.workflows.Service,
 		FailoverResolver:       serverCfg.FailoverResolver,
 		FailoverPolicy:         serverCfg.FailoverPolicy,
-		AuditLogger:            app.audit.Logger,
+		RequestLogger:          app.requestLog.Logger,
 		// The tapped logger, so guardrail LLM calls count toward the
 		// request's rate limit token windows like any other completion.
 		UsageLogger:     b.serverUsageLogger,
@@ -334,12 +334,13 @@ func (b *bootstrap) initServer() error {
 	// Registries are reused across reload generations, so their authenticators
 	// are shared too. Rebind only after every fallible construction step has
 	// succeeded: otherwise a failed replacement would leave the still-serving
-	// generation pointing at the replacement's already-closed audit logger.
-	bindAuthenticationEventRecorders(b.cfg.Extensions, auditlog.NewAuthenticationEventRecorder(app.audit.Logger))
+	// generation pointing at the replacement's already-closed request logger.
+	bindAuthenticationEventRecorders(b.cfg.Extensions, requestlog.NewAuthenticationEventRecorder(app.requestLog.Logger))
 	bindRewriterInference(b.cfg.Extensions, b.internalInference)
 	if app.sharedStore != nil {
 		bindSharedStore(b.cfg.Extensions, app.sharedStore)
 	}
+	b.installRequestCallersForMetrics()
 	return nil
 }
 

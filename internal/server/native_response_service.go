@@ -12,9 +12,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 )
 
@@ -47,7 +47,7 @@ func (s *nativeResponseService) GetResponse(c *echo.Context) error {
 
 	stored, err := s.loadStoredResponse(ctx, id)
 	if err == nil {
-		auditResponseEntry(c, storedProvider(stored))
+		requestLogResponseEntry(c, storedProvider(stored))
 		if refreshed := s.refreshStoredResponse(ctx, stored, id, params); refreshed != nil {
 			return c.JSON(http.StatusOK, refreshed)
 		}
@@ -64,7 +64,7 @@ func (s *nativeResponseService) GetResponse(c *echo.Context) error {
 	if resp == nil {
 		return handleError(c, core.NewEmptyProviderResponseError(providerType))
 	}
-	auditResponseEntry(c, providerType)
+	requestLogResponseEntry(c, providerType)
 	return c.JSON(http.StatusOK, resp)
 }
 
@@ -82,7 +82,7 @@ func (s *nativeResponseService) ListResponseInputItems(c *echo.Context) error {
 
 	stored, err := s.loadStoredResponse(ctx, id)
 	if err == nil {
-		auditResponseEntry(c, storedProvider(stored))
+		requestLogResponseEntry(c, storedProvider(stored))
 		return c.JSON(http.StatusOK, paginateStoredResponseInputItems(stored.InputItems, params))
 	}
 	if err != nil && !errors.Is(err, responsestore.ErrNotFound) {
@@ -99,7 +99,7 @@ func (s *nativeResponseService) ListResponseInputItems(c *echo.Context) error {
 	if resp.Object == "" {
 		resp.Object = "list"
 	}
-	auditResponseEntry(c, providerType)
+	requestLogResponseEntry(c, providerType)
 	return c.JSON(http.StatusOK, resp)
 }
 
@@ -115,7 +115,7 @@ func (s *nativeResponseService) CancelResponse(c *echo.Context) error {
 	if err == nil {
 		providerType := storedProvider(stored)
 		providerRoute := storedProviderRoute(stored)
-		auditResponseEntry(c, providerType)
+		requestLogResponseEntry(c, providerType)
 		resp, err := s.cancelNativeResponse(ctx, providerRoute, gateway.FirstNonEmpty(stored.ProviderResponseID, id))
 		if err != nil {
 			if isUnsupportedNativeResponseError(err) {
@@ -146,7 +146,7 @@ func (s *nativeResponseService) CancelResponse(c *echo.Context) error {
 		return handleError(c, core.NewEmptyProviderResponseError(providerType))
 	}
 	normalizeLifecycleResponse(resp, id, providerType)
-	auditResponseEntry(c, providerType)
+	requestLogResponseEntry(c, providerType)
 	return c.JSON(http.StatusOK, resp)
 }
 
@@ -162,7 +162,7 @@ func (s *nativeResponseService) DeleteResponse(c *echo.Context) error {
 	if err == nil {
 		providerType := storedProvider(stored)
 		providerRoute := storedProviderRoute(stored)
-		auditResponseEntry(c, providerType)
+		requestLogResponseEntry(c, providerType)
 		deleteResp, deleteErr := s.deleteNativeResponse(ctx, providerRoute, gateway.FirstNonEmpty(stored.ProviderResponseID, id))
 		if deleteErr != nil && !isUnsupportedNativeResponseError(deleteErr) && !isNotFoundGatewayError(deleteErr) {
 			return handleError(c, deleteErr)
@@ -197,7 +197,7 @@ func (s *nativeResponseService) DeleteResponse(c *echo.Context) error {
 	if resp.Object == "" {
 		resp.Object = "response"
 	}
-	auditResponseEntry(c, providerType)
+	requestLogResponseEntry(c, providerType)
 	return c.JSON(http.StatusOK, resp)
 }
 
@@ -212,7 +212,7 @@ func (s *nativeResponseService) CountResponseInputTokens(c *echo.Context) error 
 	// utilityRequest may have replaced the request with one carrying the
 	// plugin headers, so the provider call reads the context from it.
 	ctx = c.Request().Context()
-	auditResponseEntry(c, providerType)
+	requestLogResponseEntry(c, providerType)
 
 	router, ok := s.provider.(core.NativeResponseUtilityRoutableProvider)
 	if !ok {
@@ -245,7 +245,7 @@ func (s *nativeResponseService) CompactResponse(c *echo.Context) error {
 	// utilityRequest may have replaced the request with one carrying the
 	// plugin headers, so the provider call reads the context from it.
 	ctx = c.Request().Context()
-	auditResponseEntry(c, providerType)
+	requestLogResponseEntry(c, providerType)
 
 	router, ok := s.provider.(core.NativeResponseUtilityRoutableProvider)
 	if !ok {
@@ -408,7 +408,7 @@ func (s *nativeResponseService) refreshStoredResponse(
 	if err != nil || resp == nil {
 		if err != nil && !isUnsupportedNativeResponseError(err) && !isNotFoundGatewayError(err) {
 			// The response id comes straight from the request path, so it is
-			// left out of the log line; the audit entry already carries it.
+			// left out of the log line; the request log entry already carries it.
 			slog.Warn("response refresh failed, serving stored snapshot", "provider", providerRoute, "error", err)
 		}
 		return nil
@@ -749,9 +749,9 @@ func isUnsupportedNativeResponseError(err error) bool {
 	return gatewayErr.Code != nil && strings.TrimSpace(*gatewayErr.Code) == "unsupported_response_operation"
 }
 
-func auditResponseEntry(c *echo.Context, providerType string) {
+func requestLogResponseEntry(c *echo.Context, providerType string) {
 	if c == nil {
 		return
 	}
-	auditlog.EnrichEntry(c, "response", providerType)
+	requestlog.EnrichEntry(c, "response", providerType)
 }

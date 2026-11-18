@@ -7,8 +7,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // forwardingHeaders name the headers a reverse proxy adds for the client it
@@ -28,7 +28,7 @@ func adminOpenLocalOnly(next echo.HandlerFunc) echo.HandlerFunc {
 			return next(c)
 		}
 		const message = "the admin API accepts unauthenticated requests only from this machine; set GOMODEL_MASTER_KEY to manage the gateway remotely"
-		auditlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message)
+		requestlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message)
 		return writeGatewayError(c, (&core.GatewayError{
 			Type:       core.ErrorTypeAuthentication,
 			Message:    message,

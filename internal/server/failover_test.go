@@ -11,12 +11,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
@@ -161,8 +161,8 @@ func TestChatCompletion_FallsBackToAlternateModel(t *testing.T) {
 	}, nil)
 
 	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 	err := handler.ChatCompletion(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -174,10 +174,10 @@ func TestChatCompletion_FallsBackToAlternateModel(t *testing.T) {
 	require.Equal(t, "azure/gpt-4o", entry.Data.Failover.TargetModel)
 
 	require.Len(t, entry.Data.Attempts, 2)
-	require.Equal(t, auditlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind)
+	require.Equal(t, requestlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind)
 	require.False(t, entry.Data.Attempts[0].Success, "primary attempt must be recorded as failed")
 	require.Equal(t, http.StatusServiceUnavailable, entry.Data.Attempts[0].StatusCode)
-	require.Equal(t, auditlog.AttemptKindFailover, entry.Data.Attempts[1].Kind)
+	require.Equal(t, requestlog.AttemptKindFailover, entry.Data.Attempts[1].Kind)
 	require.True(t, entry.Data.Attempts[1].Success, "failover attempt must be recorded as successful")
 	require.Equal(t, "azure/gpt-4o", entry.Data.Attempts[1].Model)
 }
@@ -348,8 +348,8 @@ func TestResponses_FallsBackToAlternateModel(t *testing.T) {
 	}, nil)
 
 	c, rec := echotest.Post(t, "/v1/responses", `{"model":"gpt-4o","input":"hi"}`)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 	err := handler.Responses(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -623,8 +623,8 @@ func TestEmbeddings_FailoverPolicy(t *testing.T) {
 			}
 
 			c, rec := echotest.Post(t, "/v1/embeddings", `{"model":"text-embedding-3-small","input":"hi"}`)
-			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-			c.Set(string(auditlog.LogEntryKey), entry)
+			entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+			c.Set(string(requestlog.LogEntryKey), entry)
 			err := handler.Embeddings(c)
 			require.NoError(t, err)
 			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
@@ -663,8 +663,8 @@ func TestEmbeddings_FailoverUsesInstanceMetadataAndForwardsRequest(t *testing.T)
 	}, nil)
 
 	c, rec := echotest.Post(t, "/v1/embeddings", `{"model":"text-embedding-3-small","provider":"primary-openai","input":["first","second"],"dimensions":256,"encoding_format":"base64","x_meta":{"source":"test"}}`)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 	require.NoError(t, handler.Embeddings(c))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, []string{primary, backup}, provider.embeddingCalls)
@@ -712,8 +712,8 @@ func TestEmbeddings_FailoverStopsWhenRequestContextIsCanceled(t *testing.T) {
 		selectors: []core.ModelSelector{{Provider: "azure", Model: "text-embedding-3-small"}},
 	}, nil)
 	c, rec := echotest.Post(t, "/v1/embeddings", `{"model":"text-embedding-3-small","input":"hi"}`)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 	ctx, cancel := context.WithCancel(c.Request().Context())
 	cancel()
 	c.SetRequest(c.Request().WithContext(ctx))
@@ -723,7 +723,7 @@ func TestEmbeddings_FailoverStopsWhenRequestContextIsCanceled(t *testing.T) {
 	require.Equal(t, []string{"text-embedding-3-small"}, provider.embeddingCalls)
 
 	require.Len(t, entry.Data.Attempts, 1)
-	require.Equal(t, auditlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind)
+	require.Equal(t, requestlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind)
 	require.False(t, entry.Data.Attempts[0].Success)
 	require.Equal(t, http.StatusServiceUnavailable, entry.Data.Attempts[0].StatusCode)
 }
@@ -753,15 +753,15 @@ func TestEmbeddings_AdmissionDefersPrimaryRateLimitToFailover(t *testing.T) {
 	require.Equal(t, http.StatusOK, firstRec.Code, firstRec.Body.String())
 
 	second, secondRec := echotest.Post(t, "/v1/embeddings", request)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	second.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	second.Set(string(requestlog.LogEntryKey), entry)
 	require.NoError(t, handler.Embeddings(second))
 	require.Equal(t, http.StatusOK, secondRec.Code, secondRec.Body.String())
 	require.Equal(t, []string{primary, backup}, provider.embeddingCalls)
 	require.True(t, core.GetFailoverUsed(second.Request().Context()))
 	require.Len(t, entry.Data.Attempts, 2)
-	require.Equal(t, auditlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind, "saturated primary is recorded but not sent upstream")
-	require.Equal(t, auditlog.AttemptKindFailover, entry.Data.Attempts[1].Kind)
+	require.Equal(t, requestlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind, "saturated primary is recorded but not sent upstream")
+	require.Equal(t, requestlog.AttemptKindFailover, entry.Data.Attempts[1].Kind)
 }
 
 func TestEmbeddings_AdmissionDoesNotFailOverConsumerRejections(t *testing.T) {
@@ -916,8 +916,8 @@ func TestChatCompletion_SingleTargetAliasKeepsSubtreeFailover(t *testing.T) {
 	handler := newHandler(provider, nil, nil, nil, service, nil, service, nil)
 
 	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"public/model","messages":[{"role":"user","content":"hi"}]}`)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 	err = handler.ChatCompletion(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -925,9 +925,9 @@ func TestChatCompletion_SingleTargetAliasKeepsSubtreeFailover(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "subtree failover ok")
 	require.NotNil(t, entry.Data)
 	require.Len(t, entry.Data.Attempts, 2)
-	require.Equal(t, auditlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind)
+	require.Equal(t, requestlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind)
 	require.False(t, entry.Data.Attempts[0].Success)
-	require.Equal(t, auditlog.AttemptKindFailover, entry.Data.Attempts[1].Kind)
+	require.Equal(t, requestlog.AttemptKindFailover, entry.Data.Attempts[1].Kind)
 	require.True(t, entry.Data.Attempts[1].Success)
 	require.Equal(t, "vendor-b/model-y", entry.Data.Attempts[1].Model)
 }

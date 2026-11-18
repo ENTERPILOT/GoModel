@@ -7,8 +7,8 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/ext"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // authVerifyMethodNone is reported when the request carried no credential this
@@ -91,18 +91,18 @@ func (h *Handler) AuthVerify(c *echo.Context) error {
 func (h *Handler) authVerifyMethod(c *echo.Context) string {
 	ctx := c.Request().Context()
 	if core.GetAuthKeyID(ctx) != "" {
-		return auditlog.AuthMethodAPIKey
+		return requestlog.AuthMethodAPIKey
 	}
 	if authentication, ok := ext.AuthenticationFromContext(ctx); ok {
-		if method := auditlog.NormalizeAuthMethod(authentication.Method); method != "" {
+		if method := requestlog.NormalizeAuthMethod(authentication.Method); method != "" {
 			return method
 		}
-		return auditlog.AuthMethodExtension
+		return requestlog.AuthMethodExtension
 	}
 	if h.masterKey != "" {
 		if token, _ := requestAuthToken(c.Request()); token != "" &&
 			subtle.ConstantTimeCompare([]byte(token), []byte(h.masterKey)) == 1 {
-			return auditlog.AuthMethodMasterKey
+			return requestlog.AuthMethodMasterKey
 		}
 	}
 	return authVerifyMethodNone

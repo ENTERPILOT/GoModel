@@ -176,11 +176,11 @@ export function qualifiedResolvedModelDisplay(value) {
   return qualifiedModelValueDisplay(value, value && value.resolved_model);
 }
 
-// auditModelDisplay renders the audit summary pill. When the request was
+// requestModelDisplay renders the request log summary pill. When the request was
 // redirected — a runtime failover or a redirect/alias — it shows
 // "requested ⮕ target"; otherwise a single value, so direct calls stay
 // unchanged.
-export function auditModelDisplay(entry) {
+export function requestModelDisplay(entry) {
   const requested = String(
     (entry && (entry.requested_model || entry.model)) || "",
   ).trim();

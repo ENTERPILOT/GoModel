@@ -7,7 +7,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
-  import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
+  import { liveLogs } from "../requests/liveLogs.svelte.js";
   import { usagePage } from "./usage.svelte.js";
   import { usageFacets } from "./usageFacets.svelte.js";
   import { restoreUsageUrl } from "./usage-view.js";
@@ -15,6 +15,7 @@
   import UsageStatCards from "./UsageStatCards.svelte";
   import UsageBreakdownChart from "./UsageBreakdownChart.svelte";
   import UsagePivot from "./UsagePivot.svelte";
+  import UsageBenchmark from "./UsageBenchmark.svelte";
   import UsageLog from "./UsageLog.svelte";
   import ExportInvoiceButton from "./ExportInvoiceButton.svelte";
   import { invoiceExportVisible } from "./usage-invoice.js";
@@ -36,8 +37,9 @@
       untrack(() => {
         restoreUsageUrl({ fromHistory: historyTick !== seenHistoryTick });
         seenHistoryTick = historyTick;
-        usagePage.fetchUsagePage();
+        usagePage.fetchUsagePage({ reload: true });
         usageFacets.fetchAuthKeyNames();
+        usageFacets.fetchKnownUserPaths();
         liveLogs.ensureLiveLogs();
       });
     }
@@ -89,6 +91,9 @@
 
   <!-- Two-dimension breakdown (e.g. cost per month by user path). -->
   <UsagePivot />
+
+  <!-- Cost per active user of a group, per month. -->
+  <UsageBenchmark />
 
   <!-- Session cardinality and identifiers need the full page width. -->
   <div class="usage-session-breakdown-wrap">
