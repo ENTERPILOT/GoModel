@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1376,6 +1377,50 @@ func TestInitialize_SlowProviderDoesNotStarveOthers(t *testing.T) {
 		require.Equal(t, fast, provider)
 		provider = registry.GetProvider("slow-model")
 		require.Nil(t, provider)
+	})
+}
+
+// A caller without a deadline of its own (an admin-triggered refresh) must not
+// wait on a provider whose listing never answers: each listing is bounded by
+// providerListingTimeout, the other providers of the sweep are still
+// discovered, and the hanging one keeps the inventory it already had.
+func TestInitialize_HangingProviderIsBoundedByTheListingTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		registry := NewModelRegistry()
+		hanging := &registryMockProvider{
+			name: "hanging",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data:   []core.Model{{ID: "hanging-model", Object: "model", OwnedBy: "hanging"}},
+			},
+		}
+		healthy := &registryMockProvider{
+			name: "healthy",
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data:   []core.Model{{ID: "healthy-model", Object: "model", OwnedBy: "healthy"}},
+			},
+		}
+		registry.RegisterProviderWithNameAndType(hanging, "hanging", "hanging")
+		registry.RegisterProviderWithNameAndType(healthy, "healthy", "healthy")
+		require.NoError(t, registry.Initialize(context.Background()))
+
+		hanging.listModelsDelay = time.Hour
+		healthy.modelsResponse = &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "healthy-model-2", Object: "model", OwnedBy: "healthy"}},
+		}
+
+		start := time.Now()
+		require.NoError(t, registry.Initialize(context.Background()))
+		assert.Equal(t, providerListingTimeout, time.Since(start), "the sweep waits for the hanging listing no longer than its timeout")
+
+		assert.True(t, registry.ModelAvailable("healthy/healthy-model-2"), "the healthy provider of the same sweep is refreshed")
+		assert.Same(t, hanging, registry.GetProvider("hanging-model"), "the hanging provider keeps its previous inventory")
+		snapshots := registry.ProviderRuntimeSnapshots()
+		index := slices.IndexFunc(snapshots, func(s ProviderRuntimeSnapshot) bool { return s.Name == "hanging" })
+		require.GreaterOrEqual(t, index, 0)
+		assert.Contains(t, snapshots[index].LastModelFetchError, context.DeadlineExceeded.Error())
 	})
 }
 

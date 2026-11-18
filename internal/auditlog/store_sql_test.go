@@ -149,6 +149,17 @@ func TestSQLStoreCleanupDropsEntriesPastRetention(t *testing.T) {
 	})
 }
 
+// startSQLStore starts a store and waits for its background index builds, so
+// DDL a test then runs on the audit tables does not meet one: a statement
+// waiting for a table that an index is being built on deadlocks with the build.
+func startSQLStore(t *testing.T, db sqlx.DB) {
+	t.Helper()
+	store, err := NewSQLStore(context.Background(), db, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	store.indexBuild.Wait()
+}
+
 func TestNewSQLStoreRenamesLegacyModelColumn(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
@@ -161,10 +172,9 @@ func TestNewSQLStoreRenamesLegacyModelColumn(t *testing.T) {
 				status_code INTEGER DEFAULT 0
 			)`)
 		require.NoError(t, err)
-		_, err = NewSQLStore(ctx, db, 0)
-		require.NoError(t, err)
+		startSQLStore(t, db)
 
-		columns, err := auditColumns(ctx, db, auditLogTable)
+		columns, err := sqlx.Columns(ctx, db, auditLogTable)
 		require.NoError(t, err)
 
 		assert.False(t, columns["model"], "legacy model column still present")
@@ -186,8 +196,7 @@ func TestNewSQLStoreDropsLegacyExecutionPlanIndex(t *testing.T) {
 			`CREATE INDEX idx_audit_execution_plan_version_id ON audit_logs(execution_plan_version_id)`,
 		)
 		require.NoError(t, err)
-		_, err = NewSQLStore(ctx, db, 0)
-		require.NoError(t, err)
+		startSQLStore(t, db)
 		// Recreating the index must succeed, proving the startup drop removed it.
 		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_execution_plan_version_id ON audit_logs(execution_plan_version_id)`)
 		require.NoError(t, err)
@@ -272,6 +281,15 @@ func TestNewSQLStoreDropsDuplicateAttemptsIndex(t *testing.T) {
 		assert.Len(t, names, wantIndexes, "attempts indexes: %v", names)
 
 		assert.Zero(t, start().drops(duplicateAttemptsIndex), "a later startup issues no DROP")
+
+		// Unwrapped, PostgreSQL drops it on the session holding the schema lock.
+		_, err = db.Exec(ctx, "CREATE INDEX "+duplicateAttemptsIndex+" ON audit_log_attempts(audit_log_id, seq)")
+		require.NoError(t, err)
+		store, err := NewSQLStore(ctx, db, 0)
+		require.NoError(t, err)
+		store.indexBuild.Wait()
+		require.NoError(t, store.Close())
+		assert.NotContains(t, attemptsIndexNames(t, db), duplicateAttemptsIndex)
 	})
 }
 
@@ -289,8 +307,7 @@ func TestNewSQLStoreReplacesSingleColumnUserPathIndex(t *testing.T) {
 			`CREATE INDEX idx_audit_user_path ON audit_logs(user_path)`,
 		)
 		require.NoError(t, err)
-		_, err = NewSQLStore(ctx, db, 0)
-		require.NoError(t, err)
+		startSQLStore(t, db)
 		// Recreating the old index must succeed, proving the startup drop removed it.
 		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_user_path ON audit_logs(user_path)`)
 		require.NoError(t, err)
@@ -298,6 +315,63 @@ func TestNewSQLStoreReplacesSingleColumnUserPathIndex(t *testing.T) {
 		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_user_path_timestamp ON audit_logs(user_path, timestamp)`)
 		require.Error(t, err)
 	})
+}
+
+// Replicas that start together against one database change the audit schema
+// one at a time: each of them starts, whether the database is new or an older
+// release created it, and every index gets built.
+func TestNewSQLStoreStartsReplicasTogether(t *testing.T) {
+	cases := map[string][]string{
+		"new database": nil,
+		"legacy schema": {`
+			CREATE TABLE audit_logs (
+				id TEXT PRIMARY KEY,
+				timestamp ` + sqlx.TypeTimestamp + ` NOT NULL,
+				model TEXT,
+				status_code INTEGER DEFAULT 0
+			)`},
+	}
+	for name, existing := range cases {
+		t.Run(name, func(t *testing.T) {
+			sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+				if db.Dialect() != sqlx.PostgreSQL {
+					t.Skip("replicas share a database only on PostgreSQL")
+				}
+				ctx := context.Background()
+				require.NoError(t, db.Schema(ctx, existing...))
+
+				const replicas = 4
+				stores := make([]*SQLStore, replicas)
+				errs := make([]error, replicas)
+				var starting sync.WaitGroup
+				for i := range replicas {
+					starting.Go(func() { stores[i], errs[i] = NewSQLStore(ctx, db, 0) })
+				}
+				starting.Wait()
+				for _, store := range stores {
+					if store != nil {
+						t.Cleanup(func() { _ = store.Close() })
+					}
+				}
+				for i, err := range errs {
+					require.NoError(t, err, "replica %d", i)
+				}
+				for _, store := range stores {
+					store.indexBuild.Wait()
+				}
+
+				for _, index := range append(modelIndexes(sqlx.PostgreSQL), auditIndex{name: writtenAtIndex}) {
+					assert.True(t, hasValidIndex(ctx, t, db, index.name), index.name)
+				}
+				var invalid int
+				require.NoError(t, db.QueryRow(ctx, `SELECT COUNT(*) FROM pg_index i
+					JOIN pg_class c ON c.oid = i.indrelid
+					JOIN pg_namespace n ON n.oid = c.relnamespace
+					WHERE n.nspname = current_schema() AND NOT i.indisvalid`).Scan(&invalid))
+				assert.Zero(t, invalid, "no build is left interrupted")
+			})
+		})
+	}
 }
 
 // The index must be declared on the same expression the reader compares
@@ -413,6 +487,9 @@ func TestSQLStoreWriteBatchCommitsEntriesWithTheirAttempts(t *testing.T) {
 	runSQLStoreTest(t, 0, func(t *testing.T, store *SQLStore, db sqlx.DB) {
 		ctx := context.Background()
 		now := time.Unix(1700000000, 0).UTC()
+		// The drop needs a lock on audit_logs through the foreign key, and a
+		// background index build still running there deadlocks with it.
+		store.indexBuild.Wait()
 		_, err := db.Exec(ctx, `DROP TABLE audit_log_attempts`)
 		require.NoError(t, err)
 

@@ -166,27 +166,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
-	if err := db.Schema(ctx, sqlTables...); err != nil {
-		return nil, fmt.Errorf("failed to create audit log tables: %w", err)
-	}
-	if err := renameAuditColumn(ctx, db, auditLogTable, "model", "requested_model"); err != nil {
-		return nil, fmt.Errorf("failed to rename audit_logs.model to requested_model: %w", err)
-	}
-	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
+	// Under the lock the index builds below take: see withSchemaLock.
+	if err := withSchemaLock(ctx, db, func(session sqlx.DB) error { return ensureSQLSchema(ctx, session) }); err != nil {
 		return nil, err
-	}
-	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
-	indexes = append(indexes, writtenAtIndexes(db.Dialect())...)
-	if db.Dialect() != sqlx.PostgreSQL {
-		indexes = append(indexes, modelIndexStatements(db.Dialect())...)
-	}
-	for _, statement := range indexes {
-		if _, err := db.Exec(ctx, statement); err != nil {
-			slog.Warn("failed to create index", "error", err)
-		}
-	}
-	if db.Dialect() != sqlx.PostgreSQL {
-		dropDuplicateAttemptsIndex(ctx, db)
 	}
 
 	store := &SQLStore{
@@ -204,16 +186,22 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	buildCtx, cancel := context.WithCancel(context.Background())
 	store.cancelIndexBuild = cancel
 	store.indexBuild.Go(func() {
-		if db.Dialect() == sqlx.PostgreSQL {
-			dropDuplicateAttemptsIndex(buildCtx, db)
-		}
 		writtenAt, ok := writtenAtIndexBuilder(db)
 		built := !ok || writtenAt.TryBuild(buildCtx, writtenAtBackgroundIndex)
 		if buildCtx.Err() != nil {
 			return
 		}
-		ensureModelIndexesConcurrently(buildCtx, db)
-		ensureTrigramSearchIndex(buildCtx, db, postgresErrorMessage)
+		err := withSchemaLock(buildCtx, db, func(session sqlx.DB) error {
+			if session.Dialect() == sqlx.PostgreSQL {
+				dropDuplicateAttemptsIndex(buildCtx, session)
+			}
+			ensureModelIndexesConcurrently(buildCtx, session)
+			ensureTrigramSearchIndex(buildCtx, session, postgresErrorMessage)
+			return nil
+		})
+		if err != nil && buildCtx.Err() == nil {
+			slog.Warn("auditlog: failed to build model and search indexes", "error", err)
+		}
 		if !built {
 			writtenAt.Build(buildCtx, writtenAtBackgroundIndex)
 		}
@@ -222,6 +210,34 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
 	}
 	return store, nil
+}
+
+// ensureSQLSchema creates the audit tables, brings older ones up to date and
+// creates the indexes built at startup.
+func ensureSQLSchema(ctx context.Context, db sqlx.DB) error {
+	if err := db.Schema(ctx, sqlTables...); err != nil {
+		return fmt.Errorf("failed to create audit log tables: %w", err)
+	}
+	if err := renameAuditColumn(ctx, db, auditLogTable, "model", "requested_model"); err != nil {
+		return fmt.Errorf("failed to rename audit_logs.model to requested_model: %w", err)
+	}
+	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
+		return err
+	}
+	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
+	indexes = append(indexes, writtenAtIndexes(db.Dialect())...)
+	if db.Dialect() != sqlx.PostgreSQL {
+		indexes = append(indexes, modelIndexStatements(db.Dialect())...)
+	}
+	for _, statement := range indexes {
+		if _, err := db.Exec(ctx, statement); err != nil {
+			slog.Warn("failed to create index", "error", err)
+		}
+	}
+	if db.Dialect() != sqlx.PostgreSQL {
+		dropDuplicateAttemptsIndex(ctx, db)
+	}
+	return nil
 }
 
 // userPathIndexes serve the user-path filter: the exact-match term and the
@@ -474,7 +490,7 @@ func (s *SQLStore) cleanup() {
 // renameAuditColumn renames a column when the old name is still present and
 // the new one is not, so the rename runs once and is a no-op thereafter.
 func renameAuditColumn(ctx context.Context, db sqlx.DB, table, from, to string) error {
-	columns, err := auditColumns(ctx, db, table)
+	columns, err := sqlx.Columns(ctx, db, table)
 	if err != nil {
 		return err
 	}
@@ -483,39 +499,4 @@ func renameAuditColumn(ctx context.Context, db sqlx.DB, table, from, to string) 
 	}
 	_, err = db.Exec(ctx, fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s", table, from, to))
 	return err
-}
-
-// auditColumns reports the table's current column names, lowercased.
-func auditColumns(ctx context.Context, db sqlx.DB, table string) (map[string]bool, error) {
-	var query string
-	var args []any
-	switch db.Dialect() {
-	case sqlx.SQLite:
-		query = fmt.Sprintf(`SELECT name FROM pragma_table_info('%s')`, table)
-	case sqlx.PostgreSQL:
-		query = `SELECT column_name FROM information_schema.columns
-			WHERE table_schema = current_schema() AND table_name = ?`
-		args = []any{table}
-	default:
-		return nil, fmt.Errorf("unsupported dialect %q", db.Dialect())
-	}
-
-	rows, err := db.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("inspect %s columns: %w", table, err)
-	}
-	defer rows.Close()
-
-	columns := make(map[string]bool)
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("inspect %s columns: %w", table, err)
-		}
-		columns[strings.ToLower(name)] = true
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("inspect %s columns: %w", table, err)
-	}
-	return columns, nil
 }

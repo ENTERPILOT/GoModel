@@ -3,6 +3,7 @@ package vertex
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -163,6 +164,15 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	}
 	authCfg := buildGoogleAuthConfig(providerCfg)
 	authCfg.AuthType = p.authType
+	if providerCfg.Managed && googlecommon.UsesHostCredentials(authCfg) && !onVertexHost(providerCfg.BaseURL) {
+		// The host's Google credentials belong to whoever runs the gateway. A
+		// provider declared in config.yaml or the environment comes from that
+		// operator; one saved through the admin API may come from an identity
+		// that is not trusted with host secrets, so it gets them only for
+		// Google's own Vertex AI endpoints.
+		p.configErr = errHostCredentialsWithheld
+		return base
+	}
 	if base == nil {
 		base = httpclient.NewDefaultHTTPClient()
 	}
@@ -178,6 +188,15 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 		quotaProject = strings.TrimSpace(providerCfg.VertexProject)
 	}
 	return googlecommon.HTTPClient(base, creds.TokenSource, quotaProject)
+}
+
+var errHostCredentialsWithheld = errors.New("a custom Vertex AI base URL needs auth_type gcp_service_account with its own service_account_json: the host's Google credentials are only sent to Google's Vertex AI endpoints")
+
+// onVertexHost reports whether a base URL keeps requests on Google's own
+// Vertex AI hosts: a Vertex endpoint URL, or none at all, where the adapter
+// uses aiplatform.googleapis.com.
+func onVertexHost(baseURL string) bool {
+	return strings.TrimSpace(baseURL) == "" || providers.IsVertexEndpoint(baseURL)
 }
 
 func buildGoogleAuthConfig(providerCfg providers.ProviderConfig) googlecommon.Config {

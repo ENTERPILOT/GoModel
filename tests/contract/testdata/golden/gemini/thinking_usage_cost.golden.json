@@ -1,0 +1,67 @@
+{
+  "native": {
+    "costs_caveat": "",
+    "fixture": "gemini/native_chat_completion.json",
+    "input_per_mtok": 0.3,
+    "input_tokens": 11,
+    "output_per_mtok": 2.5,
+    "output_tokens": 25,
+    "raw_data": {
+      "completion_reasoning_tokens": 21,
+      "prompt_text_tokens": 11,
+      "thoughts_token_count": 21
+    },
+    "total_cost_micro_usd": 65.8,
+    "total_tokens": 36
+  },
+  "no_thinking": {
+    "costs_caveat": "",
+    "fixture": "gemini/chat_with_tools.json",
+    "input_per_mtok": 0.3,
+    "input_tokens": 44,
+    "output_per_mtok": 2.5,
+    "output_tokens": 19,
+    "raw_data": null,
+    "total_cost_micro_usd": 60.7,
+    "total_tokens": 63
+  },
+  "thinking": {
+    "costs_caveat": "",
+    "fixture": "gemini/chat_with_thinking.json",
+    "input_per_mtok": 0.3,
+    "input_tokens": 11,
+    "output_per_mtok": 2.5,
+    "output_tokens": 22,
+    "raw_data": {
+      "completion_reasoning_tokens": 18
+    },
+    "total_cost_micro_usd": 58.3,
+    "total_tokens": 33
+  },
+  "thinking_stream": {
+    "costs_caveat": "",
+    "fixture": "gemini/chat_with_thinking_stream.txt",
+    "input_per_mtok": 0.3,
+    "input_tokens": 11,
+    "output_per_mtok": 2.5,
+    "output_tokens": 25,
+    "raw_data": {
+      "completion_reasoning_tokens": 21
+    },
+    "total_cost_micro_usd": 65.8,
+    "total_tokens": 36
+  },
+  "thinking_truncated": {
+    "costs_caveat": "",
+    "fixture": "gemini/chat_with_thinking_truncated.json",
+    "input_per_mtok": 0.5,
+    "input_tokens": 11,
+    "output_per_mtok": 3,
+    "output_tokens": 46,
+    "raw_data": {
+      "completion_reasoning_tokens": 46
+    },
+    "total_cost_micro_usd": 143.5,
+    "total_tokens": 57
+  }
+}

@@ -34,6 +34,10 @@ type Manager struct {
 	// start; Close cancels it, so no dial outlives shutdown.
 	stopCtx    context.Context
 	stopCancel context.CancelFunc
+
+	// reconnectTimeout is the constant of that name; a field so tests can
+	// shorten it.
+	reconnectTimeout time.Duration
 }
 
 // NewManager creates an empty manager. Apply installs the initial specs.
@@ -45,6 +49,8 @@ func NewManager(httpClient *http.Client) *Manager {
 		stop:       make(chan struct{}),
 		stopCtx:    stopCtx,
 		stopCancel: stopCancel,
+
+		reconnectTimeout: reconnectTimeout,
 	}
 	go m.maintain()
 	return m
@@ -188,17 +194,24 @@ func (m *Manager) Views() []ServerView {
 	return views
 }
 
-// Reconnect force-redials one server and relists its catalog synchronously.
+// reconnectTimeout bounds one Reconnect: the wait for a dial or listing
+// already in flight, the redial, and the relisting. It runs inside an admin
+// request, and connectTimeout plus listTimeout exceed the inbound write
+// timeout (30s): past it the response carrying the server's view would be
+// dropped. The re-probe loop retries a server it cut short.
+const reconnectTimeout = 20 * time.Second
+
+// Reconnect force-redials one server and relists its catalog synchronously,
+// for at most reconnectTimeout.
 func (m *Manager) Reconnect(ctx context.Context, name string) (ServerView, error) {
 	u, ok := m.get(name)
 	if !ok {
 		return ServerView{}, fmt.Errorf("mcp server %q is not configured", name)
 	}
-	u.reset()
-	if u.spec.Enabled {
-		if err := u.refresh(ctx); err != nil {
-			return u.view(), err
-		}
+	ctx, cancel := context.WithTimeout(ctx, m.reconnectTimeout)
+	defer cancel()
+	if err := u.reconnect(ctx); err != nil {
+		return u.view(), err
 	}
 	return u.view(), nil
 }
