@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const requestLogCollectionName = "request_logs"
@@ -20,6 +22,15 @@ const requestLogCollectionName = "request_logs"
 const (
 	legacyCollectionName = "audit_logs"
 	legacyStagingPrefix  = "audit_logs_absorbing_"
+)
+
+// legacyAdoptTimeout bounds the move at startup. A rename is immediate; the
+// budget is for merging what an older release wrote after it, which a long
+// rollback can make large. A merge cut short keeps what it copied and is
+// finished by a later start.
+const (
+	legacyAdoptTimeout    = 2 * time.Minute
+	legacyRecoveryTimeout = 10 * time.Second
 )
 
 // MongoDB server error codes the migration expects from a concurrent start.
@@ -36,11 +47,16 @@ const (
 // under the legacy name rather than failing to start. When it cannot be told
 // which collection holds the request log, that is an error: guessing could
 // hide every existing entry.
-func requestLogCollection(ctx context.Context, database *mongo.Database) (*mongo.Collection, error) {
+func requestLogCollection(database *mongo.Database) (*mongo.Collection, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), legacyAdoptTimeout)
+	defer cancel()
 	err := adoptLegacyCollection(ctx, database)
 	if err == nil {
 		return database.Collection(requestLogCollectionName), nil
 	}
+	// A fresh deadline: the move may have failed by running out of its own.
+	ctx, cancel = context.WithTimeout(context.Background(), legacyRecoveryTimeout)
+	defer cancel()
 	names, listErr := requestLogCollectionNames(ctx, database)
 	if listErr != nil {
 		return nil, fmt.Errorf("failed to move the audit_logs collection to request_logs: %w", err)
@@ -149,10 +165,12 @@ func mergeIntoRequestLog(ctx context.Context, staged *mongo.Collection) error {
 // requestLogCollectionNames lists which of the request log collection, the
 // legacy collection and its staging collections exist.
 func requestLogCollectionNames(ctx context.Context, database *mongo.Database) ([]string, error) {
+	// authorizedCollections lets a role that may read the collections, but not
+	// list the whole database, see the ones it has access to.
 	names, err := database.ListCollectionNames(ctx, bson.D{{Key: "name", Value: bson.D{{
 		Key:   "$regex",
 		Value: "^(" + requestLogCollectionName + "|" + legacyCollectionName + "|" + legacyStagingPrefix + ".*)$",
-	}}}})
+	}}}}, options.ListCollections().SetAuthorizedCollections(true))
 	if err != nil {
 		return nil, fmt.Errorf("list request log collections: %w", err)
 	}

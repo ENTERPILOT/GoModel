@@ -49,24 +49,29 @@ func adoptLegacyStorage(ctx context.Context, db sqlx.DB) error {
 	if err != nil || legacy != relationTable {
 		return err
 	}
-	return withSchemaLock(ctx, db, func(session sqlx.DB) error { return adoptLegacyTables(ctx, session) })
+	return withSchemaLock(ctx, db, func(session sqlx.DB) error { return adoptLegacyTables(ctx, session, true) })
 }
 
 // adoptLegacyTables moves a database written by v0.2.5 or older onto the
-// request_logs names. It runs on every start, before the tables are created,
-// and does nothing once the legacy tables are gone. The caller holds the
-// schema lock (see withSchemaLock).
+// request_logs names. It runs on every start and does nothing once the legacy
+// tables are gone. The caller holds the schema lock (see withSchemaLock).
 //
-// A legacy table is renamed in place, with its indexes. When request_logs
-// exists as well, an older binary ran against the database after the rename
-// (a rollback) and recreated the legacy tables: its rows are moved over and
-// the tables dropped.
+// A legacy table is renamed in place, with its indexes. That has to happen
+// before the tables are created, or there would be an empty request_logs in
+// the way.
+//
+// When request_logs exists as well, an older binary ran against the database
+// after the rename (a rollback) and recreated the legacy tables: with absorb,
+// its rows are moved over and the tables dropped. That needs both request log
+// tables in place, so the store asks for it only once it has created and
+// migrated them; a start interrupted between the rename and that point may
+// have left one missing.
 //
 // PostgreSQL then gets views under the legacy names. Replicas still on the
 // older release read and write through them for the rest of a rolling
 // upgrade, and a rolled-back binary finds its tables. SQLite has one process
 // per database and cannot write through a view, so it gets none.
-func adoptLegacyTables(ctx context.Context, db sqlx.DB) error {
+func adoptLegacyTables(ctx context.Context, db sqlx.DB, absorb bool) error {
 	dialect := db.Dialect()
 	legacy, err := relationKind(ctx, db, dialect, legacyRequestLogTable)
 	if err != nil {
@@ -77,26 +82,51 @@ func adoptLegacyTables(ctx context.Context, db sqlx.DB) error {
 	}
 
 	started := time.Now()
+	moved := false
 	err = db.InTx(ctx, func(q sqlx.Querier) error {
 		current, err := relationKind(ctx, q, dialect, requestLogTable)
 		if err != nil {
 			return err
 		}
-		if current == "" {
+		switch {
+		case current == "":
 			err = renameLegacyTables(ctx, q, dialect)
-		} else {
+		case absorb:
+			var ready bool
+			if ready, err = absorbTargetsReady(ctx, q, dialect); err != nil || !ready {
+				return err
+			}
 			err = absorbLegacyTables(ctx, q, dialect)
+		default:
+			return nil
 		}
-		if err != nil || dialect != sqlx.PostgreSQL {
+		if err != nil {
 			return err
+		}
+		moved = true
+		if dialect != sqlx.PostgreSQL {
+			return nil
 		}
 		return createLegacyViews(ctx, q)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to move the audit_logs tables to request_logs: %w", err)
 	}
-	slog.Info("requestlog: moved the audit_logs tables to request_logs", "duration", time.Since(started).Round(time.Millisecond))
+	if moved {
+		slog.Info("requestlog: moved the audit_logs tables to request_logs", "duration", time.Since(started).Round(time.Millisecond))
+	}
 	return nil
+}
+
+// absorbTargetsReady reports whether every legacy table has its request log
+// table to move rows into.
+func absorbTargetsReady(ctx context.Context, q sqlx.Querier, dialect sqlx.Dialect) (bool, error) {
+	legacyAttempts, err := relationKind(ctx, q, dialect, legacyAttemptsTable)
+	if err != nil || legacyAttempts != relationTable {
+		return err == nil, err
+	}
+	attempts, err := relationKind(ctx, q, dialect, attemptsTable)
+	return attempts == relationTable, err
 }
 
 // renameLegacyTables renames the legacy tables, the attempt table's foreign

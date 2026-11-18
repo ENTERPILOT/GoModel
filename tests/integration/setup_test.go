@@ -182,6 +182,12 @@ func resetPostgreSQLStorage(t *testing.T) {
 		// CASCADE below also covers any future dependents.
 		"request_log_attempts",
 		"request_logs",
+		// The names up to v0.2.5, on a database an older checkout used: the
+		// gateway would move their rows into the tables just reset. They come
+		// after the current ones, whose CASCADE removes the views PostgreSQL
+		// keeps under these names.
+		"audit_log_attempts",
+		"audit_logs",
 		"usage",
 		"budgets",
 		"budget_settings",
@@ -211,6 +217,7 @@ func resetMongoDBStorage(t *testing.T) {
 
 	collections := []string{
 		"request_logs",
+		"audit_logs", // the name up to v0.2.5, on a database an older checkout used
 		"usage",
 		"budgets",
 		"budget_settings",

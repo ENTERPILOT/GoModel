@@ -66,13 +66,13 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 		return nil, fmt.Errorf("database is required")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	collection, err := requestLogCollection(ctx, database)
+	collection, err := requestLogCollection(database)
 	if err != nil {
 		return nil, err
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Create indexes for common queries
 	indexes := []mongo.IndexModel{

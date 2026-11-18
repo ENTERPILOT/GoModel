@@ -335,3 +335,29 @@ func TestNewSQLStoreBringsLegacyViewsUpToDate(t *testing.T) {
 		assert.True(t, views)
 	})
 }
+
+// A start can stop between renaming the entry table and creating the attempts
+// table, on a database old enough to have had none. If an older binary then
+// recreates the legacy tables, the next start must first complete the request
+// log tables and only then move the rows over.
+func TestNewSQLStoreAbsorbsAfterAnInterruptedRename(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		require.NoError(t, db.Schema(ctx, sqlTables[0]))
+		createLegacySchema(t, db)
+		writeLegacyEntry(t, db, "written-during-rollback", time.Unix(1700000000, 0).UTC())
+
+		// A reader has no attempts table to move into and leaves the rows be.
+		_, err := newAdoptingSQLReader(db)
+		require.NoError(t, err)
+		assert.Equal(t, relationTable, relationKindOf(t, db, legacyRequestLogTable))
+
+		startSQLStore(t, db)
+
+		entry := readEntry(t, db, "written-during-rollback")
+		require.NotNil(t, entry)
+		require.Len(t, entry.Data.Attempts, 1)
+		assert.NotEqual(t, relationTable, relationKindOf(t, db, legacyRequestLogTable))
+		assert.NotEqual(t, relationTable, relationKindOf(t, db, legacyAttemptsTable))
+	})
+}

@@ -214,7 +214,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 // (first of all onto their current names) and creates the indexes built at
 // startup.
 func ensureSQLSchema(ctx context.Context, db sqlx.DB) error {
-	if err := adoptLegacyTables(ctx, db); err != nil {
+	if err := adoptLegacyTables(ctx, db, false); err != nil {
 		return err
 	}
 	if err := db.Schema(ctx, sqlTables...); err != nil {
@@ -224,6 +224,10 @@ func ensureSQLSchema(ctx context.Context, db sqlx.DB) error {
 		return fmt.Errorf("failed to rename request_logs.model to requested_model: %w", err)
 	}
 	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
+		return err
+	}
+	// Now that both tables exist in their current shape: see adoptLegacyTables.
+	if err := adoptLegacyTables(ctx, db, true); err != nil {
 		return err
 	}
 	if err := ensureLegacyViews(ctx, db); err != nil {
