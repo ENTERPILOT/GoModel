@@ -24,9 +24,11 @@ Każdy request pasuje do dokładnie jednego aktywnego workflow.
 <Note>
   Klucz funkcji `request_logs` do wersji v0.2.5 włącznie nazywał się `audit`.
   `audit` jest przestarzały: API nadal go przyjmuje, a odpowiedzi nadal
-  zawierają go obok `request_logs` z tą samą wartością, więc istniejące
-  klienty działają bez zmian. Gdy request zawiera oba klucze, decyduje
-  `request_logs`.
+  zawierają go obok `request_logs` z tą samą wartością, więc klient wysyłający
+  samo `audit` działa dalej. Gdy request zawiera oba klucze, decyduje
+  `request_logs`, więc klient edytujący pobrany workflow musi zmienić
+  `request_logs`, a nie samo `audit`. Gateway w wersji v0.2.5 lub starszej czyta
+  tylko `audit`: wysyłaj oba klucze, dopóki działa choć jedna taka replika.
 </Note>
 
 ## Pola zakresu

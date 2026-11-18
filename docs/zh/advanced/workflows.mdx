@@ -22,8 +22,9 @@ keywords: ["工作流", "workflows", "路由规则", "routing rules", "user_path
 
 <Note>
   功能键 `request_logs` 在 v0.2.5 及更早版本中名为 `audit`。`audit` 已弃用：API
-  仍然接受它，响应中也仍会在 `request_logs` 旁以相同的值返回它，因此现有客户端可以继续使用。
-  如果请求同时包含两个键，以 `request_logs` 为准。
+  仍然接受它，响应中也仍会在 `request_logs` 旁以相同的值返回它，因此只发送 `audit` 的客户端可以继续使用。
+  如果请求同时包含两个键，以 `request_logs` 为准，所以修改已获取的 workflow 的客户端必须修改
+  `request_logs`，而不能只改 `audit`。v0.2.5 及更早版本的网关只读取 `audit`：只要还有副本运行这样的版本，就请同时发送两个键。
 </Note>
 
 ## 作用域字段

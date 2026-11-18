@@ -23,8 +23,11 @@ Each request matches exactly one active workflow.
 <Note>
   The `request_logs` feature key was named `audit` through v0.2.5. `audit` is
   deprecated: the API still accepts it, and responses still carry it next to
-  `request_logs` with the same value, so existing clients keep working. A
-  request that sends both is decided by `request_logs`.
+  `request_logs` with the same value, so a client that sends `audit` alone keeps
+  working. A request that sends both is decided by `request_logs`, so a client
+  that edits a workflow it fetched has to change `request_logs`, not `audit`
+  alone. A gateway on v0.2.5 or older reads only `audit`: send both keys while
+  any replica still runs one.
 </Note>
 
 ## Scope Fields

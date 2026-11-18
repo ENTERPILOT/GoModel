@@ -24,9 +24,12 @@ Jeder Request wird genau einem aktiven Workflow zugeordnet.
 <Note>
   Der Feature-Key `request_logs` hieß bis einschließlich v0.2.5 `audit`.
   `audit` ist veraltet: Die API akzeptiert den Key weiterhin, und Antworten
-  enthalten ihn weiterhin neben `request_logs` mit demselben Wert, sodass
-  bestehende Clients weiter funktionieren. Sendet ein Request beide Keys,
-  entscheidet `request_logs`.
+  enthalten ihn weiterhin neben `request_logs` mit demselben Wert, sodass ein
+  Client, der nur `audit` sendet, weiter funktioniert. Sendet ein Request beide
+  Keys, entscheidet `request_logs`; ein Client, der einen abgerufenen Workflow
+  bearbeitet, muss also `request_logs` ändern und nicht nur `audit`. Ein Gateway
+  mit v0.2.5 oder älter liest nur `audit`: Senden Sie beide Keys, solange noch
+  ein Replica mit einer solchen Version läuft.
 </Note>
 
 ## Scope-Felder
