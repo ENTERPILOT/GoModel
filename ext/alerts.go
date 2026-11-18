@@ -107,8 +107,7 @@ type AlertBudget struct {
 // Core logs every alert a sink missed and counts it in
 // gomodel_budget_alert_delivery_failures_total under the sink's name, except
 // those lost with a killed process. Gateways that do not share a database, as
-// with SQLite, each raise the alert: a sink that must not repeat one
-// deduplicates on AlertEvent.ID.
+// with SQLite, each track spend and raise alerts on their own.
 //
 // SendAlert is called off the request path. One gateway calls a sink with one
 // alert at a time, but a sink is registered once and outlives configuration

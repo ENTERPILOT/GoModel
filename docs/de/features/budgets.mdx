@@ -555,20 +555,9 @@ gezählt.
 
 Ein Empfänger kann dieselbe Warnung dennoch zweimal sehen. Eine Wiederholung
 sendet einen `POST` erneut, dessen Antwort auf dem Rückweg verloren ging, mit
-derselben `id`; deduplizieren Sie also auf `id`. Replikate mit SQLite, jedes
-mit eigener Datenbank, lösen die Warnung jeweils aus, meist mit einer anderen
-`id`, weil jede Datenbank dem Budget eine eigene `revision` gibt (Replikate, die
-aus Kopien derselben Datenbank gestartet wurden, können sie und damit die `id`
-teilen, bis sich Betrag oder Kostenbasis des Budgets auf einem von ihnen
-ändert).
-Um auch diese zusammenzuführen, deduplizieren Sie auf `budget.scope`,
-`budget.subject`, `budget.effective_subject`, `budget.period_seconds`,
-`period_start` und `threshold_percent`. Dieser Schlüssel verwirft auch die
-Warnung, die nach einer Änderung von Betrag oder Kostenbasis im selben Zeitraum
-erneut ausgelöst wird, da sich keines seiner Felder ändert; `amount` und
-`cost_basis` hinzuzufügen hilft nicht, wenn ein Budget auf einen früheren Wert
-zurückgesetzt wird. Um diese Warnungen zu behalten, geben Sie den Replikaten
-eine gemeinsame Datenbank und deduplizieren Sie nur auf `id`.
+derselben `id`; deduplizieren Sie also auf `id`. Replikate ohne gemeinsame
+Datenbank, wie mit SQLite, erfassen die Ausgaben getrennt und lösen eigene
+Warnungen aus, die die `id` nicht verbindet.
 
 ### Webhook-Payload
 
@@ -622,8 +611,7 @@ Zwei Zustellungen tragen genau dann dieselbe `id`, wenn sie dieselbe Warnung
 sind: dasselbe Budget (`scope`, `subject`, `effective_subject`, Zeitraum),
 dieselbe `revision`, derselbe `period_start` und dieselbe `threshold_percent`.
 Wiederholungen und Zustellungen eines anderen Replikats mit derselben Datenbank
-verwenden sie erneut. Replikate mit eigener SQLite-Datenbank meist nicht, da jede
-ihre eigene `revision` speichert.
+verwenden sie erneut.
 Ein neuer Zeitraum, ein Reset, ein verschobener Reset-Anker oder eine neue
 Revision ergibt eine neue `id`.
 
