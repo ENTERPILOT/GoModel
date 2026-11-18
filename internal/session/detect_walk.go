@@ -112,6 +112,10 @@ func bodyRuleResult(raw string, members []bodyMember, isObject bool, rule bodyRu
 		return member.value
 	case member.dup:
 		return gjson.Get(raw, rule.BodyPath)
+	case !member.value.IsObject() && !member.value.IsArray():
+		// A scalar has nothing under it. Result.Get would scan a string's
+		// text for the first bracket and read it as a container.
+		return gjson.Result{}
 	default:
 		return member.value.Get(rule.rest)
 	}

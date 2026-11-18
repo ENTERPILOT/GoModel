@@ -37,6 +37,10 @@ var walkBodies = []string{
 	`{"tools":[{"type":"function"}],"tools":[{"type":"other"}],"messages":[{"role":"user","content":"hi"}]}`,
 	`{"a":{"b":{"c":"deep"}},"a":{"b":{"c":"later"}},"messages":[{"role":"user","content":"hi"}]}`,
 	`{"x-key":"dash","n":{"0":"zero"},"list":["l0","l1"],"messages":[{"role":"user","content":"hi"}]}`,
+	// Strings holding JSON-like text are scalars: a nested path finds nothing.
+	`{"list":"[\"abc","n":"{\"0\":\"zero","messages":[]}`,
+	`{"list":"[\"l0\",\"l1\"]","n":"{\"0\":\"zero\"}","tools":"[{\"type\":\"function\"}]","messages":[]}`,
+	`{"list":7,"n":true,"conversation":null,"messages":[]}`,
 	`  {"session_id":"leading whitespace"}  `,
 	`[{"session_id":"array root"}]`,
 	`["l0","l1"]`,
@@ -49,7 +53,7 @@ var walkBodies = []string{
 var walkPaths = []string{
 	"metadata.user_id", "session_id", "litellm_session_id", "prompt_cache_key",
 	"conversation", "conversation.id", "model", "tools.0.type", "a.b.c", "x-key",
-	"n.0", "list.1", "0", "messages.#.role", "session\\_id", "a.b|@reverse",
+	"n.0", "list.0", "list.1", "0", "messages.#.role", "session\\_id", "a.b|@reverse",
 }
 
 func TestBodyRuleResultMatchesGJSON(t *testing.T) {
