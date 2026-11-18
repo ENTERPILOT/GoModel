@@ -97,8 +97,12 @@ func (r CheckResult) Projection(now time.Time) (Projection, bool) {
 
 // thresholdReached reports whether the result's spend is at or past percent
 // of the budget amount. A budget without priced usage never alerts.
+//
+// Both sides are scaled instead of dividing the amount: amount*100/100 can
+// round to just above the amount, and the 100% alert has to fire whenever
+// enforcement, which compares spend with the amount, rejects requests.
 func (r CheckResult) thresholdReached(percent int) bool {
-	return r.HasUsage && r.Spent >= r.Budget.Amount*float64(percent)/100
+	return r.HasUsage && r.Spent*100 >= r.Budget.Amount*float64(percent)
 }
 
 // AlertClaim identifies one alert: a budget revision (with the child a

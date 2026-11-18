@@ -148,6 +148,17 @@ func TestThresholdReached(t *testing.T) {
 	}
 }
 
+// Enforcement rejects requests once spend reaches the amount, so the 100%
+// alert has to fire at exactly that spend. For these amounts amount*100/100
+// rounds to just above the amount.
+func TestThresholdReachedAtFullSpendMatchesEnforcement(t *testing.T) {
+	for _, amount := range []float64{1.1e-05, 2.2e-05, 4.4e-05, 5.1e-05} {
+		require.Greater(t, amount*100/100, amount, "amount %v no longer shows the rounding", amount)
+		result := CheckResult{Budget: Budget{Amount: amount}, Spent: amount, HasUsage: true}
+		assert.True(t, result.thresholdReached(100), "amount %v", amount)
+	}
+}
+
 func TestAlertThresholdsEncoding(t *testing.T) {
 	tests := []struct {
 		name       string

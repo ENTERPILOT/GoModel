@@ -518,17 +518,8 @@ and counted as delivery failures.
 
 A receiver can still see the same alert twice. A retry repeats a `POST` whose
 answer was lost on the way back, with the same `id`, so deduplicate on `id`.
-Replicas on SQLite, each with its own database, each raise the alert, usually
-under a different `id`, because each database gives the budget its own
-`revision` (replicas started from copies of one database can share it, and
-with it the `id`, until the budget's amount or cost basis changes on one of
-them). To collapse those too, deduplicate on `budget.scope`,
-`budget.subject`, `budget.effective_subject`, `budget.period_seconds`,
-`period_start`, and `threshold_percent`. That key also drops the alert raised
-again after the budget's amount or cost basis changes within the period, since
-none of its fields change; adding `amount` and `cost_basis` doesn't help when a
-budget changes back to an earlier value. To keep those alerts, give the
-replicas one shared database and deduplicate on `id` alone.
+Replicas that do not share a database, as with SQLite, each track spend
+separately and raise their own alerts, which `id` does not tie together.
 
 ### Webhook payload
 
@@ -581,9 +572,8 @@ Each alert is one `POST` with a JSON body:
 Two deliveries carry the same `id` exactly when they are the same alert: the
 same budget (`scope`, `subject`, `effective_subject`, period), the same
 `revision`, the same `period_start`, and the same `threshold_percent`. Retries,
-and deliveries from another replica sharing the database, reuse it. Replicas
-with their own SQLite databases usually do not, since each stores its own
-`revision`. A new period, a reset, a moved
+and deliveries from another replica sharing the database, reuse it. A new
+period, a reset, a moved
 reset anchor, or a new revision gives a new `id`.
 
 Fields are only ever added. Every delivery also carries these headers:
