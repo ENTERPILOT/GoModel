@@ -243,7 +243,7 @@ Token 数计价，流式语音则根据实际传输的音频时长计价。两�
 `temperature`，以及 `timestamp_granularities[]` 和其不带方括号的别名
 `timestamp_granularities`）；二是转录上传中额外的**文件**部分，只有 `file` 中的音频会被发送。
 
-转发的值不会存储在[审计日志](/zh/advanced/admin-endpoints)中：由于它们是任意的客户端输入，
+转发的值不会存储在[请求日志](/zh/advanced/admin-endpoints)中：由于它们是任意的客户端输入，
 可能包含提供商凭据，日志条目只会在 `forwarded_fields` 下记录字段**名称**。
 
 <Note>
@@ -278,7 +278,7 @@ Token 数计价，流式语音则根据实际传输的音频时长计价。两�
 
 - **无故障转移、护栏或响应缓存**：这些阶段会被跳过。请求仍会经过授权、预算检查和计量
   （参见[成本追踪](#成本追踪)），并以其 `/v1/audio/*` 路径写入
-  [审计日志](/zh/advanced/admin-endpoints)。
+  [请求日志](/zh/advanced/admin-endpoints)。
 - **输入为 OpenAI 请求格式，输出为提供商的方言**：客户端始终发送 OpenAI 的音频格式。
   兼容 OpenAI 的上游会原样接收；Xiaomi MiMo、Cohere 和 MiniMax 的请求会被转换为
   各提供商的原生音频协议。除此之外的提供商不会在此端点背后进行适配。
@@ -288,11 +288,11 @@ Token 数计价，流式语音则根据实际传输的音频时长计价。两�
 如果提供商的原生音频 API 与 OpenAI 不同，请使用[透传 API](/zh/features/passthrough-api)
 （`/p/{provider}/v1/audio/...`），将字节原样转发到该上游。
 
-## 审计日志
+## 请求日志
 
-音频请求会像其他模型交互一样出现在审计日志中。由于音频负载是二进制数据且体积较大，
+音频请求会像其他模型交互一样出现在请求日志中。由于音频负载是二进制数据且体积较大，
 其请求体和响应体由专门的设置
-[`LOGGING_LOG_AUDIO_BODIES`](/zh/advanced/configuration#审计日志)（默认 `false`）控制。
+[`LOGGING_LOG_AUDIO_BODIES`](/zh/advanced/configuration#请求日志)（默认 `false`）控制。
 该设置是对 `LOGGING_LOG_BODIES` 的**细化**，只有在启用请求体日志时才会生效：
 
 - **请求体日志关闭**（`LOGGING_LOG_BODIES=false`）：无论此设置如何，都不会存储音频内容。
@@ -302,7 +302,7 @@ Token 数计价，流式语音则根据实际传输的音频时长计价。两�
   使**控制台能够渲染内嵌播放器**；`/v1/audio/transcriptions` 会存储上传的音频（同样可在
   控制台中播放）以及上传元数据（文件名、模型、参数）。
 
-音频字节会存入[媒体存储](/zh/advanced/configuration#媒体存储)，而不是审计数据库：
+音频字节会存入[媒体存储](/zh/advanced/configuration#媒体存储)，而不是请求日志数据库：
 日志条目携带一个 `media_id`，控制台通过 `GET /admin/media/{id}` 获取该文件。
-文件大小没有上限，流式响应会在中继的同时被存储。文件的保留时间与引用它们的审计条目相同
+文件大小没有上限，流式响应会在中继的同时被存储。文件的保留时间与引用它们的请求日志条目相同
 （`LOGGING_RETENTION_DAYS`）。

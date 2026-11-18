@@ -17,9 +17,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -129,7 +129,7 @@ func (brokenClientWriter) Write([]byte) (int, error) {
 }
 
 // A response that breaks after its status line was sent is recorded on the
-// audit entry before the handler returns, and is not returned as an error.
+// request log entry before the handler returns, and is not returned as an error.
 func TestRelayFailuresAreRecordedNotReturned(t *testing.T) {
 	jsonHeaders := map[string][]string{"Content-Type": {"application/json"}}
 	truncatedBody := func() io.ReadCloser {
@@ -164,7 +164,7 @@ func TestRelayFailuresAreRecordedNotReturned(t *testing.T) {
 			wantErrorType: "client_disconnected",
 		},
 		{
-			// The provider's own error is already on the audit entry and stays
+			// The provider's own error is already on the request log entry and stays
 			// the recorded cause.
 			name:         "relayed provider error the client stopped reading",
 			brokenClient: true,
@@ -194,8 +194,8 @@ func TestRelayFailuresAreRecordedNotReturned(t *testing.T) {
 				}))
 			}
 			c, rec := echotest.Post(t, "/v1/messages", `{}`, opts...)
-			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-			c.Set(string(auditlog.LogEntryKey), entry)
+			entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+			c.Set(string(requestlog.LogEntryKey), entry)
 
 			require.NoError(t, tc.relay(c))
 

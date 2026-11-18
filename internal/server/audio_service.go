@@ -12,8 +12,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/streaming"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -22,7 +22,7 @@ import (
 // the usage collector holds while it waits for the terminal usage event, so a
 // runaway upstream cannot grow the process without bound. Audio bytes are not
 // held at all: a relayed audio body is teed straight into the media store for
-// audit capture (auditlog.MediaWriter) and measured as it passes for usage.
+// request log capture (requestlog.MediaWriter) and measured as it passes for usage.
 const maxCollectedTranscriptBytes = 8 * 1024 * 1024
 
 // audioUsageExtractor derives the usage entry for a buffered audio call from the
@@ -60,8 +60,8 @@ func (s audioStreamSink) Entry(pricing *core.ModelPricing) *usage.UsageEntry {
 // validate, authorize, enforce budget, route, and proxy the resulting bytes.
 type audioService struct {
 	modelCallService
-	// logBodies and logAudioBodies mirror the audit logger config. Audio
-	// endpoints are not ingress-managed, so the audit middleware cannot capture
+	// logBodies and logAudioBodies mirror the request logger config. Audio
+	// endpoints are not ingress-managed, so the request log middleware cannot capture
 	// their (binary/multipart) bodies; the service captures them here instead.
 	// logBodies is the master switch: audio bodies are only captured when it is
 	// on. logAudioBodies then decides whether the audio bytes are stored in the
@@ -69,13 +69,13 @@ type audioService struct {
 	// placeholder. media is where the bytes go; nil leaves placeholders.
 	logBodies      bool
 	logAudioBodies bool
-	media          *auditlog.MediaCapturer
+	media          *requestlog.MediaCapturer
 }
 
 // audioCapture returns the media capture for this request, or nil when audio
 // bytes are not to be stored (bodies or audio logging off, no media store,
-// or no live audit entry to reference them from).
-func (s *audioService) audioCapture(c *echo.Context) *auditlog.MediaCapture {
+// or no live request log entry to reference them from).
+func (s *audioService) audioCapture(c *echo.Context) *requestlog.MediaCapture {
 	if !s.logBodies || !s.logAudioBodies {
 		return nil
 	}
@@ -116,7 +116,7 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	// that need one (OpenAI, ElevenLabs, MiniMax) fill or reject it themselves.
 
 	if s.logBodies && s.logAudioBodies {
-		auditlog.EnrichEntryWithRequestBody(c, audioSpeechAuditInput(req))
+		requestlog.EnrichEntryWithRequestBody(c, audioSpeechRequestLogInput(req))
 	}
 
 	ctx, route, err := s.prepare(c, req.Model, req.Provider)
@@ -157,7 +157,7 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 // provider returns mp3). It falls back to the requested response_format and
 // finally OpenAI's mp3 default.
 func speechResponseFormat(req *core.AudioSpeechRequest, resp *core.AudioResponse) string {
-	if resp != nil && auditlog.IsAudioContentType(resp.ContentType) {
+	if resp != nil && requestlog.IsAudioContentType(resp.ContentType) {
 		return resp.ContentType
 	}
 	if f := strings.TrimSpace(req.ResponseFormat); f != "" {
@@ -201,8 +201,8 @@ func (s *audioService) createAudioTranscription(c *echo.Context, translation boo
 	// recorded; LogAudioBodies additionally stores the raw audio for
 	// playback, otherwise the entry keeps a metadata-only placeholder.
 	if s.logBodies {
-		auditlog.EnrichEntryWithRequestBody(c, auditlog.BuildAudioUploadBody(
-			s.audioCapture(c), audioUploadContentType(req), req.File, audioTranscriptionAuditInput(req)))
+		requestlog.EnrichEntryWithRequestBody(c, requestlog.BuildAudioUploadBody(
+			s.audioCapture(c), audioUploadContentType(req), req.File, audioTranscriptionRequestLogInput(req)))
 	}
 
 	ctx, route, err := s.prepare(c, req.Model, req.Provider)
@@ -363,7 +363,7 @@ func (s *audioService) finishAudio(c *echo.Context, route modelCallRoute, resp *
 // synthesized speech and a stream=true transcript are both produced
 // incrementally, and buffering them costs the client every second of the
 // generation before its first byte. The relayed bytes are teed to the usage sink,
-// which measures them as they go, and to the audit capture: binary audio goes
+// which measures them as they go, and to the request log capture: binary audio goes
 // into the media store as it streams, a transcript into a bounded buffer.
 func (s *audioService) relayAudioStream(c *echo.Context, route modelCallRoute, resp *core.AudioResponse, started time.Time, sink audioUsageSink) error {
 	ctx := c.Request().Context()
@@ -381,20 +381,20 @@ func (s *audioService) relayAudioStream(c *echo.Context, route modelCallRoute, r
 	if isAudioEventStream(contentType) {
 		header.Set("Cache-Control", "no-cache")
 		header.Set("Connection", "keep-alive")
-		auditlog.EnrichEntryWithStream(c, true)
+		requestlog.EnrichEntryWithStream(c, true)
 	}
 	c.Response().WriteHeader(http.StatusOK)
 
 	var (
-		mediaWriter *auditlog.MediaWriter
+		mediaWriter *requestlog.MediaWriter
 		textCapture *cappedCaptureBuffer
 		capture     io.Writer
 	)
-	if auditlog.IsAudioContentType(contentType) {
+	if requestlog.IsAudioContentType(contentType) {
 		mediaWriter = s.audioCapture(c).AudioWriter(contentType)
 		capture = mediaWriter
 	} else {
-		textCapture = newCappedCaptureBuffer(auditlog.MaxBodyCapture)
+		textCapture = newCappedCaptureBuffer(requestlog.MaxBodyCapture)
 		capture = textCapture
 	}
 	flushErr := flushStream(c.Response(), io.TeeReader(stream, io.MultiWriter(sink, capture)))
@@ -403,9 +403,9 @@ func (s *audioService) relayAudioStream(c *echo.Context, route modelCallRoute, r
 	s.logUsage(ctx, route, sink.Entry)
 	if mediaWriter != nil {
 		// Built unconditionally so the upload is always committed or discarded.
-		body := auditlog.BuildRelayedAudioResponseBody(mediaWriter)
+		body := requestlog.BuildRelayedAudioResponseBody(mediaWriter)
 		if s.logBodies {
-			auditlog.EnrichEntryWithResponseBody(c, body)
+			requestlog.EnrichEntryWithResponseBody(c, body)
 		}
 	} else if data, complete := textCapture.Captured(); complete {
 		s.captureAudioResponseBody(c, contentType, data)
@@ -435,8 +435,8 @@ func (s *audioService) respondAudio(c *echo.Context, providerName string, resp *
 	return c.Blob(http.StatusOK, contentType, resp.Data)
 }
 
-// captureAudioResponseBody records the returned payload on the live audit entry.
-// The audit middleware cannot: it coerces bodies to UTF-8, which would corrupt
+// captureAudioResponseBody records the returned payload on the live request log entry.
+// The request log middleware cannot: it coerces bodies to UTF-8, which would corrupt
 // binary audio, and it skips a response that announced itself as a stream.
 // LogBodies is the master switch; LogAudioBodies only decides whether audio
 // bytes are stored for playback or recorded as a lightweight placeholder. A
@@ -447,16 +447,16 @@ func (s *audioService) captureAudioResponseBody(c *echo.Context, contentType str
 		return
 	}
 	switch {
-	case auditlog.IsAudioContentType(contentType):
-		auditlog.EnrichEntryWithResponseBody(c, auditlog.BuildAudioResponseBody(s.audioCapture(c), contentType, data))
-	case isAudioEventStream(contentType) && len(data) > 0 && len(data) <= auditlog.MaxBodyCapture:
-		auditlog.EnrichEntryWithResponseBody(c, auditlog.CaptureLoggedBody(data))
+	case requestlog.IsAudioContentType(contentType):
+		requestlog.EnrichEntryWithResponseBody(c, requestlog.BuildAudioResponseBody(s.audioCapture(c), contentType, data))
+	case isAudioEventStream(contentType) && len(data) > 0 && len(data) <= requestlog.MaxBodyCapture:
+		requestlog.EnrichEntryWithResponseBody(c, requestlog.CaptureLoggedBody(data))
 	}
 }
 
-// audioSpeechAuditInput builds the audit request body for a text-to-speech
+// audioSpeechRequestLogInput builds the logged request body for a text-to-speech
 // request: the user-facing synthesis parameters, never routing metadata.
-func audioSpeechAuditInput(req *core.AudioSpeechRequest) map[string]any {
+func audioSpeechRequestLogInput(req *core.AudioSpeechRequest) map[string]any {
 	input := map[string]any{
 		"model": req.Model,
 		"input": req.Input,
@@ -482,7 +482,7 @@ func audioUploadContentType(req *core.AudioTranscriptionRequest) string {
 	// type is a bare media type the dashboard can serve the audio under.
 	if ct := strings.TrimSpace(req.FileContentType); ct != "" {
 		mediaType := strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))
-		if auditlog.IsAudioContentType(mediaType) {
+		if requestlog.IsAudioContentType(mediaType) {
 			return mediaType
 		}
 	}
@@ -504,10 +504,10 @@ func audioUploadContentType(req *core.AudioTranscriptionRequest) string {
 	}
 }
 
-// audioTranscriptionAuditInput builds the metadata attached to a logged
+// audioTranscriptionRequestLogInput builds the metadata attached to a logged
 // transcription request (model and upload parameters). The uploaded audio
 // itself is embedded separately via BuildAudioUploadBody.
-func audioTranscriptionAuditInput(req *core.AudioTranscriptionRequest) map[string]any {
+func audioTranscriptionRequestLogInput(req *core.AudioTranscriptionRequest) map[string]any {
 	meta := map[string]any{
 		"model":      req.Model,
 		"filename":   req.Filename,
@@ -529,7 +529,7 @@ func audioTranscriptionAuditInput(req *core.AudioTranscriptionRequest) map[strin
 		meta["timestamp_granularities"] = req.TimestampGranularities
 	}
 	// Forwarded fields are arbitrary client input and may carry provider-native
-	// credentials, so the audit entry records only which ones were passed
+	// credentials, so the request log entry records only which ones were passed
 	// through, never their values.
 	if names := forwardedFieldNames(req.Fields); len(names) > 0 {
 		meta["forwarded_fields"] = names
@@ -538,7 +538,7 @@ func audioTranscriptionAuditInput(req *core.AudioTranscriptionRequest) map[strin
 }
 
 // forwardedFieldNames lists the distinct passthrough field names in request
-// order, for the audit metadata.
+// order, for the request log metadata.
 func forwardedFieldNames(fields []core.FormField) []string {
 	if len(fields) == 0 {
 		return nil

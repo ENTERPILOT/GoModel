@@ -11,7 +11,7 @@ import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { usageData } from "$lib/stores/usageData.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { toggleSearchValue } from "$lib/components/molecules/searchSelectLogic.js";
-import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
+import { liveLogs } from "../requests/liveLogs.svelte.js";
 import { emptySessionUsage, emptyUsageLog, emptyUsagePageSummary } from "./usage-helpers.js";
 import {
   endpointsSelected,

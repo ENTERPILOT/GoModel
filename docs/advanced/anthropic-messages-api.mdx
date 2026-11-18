@@ -14,7 +14,7 @@ format can point at GoModel unchanged.
 
 The request is translated to GoModel's canonical chat type at ingress and runs through
 the same pipeline as `/v1/chat/completions` — so virtual models, workflow policy,
-budgets, failover, the response cache, usage/cost tracking, and audit logging all
+budgets, failover, the response cache, usage/cost tracking, and request logging all
 apply. Because every provider implements chat completion, an Anthropic-format request
 can be routed to **any** configured provider (OpenAI, Gemini, Bedrock, and others),
 not only Anthropic.
@@ -32,7 +32,7 @@ different name), then relays the provider-native response or SSE stream
 unchanged. This preserves everything the canonical translation cannot —
 `cache_control` breakpoints, thinking-block signatures, `anthropic-beta`
 headers — which coding agents like Claude Code depend on. Rate limits,
-budgets, audit logging, and usage tracking still apply, for both streaming
+budgets, request logging, and usage tracking still apply, for both streaming
 and non-streaming responses.
 
 Native forwarding is automatic. Requests fall back to the translated pipeline
@@ -182,9 +182,9 @@ Streaming responses emit the Anthropic SSE event sequence (`message_start`,
 `content_block_start`/`content_block_delta`/`content_block_stop`, `message_delta`,
 `message_stop`).
 
-## Cost tracking and audit logs
+## Cost tracking and request logs
 
-`/v1/messages` requests are tracked and audited exactly like the OpenAI-compatible
+`/v1/messages` requests are tracked and logged exactly like the OpenAI-compatible
 routes. Cost is computed from the actual provider that served the request, and usage
 is recorded under the `/v1/messages` endpoint so it can be filtered in the dashboard.
 

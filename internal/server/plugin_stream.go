@@ -310,7 +310,7 @@ type pluginStream struct {
 	// replaced and dropped count, per in-flight instance, the events it
 	// rewrote or withheld; eventTime is the time its event hook took over
 	// the stream and failedOpen its first event failure the chain carried on
-	// from. All feed the audit outcome trail.
+	// from. All feed the request log outcome trail.
 	replaced   map[string]int
 	dropped    map[string]int
 	eventTime  map[string]time.Duration
@@ -563,7 +563,7 @@ func (ps *pluginStream) streamStep(instance string) int {
 
 // recordWarn adds the warn header for a warn outcome. It reaches the client
 // only when the headers are not committed yet: a buffered stream that
-// finished before its first keep-alive. Later warns stay in the audit trail.
+// finished before its first keep-alive. Later warns stay in the request log.
 func (ps *pluginStream) recordWarn(outcome plugins.Outcome) {
 	if outcome.Decision.Action == pluginapi.ActionWarn {
 		ps.state.AddResponseHeader(plugins.GuardrailHeader, plugins.WarnHeaderValue(outcome.Decision))

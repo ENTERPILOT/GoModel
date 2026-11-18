@@ -122,7 +122,7 @@ carries a whole image as base64, can be up to 32 MiB; stream plugins hold at
 most 4 MiB by default, so a larger image ends a stream that runs through them.
 Request 2K and 4K images without streaming when such plugins are on.
 
-Each image is several megabytes of base64. Audit logs capture at most 1 MB of
+Each image is several megabytes of base64. Request logs capture at most 1 MB of
 a response body, so a logged body is truncated and marked as such. The response
 cache stores the whole response.
 

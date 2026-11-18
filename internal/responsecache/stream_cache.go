@@ -14,8 +14,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
@@ -179,8 +179,8 @@ func replayCommitted(err error) bool {
 func writeCachedResponse(c *echo.Context, path string, requestBody, cached []byte, cacheType string) error {
 	cacheHeader := cacheHeaderValue(cacheType)
 	if isStreamingRequest(path, requestBody) {
-		auditlog.EnrichEntryWithStream(c, true)
-		auditlog.EnrichEntryWithCachedStreamResponse(c, path, cached)
+		requestlog.EnrichEntryWithStream(c, true)
+		requestlog.EnrichEntryWithCachedStreamResponse(c, path, cached)
 		c.Response().Header().Set("Content-Type", "text/event-stream")
 		c.Response().Header().Set("Cache-Control", "no-cache")
 		c.Response().Header().Set("Connection", "keep-alive")

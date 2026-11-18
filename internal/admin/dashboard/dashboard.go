@@ -123,7 +123,7 @@ func runtimeGlobals(basePath string, demoMode bool) string {
 // contentSecurityPolicy limits the dashboard to its own origin. Scripts run
 // only from the bundle and the runtime globals; the dashboard holds an admin
 // credential, so an injected script must not run. Styles allow inline
-// attributes, which the SPA templates use. Audit previews render media as
+// attributes, which the SPA templates use. Request log previews render media as
 // data: and blob: URLs. The page cannot be framed.
 func contentSecurityPolicy(inlineScript string) string {
 	sum := sha256.Sum256([]byte(inlineScript))

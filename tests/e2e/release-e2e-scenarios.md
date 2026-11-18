@@ -64,7 +64,7 @@ Stateful note:
   scenario creates `$QA_SUFFIX`-scoped virtual models and deletes them, so they
   are self-contained and rerunnable in any order
 - `S142`-`S148` exercise header tagging (admin rule CRUD, validation negatives,
-  label extraction onto usage entries and audit `data.labels`, streaming,
+  label extraction onto usage entries and request log `data.labels`, streaming,
   PostgreSQL/MongoDB backend parity, and auth gating); each scenario uses
   `$QA_SUFFIX`-scoped header names and restores an empty operator rule set, so
   they are self-contained and rerunnable in any order. Env/config-managed rules
@@ -83,7 +83,7 @@ Stateful note:
   self-contained, but `S158` saturates `deepseek/deepseek-flash` for up to
   one minute after it runs
 - `S163`-`S172` exercise the MCP gateway (admin CRUD with secret redaction,
-  aggregation/namespacing, tools/prompts/resources relay, usage and audit
+  aggregation/namespacing, tools/prompts/resources relay, usage and request
   logging with JSON-RPC bodies, identity-bound sessions, store parity on
   PostgreSQL/MongoDB) plus provider `request_health` on
   `/admin/providers/status`; each scenario registers `$QA_SUFFIX`-scoped
@@ -105,7 +105,7 @@ Stateful note:
   `SERVER_CLIENT_IP_HEADER`, `SERVER_TRUSTED_HOPS`) needs one gateway per
   policy, so it is covered by a standalone script rather than this matrix
   (`tests/e2e/test-clientip.sh`). This stack trusts no proxy, which is the
-  default posture: a forwarding header it carries is ignored and the audit
+  default posture: a forwarding header it carries is ignored and the request log
   entry records the socket peer
 - Disabled master key authentication (`MASTER_KEY_DISABLED`) needs a gateway
   booted with the key turned off and a managed key issued before that, so it is
@@ -148,9 +148,9 @@ Stateful note:
   gateway, which is safe in this sequential runner.
 - `S208`-`S215` exercise the OpenAI-compatible image endpoints
   (`/v1/images/generations`, `/v1/images/edits`) across OpenAI and Gemini's
-  native API, including registry routing, negatives, metering, and audit
+  native API, including registry routing, negatives, metering, and request log
   image-body placeholders; each is self-contained (`S210` creates and deletes
-  its own alias) and rerunnable in any order. Storing image pixels in the audit
+  its own alias) and rerunnable in any order. Storing image pixels in the request
   log (`LOGGING_LOG_IMAGE_BODIES`) needs a gateway booted with that variable
   on, so it is covered by unit tests rather than this matrix
 - `MODEL_LIST_URL=off`, conditional model-list fetches (`ETag`/`304`), and the
@@ -176,7 +176,7 @@ Stateful note:
   SQLite gateway and therefore stays sequential
 - `S229`-`S241` exercise the Jev / Kev System One API (`/v1/systemone`, Kev's
   `/permute` and `/separate`, passthrough, pinned versions, misuse negatives,
-  audit and usage, failover, exact cache on the auth gateway, state guardrails
+  request log and usage, failover, exact cache on the auth gateway, state guardrails
   on the guardrail gateway, managed-key allowlists) against the mock upstream
   on port 18091, since no hosted Jev key or Kev server is available; each
   prints `SKIPPED:` and exits 0 when the mock is down. They create and delete
@@ -216,7 +216,7 @@ Stateful note:
   calls, global-admin-only grants); it creates and deactivates its own
   `$QA_SUFFIX`-scoped keys and is rerunnable in any order
 - `S264` exercises `llm_judge` with a decision model on the guardrail gateway
-  (a block on the mock Jev probability, the judge call audited and accounted
+  (a block on the mock Jev probability, the judge call logged and accounted
   under `/v1/decisions`, an allow under a higher threshold that reaches the
   real `gpt-4.1-mini`); it prints `SKIPPED:` when the mock is down, deletes
   its own `$QA_SUFFIX`-scoped guardrail and workflow, and is rerunnable in any
@@ -580,8 +580,10 @@ assert_http_status() {
   fi
 }
 
-# Polls the audit or usage log until an entry for the request id appears.
+# Polls the request or usage log until an entry for the request id appears.
 # usage: wait_log_entry BASE_URL audit|usage REQUEST_ID OUTPUT_FILE [curl args...]
+# "audit" is the request log: /admin/audit/log is the deprecated alias of
+# /admin/request-logs, so this helper also exercises the alias.
 wait_log_entry() {
   local base="$1" kind="$2" rid="$3" out="$4"
   shift 4
@@ -645,7 +647,7 @@ run_release_budget_enforcement() {
   jq -e '.error.type == "rate_limit_error" and .error.code == "budget_exceeded" and (.error.message | test("budget exceeded"))' "$body_file" >/dev/null
 
   for _ in $(seq 1 10); do
-    curl -fsS "$base_url/admin/audit/log?search=$req2&limit=5" > "$audit_json_file"
+    curl -fsS "$base_url/admin/request-logs?search=$req2&limit=5" > "$audit_json_file"
     if jq -e --arg request_id "$req2" --arg user_path "$leaf_path" '
       any(.entries[]?; .request_id == $request_id and .user_path == $user_path and .status_code == 429 and .error_type == "rate_limit_error")
     ' "$audit_json_file" >/dev/null; then
@@ -973,35 +975,35 @@ curl -fsS "$BASE_URL/admin/usage/log?model=gpt-4.1-mini-2025-04-14&limit=5" \
   | jq -e '(.entries | type == "array") and (.total | type == "number") and (.limit | type == "number")' >/dev/null
 ```
 
-### S10 Audit log endpoint
+### S10 Request log endpoint
 
-Reads recent audit entries.
+Reads recent request log entries.
 
 ```bash
-curl -fsS "$BASE_URL/admin/audit/log?limit=5" \
+curl -fsS "$BASE_URL/admin/request-logs?limit=5" \
   | jq -e '(.entries | type == "array") and (.total | type == "number") and all(.entries[]; (.path | type == "string") and (.status_code | type == "number"))' >/dev/null
 ```
 
-### S11 Audit conversation endpoint
+### S11 Request log conversation endpoint
 
-Reads a conversation thread anchored to the newest audit entry. On a fresh
-database the audit log is empty, so the scenario seeds one chat request and
+Reads a conversation thread anchored to the newest request log entry. On a fresh
+database the request log is empty, so the scenario seeds one chat request and
 waits for it to be flushed before anchoring.
 
 ```bash
-if ! curl -fsS "$BASE_URL/admin/audit/log?limit=1" | jq -e '.entries | length >= 1' >/dev/null; then
+if ! curl -fsS "$BASE_URL/admin/request-logs?limit=1" | jq -e '.entries | length >= 1' >/dev/null; then
   curl -fsS "$BASE_URL/v1/chat/completions" \
     -H 'Content-Type: application/json' \
     -d '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly QA_AUDIT_SEED_OK"}],"max_tokens":20}' >/dev/null
   for _ in $(seq 1 10); do
-    if curl -fsS "$BASE_URL/admin/audit/log?limit=1" | jq -e '.entries | length >= 1' >/dev/null; then
+    if curl -fsS "$BASE_URL/admin/request-logs?limit=1" | jq -e '.entries | length >= 1' >/dev/null; then
       break
     fi
     sleep 1
   done
 fi
-AUDIT_ID=$(curl -fsS "$BASE_URL/admin/audit/log?limit=1" | jq -er '.entries[0].id')
-curl -fsS "$BASE_URL/admin/audit/conversation?log_id=$AUDIT_ID&limit=5" \
+AUDIT_ID=$(curl -fsS "$BASE_URL/admin/request-logs?limit=1" | jq -er '.entries[0].id')
+curl -fsS "$BASE_URL/admin/request-logs/conversation?log_id=$AUDIT_ID&limit=5" \
   | jq -e --arg audit_id "$AUDIT_ID" '.anchor_id == $audit_id and (.entries | type == "array" and length >= 1)' >/dev/null
 ```
 
@@ -1604,7 +1606,7 @@ assert_chat_stream_contains "$SSE_FILE" "QA_PASS_STREAM_OK"
 
 ### S54 PostgreSQL smoke
 
-Checks health, one model request, then admin usage/audit after the flush interval.
+Checks health, one model request, then admin usage/request logs after the flush interval.
 
 ```bash
 curl -fsS "$PG_BASE_URL/health" && echo
@@ -1620,13 +1622,13 @@ assert_chat_response_contains "$RESP_FILE" "openai" "QA_POSTGRES_OK"
 sleep 6
 curl -fsS "$PG_BASE_URL/admin/usage/summary" \
   | jq -e '(.total_requests // 0) > 0 and (.total_tokens // 0) > 0' >/dev/null
-curl -fsS "$PG_BASE_URL/admin/audit/log?search=$RID&limit=3" \
+curl -fsS "$PG_BASE_URL/admin/request-logs?search=$RID&limit=3" \
   | jq -e --arg rid "$RID" 'any(.entries[]?; .request_id == $rid and .path == "/v1/chat/completions" and .status_code == 200)' >/dev/null
 ```
 
 ### S55 MongoDB smoke
 
-Checks health, one model request, then admin audit/usage on MongoDB storage.
+Checks health, one model request, then admin request logs/usage on MongoDB storage.
 
 ```bash
 curl -fsS "$MONGO_BASE_URL/health" && echo
@@ -1642,7 +1644,7 @@ assert_chat_response_contains "$RESP_FILE" "openai" "QA_MONGO_OK"
 sleep 6
 curl -fsS "$MONGO_BASE_URL/admin/usage/log?search=$RID&limit=3" \
   | jq -e --arg rid "$RID" 'any(.entries[]?; .request_id == $rid and (.total_tokens // 0) > 0)' >/dev/null
-curl -fsS "$MONGO_BASE_URL/admin/audit/log?search=$RID&limit=3" \
+curl -fsS "$MONGO_BASE_URL/admin/request-logs?search=$RID&limit=3" \
   | jq -e --arg rid "$RID" 'any(.entries[]?; .request_id == $rid and .path == "/v1/chat/completions" and .status_code == 200)' >/dev/null
 ```
 
@@ -1675,13 +1677,13 @@ jq '{status,model,output}' "$RESP_FILE"
 assert_responses_response_contains "$RESP_FILE" "openai" "QA_GUARDRAIL_OVERRIDE"
 ```
 
-### S58 Guardrail audit and usage smoke
+### S58 Guardrail request log and usage smoke
 
 Reads admin evidence after the guardrail requests flush.
 
 ```bash
 sleep 6
-curl -fsS "$GR_BASE_URL/admin/audit/log?limit=3" \
+curl -fsS "$GR_BASE_URL/admin/request-logs?limit=3" \
   | jq -e '(.entries | length) >= 2 and any(.entries[]?; .path == "/v1/chat/completions" and .status_code == 200) and any(.entries[]?; .path == "/v1/responses" and .status_code == 200)' >/dev/null
 curl -fsS "$GR_BASE_URL/admin/usage/summary" \
   | jq -e '(.total_requests // 0) >= 2 and (.total_tokens // 0) > 0' >/dev/null
@@ -1715,11 +1717,11 @@ sed -n '1,20p' "$HEADERS_FILE"
 grep -Eiq '^HTTP/.* 204 ' "$HEADERS_FILE"
 ```
 
-## 11. Audit failure coverage
+## 11. Request log failure coverage
 
-### S61 Unsupported translated model is still visible in audit log search
+### S61 Unsupported translated model is still visible in request log search
 
-Checks that a rejected translated request is still visible in audit-log search by request ID with the requested model and error type.
+Checks that a rejected translated request is still visible in request-log search by request ID with the requested model and error type.
 
 ```bash
 REQUEST_ID="qa-invalid-model-$(date +%s)-$$"
@@ -1735,7 +1737,7 @@ grep -Eiq '^HTTP/.* 404 ' "$HEADERS_FILE"
 jq -e '.error.type == "not_found_error" and .error.code == "model_not_found"' "$BODY_FILE" >/dev/null
 sleep 6
 AUDIT_JSON_FILE="$QA_RUN_DIR/s61.audit.json"
-curl -fsS "$BASE_URL/admin/audit/log?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
+curl -fsS "$BASE_URL/admin/request-logs?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
 jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,requested_model,resolved_model,provider,status_code,error_type}))}' "$AUDIT_JSON_FILE"
 jq -e --arg request_id "$REQUEST_ID" '
     any(.entries[]?;
@@ -1748,9 +1750,9 @@ jq -e --arg request_id "$REQUEST_ID" '
   ' "$AUDIT_JSON_FILE" >/dev/null
 ```
 
-### S62 Unsupported passthrough provider is still visible in audit log search
+### S62 Unsupported passthrough provider is still visible in request log search
 
-Checks that a rejected passthrough request is still visible in audit-log search by request ID with the provider parsed from the path.
+Checks that a rejected passthrough request is still visible in request-log search by request ID with the provider parsed from the path.
 
 ```bash
 REQUEST_ID="qa-invalid-provider-$(date +%s)-$$"
@@ -1766,7 +1768,7 @@ grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
 jq -e '.error.type == "invalid_request_error"' "$BODY_FILE" >/dev/null
 sleep 6
 AUDIT_JSON_FILE="$QA_RUN_DIR/s62.audit.json"
-curl -fsS "$BASE_URL/admin/audit/log?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
+curl -fsS "$BASE_URL/admin/request-logs?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
 jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,requested_model,provider,status_code,error_type}))}' "$AUDIT_JSON_FILE"
 jq -e --arg request_id "$REQUEST_ID" '
     any(.entries[]?;
@@ -1936,9 +1938,9 @@ if grep -Eiq '^X-Cache:' "$HEADERS_FILE"; then
 fi
 ```
 
-### S70 Audit evidence for managed-key scoped workflow
+### S70 Request log evidence for managed-key scoped workflow
 
-Confirms through audit-log search that auth method, managed auth key ID, normalized user path, workflow ID, and no cache hit are all recorded together. The list projection is slimmed (`bodies_omitted: true`), so the response body is asserted through `/admin/audit/detail`.
+Confirms through request-log search that auth method, managed auth key ID, normalized user path, workflow ID, and no cache hit are all recorded together. The list projection is slimmed (`bodies_omitted: true`), so the response body is asserted through `/admin/request-logs/detail`.
 
 ```bash
 sleep 6
@@ -1950,7 +1952,7 @@ if ! AUTH_KEY_ID=$(jq -er '.id' "$QA_AUTH_KEY_JSON"); then
 fi
 WORKFLOW_ID=$(<"$QA_WORKFLOW_ID_FILE")
 AUDIT_JSON_FILE="$QA_RUN_DIR/s70.audit.json"
-curl -fsS "$AUTH_BASE_URL/admin/audit/log?search=$QA_AUTH_REQ2&limit=5" \
+curl -fsS "$AUTH_BASE_URL/admin/request-logs?search=$QA_AUTH_REQ2&limit=5" \
   -H "$ADMIN_AUTH_HEADER" \
   > "$AUDIT_JSON_FILE"
 jq --arg request_id "$QA_AUTH_REQ2" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,status_code,auth_method,auth_key_id,user_path,workflow_version_id,cache_type,bodies_omitted}))}' "$AUDIT_JSON_FILE"
@@ -1972,7 +1974,7 @@ jq -e \
   ' "$AUDIT_JSON_FILE" >/dev/null
 AUDIT_ID=$(jq -er --arg request_id "$QA_AUTH_REQ2" '[.entries[] | select(.request_id == $request_id)][0].id' "$AUDIT_JSON_FILE")
 DETAIL_JSON_FILE="$QA_RUN_DIR/s70.detail.json"
-curl -fsS "$AUTH_BASE_URL/admin/audit/detail?log_id=$AUDIT_ID" \
+curl -fsS "$AUTH_BASE_URL/admin/request-logs/detail?log_id=$AUDIT_ID" \
   -H "$ADMIN_AUTH_HEADER" \
   > "$DETAIL_JSON_FILE"
 jq -e '.data.response_body.choices[0].message.content == "QA_AUTH_CACHE_OFF_OK"' "$DETAIL_JSON_FILE" >/dev/null
@@ -2315,7 +2317,7 @@ curl -fsS -X PUT "$BASE_URL/admin/budgets/settings" \
   >/dev/null
 ```
 
-### S87 SQLite budget enforcement and audit
+### S87 SQLite budget enforcement and request log
 
 Creates a tiny daily budget, verifies the first request is recorded as spend, and verifies the next request is blocked with an OpenAI-compatible rate-limit error.
 
@@ -2327,7 +2329,7 @@ run_release_budget_enforcement \
   "QA_BUDGET_SQLITE_OK_$QA_BUDGET_SUFFIX"
 ```
 
-### S88 PostgreSQL budget enforcement and audit
+### S88 PostgreSQL budget enforcement and request log
 
 Runs the same budget enforcement flow against the PostgreSQL-backed gateway.
 
@@ -2339,7 +2341,7 @@ run_release_budget_enforcement \
   "QA_BUDGET_POSTGRES_OK_$QA_BUDGET_SUFFIX"
 ```
 
-### S89 MongoDB budget enforcement and audit
+### S89 MongoDB budget enforcement and request log
 
 Runs the same budget enforcement flow against the MongoDB-backed gateway.
 
@@ -2367,7 +2369,7 @@ curl -fsS -X POST "$BASE_URL/admin/usage/recalculate-pricing" \
 ## 17. Dashboard live preview
 
 These scenarios exercise the `/admin/live/logs` SSE feed that powers the
-dashboard's realtime audit/usage panel. The auth/cache gateway is used because
+dashboard's realtime request log/usage panel. The auth/cache gateway is used because
 it serves the dashboard and requires master-key authentication for admin
 routes.
 
@@ -2384,7 +2386,7 @@ grep -cE '^event: reset' "$LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
 grep -cE '^event: heartbeat' "$LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
 ```
 
-### S92 Live preview emits audit + usage events for a fresh chat
+### S92 Live preview emits request log + usage events for a fresh chat
 
 Opens an SSE subscription, triggers one chat completion with a unique request id, then asserts the captured stream contains an `audit.*` event whose JSON payload references that request id and at least one `usage.*` event.
 
@@ -2457,9 +2459,9 @@ grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
 jq -e '.error.type == "invalid_request_error" and (.error.message | test("cursor"; "i"))' "$BODY_FILE" >/dev/null
 ```
 
-### S95 Streaming client disconnect is audited as `client_disconnected`
+### S95 Streaming client disconnect is logged as `client_disconnected`
 
-Starts a streaming chat completion, aborts it within 400 ms (before the upstream connection completes), then asserts the audit row reflects the request as a streaming request that was cancelled by the client rather than as an upstream provider failure.
+Starts a streaming chat completion, aborts it within 400 ms (before the upstream connection completes), then asserts the request log row reflects the request as a streaming request that was cancelled by the client rather than as an upstream provider failure.
 
 ```bash
 RID="qa-stream-cancel-$QA_SUFFIX"
@@ -2470,7 +2472,7 @@ timeout 0.4 curl -sS --no-buffer "$BASE_URL/v1/chat/completions" \
   > "$QA_RUN_DIR/s95.partial.sse" 2>/dev/null || true
 sleep 6
 AUDIT_JSON_FILE="$QA_RUN_DIR/s95.audit.json"
-curl -fsS "$BASE_URL/admin/audit/log?search=$RID&limit=5" > "$AUDIT_JSON_FILE"
+curl -fsS "$BASE_URL/admin/request-logs?search=$RID&limit=5" > "$AUDIT_JSON_FILE"
 jq --arg rid "$RID" '{entries:(.entries|map(select(.request_id==$rid))|map({request_id,status_code,stream,error_type,path}))}' "$AUDIT_JSON_FILE"
 jq -e --arg rid "$RID" '
     any(.entries[]?;
@@ -2490,7 +2492,7 @@ accepts the Anthropic Messages request dialect, translates it to the canonical
 chat request, routes it through the standard chat-completions pipeline (so it
 works with any configured provider), and renders responses back in the
 Anthropic Messages shape. The main SQLite-backed gateway is used because it
-runs in unsafe mode (no master key) with audit logging enabled.
+runs in unsafe mode (no master key) with request logging enabled.
 
 ### S96 Non-streaming message on an Anthropic model
 
@@ -2727,9 +2729,9 @@ grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
 jq -e '.type == "error" and .error.type == "invalid_request_error" and (.error.message | test("browser_state|unsupported"; "i"))' "$BODY_FILE" >/dev/null
 ```
 
-### S109 Messages request is visible in the audit log
+### S109 Messages request is visible in the request log
 
-Checks that a `/v1/messages` request is recorded in the audit log under the
+Checks that a `/v1/messages` request is recorded in the request log under the
 `/v1/messages` path and is searchable by request ID.
 
 ```bash
@@ -2743,7 +2745,7 @@ curl -fsS "$BASE_URL/v1/messages" \
 jq -e 'any(.content[]; .type == "text" and (.text | contains("QA_MESSAGES_AUDIT_OK")))' "$RESP_FILE" >/dev/null
 sleep 6
 AUDIT_JSON_FILE="$QA_RUN_DIR/s109.audit.json"
-curl -fsS "$BASE_URL/admin/audit/log?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
+curl -fsS "$BASE_URL/admin/request-logs?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
 jq --arg rid "$REQUEST_ID" '{entries:(.entries|map(select(.request_id==$rid))|map({request_id,path,requested_model,provider,status_code,error_type}))}' "$AUDIT_JSON_FILE"
 jq -e --arg rid "$REQUEST_ID" '
     any(.entries[]?;
@@ -3539,9 +3541,9 @@ curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
   -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
 ```
 
-### S144 Audit log records request labels in `data.labels`
+### S144 Request log records request labels in `data.labels`
 
-The audit entry for a labelled request carries the extracted labels in
+The request log entry for a labelled request carries the extracted labels in
 `data.labels`, with the prefix trimmed.
 
 ```bash
@@ -3556,7 +3558,7 @@ curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
   -d '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly QA_TAG_AUDIT_OK"}],"max_tokens":20}' >/dev/null
 AUDIT_FILE="$QA_RUN_DIR/s144.audit.json"
 for _ in $(seq 1 15); do
-  curl -fsS "$BASE_URL/admin/audit/log?search=$RID&limit=3" > "$AUDIT_FILE"
+  curl -fsS "$BASE_URL/admin/request-logs?search=$RID&limit=3" > "$AUDIT_FILE"
   if jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r)' "$AUDIT_FILE" >/dev/null; then
     break
   fi
@@ -4117,7 +4119,7 @@ done
 ## 23. MCP gateway and provider request health
 
 These scenarios cover the post-v0.1.51 features: the aggregating MCP gateway
-(PR #502), JSON-RPC body capture on MCP audit entries (PR #534), and
+(PR #502), JSON-RPC body capture on MCP request log entries (PR #534), and
 real-traffic `request_health` on provider status (PR #521). They need the mock
 MCP upstream on port 18090 (started by `manage-release-e2e-stack.sh`).
 
@@ -4305,13 +4307,13 @@ mcp_post "$BASE_URL/mcp" "$NSID" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}
     ' >/dev/null
 ```
 
-### S167 MCP audit entries carry JSON-RPC bodies and nosniff
+### S167 MCP request log entries carry JSON-RPC bodies and nosniff
 
-With `LOGGING_LOG_BODIES` on, an MCP `tools/call` audit entry is labelled with
+With `LOGGING_LOG_BODIES` on, an MCP `tools/call` request log entry is labelled with
 the tool name and `provider="mcp"`, and captures both the JSON-RPC request
 frame and the SSE-decoded response frame. The list projection omits bodies
 (`bodies_omitted: true`), so the frames are asserted through
-`/admin/audit/detail`. The MCP response also carries
+`/admin/request-logs/detail`. The MCP response also carries
 `X-Content-Type-Options: nosniff`.
 
 ```bash
@@ -4341,7 +4343,7 @@ grep -Eiq '^x-content-type-options: *nosniff' "$CALL_HEADERS"
 AUDIT_FILE="$QA_RUN_DIR/s167.audit.json"
 FOUND=0
 for _ in $(seq 1 15); do
-  curl -fsS "$BASE_URL/admin/audit/log?search=$REQ_ID&limit=5" > "$AUDIT_FILE"
+  curl -fsS "$BASE_URL/admin/request-logs?search=$REQ_ID&limit=5" > "$AUDIT_FILE"
   if jq -e --arg rid "$REQ_ID" --arg tool "${QA_MCP_ALPHA_SLUG}_echo" '
     any(.entries[]?;
       .request_id == $rid
@@ -4356,12 +4358,12 @@ for _ in $(seq 1 15); do
 done
 if [ "$FOUND" -ne 1 ]; then
   jq '.' "$AUDIT_FILE" >&2 || true
-  echo "error: MCP audit entry was not flushed for $REQ_ID" >&2
+  echo "error: MCP request log entry was not flushed for $REQ_ID" >&2
   exit 1
 fi
 AUDIT_ID=$(jq -er --arg rid "$REQ_ID" '[.entries[] | select(.request_id == $rid)][0].id' "$AUDIT_FILE")
 DETAIL_FILE="$QA_RUN_DIR/s167.detail.json"
-curl -fsS "$BASE_URL/admin/audit/detail?log_id=$AUDIT_ID" > "$DETAIL_FILE"
+curl -fsS "$BASE_URL/admin/request-logs/detail?log_id=$AUDIT_ID" > "$DETAIL_FILE"
 jq -e '
   ((.data.request_body | tojson) | contains("QA_MCP_AUDIT_BODY_OK"))
   and ((.data.response_body | tojson) | (contains("echo:") and contains("QA_MCP_AUDIT_BODY_OK")))
@@ -5943,15 +5945,15 @@ img_edit_error mask 400 \
 jq -e '.error.type == "invalid_request_error" and (.error.message | test("mask"))' "$IMG_BODY" >/dev/null
 ```
 
-### S215 Image calls are metered and audited with image-body placeholders
+### S215 Image calls are metered and logged with image-body placeholders
 
-An image request is billed like any other model call and lands in the audit log
+An image request is billed like any other model call and lands in the request log
 as an image body. The release stack runs with `LOGGING_LOG_IMAGE_BODIES`
 unset (the default), so each image is a sized placeholder (`stored: false`)
 rather than embedded base64 — the entry stays small and never trips generic body
 truncation. Storing the pixels themselves needs a gateway booted with that
 variable on, so it is covered by unit tests
-(`config/logging_test.go`, `internal/auditlog/image_body_test.go`).
+(`config/logging_test.go`, `internal/requestlog/image_body_test.go`).
 
 ```bash
 REQUEST_ID="qa-images-usage-$QA_SUFFIX"
@@ -5978,14 +5980,14 @@ jq -e --arg request_id "$REQUEST_ID" '
 AUDIT_FILE="$QA_RUN_DIR/s215.audit.json"
 DETAIL_FILE="$QA_RUN_DIR/s215.detail.json"
 for _ in $(seq 1 15); do
-  curl -fsS "$BASE_URL/admin/audit/log?search=$REQUEST_ID&limit=5" > "$AUDIT_FILE"
+  curl -fsS "$BASE_URL/admin/request-logs?search=$REQUEST_ID&limit=5" > "$AUDIT_FILE"
   if jq -e --arg request_id "$REQUEST_ID" 'any(.entries[]?; .request_id == $request_id)' "$AUDIT_FILE" >/dev/null; then
     break
   fi
   sleep 1
 done
 LOG_ID=$(jq -er --arg request_id "$REQUEST_ID" 'first(.entries[]? | select(.request_id == $request_id) | .id)' "$AUDIT_FILE")
-curl -fsS "$BASE_URL/admin/audit/detail?log_id=$LOG_ID" > "$DETAIL_FILE"
+curl -fsS "$BASE_URL/admin/request-logs/detail?log_id=$LOG_ID" > "$DETAIL_FILE"
 jq '{path,status_code,response_images:.data.response_body.images}' "$DETAIL_FILE"
 jq -e '
   .path == "/v1/images/generations"
@@ -6726,9 +6728,9 @@ assert_http_status 400 "$CODE" "$F"
 jq -e '.error.message | contains("model field is repeated")' "$F" >/dev/null
 ```
 
-### S237 System One calls are audited, filterable, metered, and priced
+### S237 System One calls are logged, filterable, metered, and priced
 
-Checks the audit entry (route, requested and resolved model, provider, one
+Checks the request log entry (route, requested and resolved model, provider, one
 successful primary attempt), the `exclude_operation=systemone` request-type
 filter, and the usage entry: tokens copied from the answer, recorded under
 the model that answered, and priced by an operator override.
@@ -6769,11 +6771,11 @@ jq -e --arg rid "$RID" '
     and ([.data.attempts[]? | {kind, provider_name, success}] == [{"kind":"primary","provider_name":"jev","success":true}]))
 ' "$AUDIT_FILE" >/dev/null
 
-curl -fsS "$BASE_URL/admin/audit/log?search=$RID&limit=5&exclude_operation=systemone" \
+curl -fsS "$BASE_URL/admin/request-logs?search=$RID&limit=5&exclude_operation=systemone" \
   | jq -e '(.entries // []) | length == 0' >/dev/null
-curl -fsS "$BASE_URL/admin/audit/log?search=$RID&limit=5&exclude_operation=chat_completions,provider_passthrough" \
+curl -fsS "$BASE_URL/admin/request-logs?search=$RID&limit=5&exclude_operation=chat_completions,provider_passthrough" \
   | jq -e --arg rid "$RID" 'any(.entries[]; .request_id == $rid)' >/dev/null
-CODE=$(curl -sS -o "$QA_RUN_DIR/s237.bad-filter.json" -w '%{http_code}' "$BASE_URL/admin/audit/log?exclude_operation=not_an_operation")
+CODE=$(curl -sS -o "$QA_RUN_DIR/s237.bad-filter.json" -w '%{http_code}' "$BASE_URL/admin/request-logs?exclude_operation=not_an_operation")
 assert_http_status 400 "$CODE" "$QA_RUN_DIR/s237.bad-filter.json"
 
 USAGE_FILE="$QA_RUN_DIR/s237.usage.json"
@@ -6884,7 +6886,7 @@ jq -e --arg rid "$RID422" '
 
 Runs on the auth + exact-cache gateway. The replayed answer carries the same
 mock request sequence (the upstream was not called), `Cache-Control: no-cache`
-bypasses the cache, a different state misses, and the hit is audited and
+bypasses the cache, a different state misses, and the hit is logged and
 recorded in usage as an exact cache hit.
 
 ```bash
@@ -8487,7 +8489,7 @@ Runs on the guardrail gateway with a workflow scoped to a user path. With the
 default threshold (`0.5`) the prompt is blocked before any chat provider is
 called; the mock received the prompt text as the System One state and the
 decision question as a `noul` question, under the client's request ID; and
-the judge call is audited and accounted as `/v1/decisions` under
+the judge call is logged and accounted as `/v1/decisions` under
 `<user path>/guardrails/<instance>`. Raising `block_threshold` to `0.95`
 lets the same prompt through to the chat model.
 
@@ -8559,7 +8561,7 @@ jq -e --arg path "$SCOPE_PATH/agent/guardrails/$JUDGE" '
 
 AUDIT_FILE="$QA_RUN_DIR/s264.audit.json"
 for _ in $(seq 1 20); do
-  curl -fsS "$GR_BASE_URL/admin/audit/log?search=$RID&limit=10" > "$AUDIT_FILE"
+  curl -fsS "$GR_BASE_URL/admin/request-logs?search=$RID&limit=10" > "$AUDIT_FILE"
   if jq -e '[.entries[]? | .path] | (index("/v1/decisions") != null and index("/v1/chat/completions") != null)' "$AUDIT_FILE" >/dev/null; then
     break
   fi

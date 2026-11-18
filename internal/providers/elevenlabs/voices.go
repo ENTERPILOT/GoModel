@@ -30,8 +30,8 @@ type voicesPage struct {
 	// Voices is a pointer so a page without the array is told apart from an
 	// empty one and reported as malformed instead of as "no voices".
 	Voices        *[]json.RawMessage `json:"voices"`
-	HasMore       bool              `json:"has_more"`
-	NextPageToken string            `json:"next_page_token"`
+	HasMore       bool               `json:"has_more"`
+	NextPageToken string             `json:"next_page_token"`
 }
 
 // ListVoices lists the workspace's voices through GET /v2/voices, following
