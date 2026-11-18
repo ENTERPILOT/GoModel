@@ -44,9 +44,10 @@ When a fix is released we:
 
 These are documented behaviors, not vulnerabilities:
 
-- **No master key.** With `GOMODEL_MASTER_KEY` empty and no authentication
-  extension, `/admin/*` is open to anyone who can reach the port, and so is the
-  API until a managed key exists. GoModel warns about this at startup; see the
+- **No master key.** With no master key configured (`GOMODEL_MASTER_KEY` and
+  `server.master_key` both empty), `MASTER_KEY_DISABLED` not set, and no
+  authentication extension, `/admin/*` is open to anyone who can reach the
+  port, and so is the API until a managed key exists. GoModel warns about this at startup; see the
   [production guide](https://gomodel.enterpilot.io/docs/guides/production).
   Still in scope: an authentication bypass once a master key is set or disabled
   with `MASTER_KEY_DISABLED=true`, and anything that lets a party who cannot
