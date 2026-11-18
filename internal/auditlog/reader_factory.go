@@ -16,7 +16,7 @@ func NewReader(store storage.Storage) (Reader, error) {
 		return nil, nil
 	}
 
-	return storage.ResolveSQLBackend[Reader](
+	return storage.ResolveSQLReadBackend[Reader](
 		context.Background(),
 		store,
 		func(db sqlx.DB) (Reader, error) { return NewSQLReader(db) },

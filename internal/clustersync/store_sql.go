@@ -9,7 +9,13 @@ import (
 )
 
 // SQLStore keeps configuration revisions in SQLite or PostgreSQL.
-type SQLStore struct{ db sqlx.DB }
+type SQLStore struct {
+	db sqlx.DB
+	// reads serves the Revisions poll, which only reads and tolerates a
+	// snapshot taken just before a concurrent write commits: SQLite's
+	// read-only pool, or db.
+	reads sqlx.DB
+}
 
 const sqlSchema = `
 	CREATE TABLE IF NOT EXISTS config_revisions (
@@ -27,7 +33,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err := db.Schema(ctx, sqlSchema); err != nil {
 		return nil, fmt.Errorf("create config revisions table: %w", err)
 	}
-	return &SQLStore{db: db}, nil
+	return &SQLStore{db: db, reads: db}, nil
 }
 
 // Bump increments entity's revision. The upsert is a single statement, so
@@ -45,7 +51,7 @@ func (s *SQLStore) Bump(ctx context.Context, entity string) error {
 
 // Revisions returns every stored revision.
 func (s *SQLStore) Revisions(ctx context.Context) (map[string]int64, error) {
-	rows, err := s.db.Query(ctx, `SELECT entity, revision FROM config_revisions`)
+	rows, err := s.reads.Query(ctx, `SELECT entity, revision FROM config_revisions`)
 	if err != nil {
 		return nil, fmt.Errorf("list config revisions: %w", err)
 	}
