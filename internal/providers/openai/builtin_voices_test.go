@@ -2,9 +2,11 @@ package openai
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
@@ -193,6 +195,84 @@ func TestListVoices_NativeOpenAIKeepsBuiltinVoicesWhenCustomListingFails(t *test
 	}
 }
 
+// A cursor that does not advance would replay the same page until the cap.
+func TestCustomVoices_StalledCursorIsAnError(t *testing.T) {
+	provider, capture := newNativeVoicesProvider(t, "", voicesHandler(http.StatusOK,
+		`{"data":[{"id":"voice_a","name":"A"}],"last_id":"voice_a","has_more":true}`))
+
+	custom, err := provider.customVoices(context.Background(), "tts-1")
+	require.ErrorIs(t, err, core.ErrUnrecognizedVoices)
+	assert.Equal(t, []core.AudioVoice{{ID: "voice_a", Name: "A"}}, custom)
+	assert.Equal(t, 2, capture.Count())
+}
+
+// One key serves every page of a listing; rotation advances between listings.
+func TestCustomVoices_PinsOneKeyPerListing(t *testing.T) {
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("after") == "" {
+			voicesHandler(http.StatusOK, `{"data":[{"id":"voice_a","name":"A"}],"last_id":"voice_a","has_more":true}`)(w, r)
+			return
+		}
+		voicesHandler(http.StatusOK, `{"data":[{"id":"voice_b","name":"B"}],"last_id":"voice_b","has_more":false}`)(w, r)
+	})
+	target, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = &http.Client{Transport: redirectTransport{target: target}}
+	opts.Keys = providers.NewKeyring("sk-a", "sk-b")
+	provider := New(providers.ProviderConfig{}, opts).(*Provider)
+
+	for range 2 {
+		_, err := provider.customVoices(context.Background(), "tts-1")
+		require.NoError(t, err)
+	}
+
+	requests := capture.All()
+	require.Len(t, requests, 4)
+	assert.Equal(t, requests[0].Header.Get("Authorization"), requests[1].Header.Get("Authorization"))
+	assert.Equal(t, requests[2].Header.Get("Authorization"), requests[3].Header.Get("Authorization"))
+	assert.NotEqual(t, requests[0].Header.Get("Authorization"), requests[2].Header.Get("Authorization"), "rotation still advances between listings")
+}
+
+// A stalled upstream costs the caller the custom voices, not the built-in ones.
+func TestListVoices_NativeOpenAIKeepsBuiltinVoicesWhenCustomListingStalls(t *testing.T) {
+	provider, _ := newNativeVoicesProvider(t, "", func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	resp, err := provider.ListVoices(ctx, &core.AudioVoicesRequest{Model: "tts-1"})
+	require.NoError(t, err)
+	assert.Equal(t, legacyBuiltinVoices, resp.Voices)
+}
+
+// A key restricted from reading voices is a standing condition, not worth a
+// warning on every listing.
+func TestCustomVoicesFailureLevel(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		want   slog.Level
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized, body: `{"error":{"message":"Missing scopes: api.voices.read"}}`, want: slog.LevelInfo},
+		{name: "forbidden", status: http.StatusForbidden, body: `{"error":{"message":"Missing scopes: api.voices.read"}}`, want: slog.LevelInfo},
+		{name: "no such route", status: http.StatusNotFound, body: `{"error":{"message":"Invalid URL"}}`, want: slog.LevelWarn},
+		{name: "upstream failure", status: http.StatusInternalServerError, body: `{"error":{"message":"boom"}}`, want: slog.LevelWarn},
+		{name: "unrecognized body", status: http.StatusOK, body: `{"object":"list"}`, want: slog.LevelWarn},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, _ := newNativeVoicesProvider(t, "", voicesHandler(tt.status, tt.body))
+
+			_, err := provider.customVoices(context.Background(), "tts-1")
+			require.Error(t, err)
+			assert.Equal(t, tt.want, customVoicesFailureLevel(err))
+		})
+	}
+}
+
 func TestListVoices_NativeOpenAIKeepsCustomVoicesReadBeforeAFailure(t *testing.T) {
 	provider, _ := newNativeVoicesProvider(t, "", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("after") == "" {
@@ -250,6 +330,7 @@ func TestCreateSpeech_NativeOpenAISendsCustomVoiceIDAsObject(t *testing.T) {
 			_, err = provider.CreateSpeech(context.Background(), req)
 			require.NoError(t, err)
 
+			assert.Equal(t, "/v1/audio/speech", capture.Last(t).Path)
 			var sent map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal(capture.Last(t).Body, &sent))
 			assert.JSONEq(t, tt.want, string(sent["voice"]))
@@ -262,6 +343,7 @@ func TestCreateSpeech_NativeOpenAISendsCustomVoiceIDAsObject(t *testing.T) {
 
 		_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{Model: "kokoro", Input: "hi", Voice: "voice_alba"})
 		require.NoError(t, err)
+		assert.Equal(t, "/v1/audio/speech", capture.Last(t).Path)
 		assert.Equal(t, "voice_alba", capture.Last(t).JSON(t)["voice"])
 	})
 }

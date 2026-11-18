@@ -39,7 +39,7 @@ var openAIVoices = []struct {
 // upstream. The custom voices are an addition to a list that is useful without
 // them, so when the upstream call fails (a key without the api.voices.read
 // permission, an outage) the built-in voices are still returned and the
-// failure is logged. A model that is not a speech model reports voice listing
+// failure is logged (see customVoicesFailureLevel). A model that is not a speech model reports voice listing
 // as unsupported: realtime and chat-audio models take a different voice set.
 // A provider pointed at a custom base URL (a self-hosted server) forwards to
 // its /audio/voices instead.
@@ -53,7 +53,7 @@ func (p *Provider) ListVoices(ctx context.Context, req *core.AudioVoicesRequest)
 	}
 	custom, err := p.customVoices(ctx, req.Model)
 	if err != nil {
-		slog.WarnContext(ctx, "openai custom voice listing failed; returning the voices read so far",
+		slog.Log(ctx, customVoicesFailureLevel(err), "openai custom voice listing failed; returning the voices read so far",
 			"provider", p.providerName, "custom_voices", len(custom), "error", err)
 	}
 	return &core.AudioVoicesResponse{Voices: append(voices, custom...)}, nil
