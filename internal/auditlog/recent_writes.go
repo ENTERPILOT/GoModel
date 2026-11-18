@@ -95,6 +95,20 @@ func writtenAtIndexBuilder(db sqlx.DB) (storage.BackgroundIndexBuilder, bool) {
 	return storage.BackgroundIndexBuilder{Pool: pool, LockKey: backgroundIndexLockKey, Retry: backgroundIndexRetry}, true
 }
 
+// withSchemaLock runs fn while holding the lock the audit index builds take,
+// on the session that holds it. Every schema change to the audit tables goes
+// through it, so replicas starting together change them one at a time and
+// none of them waits on a table another one is building an index on (see
+// storage.BackgroundIndexBuilder.WithLock). Without a pool to hold the lock
+// on, as on SQLite, fn runs on db.
+func withSchemaLock(ctx context.Context, db sqlx.DB, fn func(sqlx.DB) error) error {
+	builder, ok := writtenAtIndexBuilder(db)
+	if !ok {
+		return fn(db)
+	}
+	return builder.WithLock(ctx, fn)
+}
+
 // RecentWrites implements RecentWriteReader.
 func (r *SQLReader) RecentWrites(ctx context.Context, since int64, excludeWriter string, limit int) ([]storage.RecentWrite, error) {
 	if limit <= 0 {

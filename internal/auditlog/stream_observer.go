@@ -3,10 +3,12 @@ package auditlog
 import (
 	"bytes"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/goccy/go-json"
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/streaming"
@@ -113,11 +115,7 @@ func liveSubscribed(live LiveEventEmitter) bool {
 // applyResponseBody snapshots the builder's current reconstruction onto the
 // entry. Called for each live preview and once more when the stream closes.
 func (o *StreamLogObserver) applyResponseBody() {
-	if o.builder.IsResponsesAPI {
-		o.entry.Data.ResponseBody = o.builder.buildResponsesAPIResponse()
-	} else {
-		o.entry.Data.ResponseBody = o.builder.buildChatCompletionResponse()
-	}
+	o.entry.Data.ResponseBody = o.builder.build()
 	o.entry.Data.ResponseBodyTooBigToHandle = o.builder.truncated
 }
 
@@ -141,8 +139,8 @@ func (o *StreamLogObserver) OnStreamClose() {
 	}
 }
 
-// EnrichEntryWithCachedStreamResponse reconstructs the OpenAI-compatible
-// response body for a cached SSE replay when audit body capture is enabled.
+// EnrichEntryWithCachedStreamResponse reconstructs the response body for a
+// cached SSE replay when audit body capture is enabled.
 func EnrichEntryWithCachedStreamResponse(c *echo.Context, path string, body []byte) {
 	if c == nil || len(body) == 0 {
 		return
@@ -165,11 +163,7 @@ func EnrichEntryWithCachedStreamResponse(c *echo.Context, path string, body []by
 	_ = stream.Close()
 
 	data := ensureLogData(entry)
-	if builder.IsResponsesAPI {
-		data.ResponseBody = builder.buildResponsesAPIResponse()
-	} else {
-		data.ResponseBody = builder.buildChatCompletionResponse()
-	}
+	data.ResponseBody = builder.build()
 	data.ResponseBodyTooBigToHandle = builder.truncated
 }
 
@@ -212,6 +206,12 @@ func observeStreamJSONEvent(builder *streamResponseBuilder, event map[string]any
 		parseResponsesAPIEvent(builder, event)
 		return
 	}
+	// The path does not say which dialect a stream speaks: /v1/messages
+	// carries chat chunks when translated and Anthropic's own events when
+	// forwarded natively. The events themselves do.
+	if parseAnthropicEvent(builder, event) {
+		return
+	}
 	parseChatCompletionEvent(builder, event)
 }
 
@@ -236,7 +236,7 @@ func parseChatCompletionEvent(builder *streamResponseBuilder, event map[string]a
 		builder.Created = created
 	}
 	if usage, ok := event["usage"].(map[string]any); ok {
-		builder.Usage = copyAnyMap(usage)
+		builder.Usage = maps.Clone(usage)
 	}
 
 	if choices, ok := event["choices"].([]any); ok && len(choices) > 0 {
@@ -252,6 +252,11 @@ func parseChatCompletionEvent(builder *streamResponseBuilder, event map[string]a
 			state := builder.chatChoice(index)
 			if fr, ok := choice["finish_reason"].(string); ok && fr != "" {
 				state.FinishReason = fr
+			}
+
+			// A legacy text completion streams its text on the choice itself.
+			if text, ok := choice["text"].(string); ok && text != "" {
+				appendChatContent(builder, state, text)
 			}
 
 			if delta, ok := choice["delta"].(map[string]any); ok {
@@ -357,12 +362,29 @@ func parseResponsesAPIEvent(builder *streamResponseBuilder, event map[string]any
 			if createdAt, ok := resp["created_at"].(float64); ok {
 				builder.CreatedAt = int64(createdAt)
 			}
+			// The closing event repeats the whole output. Unlike the text
+			// deltas it includes tool calls, which are all a turn that only
+			// calls a tool has to show.
+			if output, ok := resp["output"].([]any); ok && len(output) > 0 {
+				builder.keepResponsesOutput(output)
+			}
 		}
 	case "response.output_text.delta":
 		if delta, ok := event["delta"].(string); ok && delta != "" {
 			appendStreamContent(builder, delta)
 		}
 	}
+}
+
+// keepResponsesOutput keeps the final output while it fits the capture
+// budget; past it the accumulated text stands in.
+func (b *streamResponseBuilder) keepResponsesOutput(output []any) {
+	raw, err := json.Marshal(output)
+	if err != nil || len(raw) > MaxContentCapture {
+		b.truncated = true
+		return
+	}
+	b.Output = output
 }
 
 func appendStreamContent(builder *streamResponseBuilder, content string) {

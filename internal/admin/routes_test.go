@@ -45,6 +45,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"GET /admin/usage/endpoints",
 		"GET /admin/usage/breakdown",
 		"GET /admin/usage/invoice",
+		"GET /admin/usage/benchmark",
 		"GET /admin/usage/sessions",
 		"GET /admin/usage/log",
 		"GET /admin/usage/throughput",
@@ -91,6 +92,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"DELETE /admin/virtual-models",
 
 		"GET /admin/mcp-servers",
+		"GET /admin/mcp-servers/catalog",
 		"PUT /admin/mcp-servers",
 		"DELETE /admin/mcp-servers/:name",
 		"POST /admin/mcp-servers/:name/reconnect",
@@ -108,6 +110,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"GET /admin/auth-keys",
 		"POST /admin/auth-keys",
 		"POST /admin/auth-keys/import",
+		"PUT /admin/auth-keys/:id/name",
 		"PUT /admin/auth-keys/:id/labels",
 		"PUT /admin/auth-keys/:id/allowed-models",
 		"PUT /admin/auth-keys/:id/dashboard-access",

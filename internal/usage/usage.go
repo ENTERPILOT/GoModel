@@ -94,6 +94,17 @@ type UsageEntry struct {
 	// Markup selection prefers it, as pricing does. Not persisted.
 	RoutedModel string `json:"-" bson:"-"`
 
+	// Operation is the GenAI operation of the provider call that served the
+	// entry (core.GenAIOperation), so token metrics name the same operation
+	// as the duration metric. Empty when unknown. Not persisted.
+	Operation string `json:"-" bson:"-"`
+
+	// Repeated marks an entry this process handed to its logger before: a
+	// batch's usage, written again because its marker could not be saved.
+	// Storage drops the repeat by ID, and the token and cost metrics skip it.
+	// Not persisted.
+	Repeated bool `json:"-" bson:"-"`
+
 	// MarkupPercent is the pricing.markups percentage applied on top of
 	// TotalCost, and MarkupSelector the selector it came from (nil and empty
 	// when no markup rule matched). A pricing.user_path_markups rule is
