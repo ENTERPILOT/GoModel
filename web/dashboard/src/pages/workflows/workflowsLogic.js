@@ -9,7 +9,6 @@ import * as m from "../../lib/paraglide/messages.js";
 import { filterFields } from "../../lib/utils/textMatch.js";
 import {
   DEFAULT_PHASE,
-  WORKFLOW_PHASES,
   isWorkflowPhase,
   normalizeWorkflowPhase,
   phasesSupport,

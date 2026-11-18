@@ -68,8 +68,16 @@ func (p *Provider) SetBaseURL(baseURL string) {
 	p.client.SetBaseURL(baseURL)
 }
 
+// pinnedKeyContextKey carries the API key a multi-request operation must keep
+// using, so key rotation cannot split it across accounts.
+type pinnedKeyContextKey struct{}
+
 func (p *Provider) setHeaders(req *http.Request) {
-	req.Header.Set(authHeader, p.keys.NextForContext(req.Context()))
+	key, pinned := req.Context().Value(pinnedKeyContextKey{}).(string)
+	if !pinned {
+		key = p.keys.NextForContext(req.Context())
+	}
+	req.Header.Set(authHeader, key)
 	if requestID := core.GetRequestID(req.Context()); requestID != "" {
 		req.Header.Set("X-Request-Id", requestID)
 	}

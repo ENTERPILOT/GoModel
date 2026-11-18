@@ -1,0 +1,41 @@
+name: Scorecard
+
+# publish_results makes the Scorecard API reject runs from a workflow that has
+# top-level env or defaults, workflow-level write permissions, or steps in the
+# analysis job other than checkout, scorecard-action, upload-artifact,
+# upload-sarif and harden-runner (no `run` steps). See
+# https://github.com/ossf/scorecard-action#workflow-restrictions.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * 3"
+
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+      id-token: write # OIDC token that authenticates publish_results
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publishes to api.scorecard.dev, which serves the README badge.
+          publish_results: true
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        with:
+          sarif_file: results.sarif
