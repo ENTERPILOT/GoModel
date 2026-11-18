@@ -1,0 +1,12 @@
+# Vulnerabilities in package-lock.json that OSV-Scanner (and OpenSSF Scorecard,
+# which runs it) should not report. Each entry expires so it is reviewed again.
+
+[[IgnoredVulns]]
+id = "GHSA-gcqx-w48m-w2h4"
+ignoreUntil = 2027-02-15
+reason = """\
+deepmerge 4.3.1 is the latest release and has no fix. It is a dev-only \
+dependency of @sveltejs/vite-plugin-svelte, which merges the dashboard's own \
+Svelte config at build time. It is not in the built dashboard or the gateway \
+binary, and never merges untrusted input. Drop this entry once deepmerge or \
+vite-plugin-svelte ships a fix."""

@@ -14,10 +14,13 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/requestparams"
+	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/users"
@@ -111,7 +114,7 @@ func seedDashboardObjects(t *testing.T, db sqlx.DB) {
 	require.NoError(t, userStore.Upsert(ctx, users.User{UserPath: "/tenant", Description: "${env:EXPORT_TEST_MASTER_KEY}"}))
 	models, err := virtualmodels.NewSQLStore(ctx, db)
 	require.NoError(t, err)
-	require.NoError(t, models.Upsert(ctx, virtualmodels.VirtualModel{Source: "smart", Targets: []virtualmodels.Target{{Provider: "openai", Model: "gpt-4o"}}, ReasoningEffort: "high", Enabled: true}))
+	require.NoError(t, models.Upsert(ctx, virtualmodels.VirtualModel{Source: "smart", Targets: []virtualmodels.Target{{Provider: "openai", Model: "gpt-4o", ReasoningEffort: "low"}}, ReasoningEffort: "high", Enabled: true}))
 	rules, err := tagging.NewSQLStore(ctx, db)
 	require.NoError(t, err)
 	require.NoError(t, rules.SaveRules(ctx, []tagging.Rule{{Header: "X-Cost-Center", Prefix: "cc-", Delimiter: ","}, {Header: "x-team"}}))
@@ -169,6 +172,7 @@ func TestExportConfig(t *testing.T) {
 	require.Len(t, doc.VirtualModels, 1)
 	assert.Equal(t, "smart", doc.VirtualModels[0].Source)
 	assert.Equal(t, "high", doc.VirtualModels[0].ReasoningEffort)
+	assert.Equal(t, []config.VirtualModelTargetConfig{{Provider: "openai", Model: "gpt-4o", ReasoningEffort: "low"}}, doc.VirtualModels[0].Targets)
 	assert.Equal(t, []config.TaggingHeaderConfig{{Header: "X-Team", Delimiter: ","}, {Header: "X-Cost-Center", Prefix: "cc-", Delimiter: ","}}, doc.Tagging.Headers)
 	// The amount edited in the dashboard wins over config.yaml's, as at start.
 	assert.Equal(t, []config.BudgetUserPathConfig{{Path: "/team", Limits: []config.BudgetLimitConfig{{Period: "daily", PeriodSeconds: budget.PeriodDailySeconds, Amount: 99, CostBasis: "provider"}}}}, doc.Budgets.UserPaths)
@@ -187,6 +191,145 @@ func TestExportConfig(t *testing.T) {
 	assert.Equal(t, "mk-do-not-leak", reloaded.Config.Server.MasterKey)
 	assert.Equal(t, "${env:EXPORT_TEST_MASTER_KEY}", reloaded.Config.Users[1].Description)
 	assert.Equal(t, "Bearer lin-new", reloaded.Config.MCP.Servers["linear"].Headers["Authorization"])
+}
+
+func TestExportConfigKeepsVirtualModelParams(t *testing.T) {
+	// A gateway rebuilt from an export must force and default the same
+	// parameters as the one exported: a token cap, store: false, and a null
+	// that strips a key are controls, whether declared or saved in the
+	// dashboard.
+	isolateEnv(t)
+	loaded := loadExportConfig(t, `
+virtual_models:
+  - source: declared
+    target: openai/gpt-4o
+    params:
+      max_tokens: 128
+      stop: null
+    default_params:
+      temperature: 0.7
+`)
+	sets := func(values map[string]any) requestparams.Set {
+		set, err := requestparams.FromAny(values)
+		require.NoError(t, err)
+		return set
+	}
+	saved := virtualmodels.VirtualModel{
+		Source:  "capped",
+		Targets: []virtualmodels.Target{{Provider: "openai", Model: "gpt-4o"}},
+		Params: sets(map[string]any{
+			"max_tokens":           256,
+			"store":                false,
+			"seed":                 int64(9007199254740993),
+			"service_tier":         "flex",
+			"chat_template_kwargs": map[string]any{"enable_thinking": false},
+			"stop":                 nil,
+		}),
+		DefaultParams: sets(map[string]any{"temperature": 0.2, "metadata": map[string]any{"team": "platform"}}),
+		Enabled:       true,
+	}
+	secret := virtualmodels.VirtualModel{
+		Source:  "signed",
+		Targets: []virtualmodels.Target{{Provider: "openai", Model: "gpt-4o"}},
+		Params:  sets(map[string]any{"extra_body": map[string]any{"api_key": "param-key-do-not-leak"}}),
+		Enabled: true,
+	}
+	ctx := context.Background()
+	withSQL(t, loaded, func(db sqlx.DB) {
+		models, err := virtualmodels.NewSQLStore(ctx, db)
+		require.NoError(t, err)
+		require.NoError(t, models.Upsert(ctx, saved))
+		require.NoError(t, models.Upsert(ctx, secret))
+	})
+
+	out, err := ExportConfig(ctx, ConfigExportOptions{Config: loaded, Factory: exportTestFactory()})
+	require.NoError(t, err)
+	assert.NotContains(t, string(out), "param-key-do-not-leak")
+
+	reloaded := loadExportConfig(t, string(out))
+	models, err := virtualmodels.ConfigModels(reloaded.Config.VirtualModels)
+	require.NoError(t, err)
+	bySource := make(map[string]virtualmodels.VirtualModel, len(models))
+	for _, model := range models {
+		bySource[model.Source] = model
+	}
+	require.Len(t, bySource, 3)
+
+	assertParams := func(want, got requestparams.Set) {
+		t.Helper()
+		require.Len(t, got, len(want))
+		for key, value := range want {
+			require.Contains(t, got, key)
+			if value == nil {
+				assert.Nil(t, got[key], key)
+				continue
+			}
+			// Both sides are encoded by FromAny, so equal values are equal
+			// text; JSONEq reads numbers as float64 and would miss a
+			// rounded integer.
+			assert.Equal(t, string(value), string(got[key]), key)
+		}
+	}
+	assertParams(sets(map[string]any{"max_tokens": 128, "stop": nil}), bySource["declared"].Params)
+	assertParams(sets(map[string]any{"temperature": 0.7}), bySource["declared"].DefaultParams)
+	assertParams(saved.Params, bySource["capped"].Params)
+	assertParams(saved.DefaultParams, bySource["capped"].DefaultParams)
+	// A secret in a parameter is written as a reference, like any other.
+	assert.Contains(t, string(bySource["signed"].Params["extra_body"]), "${env:")
+}
+
+func TestExportConfigKeepsAccessPoliciesLoadable(t *testing.T) {
+	// An access policy has no targets: its source selects the models it
+	// gates. Written with its own model as a target, it would read back as a
+	// redirect to itself and stop the gateway started from the export.
+	isolateEnv(t)
+	ctx := context.Background()
+	registry := providers.NewModelRegistry()
+	registry.RegisterProviderWithNameAndType(catalogProvider(core.Model{ID: "gpt-4.1-mini", Object: "model"}), "openai", "openai")
+	require.NoError(t, registry.Initialize(ctx))
+	// start loads the virtual models as the gateway does when it starts.
+	start := func(loaded *config.LoadResult) (*virtualmodels.Service, func()) {
+		shared, err := storage.New(ctx, loaded.Config.Storage.BackendConfig())
+		require.NoError(t, err)
+		result, err := virtualmodels.New(ctx, loaded.Config, shared, registry, []string{"openai"})
+		if err != nil {
+			_ = shared.Close()
+		}
+		require.NoError(t, err)
+		return result.Service, func() {
+			_ = result.Close()
+			_ = shared.Close()
+		}
+	}
+
+	policies := []virtualmodels.VirtualModel{
+		{Source: "openai/gpt-4.1-mini", UserPaths: []string{"/team/b"}, Enabled: true},
+		{Source: "gpt-4.1-mini", UserPaths: []string{"/team/c"}, Enabled: true},
+		{Source: "openai/", UserPaths: []string{"/team"}, Enabled: true},
+	}
+	loaded := loadExportConfig(t, "providers:\n  openai:\n    type: openai\n")
+	saved, stop := start(loaded)
+	for _, policy := range policies {
+		require.NoError(t, saved.Upsert(ctx, policy), policy.Source)
+	}
+	stop()
+
+	out, err := ExportConfig(ctx, ConfigExportOptions{Config: loaded, Factory: exportTestFactory()})
+	require.NoError(t, err)
+
+	exported, stop := start(loadExportConfig(t, string(out)))
+	defer stop()
+	bySource := make(map[string]virtualmodels.VirtualModel, len(policies))
+	for _, model := range exported.List() {
+		bySource[model.Source] = model
+	}
+	require.Len(t, bySource, len(policies), string(out))
+	for _, policy := range policies {
+		require.Contains(t, bySource, policy.Source)
+		got := bySource[policy.Source]
+		assert.Equal(t, virtualmodels.KindPolicy, got.Kind(), policy.Source)
+		assert.Equal(t, policy.UserPaths, got.UserPaths, policy.Source)
+	}
 }
 
 func TestExportRateLimitsPrefersDashboardEdits(t *testing.T) {
