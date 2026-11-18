@@ -72,7 +72,7 @@ func TestMessages_NativeStreamingLogsUsage(t *testing.T) {
 }
 
 // A forwarded Accept-Encoding would make the upstream body arrive compressed,
-// blinding the SSE usage and audit observers; it must be stripped so the
+// blinding the SSE usage and request log observers; it must be stripped so the
 // transport decompresses transparently.
 func TestBuildPassthroughHeadersDropsAcceptEncoding(t *testing.T) {
 	src := http.Header{

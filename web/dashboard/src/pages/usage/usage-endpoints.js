@@ -3,9 +3,9 @@
 // Kept free of Svelte/DOM dependencies so node:test can exercise it.
 
 import * as m from "../../lib/paraglide/messages.js";
-import { AUDIT_TYPES } from "../audit-logs/audit-operations.js";
+import { REQUEST_TYPES } from "../requests/request-operations.js";
 
-// The usage page groups endpoints by the same request types as the audit
+// The usage page groups endpoints by the same request types as the request
 // log: each type covers one or more gateway operations, so
 // /v1/chat/completions and /v1/messages both count as chat. Endpoints
 // outside every type fall under "other". The page filters by endpoint, so a
@@ -14,10 +14,10 @@ import { AUDIT_TYPES } from "../audit-logs/audit-operations.js";
 export const USAGE_TYPE_OTHER = "other";
 
 const TYPE_BY_OPERATION = new Map(
-  AUDIT_TYPES.flatMap((type) => type.operations.map((op) => [op, type])),
+  REQUEST_TYPES.flatMap((type) => type.operations.map((op) => [op, type])),
 );
-const TYPE_BY_KEY = new Map(AUDIT_TYPES.map((type) => [type.key, type]));
-const TYPE_ORDER = new Map(AUDIT_TYPES.map((type, index) => [type.key, index]));
+const TYPE_BY_KEY = new Map(REQUEST_TYPES.map((type) => [type.key, type]));
+const TYPE_ORDER = new Map(REQUEST_TYPES.map((type, index) => [type.key, index]));
 
 // usageTypeForOperation returns the type key an endpoint's operation belongs to.
 export function usageTypeForOperation(operation) {
@@ -31,11 +31,11 @@ export function usageTypeLabel(key) {
 }
 
 function typeOrder(key) {
-  return TYPE_ORDER.has(key) ? TYPE_ORDER.get(key) : AUDIT_TYPES.length;
+  return TYPE_ORDER.has(key) ? TYPE_ORDER.get(key) : REQUEST_TYPES.length;
 }
 
 // usageEndpointOptions builds the endpoint filter choices from
-// /admin/usage/endpoints rows: grouped in the audit log's type order, each
+// /admin/usage/endpoints rows: grouped in the request log's type order, each
 // described by its type.
 export function usageEndpointOptions(rows) {
   const byEndpoint = new Map();

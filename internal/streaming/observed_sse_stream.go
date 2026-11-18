@@ -15,7 +15,7 @@ const maxPendingEventBytes = 256 * 1024
 // observers, and the event a stream rewriter holds whole. It is far above
 // maxPendingEventBytes because a terminal Responses event carries the whole
 // response: a streamed image generation repeats every image's base64 in
-// response.completed, and usage, audit and the stored response all come from
+// response.completed, and usage, request log and the stored response all come from
 // that event. Memory is only taken when such an event arrives; a larger one
 // is relayed to the client but not observed.
 const MaxObservedEventBytes = 64 << 20

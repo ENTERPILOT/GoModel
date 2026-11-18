@@ -17,9 +17,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 func TestHandleError_RendersDialectSpecificEnvelope(t *testing.T) {
@@ -103,10 +103,10 @@ func TestHandleError_LogsServerErrorsAtErrorLevel(t *testing.T) {
 	require.Contains(t, logOutput, `"message":"provider timeout"`)
 }
 
-func TestHandleError_EnrichesAuditEntryWithGatewayErrorCode(t *testing.T) {
+func TestHandleError_EnrichesRequestLogEntryWithGatewayErrorCode(t *testing.T) {
 	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 
 	err := core.NewRateLimitError("budget", "budget exceeded").WithCode("budget_exceeded")
 	handleErr := handleError(c, err)
@@ -169,8 +169,8 @@ func TestHandleError_ClassifiesClientCancellation(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			c, rec := echotest.Post(t, tc.path, nil)
-			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-			c.Set(string(auditlog.LogEntryKey), entry)
+			entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+			c.Set(string(requestlog.LogEntryKey), entry)
 			if tc.cancelRequest {
 				ctx, cancel := context.WithCancel(c.Request().Context())
 				cancel()
@@ -185,14 +185,14 @@ func TestHandleError_ClassifiesClientCancellation(t *testing.T) {
 	}
 }
 
-func TestHandleError_AuditMiddlewareRecordsClientCancellationStatus(t *testing.T) {
-	logger := &capturingAuditLogger{config: auditlog.Config{Enabled: true}}
+func TestHandleError_RequestLogMiddlewareRecordsClientCancellationStatus(t *testing.T) {
+	logger := &capturingRequestLogger{config: requestlog.Config{Enabled: true}}
 	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
 	ctx, cancel := context.WithCancel(c.Request().Context())
 	cancel()
 	c.SetRequest(c.Request().WithContext(ctx))
 
-	handler := auditlog.Middleware(logger)(func(c *echo.Context) error {
+	handler := requestlog.Middleware(logger)(func(c *echo.Context) error {
 		return handleError(c, fmt.Errorf("send request: %w", context.Canceled))
 	})
 
@@ -238,8 +238,8 @@ func TestHandleRouteNotFound_OpenAIDialect(t *testing.T) {
 
 func TestHandleError_RecordsUpstreamProviderOfError(t *testing.T) {
 	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 
 	upstream := core.ParseProviderError("openai", http.StatusUnauthorized, []byte(`{"error":{"message":"Incorrect API key provided"}}`), nil)
 	handleErr := handleError(c, upstream)
@@ -255,8 +255,8 @@ func TestHandleError_RecordsUpstreamProviderOfError(t *testing.T) {
 
 	// The gateway's own authentication failure names no provider.
 	c, rec = echotest.Post(t, "/v1/chat/completions", nil)
-	entry = &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry = &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 	handleErr = handleError(c, core.NewAuthenticationError("", "invalid API key"))
 	require.NoError(t, handleErr)
 	require.Empty(t, entry.Data.ErrorProvider)
@@ -417,10 +417,10 @@ func TestGatewayErrorHandler_UnencodableResponseThroughRealServer(t *testing.T) 
 	assert.Contains(t, logs.String(), "year outside of range")
 }
 
-func TestGatewayErrorHandler_FinalizesHeadersAndAudit(t *testing.T) {
+func TestGatewayErrorHandler_FinalizesHeadersAndRequestLog(t *testing.T) {
 	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 
 	gatewayErrorHandler(c, &gatewayErrorWithResponseHeaders{
 		GatewayError: core.NewRateLimitError("budget", "budget exceeded").WithCode("budget_exceeded"),
@@ -433,10 +433,10 @@ func TestGatewayErrorHandler_FinalizesHeadersAndAudit(t *testing.T) {
 	assert.Equal(t, "budget_exceeded", entry.Data.ErrorCode)
 }
 
-func TestGatewayErrorHandler_KeepsTheOriginalAuditedError(t *testing.T) {
+func TestGatewayErrorHandler_KeepsTheOriginalLoggedError(t *testing.T) {
 	c, _ := echotest.Post(t, "/v1/chat/completions", nil)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 
 	// handleError records the real cause and returns its own write failure,
 	// which then escapes here; that follow-up must not overwrite the cause.

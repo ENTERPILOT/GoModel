@@ -1,7 +1,7 @@
 // Playground state: the editable conversation, the endpoint/model selection
 // and the in-flight request. Requests go straight to the gateway's public API
 // (/v1/chat/completions, /v1/responses, /v1/messages) with the dashboard key,
-// so they show up in Audit Logs and Usage like any other client's traffic.
+// so they show up in Requests and Usage like any other client's traffic.
 
 import { apiFetch, isAbortError } from "$lib/api/client.js";
 import { errorPayloadMessage, isGatewayAuthError } from "$lib/api/errors.js";

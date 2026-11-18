@@ -41,7 +41,7 @@ Lambdy albo mała maszyna wirtualna obok Twojej aplikacji. Nie potrzebuje dedyko
 
 ## Wybór backendu storage
 
-GoModel utrwala logi audytowe, rekordy użycia, budżety, modele wirtualne, zarządzane klucze
+GoModel utrwala logi requestów, rekordy użycia, budżety, modele wirtualne, zarządzane klucze
 API i inny stan administracyjny za pośrednictwem `STORAGE_TYPE`.
 
 | Backend | `STORAGE_TYPE` | Użyj, gdy |
@@ -71,7 +71,7 @@ bazy danych, tylko każda ma własną, więc użycie, budżety i zarządzane klu
 po cichu się rozjeżdżają. Klucz utworzony w jednym podzie nie istnieje w drugim.
 
 SQLite działa też celowo z jednym otwartym połączeniem, aby był jeden zapisujący
-i aby uniknąć rywalizacji o blokady. Każdy zapis logów audytowych, zapis użycia i sprawdzenie budżetu
+i aby uniknąć rywalizacji o blokady. Każdy zapis logów requestów, zapis użycia i sprawdzenie budżetu
 jest przez nie serializowane, co stanowi pułap przepustowości przy stałym obciążeniu.
 
 W przypadku Postgresa `POSTGRES_MAX_CONNS` ma domyślnie wartość `10`. Zwiększ ją w pierwszej kolejności, jeśli
@@ -80,7 +80,7 @@ masz dużą współbieżność przy włączonych budżetach lub limitach żąda�
 <Warning>
   **Obraz Docker nie deklaruje wolumenu.** Domyślna ścieżka bazy danych
   rozwiązuje się do `/app/data/gomodel.db` wewnątrz obrazu, czyli do katalogu
-  w warstwie obrazu. Bez jawnie zamontowanego wolumenu każdy log audytowy, rekord użycia,
+  w warstwie obrazu. Bez jawnie zamontowanego wolumenu każdy log requestów, rekord użycia,
   budżet, zarządzany klucz API i zapisane dane uwierzytelniające giną, gdy kontener zostanie
   zastąpiony. Zawsze montuj wolumen w `/app/data` albo przejdź na Postgres/MongoDB.
   Gateway loguje ostrzeżenie przy starcie, gdy wykryje taką sytuację, a
@@ -178,7 +178,7 @@ wolumen, ograniczaj dostęp i odpowiednio klasyfikuj kopie zapasowe.
 - **Nagłówki z danymi uwierzytelniającymi klienta są redagowane przed utrwaleniem.** Przy
   `LOGGING_LOG_HEADERS=true` nagłówki `Authorization`, `x-api-key`, `Cookie` i
   inne nagłówki z danymi uwierzytelniającymi są zastępowane przez `[REDACTED]` na ścieżce zapisu, więc
-  magazyn audytu nigdy ich nie otrzymuje. To samo dotyczy każdego nagłówka, którego nazwa
+  magazyn logów requestów nigdy ich nie otrzymuje. To samo dotyczy każdego nagłówka, którego nazwa
   wygląda na dane uwierzytelniające: kończy się na `token`, `-key` lub `-auth` albo zawiera
   `authorization`, `api-key`, `apikey`, `secret`, `password`, `signature` lub `jwt`.
   `Idempotency-Key` i `Sec-WebSocket-Key` pozostają bez zmian.
@@ -432,7 +432,7 @@ koordynuje go między instancjami.
 | --- | --- | --- |
 | Egzekwowanie [budżetów](/pl/features/budgets) | Trwały (baza danych) | Poprawne między replikami. Wydatki są odczytywane ze współdzielonej tabeli użycia. |
 | [Rekordy użycia i kosztów](/pl/features/cost-tracking) | Trwały (baza danych) | Agregowane poprawnie. |
-| Logi audytowe | Trwały (baza danych) | Kompletne między replikami. |
+| Logi requestów | Trwały (baza danych) | Kompletne między replikami. |
 | Wylogowanie [SSO](/pl/pro/sso) (Pro) | Trwały (baza danych) | Wylogowana sesja jest odrzucana na każdej replice w ciągu około 2 sekund. |
 | [Limity żądań](/pl/features/rate-limits) | W pamięci, współdzielone przez bazę danych | Repliki egzekwują jeden wspólny limit, w przybliżeniu: każda widzi liczniki pozostałych w ciągu około dwóch interwałów flush. Restart przywraca ostatnio zapisane liczniki requestów i tokenów raz; awaria może stracić to, co zliczono od ostatniego flusha. Reset czyści te okna na każdej replice; zajęte sloty współbieżności pozostają zajęte, dopóki ich requesty się nie zakończą. |
 | Circuit breakery | W pamięci, per proces | Każda replika osobno wykrywa awarię, więc upstream widzi do `N x failure_threshold` błędów, zanim otworzy się którykolwiek breaker. |
@@ -460,7 +460,7 @@ repliki łącznie znów mogą przepuścić do około `N x` limitu.
 Dashboard streamuje logi na żywo z repliki, z którą jest połączony. Ta replika
 pokazuje swoje requesty od razu, gdy się zaczynają, z podglądem requestów
 w toku i streamowanych odpowiedzi. Dopóki połączony jest co najmniej jeden
-dashboard, replika co 2 sekundy odczytuje też wiersze audytu i użycia zapisane
+dashboard, replika co 2 sekundy odczytuje też wiersze logu requestów i użycia zapisane
 przez pozostałe repliki i streamuje je do tego samego widoku. Nie dodaje to
 żadnych zapisów do bazy: każda replika oznacza swoim ID partie, które i tak
 zapisuje, a gdy żaden dashboard nie jest otwarty, żadna replika niczego nie
@@ -476,16 +476,16 @@ Requesty obsłużone przez inną replikę:
   providerem, użyciem i kosztem, ale bez podglądu requestu w toku ani
   poszczególnych chunków streamu; body są ładowane z bazy danych po rozwinięciu
   wpisu;
-- pojawiają się tylko wtedy, gdy zostały zapisane. Wpisy audytu i wpisy użycia
-  pochodzą z osobnych funkcji: replika z wyłączonymi logami audytowymi nie
-  dostarcza wpisów audytu, a replika z wyłączonym śledzeniem użycia – wpisów
-  użycia. Replika, z którą połączony jest Twój dashboard, pokazuje wpisy audytu
-  innej repliki tylko wtedy, gdy sama ma włączone logi audytowe, a jej wpisy
+- pojawiają się tylko wtedy, gdy zostały zapisane. Wpisy logu requestów i wpisy użycia
+  pochodzą z osobnych funkcji: replika z wyłączonymi logami requestów nie
+  dostarcza wpisów logu requestów, a replika z wyłączonym śledzeniem użycia – wpisów
+  użycia. Replika, z którą połączony jest Twój dashboard, pokazuje wpisy logu requestów
+  innej repliki tylko wtedy, gdy sama ma włączone logi requestów, a jej wpisy
   użycia tylko z włączonym śledzeniem użycia;
 - są wstawiane na listę według czasu requestu, poniżej wszystkiego, co nowsze.
 
 Przy dużym ruchu w jednym pollingu streamowanych jest maksymalnie 200 wpisów
-audytu i 200 wpisów użycia z innych replik; gdy jest ich więcej, wybieranych jest
+logu requestów i 200 wpisów użycia z innych replik; gdy jest ich więcej, wybieranych jest
 200 najnowszych. Pozostałe i tak są na liście po odświeżeniu. Dashboard, który połączy się ponownie, albo replika,
 której odczyty przez jakiś czas zawodziły, nadrabia to, co pozostałe repliki
 zapisały w międzyczasie, do 5 minut wstecz i w ramach tego samego limitu 200
@@ -555,7 +555,7 @@ wolumenie i odmawia uruchomienia więcej niż jednej repliki, dopóki nie przeł
 </Note>
 
 Po otrzymaniu `SIGTERM` gateway przez 10 sekund dokańcza bieżącą pracę HTTP, a następnie
-kończy zamykanie w ciągu 30 sekund, zapisując po drodze zbuforowane wpisy użycia i audytu.
+kończy zamykanie w ciągu 30 sekund, zapisując po drodze zbuforowane wpisy użycia i logu requestów.
 Żadnego z tych timeoutów nie można konfigurować. Streamowane odpowiedzi w toku
 są przerywane po 10 sekundach, więc długie completion trwające podczas rolling
 deploymentu zostanie ucięte. Ustaw `terminationGracePeriodSeconds` powyżej 30 (45 to
@@ -563,11 +563,11 @@ rozsądny wybór), aby zamykanie nie ścigało się z SIGKILL.
 
 ## Retencja danych i przyrost dysku
 
-Logowanie audytowe i śledzenie użycia zapisują jeden wiersz na request, a oba mechanizmy czyszczą dane co godzinę.
+Logowanie requestów i śledzenie użycia zapisują jeden wiersz na request, a oba mechanizmy czyszczą dane co godzinę.
 
 | Ustawienie | Wartość domyślna | Uwagi |
 | --- | --- | --- |
-| `LOGGING_RETENTION_DAYS` | `30` | Wpisy audytu starsze niż ta wartość są usuwane. |
+| `LOGGING_RETENTION_DAYS` | `30` | Wpisy logu requestów starsze niż ta wartość są usuwane. |
 | `USAGE_RETENTION_DAYS` | `90` | Rekordy użycia starsze niż ta wartość są usuwane. |
 | `LOGGING_LOG_BODIES` | `true` | Przechwytuje pełne body requestów i odpowiedzi, do 1 MB każde. |
 
@@ -579,19 +579,19 @@ Logowanie audytowe i śledzenie użycia zapisują jeden wiersz na request, a oba
   prompt, jest utrwalane na cały okres retencji.
 
   W środowiskach regulowanych lub wszędzie tam, gdzie prompty zawierają dane osobowe, ustaw
-  `LOGGING_LOG_BODIES=false` i zachowaj ścieżkę audytu zawierającą wyłącznie metadane.
+  `LOGGING_LOG_BODIES=false` i zachowaj log requestów zawierający wyłącznie metadane.
 </Warning>
 
 Dwie dodatkowe kwestie przy dużym wolumenie:
 
-- **Zapisy użycia i audytu są buforowane i odrzucane, a nie blokowane, gdy
+- **Zapisy użycia i logu requestów są buforowane i odrzucane, a nie blokowane, gdy
   bufor się zapełni.** Skok ruchu lub wolna baza danych mogą po cichu zgubić wpisy użycia,
   co oznacza utracone dane o kosztach i zaniżone obciążenie budżetów. Ustaw alert na
   `gomodel_usage_entries_dropped_total` (zobacz
   [Alerty na utracone użycie](/pl/guides/prometheus-metrics#alerty-na-utracone-użycie)),
   a bez metryk na komunikaty `usage log buffer full`, `usage logger closed`
-  i `failed to write usage batch` w logach. Utracony wpis audytu zostawia
-  w logach `audit log buffer full`.
+  i `failed to write usage batch` w logach. Utracony wpis logu requestów zostawia
+  w logach `request log buffer full`.
 - **Sprawdzenia budżetów odpytują tabelę użycia przy każdym requeście.** Trzymaj
   `USAGE_RETENTION_DAYS` na niskim poziomie, gdy budżety są włączone, i wybieraj Postgresa
   zamiast SQLite, którego pojedyncze połączenie sprawia, że to dominujący koszt.

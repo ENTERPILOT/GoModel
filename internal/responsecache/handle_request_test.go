@@ -14,10 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/config"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -39,22 +39,22 @@ func (l *recordingUsageLogger) Close() error {
 	return nil
 }
 
-type recordingAuditLogger struct {
-	config  auditlog.Config
-	entries []*auditlog.LogEntry
+type recordingRequestLogger struct {
+	config  requestlog.Config
+	entries []*requestlog.LogEntry
 }
 
-func (l *recordingAuditLogger) Write(entry *auditlog.LogEntry) {
+func (l *recordingRequestLogger) Write(entry *requestlog.LogEntry) {
 	if entry != nil {
 		l.entries = append(l.entries, entry)
 	}
 }
 
-func (l *recordingAuditLogger) Config() auditlog.Config {
+func (l *recordingRequestLogger) Config() requestlog.Config {
 	return l.config
 }
 
-func (l *recordingAuditLogger) Close() error {
+func (l *recordingRequestLogger) Close() error {
 	return nil
 }
 
@@ -314,7 +314,7 @@ func TestHandleRequest_FailoverUsedSkipsCacheWrites(t *testing.T) {
 	require.Equal(t, 2, handlerCalls)
 }
 
-func TestHandleRequest_ExactHitMarksAuditEntryCacheType(t *testing.T) {
+func TestHandleRequest_ExactHitMarksRequestLogEntryCacheType(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()
 
@@ -324,10 +324,10 @@ func TestHandleRequest_ExactHitMarksAuditEntryCacheType(t *testing.T) {
 
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"mark-exact-cache-type"}]}`)
 
-	run := func() (*httptest.ResponseRecorder, *auditlog.LogEntry) {
+	run := func() (*httptest.ResponseRecorder, *requestlog.LogEntry) {
 		t.Helper()
-		entry := &auditlog.LogEntry{ID: "audit-entry"}
-		c, rec := echotest.Post(t, "/v1/chat/completions", body, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+		entry := &requestlog.LogEntry{ID: "request-log-entry"}
+		c, rec := echotest.Post(t, "/v1/chat/completions", body, echotest.WithValue(string(requestlog.LogEntryKey), entry))
 		err := m.HandleRequest(c, body, func() error {
 			return c.JSON(http.StatusOK, map[string]string{"n": "1"})
 		})
@@ -344,7 +344,7 @@ func TestHandleRequest_ExactHitMarksAuditEntryCacheType(t *testing.T) {
 
 	rec2, entry2 := run()
 	require.Equal(t, "HIT (exact)", rec2.Header().Get("X-Cache"))
-	require.Equal(t, auditlog.CacheTypeExact, entry2.CacheType)
+	require.Equal(t, requestlog.CacheTypeExact, entry2.CacheType)
 }
 
 func TestHandleRequest_ExactHitWritesSyntheticUsageEntry(t *testing.T) {
@@ -493,24 +493,24 @@ func TestHandleRequest_EmbeddingsSkipSemanticLayer(t *testing.T) {
 	require.Equal(t, 0, vecStore.Len())
 }
 
-func TestHandleRequest_AuditMiddlewarePreservesCommittedErrorStatus(t *testing.T) {
+func TestHandleRequest_RequestLogMiddlewarePreservesCommittedErrorStatus(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()
 
 	m := &ResponseCacheMiddleware{
 		simple: newSimpleCacheMiddleware(store, time.Hour, nil),
 	}
-	logger := &recordingAuditLogger{
-		config: auditlog.Config{
+	logger := &recordingRequestLogger{
+		config: requestlog.Config{
 			Enabled:   true,
 			LogBodies: true,
 		},
 	}
 
-	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"cache-audit-error-status"}]}`)
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"cache-request-log-error-status"}]}`)
 	c, rec := echotest.Post(t, "/v1/chat/completions", body)
 
-	handler := auditlog.Middleware(logger)(func(c *echo.Context) error {
+	handler := requestlog.Middleware(logger)(func(c *echo.Context) error {
 		return m.HandleRequest(c, body, func() error {
 			return c.JSON(http.StatusGatewayTimeout, map[string]any{
 				"error": map[string]any{
@@ -780,36 +780,36 @@ func TestHandleRequest_StreamingExactHitWritesSyntheticUsageEntry(t *testing.T) 
 	require.Equal(t, "chatcmpl-cache-hit", entry.ProviderID)
 }
 
-func TestHandleRequest_StreamingExactHitAuditLogsCachedResponseBody(t *testing.T) {
+func TestHandleRequest_StreamingExactHitRequestLogsCachedResponseBody(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()
 
 	m := &ResponseCacheMiddleware{
 		simple: newSimpleCacheMiddleware(store, time.Hour, nil),
 	}
-	logger := &recordingAuditLogger{
-		config: auditlog.Config{
+	logger := &recordingRequestLogger{
+		config: requestlog.Config{
 			Enabled:    true,
 			LogBodies:  true,
 			LogHeaders: true,
 		},
 	}
 
-	body := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"cache-stream-audit-hit"}]}`)
+	body := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"cache-stream-request-log-hit"}]}`)
 	rawStream := []byte(
-		"data: {\"id\":\"chatcmpl-cache-audit\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hello\"},\"finish_reason\":null}]}\n\n" +
-			"data: {\"id\":\"chatcmpl-cache-audit\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" cached audit\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-cache-logged\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hello\"},\"finish_reason\":null}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-cache-logged\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" cached request log\"},\"finish_reason\":\"stop\"}]}\n\n" +
 			"data: [DONE]\n\n",
 	)
 	workflow := resolvedWorkflow("openai", "gpt-4")
 
 	run := func() *httptest.ResponseRecorder {
 		t.Helper()
-		c, rec := postWithWorkflow(t, "/v1/chat/completions", body, workflow, echotest.WithHeader("X-Request-ID", "req-cache-audit"))
-		handler := auditlog.Middleware(logger)(func(c *echo.Context) error {
+		c, rec := postWithWorkflow(t, "/v1/chat/completions", body, workflow, echotest.WithHeader("X-Request-ID", "req-cache-logged"))
+		handler := requestlog.Middleware(logger)(func(c *echo.Context) error {
 			return m.HandleRequest(c, body, func() error {
-				auditlog.MarkEntryAsStreaming(c, true)
-				auditlog.EnrichEntryWithStream(c, true)
+				requestlog.MarkEntryAsStreaming(c, true)
+				requestlog.EnrichEntryWithStream(c, true)
 				c.Response().Header().Set("Content-Type", "text/event-stream")
 				c.Response().WriteHeader(http.StatusOK)
 				_, _ = c.Response().Write(rawStream)
@@ -834,7 +834,7 @@ func TestHandleRequest_StreamingExactHitAuditLogsCachedResponseBody(t *testing.T
 
 	entry := logger.entries[0]
 	require.True(t, entry.Stream)
-	require.Equal(t, auditlog.CacheTypeExact, entry.CacheType)
+	require.Equal(t, requestlog.CacheTypeExact, entry.CacheType)
 	require.NotNil(t, entry.Data)
 	require.NotNil(t, entry.Data.ResponseBody)
 
@@ -847,7 +847,7 @@ func TestHandleRequest_StreamingExactHitAuditLogsCachedResponseBody(t *testing.T
 
 	message, ok := choices[0]["message"].(map[string]any)
 	require.True(t, ok, "message = %#v, want map[string]any", choices[0]["message"])
-	require.Equal(t, "Hello cached audit", message["content"])
+	require.Equal(t, "Hello cached request log", message["content"])
 	require.Equal(t, "HIT (exact)", entry.Data.ResponseHeaders["X-Cache"])
 }
 

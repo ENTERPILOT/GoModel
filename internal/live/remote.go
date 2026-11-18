@@ -9,15 +9,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // The remote feed shows a dashboard the traffic of every replica, not only
 // the one its stream is connected to. It adds no write of its own: each
-// replica already persists its audit and usage entries in batches, and stamps
-// each batch with its writer id and clock (see auditlog.LogEntry.Stamp). While at least one
+// replica already persists its request log and usage entries in batches, and stamps
+// each batch with its writer id and clock (see requestlog.LogEntry.Stamp). While at least one
 // dashboard is subscribed, the feed reads the entries other writers stamped in
 // the last remoteWindow and publishes the ones it has not published yet. With
 // no subscriber it issues no query at all.
@@ -65,17 +65,17 @@ type RemoteConfig struct {
 	// Writer is this process's writer id (storage.WriterID): entries it
 	// stamped were already published live and are skipped.
 	Writer string
-	// Audit and Usage read the stamped entries. Either may be nil.
-	Audit auditlog.RecentWriteReader
-	Usage usage.RecentWriteReader
+	// RequestLog and Usage read the stamped entries. Either may be nil.
+	RequestLog requestlog.RecentWriteReader
+	Usage      usage.RecentWriteReader
 }
 
-// StartRemote starts publishing the audit and usage entries other replicas
+// StartRemote starts publishing the request log and usage entries other replicas
 // persist, polling while at least one subscriber is connected. Close stops
 // it. It does nothing on a disabled or closed broker, without a reader, or
 // when already started.
 func (b *Broker) StartRemote(cfg RemoteConfig) {
-	if cfg.Audit == nil && cfg.Usage == nil {
+	if cfg.RequestLog == nil && cfg.Usage == nil {
 		return
 	}
 	b.startRemote(newRemoteFeed(b, cfg))
@@ -96,14 +96,14 @@ func (b *Broker) startRemote(feed *remoteFeed) {
 
 // remoteFeed polls the stamped entries of other writers into a broker.
 type remoteFeed struct {
-	broker   *Broker
-	writer   string
-	audit    auditlog.RecentWriteReader
-	usage    usage.RecentWriteReader
-	interval time.Duration
-	window   time.Duration
-	resume   time.Duration
-	timeout  time.Duration
+	broker     *Broker
+	writer     string
+	requestLog requestlog.RecentWriteReader
+	usage      usage.RecentWriteReader
+	interval   time.Duration
+	window     time.Duration
+	resume     time.Duration
+	timeout    time.Duration
 
 	// now and newTicker are the clock; tests replace them, and set polled
 	// to learn when a poll has finished.
@@ -112,8 +112,8 @@ type remoteFeed struct {
 	polled    func()
 
 	// Owned by the run goroutine.
-	auditSeen remoteSeen
-	usageSeen remoteSeen
+	requestLogSeen remoteSeen
+	usageSeen      remoteSeen
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -122,18 +122,18 @@ type remoteFeed struct {
 
 func newRemoteFeed(b *Broker, cfg RemoteConfig) *remoteFeed {
 	return &remoteFeed{
-		broker:    b,
-		writer:    cfg.Writer,
-		audit:     cfg.Audit,
-		usage:     cfg.Usage,
-		interval:  remoteInterval,
-		window:    remoteWindow,
-		resume:    remoteResumeLimit,
-		timeout:   remotePollTimeout,
-		now:       time.Now,
-		newTicker: realTicker,
-		auditSeen: remoteSeen{table: "audit"},
-		usageSeen: remoteSeen{table: "usage"},
+		broker:         b,
+		writer:         cfg.Writer,
+		requestLog:     cfg.RequestLog,
+		usage:          cfg.Usage,
+		interval:       remoteInterval,
+		window:         remoteWindow,
+		resume:         remoteResumeLimit,
+		timeout:        remotePollTimeout,
+		now:            time.Now,
+		newTicker:      realTicker,
+		requestLogSeen: remoteSeen{table: "audit"},
+		usageSeen:      remoteSeen{table: "usage"},
 	}
 }
 
@@ -201,9 +201,9 @@ func (f *remoteFeed) pollWhileSubscribed(ctx context.Context) {
 
 func (f *remoteFeed) poll(ctx context.Context) {
 	span := remoteSpan{now: f.now().UnixMicro(), window: f.window.Microseconds(), resume: f.resume.Microseconds(), timeout: f.timeout}
-	// Audit first: a usage event merges into the audit row it belongs to.
-	if f.audit != nil {
-		f.auditSeen.poll(ctx, span, f.writer, f.audit.RecentWrites, f.publishAudit)
+	// Request log first: a usage event merges into the request log row it belongs to.
+	if f.requestLog != nil {
+		f.requestLogSeen.poll(ctx, span, f.writer, f.requestLog.RecentWrites, f.publishRequestLog)
 	}
 	if f.usage != nil {
 		f.usageSeen.poll(ctx, span, f.writer, f.usage.RecentWrites, f.publishUsage)
@@ -213,19 +213,19 @@ func (f *remoteFeed) poll(ctx context.Context) {
 	}
 }
 
-func (f *remoteFeed) publishAudit(ctx context.Context, writes []storage.RecentWrite) error {
-	entries, err := f.audit.PreviewsByID(ctx, recentWriteIDs(writes))
+func (f *remoteFeed) publishRequestLog(ctx context.Context, writes []storage.RecentWrite) error {
+	entries, err := f.requestLog.PreviewsByID(ctx, recentWriteIDs(writes))
 	if err != nil {
 		return err
 	}
 	// Oldest first, so the newest request is the last one a dashboard
 	// places, as it would be for local traffic.
-	slices.SortFunc(entries, func(a, b auditlog.EntryPreview) int {
+	slices.SortFunc(entries, func(a, b requestlog.EntryPreview) int {
 		return cmp.Or(a.Timestamp.Compare(b.Timestamp), cmp.Compare(a.ID, b.ID))
 	})
 	writtenAt := recentWriteTimes(writes)
 	for i := range entries {
-		f.broker.PublishRemoteAuditEntry(&entries[i], writtenAt[entries[i].ID])
+		f.broker.PublishRemoteRequestLogEntry(&entries[i], writtenAt[entries[i].ID])
 	}
 	return nil
 }
@@ -299,7 +299,7 @@ type recentWritesFunc func(ctx context.Context, since int64, excludeWriter strin
 // not published yet. They are remembered only once published, so a failed
 // load is retried on the next poll, which reaches back to cover it.
 func (s *remoteSeen) poll(ctx context.Context, span remoteSpan, writer string, recent recentWritesFunc, publish func(context.Context, []storage.RecentWrite) error) {
-	// Each table has its own budget, so a slow audit read cannot starve the
+	// Each table has its own budget, so a slow request log read cannot starve the
 	// usage one.
 	ctx, cancel := context.WithTimeout(ctx, span.timeout)
 	defer cancel()

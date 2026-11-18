@@ -76,7 +76,7 @@ func (r *Registry) HasCapability(capability Capability) bool {
 
 // UseOuterMiddleware adds middleware at the outer HTTP boundary, after
 // credential-like request URI values are redacted and before request logging,
-// recovery, limits, audit capture, and authentication. It is intended for
+// recovery, limits, request log capture, and authentication. It is intended for
 // observability and correlation middleware that must cover the whole request.
 // It must not depend on an authenticated identity.
 func (r *Registry) UseOuterMiddleware(m echo.MiddlewareFunc) {
@@ -109,7 +109,7 @@ func (r *Registry) RegisterRewriter(rw RequestRewriter) {
 	r.rewriters = append(r.rewriters, rw)
 }
 
-// UseMiddleware adds an Echo middleware that runs after audit capture and
+// UseMiddleware adds an Echo middleware that runs after request log capture and
 // before gateway authentication, so it can normalize credentials (for
 // example an SSO session) before the gateway auth check.
 func (r *Registry) UseMiddleware(m echo.MiddlewareFunc) {

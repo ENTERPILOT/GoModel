@@ -164,7 +164,7 @@ export ANTHROPIC_AUTH_TOKEN=change-me
 export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
 ```
 
-托管的基础 URL 通过[原生转发](/zh/advanced/anthropic-messages-api#原生转发到-anthropic)提供 `/v1/messages`：解析到 Anthropic 的请求除模型别名解析外均原样转发（保留 `cache_control`、thinking 签名和 beta 请求头），同时速率限制、预算、审计和用量追踪仍会生效；并且可以通过模型别名或虚拟模型将 Claude Code 路由到其他提供商。另外，也可以使用 `ANTHROPIC_BASE_URL=http://localhost:8080/p/anthropic`，以固定指向 Anthropic 上游的原始透传方式访问。
+托管的基础 URL 通过[原生转发](/zh/advanced/anthropic-messages-api#原生转发到-anthropic)提供 `/v1/messages`：解析到 Anthropic 的请求除模型别名解析外均原样转发（保留 `cache_control`、thinking 签名和 beta 请求头），同时速率限制、预算、请求日志和用量追踪仍会生效；并且可以通过模型别名或虚拟模型将 Claude Code 路由到其他提供商。另外，也可以使用 `ANTHROPIC_BASE_URL=http://localhost:8080/p/anthropic`，以固定指向 Anthropic 上游的原始透传方式访问。
 
 Claude Code 文档要点：在网关模式下，将 `ANTHROPIC_BASE_URL` 设置为您的网关 URL，将 `ANTHROPIC_AUTH_TOKEN` 设置为您的网关 Token，然后正常运行 Claude Code。参阅官方指南：[Claude Code LLM 网关文档](https://code.claude.com/docs/en/llm-gateway)。
 
@@ -185,9 +185,9 @@ ok
 
 ## 5. 在 GoModel 中查看流量
 
-打开 GoModel 控制台的审计日志：
+打开 GoModel 控制台的“请求”页面：
 
-[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+[http://localhost:8080/admin/dashboard/requests](http://localhost:8080/admin/dashboard/requests)
 
 这是确认 Claude Code 是否到达 GoModel、以及查看完整请求和响应记录的最简便方式。在同一控制台中，您还可以持续跟踪 GoModel 的流量和用量。
 

@@ -140,7 +140,7 @@ Cross-page conventions:
 
 - Abortable fetches: cancel the in-flight request when a newer one starts
   (AbortController); ignore abort errors.
-- `history.pushState` deep links (e.g. audit filters in the query string):
+- `history.pushState` deep links (e.g. request log filters in the query string):
   keep the established URL shapes; use `gomodelPath()`.
 - Timestamps shown to users: `timezone.formatTimestamp(ts)`;
   `title` tooltips use `formatTimestampUTC(ts)`.

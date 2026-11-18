@@ -29,7 +29,7 @@ type Authentication struct {
 	UserPath        string
 	Labels          []string
 	DashboardAccess bool
-	// Method is a short, stable audit identifier such as "oidc" or "saml".
+	// Method is a short, stable request log identifier such as "oidc" or "saml".
 	// Core normalizes safe identifiers and records "extension" when it is empty
 	// or invalid.
 	Method string
@@ -63,7 +63,7 @@ type AuthenticationEvent struct {
 }
 
 // AuthenticationEventRecorder persists authentication lifecycle events in
-// Core's audit trail. Implementations must be safe for concurrent use and
+// Core's request log. Implementations must be safe for concurrent use and
 // must not block the authentication flow on durable storage I/O.
 type AuthenticationEventRecorder interface {
 	RecordAuthenticationEvent(AuthenticationEvent)
@@ -71,7 +71,7 @@ type AuthenticationEventRecorder interface {
 
 // AuthenticationEventRecorderAware is optionally implemented by a request
 // authenticator that emits login, rejection, and logout lifecycle events.
-// Core installs the recorder after its audit subsystem has initialized.
+// Core installs the recorder after its request log subsystem has initialized.
 type AuthenticationEventRecorderAware interface {
 	SetAuthenticationEventRecorder(AuthenticationEventRecorder)
 }

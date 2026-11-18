@@ -9,9 +9,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 )
 
@@ -57,7 +57,7 @@ func (s *translatedInferenceService) dispatchNativeJSONWithCache(c *echo.Context
 
 // dispatchNativeJSON sends the body to the resolved target, and to the
 // workflow's eligible failover targets while the failover policy allows,
-// then relays the answer with audit and usage accounting.
+// then relays the answer with request logging and usage accounting.
 func (s *translatedInferenceService) dispatchNativeJSON(
 	c *echo.Context,
 	route nativeJSONRoute,
@@ -65,7 +65,7 @@ func (s *translatedInferenceService) dispatchNativeJSON(
 	eligible func(selector core.ModelSelector, providerType string) bool,
 	send nativeJSONSender,
 ) error {
-	// Record each provider attempt so the audit entry shows a failed primary
+	// Record each provider attempt so the request log entry shows a failed primary
 	// and the failover that answered, as it does for chat.
 	c.SetRequest(c.Request().WithContext(gateway.WithAttemptRecorder(c.Request().Context())))
 	s.observeLiveProviderAttempts(c, workflow)
@@ -87,25 +87,25 @@ func (s *translatedInferenceService) dispatchNativeJSON(
 		func(ctx context.Context, selector core.ModelSelector, providerType, providerName string) (*core.PassthroughResponse, error) {
 			return send(ctx, selector, providerType, providerName, headers.Clone())
 		})
-	enrichAuditEntryWithProviderAttempts(c)
+	enrichRequestLogEntryWithProviderAttempts(c)
 	if err != nil {
 		return handleError(c, err)
 	}
 
 	if meta.UsedFailover {
 		markRequestFailoverUsed(c)
-		auditlog.EnrichEntryWithFailover(c, meta.FailoverModel)
+		requestlog.EnrichEntryWithFailover(c, meta.FailoverModel)
 		workflow = executedNativeWorkflow(workflow, executed, meta)
 		storeWorkflow(c, workflow)
 	}
-	auditlog.EnrichEntryWithWorkflow(c, workflow)
-	auditlog.EnrichEntryWithResolvedRoute(c, executed.QualifiedModel(), meta.ProviderType, meta.ProviderName)
+	requestlog.EnrichEntryWithWorkflow(c, workflow)
+	requestlog.EnrichEntryWithResolvedRoute(c, executed.QualifiedModel(), meta.ProviderType, meta.ProviderName)
 	info := &core.PassthroughRouteInfo{
 		Provider:           meta.ProviderType,
 		ProviderName:       meta.ProviderName,
 		NormalizedEndpoint: route.endpoint,
 		SemanticOperation:  route.operation,
-		AuditPath:          route.path,
+		RequestLogPath:     route.path,
 		Model:              executed.Model,
 	}
 	return proxyPassthroughResponse(c, s.logger, s.usageLogger, s.pricingResolver, meta.ProviderType, meta.ProviderName, route.endpoint, info, resp)
@@ -137,7 +137,7 @@ func nativeJSONResult(providerType string, resp *core.PassthroughResponse, err e
 }
 
 // executedNativeWorkflow returns a copy of workflow routed to the failover
-// target that answered, so usage is priced and audited under the model that
+// target that answered, so usage is priced and logged under the model that
 // did the work rather than the primary that failed.
 func executedNativeWorkflow(workflow *core.Workflow, executed core.ModelSelector, meta gateway.ExecutionMeta) *core.Workflow {
 	if workflow == nil || workflow.Resolution == nil {

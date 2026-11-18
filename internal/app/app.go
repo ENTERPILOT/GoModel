@@ -15,7 +15,6 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/budget"
@@ -33,6 +32,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/runtimesettings"
 	"github.com/enterpilot/gomodel/internal/server"
@@ -54,7 +54,7 @@ type App struct {
 	telemetry           *telemetry.Service // nil unless OpenTelemetry export is enabled
 	providers           *providers.InitResult
 	secretRotation      *secretRotation
-	audit               *auditlog.Result
+	requestLog          *requestlog.Result
 	usage               *usage.Result
 	budgets             *budget.Result
 	rateLimits          *ratelimit.Result
@@ -182,12 +182,12 @@ func (a *App) Router() core.RoutableProvider {
 	return a.providers.Router
 }
 
-// AuditLogger returns the audit logger interface.
-func (a *App) AuditLogger() auditlog.LoggerInterface {
-	if a.audit == nil {
+// RequestLogger returns the request logger interface.
+func (a *App) RequestLogger() requestlog.LoggerInterface {
+	if a.requestLog == nil {
 		return nil
 	}
-	return a.audit.Logger
+	return a.requestLog.Logger
 }
 
 // UsageLogger returns the usage logger interface.
@@ -202,9 +202,9 @@ func (a *App) attachLivePublishers() {
 	if a == nil || a.live == nil || !a.live.Enabled() {
 		return
 	}
-	if a.audit != nil {
-		if logger, ok := a.audit.Logger.(interface {
-			SetLivePublisher(auditlog.LiveEventPublisher)
+	if a.requestLog != nil {
+		if logger, ok := a.requestLog.Logger.(interface {
+			SetLivePublisher(requestlog.LiveEventPublisher)
 		}); ok {
 			logger.SetLivePublisher(a.live)
 		}
@@ -218,7 +218,7 @@ func (a *App) attachLivePublishers() {
 	}
 }
 
-// startRemoteLiveLogs has the live broker also publish the audit and usage
+// startRemoteLiveLogs has the live broker also publish the request log and usage
 // entries other replicas persist to the shared database, so a dashboard
 // connected to this replica sees every replica's traffic. The broker polls
 // only while a dashboard is subscribed, and stops when it closes.
@@ -228,11 +228,11 @@ func (a *App) startRemoteLiveLogs() {
 	}
 	cfg := live.RemoteConfig{Writer: storage.WriterID()}
 	if a.config.Logging.Enabled {
-		reader, err := auditlog.NewRecentWriteReader(a.storage)
+		reader, err := requestlog.NewRecentWriteReader(a.storage)
 		if err != nil {
-			slog.Warn("live logs will not show other replicas' audit entries", "error", err)
+			slog.Warn("live logs will not show other replicas' request log entries", "error", err)
 		} else {
-			cfg.Audit = reader
+			cfg.RequestLog = reader
 		}
 	}
 	if a.config.Usage.Enabled {
@@ -474,7 +474,7 @@ func (a *App) logStartupInfo() {
 	}
 
 	// Client address resolution. Reported whenever a proxy is trusted, because
-	// it decides which address every audit entry, rate limit key, and log line
+	// it decides which address every request log entry, rate limit key, and log line
 	// attributes a request to.
 	if policy := cfg.Server.ClientIP; policy.Enabled() {
 		slog.Info("trusted proxies configured",
@@ -490,7 +490,7 @@ func (a *App) logStartupInfo() {
 		slog.Info("prometheus metrics disabled")
 	}
 
-	// Storage configuration (shared by audit logging and usage tracking)
+	// Storage configuration (shared by request logging and usage tracking)
 	if backend := cfg.Storage.BackendConfig(); backend.Type == storage.TypeSQLite {
 		slog.Info("storage configured", "type", backend.Type, "path", backend.SQLite.Path)
 	} else {
@@ -503,9 +503,9 @@ func (a *App) logStartupInfo() {
 		slog.Info("media storage configured", "type", cfg.Media.Storage.Type)
 	}
 
-	// Audit logging configuration
+	// Request logging configuration
 	if cfg.Logging.Enabled {
-		slog.Info("audit logging enabled",
+		slog.Info("request logging enabled",
 			"log_bodies", cfg.Logging.LogBodies,
 			"log_audio_bodies", cfg.Logging.LogAudioBodies,
 			"log_embedding_bodies", cfg.Logging.LogEmbeddingBodies,
@@ -515,7 +515,7 @@ func (a *App) logStartupInfo() {
 			"retention_days", cfg.Logging.RetentionDays,
 		)
 	} else {
-		slog.Info("audit logging disabled")
+		slog.Info("request logging disabled")
 	}
 
 	// Usage tracking configuration

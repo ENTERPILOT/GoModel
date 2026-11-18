@@ -614,7 +614,7 @@ func TestAdminEndpoints_Enabled(t *testing.T) {
 		AdminHandler:          adminHandler,
 	})
 
-	for _, path := range []string{"/admin/models", "/admin/providers/status", "/admin/audit/log", "/admin/audit/conversation?log_id=abc"} {
+	for _, path := range []string{"/admin/models", "/admin/providers/status", "/admin/request-logs", "/admin/request-logs/conversation?log_id=abc"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)

@@ -9,9 +9,9 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -24,7 +24,7 @@ type InternalChatCompletionExecutorConfig struct {
 	WorkflowPolicyResolver RequestWorkflowPolicyResolver
 	FailoverResolver       RequestFailoverResolver
 	FailoverPolicy         *gateway.FailoverPolicy
-	AuditLogger            auditlog.LoggerInterface
+	RequestLogger          requestlog.LoggerInterface
 	UsageLogger            usage.LoggerInterface
 	PricingResolver        usage.PricingResolver
 	ResponseCache          *responsecache.ResponseCacheMiddleware
@@ -43,7 +43,7 @@ type InternalChatCompletionExecutor struct {
 	provider               core.RoutableProvider
 	modelResolver          RequestModelResolver
 	workflowPolicyResolver RequestWorkflowPolicyResolver
-	logger                 auditlog.LoggerInterface
+	logger                 requestlog.LoggerInterface
 	orchestrator           *gateway.InferenceOrchestrator
 	modelAuthorizer        RequestModelAuthorizer
 	responseCache          *responsecache.ResponseCacheMiddleware
@@ -52,7 +52,7 @@ type InternalChatCompletionExecutor struct {
 }
 
 // NewInternalChatCompletionExecutor creates a transport-free translated chat
-// executor that reuses workflow resolution, failover, usage, and audit logic.
+// executor that reuses workflow resolution, failover, usage, and request logic.
 func NewInternalChatCompletionExecutor(provider core.RoutableProvider, cfg InternalChatCompletionExecutorConfig) *InternalChatCompletionExecutor {
 	inference := gateway.InferenceConfig{
 		Provider:                 provider,
@@ -76,7 +76,7 @@ func NewInternalChatCompletionExecutor(provider core.RoutableProvider, cfg Inter
 		modelResolver:          cfg.ModelResolver,
 		modelAuthorizer:        cfg.ModelAuthorizer,
 		workflowPolicyResolver: cfg.WorkflowPolicyResolver,
-		logger:                 cfg.AuditLogger,
+		logger:                 cfg.RequestLogger,
 		responseCache:          cfg.ResponseCache,
 		rateLimiter:            cfg.RateLimiter,
 		budgetChecker:          cfg.BudgetChecker,
@@ -103,12 +103,12 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
 	requested := core.NewRequestedModelSelector(req.Model, req.Provider)
 	start := time.Now()
-	entry := newInternalAuditEntry(e.logger, ctx, requestID, requested, chatCompletionsPath)
+	entry := newInternalRequestLogEntry(e.logger, ctx, requestID, requested, chatCompletionsPath)
 	var workflow *core.Workflow
 	var cacheType string
 	var meta gateway.ExecutionMeta
 	defer func() {
-		finishInternalAuditEntry(e.logger, ctx, entry, internalExchange{
+		finishInternalRequestLogEntry(e.logger, ctx, entry, internalExchange{
 			path: chatCompletionsPath, start: start, workflow: workflow, request: req, response: resp,
 			model: chatResponseModel(resp), err: err, cacheType: cacheType, meta: meta,
 		})

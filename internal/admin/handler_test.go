@@ -15,10 +15,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -63,20 +63,20 @@ type mockUsageReader struct {
 	throughputErr        error
 }
 
-type mockAuditReader struct {
-	logResult           *auditlog.LogListResult
+type mockRequestLogReader struct {
+	logResult           *requestlog.LogListResult
 	logErr              error
-	lastQuery           auditlog.LogQueryParams
-	logByID             *auditlog.LogEntry
+	lastQuery           requestlog.LogQueryParams
+	logByID             *requestlog.LogEntry
 	logByIDErr          error
-	conversationResult  *auditlog.ConversationResult
+	conversationResult  *requestlog.ConversationResult
 	conversationErr     error
 	lastConversationID  string
 	lastConversationLim int
-	statsResult         *auditlog.RequestStats
+	statsResult         *requestlog.RequestStats
 	statsErr            error
-	lastStatsParams     auditlog.RequestStatsParams
-	sessionsResult      *auditlog.SessionListResult
+	lastStatsParams     requestlog.RequestStatsParams
+	sessionsResult      *requestlog.SessionListResult
 	sessionsErr         error
 	lastUsed            map[string]time.Time
 	lastUsedErr         error
@@ -197,7 +197,7 @@ func (m *mockUsageReader) GetTokenThroughput(_ context.Context, gran usage.Throu
 	return m.throughput, nil
 }
 
-func (m *mockAuditReader) GetLogs(_ context.Context, params auditlog.LogQueryParams) (*auditlog.LogListResult, error) {
+func (m *mockRequestLogReader) GetLogs(_ context.Context, params requestlog.LogQueryParams) (*requestlog.LogListResult, error) {
 	m.lastQuery = params
 	if m.logErr != nil {
 		return nil, m.logErr
@@ -205,7 +205,7 @@ func (m *mockAuditReader) GetLogs(_ context.Context, params auditlog.LogQueryPar
 	return m.logResult, nil
 }
 
-func (m *mockAuditReader) GetSessions(_ context.Context, params auditlog.LogQueryParams) (*auditlog.SessionListResult, error) {
+func (m *mockRequestLogReader) GetSessions(_ context.Context, params requestlog.LogQueryParams) (*requestlog.SessionListResult, error) {
 	m.lastQuery = params
 	if m.sessionsErr != nil {
 		return nil, m.sessionsErr
@@ -213,24 +213,24 @@ func (m *mockAuditReader) GetSessions(_ context.Context, params auditlog.LogQuer
 	return m.sessionsResult, nil
 }
 
-func (m *mockAuditReader) GetLogByID(_ context.Context, _ string) (*auditlog.LogEntry, error) {
+func (m *mockRequestLogReader) GetLogByID(_ context.Context, _ string) (*requestlog.LogEntry, error) {
 	if m.logByIDErr != nil {
 		return nil, m.logByIDErr
 	}
 	return m.logByID, nil
 }
 
-func (m *mockAuditReader) GetInteractionParent(_ context.Context, _ string) (*auditlog.InteractionParent, error) {
+func (m *mockRequestLogReader) GetInteractionParent(_ context.Context, _ string) (*requestlog.InteractionParent, error) {
 	if m.logByIDErr != nil {
 		return nil, m.logByIDErr
 	}
 	if m.logByID == nil {
 		return nil, nil
 	}
-	return &auditlog.InteractionParent{UserPath: m.logByID.UserPath, SessionID: m.logByID.SessionID}, nil
+	return &requestlog.InteractionParent{UserPath: m.logByID.UserPath, SessionID: m.logByID.SessionID}, nil
 }
 
-func (m *mockAuditReader) GetRequestStats(_ context.Context, params auditlog.RequestStatsParams) (*auditlog.RequestStats, error) {
+func (m *mockRequestLogReader) GetRequestStats(_ context.Context, params requestlog.RequestStatsParams) (*requestlog.RequestStats, error) {
 	m.lastStatsParams = params
 	if m.statsErr != nil {
 		return nil, m.statsErr
@@ -238,7 +238,7 @@ func (m *mockAuditReader) GetRequestStats(_ context.Context, params auditlog.Req
 	return m.statsResult, nil
 }
 
-func (m *mockAuditReader) GetConversation(_ context.Context, logID string, limit int) (*auditlog.ConversationResult, error) {
+func (m *mockRequestLogReader) GetConversation(_ context.Context, logID string, limit int) (*requestlog.ConversationResult, error) {
 	m.lastConversationID = logID
 	m.lastConversationLim = limit
 	if m.conversationErr != nil {
@@ -247,7 +247,7 @@ func (m *mockAuditReader) GetConversation(_ context.Context, logID string, limit
 	return m.conversationResult, nil
 }
 
-func (m *mockAuditReader) GetLastUsedByAuthKeys(_ context.Context, keyIDs []string) (map[string]time.Time, error) {
+func (m *mockRequestLogReader) GetLastUsedByAuthKeys(_ context.Context, keyIDs []string) (map[string]time.Time, error) {
 	m.lastUsedKeyIDs = keyIDs
 	if m.lastUsedErr != nil {
 		return nil, m.lastUsedErr
@@ -921,28 +921,28 @@ func TestUsageBySessionPropagatesReaderError(t *testing.T) {
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 }
 
-// --- AuditLog handler tests ---
+// --- RequestLog handler tests ---
 
-func TestAuditLog_NilReader(t *testing.T) {
+func TestRequestLog_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
 	// Omit limit, as a paging client's first request may. The disabled-reader
 	// path must report the default page size (not 0) so the client never resends
 	// limit=0 (which 400s).
-	c, rec := echotest.Get(t, "/admin/audit/log")
-	require.NoError(t, h.AuditLog(c))
+	c, rec := echotest.Get(t, "/admin/request-logs")
+	require.NoError(t, h.RequestLog(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	result := echotest.Decode[auditlog.LogListResult](t, rec)
+	result := echotest.Decode[requestlog.LogListResult](t, rec)
 	assert.Empty(t, result.Entries)
 	assert.Equal(t, 0, result.Offset)
 	assert.Equal(t, 25, result.Limit)
 }
 
-func TestAuditLog_Success(t *testing.T) {
+func TestRequestLog_Success(t *testing.T) {
 	now := time.Now().UTC()
-	reader := &mockAuditReader{
-		logResult: &auditlog.LogListResult{
-			Entries: []auditlog.LogEntry{
+	reader := &mockRequestLogReader{
+		logResult: &requestlog.LogListResult{
+			Entries: []requestlog.LogEntry{
 				{
 					ID:             "log-1",
 					Timestamp:      now,
@@ -953,7 +953,7 @@ func TestAuditLog_Success(t *testing.T) {
 					RequestID:      "req-1",
 					Method:         http.MethodPost,
 					Path:           "/v1/chat/completions",
-					Data: &auditlog.LogData{
+					Data: &requestlog.LogData{
 						RequestBody: map[string]any{
 							"model": "gpt-4o",
 						},
@@ -969,27 +969,27 @@ func TestAuditLog_Success(t *testing.T) {
 		},
 	}
 
-	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/log?days=7")
-	require.NoError(t, h.AuditLog(c))
+	h := NewHandler(nil, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs?days=7")
+	require.NoError(t, h.RequestLog(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	result := echotest.Decode[auditlog.LogListResult](t, rec)
+	result := echotest.Decode[requestlog.LogListResult](t, rec)
 	require.Len(t, result.Entries, 1)
 	assert.Equal(t, 1, result.Total)
 	assert.Equal(t, "log-1", result.Entries[0].ID)
 
-	// List entries are slim: bodies live behind /admin/audit/detail.
+	// List entries are slim: bodies live behind /admin/request-logs/detail.
 	require.NotNil(t, result.Entries[0].Data)
 	assert.Nil(t, result.Entries[0].Data.RequestBody)
 	assert.Nil(t, result.Entries[0].Data.ResponseBody)
 }
 
-func TestAuditLog_EmitsRequestedModel(t *testing.T) {
+func TestRequestLog_EmitsRequestedModel(t *testing.T) {
 	now := time.Now().UTC()
-	reader := &mockAuditReader{
-		logResult: &auditlog.LogListResult{
-			Entries: []auditlog.LogEntry{
+	reader := &mockRequestLogReader{
+		logResult: &requestlog.LogListResult{
+			Entries: []requestlog.LogEntry{
 				{
 					ID:             "log-1",
 					Timestamp:      now,
@@ -1007,9 +1007,9 @@ func TestAuditLog_EmitsRequestedModel(t *testing.T) {
 		},
 	}
 
-	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/log?search=req-1")
-	require.NoError(t, h.AuditLog(c))
+	h := NewHandler(nil, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs?search=req-1")
+	require.NoError(t, h.RequestLog(c))
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	var result struct {
@@ -1022,7 +1022,7 @@ func TestAuditLog_EmitsRequestedModel(t *testing.T) {
 	require.Equal(t, "does-not-exist-model", result.Entries[0].RequestedModel)
 }
 
-func TestAuditLog_EnrichesEntriesWithUsageSummary(t *testing.T) {
+func TestRequestLog_EnrichesEntriesWithUsageSummary(t *testing.T) {
 	now := time.Now().UTC()
 	usageReader := &mockUsageReader{
 		usageByRequestID: map[string][]usage.UsageLogEntry{
@@ -1039,9 +1039,9 @@ func TestAuditLog_EnrichesEntriesWithUsageSummary(t *testing.T) {
 			},
 		},
 	}
-	auditReader := &mockAuditReader{
-		logResult: &auditlog.LogListResult{
-			Entries: []auditlog.LogEntry{
+	requestLogReader := &mockRequestLogReader{
+		logResult: &requestlog.LogListResult{
+			Entries: []requestlog.LogEntry{
 				{
 					ID:             "log-1",
 					Timestamp:      now,
@@ -1059,12 +1059,12 @@ func TestAuditLog_EnrichesEntriesWithUsageSummary(t *testing.T) {
 		},
 	}
 
-	h := NewHandler(usageReader, nil, WithAuditReader(auditReader))
-	c, rec := echotest.Get(t, "/admin/audit/log?days=7")
-	require.NoError(t, h.AuditLog(c))
+	h := NewHandler(usageReader, nil, WithRequestLogReader(requestLogReader))
+	c, rec := echotest.Get(t, "/admin/request-logs?days=7")
+	require.NoError(t, h.RequestLog(c))
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	result := echotest.Decode[auditLogListResponse](t, rec)
+	result := echotest.Decode[requestLogListResponse](t, rec)
 	require.Len(t, result.Entries, 1)
 	require.Len(t, usageReader.lastRequestIDs, 1)
 	require.Equal(t, "req-1", usageReader.lastRequestIDs[0])
@@ -1074,41 +1074,41 @@ func TestAuditLog_EnrichesEntriesWithUsageSummary(t *testing.T) {
 	require.Equal(t, int64(240), result.Entries[0].Usage.TotalTokens)
 }
 
-func TestAuditLogDetail_MissingLogID(t *testing.T) {
-	h := NewHandler(nil, nil, WithAuditReader(&mockAuditReader{}))
-	c, rec := echotest.Get(t, "/admin/audit/detail")
-	require.NoError(t, h.AuditLogDetail(c))
+func TestRequestLogDetail_MissingLogID(t *testing.T) {
+	h := NewHandler(nil, nil, WithRequestLogReader(&mockRequestLogReader{}))
+	c, rec := echotest.Get(t, "/admin/request-logs/detail")
+	require.NoError(t, h.RequestLogDetail(c))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), "log_id is required")
 }
 
-func TestAuditLogDetail_NilReader(t *testing.T) {
+func TestRequestLogDetail_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := echotest.Get(t, "/admin/audit/detail?log_id=log-1")
-	require.NoError(t, h.AuditLogDetail(c))
+	c, rec := echotest.Get(t, "/admin/request-logs/detail?log_id=log-1")
+	require.NoError(t, h.RequestLogDetail(c))
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
-	require.Contains(t, rec.Body.String(), "audit log detail is unavailable")
+	require.Contains(t, rec.Body.String(), "request log detail is unavailable")
 }
 
-func TestAuditLogDetail_NotFound(t *testing.T) {
-	h := NewHandler(nil, nil, WithAuditReader(&mockAuditReader{}))
-	c, rec := echotest.Get(t, "/admin/audit/detail?log_id=missing")
-	require.NoError(t, h.AuditLogDetail(c))
+func TestRequestLogDetail_NotFound(t *testing.T) {
+	h := NewHandler(nil, nil, WithRequestLogReader(&mockRequestLogReader{}))
+	c, rec := echotest.Get(t, "/admin/request-logs/detail?log_id=missing")
+	require.NoError(t, h.RequestLogDetail(c))
 	require.Equal(t, http.StatusNotFound, rec.Code)
-	require.Contains(t, rec.Body.String(), "audit log not found: missing")
+	require.Contains(t, rec.Body.String(), "request log not found: missing")
 }
 
-func TestAuditLogDetail_PropagatesReaderError(t *testing.T) {
-	h := NewHandler(nil, nil, WithAuditReader(&mockAuditReader{
-		logByIDErr: core.NewProviderError("audit", http.StatusServiceUnavailable, "audit reader unavailable", nil),
+func TestRequestLogDetail_PropagatesReaderError(t *testing.T) {
+	h := NewHandler(nil, nil, WithRequestLogReader(&mockRequestLogReader{
+		logByIDErr: core.NewProviderError("audit", http.StatusServiceUnavailable, "request log reader unavailable", nil),
 	}))
-	c, rec := echotest.Get(t, "/admin/audit/detail?log_id=log-1")
-	require.NoError(t, h.AuditLogDetail(c))
+	c, rec := echotest.Get(t, "/admin/request-logs/detail?log_id=log-1")
+	require.NoError(t, h.RequestLogDetail(c))
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
-	require.Contains(t, rec.Body.String(), "audit reader unavailable")
+	require.Contains(t, rec.Body.String(), "request log reader unavailable")
 }
 
-func TestAuditLogDetail_SuccessEnrichesUsage(t *testing.T) {
+func TestRequestLogDetail_SuccessEnrichesUsage(t *testing.T) {
 	now := time.Now().UTC()
 	usageReader := &mockUsageReader{
 		usageByRequestID: map[string][]usage.UsageLogEntry{
@@ -1125,8 +1125,8 @@ func TestAuditLogDetail_SuccessEnrichesUsage(t *testing.T) {
 			},
 		},
 	}
-	auditReader := &mockAuditReader{
-		logByID: &auditlog.LogEntry{
+	requestLogReader := &mockRequestLogReader{
+		logByID: &requestlog.LogEntry{
 			ID:             "log-1",
 			Timestamp:      now,
 			RequestedModel: "gpt-4o",
@@ -1137,12 +1137,12 @@ func TestAuditLogDetail_SuccessEnrichesUsage(t *testing.T) {
 			Path:           "/v1/chat/completions",
 		},
 	}
-	h := NewHandler(usageReader, nil, WithAuditReader(auditReader))
-	c, rec := echotest.Get(t, "/admin/audit/detail?log_id=log-1")
-	require.NoError(t, h.AuditLogDetail(c))
+	h := NewHandler(usageReader, nil, WithRequestLogReader(requestLogReader))
+	c, rec := echotest.Get(t, "/admin/request-logs/detail?log_id=log-1")
+	require.NoError(t, h.RequestLogDetail(c))
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	result := echotest.Decode[auditLogEntryResponse](t, rec)
+	result := echotest.Decode[requestLogEntryResponse](t, rec)
 	require.Equal(t, "log-1", result.ID)
 	require.Len(t, usageReader.lastRequestIDs, 1)
 	require.Equal(t, "req-1", usageReader.lastRequestIDs[0])
@@ -1151,11 +1151,11 @@ func TestAuditLogDetail_SuccessEnrichesUsage(t *testing.T) {
 	require.Equal(t, int64(240), result.Usage.TotalTokens)
 }
 
-func TestAuditLog_PreservesProviderName(t *testing.T) {
+func TestRequestLog_PreservesProviderName(t *testing.T) {
 	now := time.Now().UTC()
-	reader := &mockAuditReader{
-		logResult: &auditlog.LogListResult{
-			Entries: []auditlog.LogEntry{
+	reader := &mockRequestLogReader{
+		logResult: &requestlog.LogListResult{
+			Entries: []requestlog.LogEntry{
 				{
 					ID:             "log-1",
 					Timestamp:      now,
@@ -1170,30 +1170,30 @@ func TestAuditLog_PreservesProviderName(t *testing.T) {
 			Limit: 25,
 		},
 	}
-	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/log?days=7")
-	require.NoError(t, h.AuditLog(c))
+	h := NewHandler(nil, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs?days=7")
+	require.NoError(t, h.RequestLog(c))
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	result := echotest.Decode[auditlog.LogListResult](t, rec)
+	result := echotest.Decode[requestlog.LogListResult](t, rec)
 	require.Len(t, result.Entries, 1)
 	require.Equal(t, "primary-openai", result.Entries[0].ProviderName)
 	require.Equal(t, "openai", result.Entries[0].Provider)
 }
 
-func TestAuditLog_WithFilters(t *testing.T) {
-	reader := &mockAuditReader{
-		logResult: &auditlog.LogListResult{
-			Entries: []auditlog.LogEntry{},
+func TestRequestLog_WithFilters(t *testing.T) {
+	reader := &mockRequestLogReader{
+		logResult: &requestlog.LogListResult{
+			Entries: []requestlog.LogEntry{},
 			Total:   0,
 			Limit:   10,
 			Offset:  0,
 		},
 	}
 
-	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/log?model=gpt-4&provider=openai&method=post&path=/v1/chat/completions&user_path=/team&error_type=provider_error&status_code=502&stream=true&search=timeout&limit=10&offset=5")
-	require.NoError(t, h.AuditLog(c))
+	h := NewHandler(nil, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs?model=gpt-4&provider=openai&method=post&path=/v1/chat/completions&user_path=/team&error_type=provider_error&status_code=502&stream=true&search=timeout&limit=10&offset=5")
+	require.NoError(t, h.RequestLog(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "gpt-4", reader.lastQuery.RequestedModel)
 	assert.Equal(t, "openai", reader.lastQuery.Provider)
@@ -1210,11 +1210,11 @@ func TestAuditLog_WithFilters(t *testing.T) {
 	assert.Equal(t, 5, reader.lastQuery.Offset)
 }
 
-func TestAuditLog_FieldFilters(t *testing.T) {
-	reader := &mockAuditReader{logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}}}
-	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/log?days=7&user_path_prefix=voxina&model_prefix=openai%2Fgpt&request_id=%20req-1%20")
-	require.NoError(t, h.AuditLog(c))
+func TestRequestLog_FieldFilters(t *testing.T) {
+	reader := &mockRequestLogReader{logResult: &requestlog.LogListResult{Entries: []requestlog.LogEntry{}}}
+	h := NewHandler(nil, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs?days=7&user_path_prefix=voxina&model_prefix=openai%2Fgpt&request_id=%20req-1%20")
+	require.NoError(t, h.RequestLog(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "voxina", reader.lastQuery.UserPathPrefix)
 	assert.Equal(t, "openai/gpt", reader.lastQuery.ModelPrefix)
@@ -1222,101 +1222,101 @@ func TestAuditLog_FieldFilters(t *testing.T) {
 	assert.Empty(t, reader.lastQuery.Search)
 }
 
-func TestAuditLog_InvalidStatusCode(t *testing.T) {
-	reader := &mockAuditReader{
-		logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}},
+func TestRequestLog_InvalidStatusCode(t *testing.T) {
+	reader := &mockRequestLogReader{
+		logResult: &requestlog.LogListResult{Entries: []requestlog.LogEntry{}},
 	}
-	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/log?status_code=foo")
-	require.NoError(t, h.AuditLog(c))
+	h := NewHandler(nil, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs?status_code=foo")
+	require.NoError(t, h.RequestLog(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "invalid_request_error")
 }
 
-func TestAuditLog_InvalidStream(t *testing.T) {
-	reader := &mockAuditReader{
-		logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}},
+func TestRequestLog_InvalidStream(t *testing.T) {
+	reader := &mockRequestLogReader{
+		logResult: &requestlog.LogListResult{Entries: []requestlog.LogEntry{}},
 	}
-	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/log?stream=maybe")
-	require.NoError(t, h.AuditLog(c))
+	h := NewHandler(nil, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs?stream=maybe")
+	require.NoError(t, h.RequestLog(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "invalid_request_error")
 }
 
-func TestAuditLog_InvalidLimit(t *testing.T) {
+func TestRequestLog_InvalidLimit(t *testing.T) {
 	cases := []string{"abc", "0", "-1"}
 	for _, q := range cases {
 		t.Run(q, func(t *testing.T) {
-			reader := &mockAuditReader{
-				logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}},
+			reader := &mockRequestLogReader{
+				logResult: &requestlog.LogListResult{Entries: []requestlog.LogEntry{}},
 			}
-			h := NewHandler(nil, nil, WithAuditReader(reader))
-			c, rec := echotest.Get(t, "/admin/audit/log?limit="+q)
-			require.NoError(t, h.AuditLog(c))
+			h := NewHandler(nil, nil, WithRequestLogReader(reader))
+			c, rec := echotest.Get(t, "/admin/request-logs?limit="+q)
+			require.NoError(t, h.RequestLog(c))
 			assert.Equal(t, http.StatusBadRequest, rec.Code, q)
 			assert.Contains(t, rec.Body.String(), "invalid_request_error")
 		})
 	}
 }
 
-func TestAuditLog_InvalidOffset(t *testing.T) {
+func TestRequestLog_InvalidOffset(t *testing.T) {
 	cases := []string{"abc", "-1"}
 	for _, q := range cases {
 		t.Run(q, func(t *testing.T) {
-			reader := &mockAuditReader{
-				logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}},
+			reader := &mockRequestLogReader{
+				logResult: &requestlog.LogListResult{Entries: []requestlog.LogEntry{}},
 			}
-			h := NewHandler(nil, nil, WithAuditReader(reader))
-			c, rec := echotest.Get(t, "/admin/audit/log?offset="+q)
-			require.NoError(t, h.AuditLog(c))
+			h := NewHandler(nil, nil, WithRequestLogReader(reader))
+			c, rec := echotest.Get(t, "/admin/request-logs?offset="+q)
+			require.NoError(t, h.RequestLog(c))
 			assert.Equal(t, http.StatusBadRequest, rec.Code, q)
 			assert.Contains(t, rec.Body.String(), "invalid_request_error")
 		})
 	}
 }
 
-func TestAuditLog_Error(t *testing.T) {
-	reader := &mockAuditReader{
+func TestRequestLog_Error(t *testing.T) {
+	reader := &mockRequestLogReader{
 		logErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
 	}
-	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/log")
-	require.NoError(t, h.AuditLog(c))
+	h := NewHandler(nil, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs")
+	require.NoError(t, h.RequestLog(c))
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
 }
 
-func TestAuditConversation_NilReader(t *testing.T) {
+func TestRequestLogConversation_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := echotest.Get(t, "/admin/audit/conversation?log_id=log-1")
-	require.NoError(t, h.AuditConversation(c))
+	c, rec := echotest.Get(t, "/admin/request-logs/conversation?log_id=log-1")
+	require.NoError(t, h.RequestLogConversation(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	result := echotest.Decode[auditlog.ConversationResult](t, rec)
+	result := echotest.Decode[requestlog.ConversationResult](t, rec)
 	assert.Equal(t, "log-1", result.AnchorID)
 	assert.Empty(t, result.Entries)
 }
 
-func TestAuditConversation_Success(t *testing.T) {
+func TestRequestLogConversation_Success(t *testing.T) {
 	now := time.Now().UTC()
-	reader := &mockAuditReader{
-		conversationResult: &auditlog.ConversationResult{
+	reader := &mockRequestLogReader{
+		conversationResult: &requestlog.ConversationResult{
 			AnchorID: "log-2",
-			Entries: []auditlog.LogEntry{
+			Entries: []requestlog.LogEntry{
 				{ID: "log-1", Timestamp: now.Add(-time.Minute), Path: "/v1/responses"},
 				{ID: "log-2", Timestamp: now, Path: "/v1/responses"},
 			},
 		},
 	}
-	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/conversation?log_id=log-2&limit=80")
-	require.NoError(t, h.AuditConversation(c))
+	h := NewHandler(nil, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs/conversation?log_id=log-2&limit=80")
+	require.NoError(t, h.RequestLogConversation(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "log-2", reader.lastConversationID)
 	assert.Equal(t, 80, reader.lastConversationLim)
 }
 
-func TestAuditConversation_EnrichesEntriesWithPromptCacheUsage(t *testing.T) {
+func TestRequestLogConversation_EnrichesEntriesWithPromptCacheUsage(t *testing.T) {
 	now := time.Now().UTC()
 	usageReader := &mockUsageReader{
 		usageByRequestID: map[string][]usage.UsageLogEntry{
@@ -1331,94 +1331,94 @@ func TestAuditConversation_EnrichesEntriesWithPromptCacheUsage(t *testing.T) {
 			},
 		},
 	}
-	reader := &mockAuditReader{
-		conversationResult: &auditlog.ConversationResult{
+	reader := &mockRequestLogReader{
+		conversationResult: &requestlog.ConversationResult{
 			AnchorID: "log-cached",
-			Entries: []auditlog.LogEntry{
+			Entries: []requestlog.LogEntry{
 				{ID: "log-cached", RequestID: "req-cached", Timestamp: now, Path: "/v1/chat/completions"},
 			},
 		},
 	}
-	h := NewHandler(usageReader, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/conversation?log_id=log-cached")
-	require.NoError(t, h.AuditConversation(c))
+	h := NewHandler(usageReader, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs/conversation?log_id=log-cached")
+	require.NoError(t, h.RequestLogConversation(c))
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	result := echotest.Decode[auditConversationResponse](t, rec)
+	result := echotest.Decode[requestLogConversationResponse](t, rec)
 	require.Len(t, result.Entries, 1)
 	require.NotNil(t, result.Entries[0].Usage)
 	require.Equal(t, int64(25), result.Entries[0].Usage.CachedInputTokens)
 	require.Equal(t, int64(100), result.Entries[0].Usage.EstimatedCachedCharacters)
 }
 
-func TestAuditConversation_PreservesProviderName(t *testing.T) {
+func TestRequestLogConversation_PreservesProviderName(t *testing.T) {
 	now := time.Now().UTC()
-	reader := &mockAuditReader{
-		conversationResult: &auditlog.ConversationResult{
+	reader := &mockRequestLogReader{
+		conversationResult: &requestlog.ConversationResult{
 			AnchorID: "log-2",
-			Entries: []auditlog.LogEntry{
+			Entries: []requestlog.LogEntry{
 				{ID: "log-1", Timestamp: now.Add(-time.Minute), ResolvedModel: "primary-openai/gpt-4o", Provider: "openai", ProviderName: "primary-openai", Path: "/v1/responses"},
 				{ID: "log-2", Timestamp: now, ResolvedModel: "primary-openai/gpt-4o", Provider: "openai", ProviderName: "primary-openai", Path: "/v1/responses"},
 			},
 		},
 	}
-	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/conversation?log_id=log-2")
-	require.NoError(t, h.AuditConversation(c))
+	h := NewHandler(nil, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs/conversation?log_id=log-2")
+	require.NoError(t, h.RequestLogConversation(c))
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	result := echotest.Decode[auditlog.ConversationResult](t, rec)
+	result := echotest.Decode[requestlog.ConversationResult](t, rec)
 	require.Len(t, result.Entries, 2)
 	require.Equal(t, "primary-openai", result.Entries[0].ProviderName)
 	require.Equal(t, "openai", result.Entries[0].Provider)
 }
 
-func TestAuditConversation_MissingLogID(t *testing.T) {
-	reader := &mockAuditReader{}
-	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/conversation")
-	require.NoError(t, h.AuditConversation(c))
+func TestRequestLogConversation_MissingLogID(t *testing.T) {
+	reader := &mockRequestLogReader{}
+	h := NewHandler(nil, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs/conversation")
+	require.NoError(t, h.RequestLogConversation(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestAuditConversation_InvalidLimit(t *testing.T) {
-	reader := &mockAuditReader{}
-	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/conversation?log_id=log-1&limit=bad")
-	require.NoError(t, h.AuditConversation(c))
+func TestRequestLogConversation_InvalidLimit(t *testing.T) {
+	reader := &mockRequestLogReader{}
+	h := NewHandler(nil, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs/conversation?log_id=log-1&limit=bad")
+	require.NoError(t, h.RequestLogConversation(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestAuditConversation_Error(t *testing.T) {
-	reader := &mockAuditReader{
+func TestRequestLogConversation_Error(t *testing.T) {
+	reader := &mockRequestLogReader{
 		conversationErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
 	}
-	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := echotest.Get(t, "/admin/audit/conversation?log_id=log-1")
-	require.NoError(t, h.AuditConversation(c))
+	h := NewHandler(nil, nil, WithRequestLogReader(reader))
+	c, rec := echotest.Get(t, "/admin/request-logs/conversation?log_id=log-1")
+	require.NoError(t, h.RequestLogConversation(c))
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
 }
 
 // --- Validation-before-fast-path tests ---
 //
-// AuditLog, AuditConversation, and UsageLog all short-circuit to an empty
+// RequestLog, RequestLogConversation, and UsageLog all short-circuit to an empty
 // success payload when their reader is nil. These tests assert that request-
 // shape validation runs *before* that fast path, so callers get a 400 for
 // missing/malformed required params regardless of whether the underlying
 // reader is wired up.
 
-func TestAuditLog_NilReaderStillValidatesParams(t *testing.T) {
-	h := NewHandler(nil, nil) // no audit reader configured
-	c, rec := echotest.Get(t, "/admin/audit/log?status_code=not-an-int")
-	require.NoError(t, h.AuditLog(c))
+func TestRequestLog_NilReaderStillValidatesParams(t *testing.T) {
+	h := NewHandler(nil, nil) // no request log reader configured
+	c, rec := echotest.Get(t, "/admin/request-logs?status_code=not-an-int")
+	require.NoError(t, h.RequestLog(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "invalid_request_error")
 }
 
-func TestAuditConversation_NilReaderStillValidatesParams(t *testing.T) {
-	h := NewHandler(nil, nil) // no audit reader configured
-	c, rec := echotest.Get(t, "/admin/audit/conversation")
-	require.NoError(t, h.AuditConversation(c)) // missing required log_id
+func TestRequestLogConversation_NilReaderStillValidatesParams(t *testing.T) {
+	h := NewHandler(nil, nil) // no request log reader configured
+	c, rec := echotest.Get(t, "/admin/request-logs/conversation")
+	require.NoError(t, h.RequestLogConversation(c)) // missing required log_id
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "log_id is required")
 }

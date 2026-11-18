@@ -1,6 +1,6 @@
 ---
 title: "Utrzymywanie sesji"
-description: "Grupuj requesty z jednej sesji klienta, aby uzyskać sticky load balancing i wątki w logach audytowych"
+description: "Grupuj requesty z jednej sesji klienta, aby uzyskać sticky load balancing i wątki w logach requestów"
 icon: "pin"
 ---
 
@@ -15,7 +15,7 @@ wykrywa taką sesję i wykorzystuje ją w całym routingu i obserwowalności:
 - **Sticky wybór klucza API** – gdy jeden provider ma kilka kluczy, każdy
   request w wykrytej sesji używa tego samego klucza, co zachowuje powiązanie z
   prompt cache providera.
-- **Wątki w logach audytowych** – strona Audit Logs w dashboardzie grupuje
+- **Wątki w logach requestów** – strona „Requesty” w dashboardzie grupuje
   requesty sesji w jeden wątek: najnowszy request jest wierszem, a rozwijany
   element pokazuje pod nim starsze requesty.
 - **Użycie i koszt per sesja** – rekordy użycia niosą to samo ID sesji w danym
@@ -119,15 +119,15 @@ po restartach. Wyłącz je dla danego providera przez `session_sticky_keys: fals
 **Session-sticky API keys**
 w dashboardzie. Requesty bez wykrytej sesji nadal są obsługiwane round robin.
 
-## Wątki w logach audytowych
+## Wątki w logach requestów
 
-Wpisy audytowe zapisują ID sesji (`session_id`), a strona Audit Logs domyślnie
+Wpisy logu requestów zapisują ID sesji (`session_id`), a strona „Requesty” domyślnie
 grupuje je według niego (przełącznik „Group by session”). Każdy wątek pokazuje
 swój najnowszy request z plakietką licznika; rozwijany element po lewej
 pokazuje starsze requesty. Plakietka liczy całą sesję. Filtry określają, które
 sesje są widoczne i który pasujący request reprezentuje każdy wątek.
-`GET /admin/audit/sessions` zwraca dla każdego wątku `request_count` i
-najnowszy pasujący wpis logu audytowego. `GET /admin/audit/log?session_id=…`
+`GET /admin/request-logs/sessions` zwraca dla każdego wątku `request_count` i
+najnowszy pasujący wpis logu requestów. `GET /admin/request-logs?session_id=…`
 zwraca wszystkie requesty w rozwiniętej sesji.
 
 Każdy zgrupowany wątek ma też akcję wykresu użycia. Otwiera ona Usage Analytics
@@ -208,7 +208,7 @@ session:
 
 Nagłówki niosące dane uwierzytelniające (`Authorization`, nagłówki z kluczami
 API, …) są odrzucane jako źródła sesji, ponieważ ID sesji jest utrwalane w
-rekordach audytowych i rekordach użycia.
+wpisach logu requestów i rekordach użycia.
 
 **Kiedy zmienić wartości domyślne:** ustaw `SESSION_AUTO_DETECT=false`, jeśli
 chcesz grupować wyłącznie jawnie oznaczone sesje; ustaw

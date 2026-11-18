@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	batchstore "github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -35,6 +34,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/observability"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	provideradapter "github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -302,20 +302,20 @@ func (r *closeCountingReadCloser) Close() error {
 	return r.ReadCloser.Close()
 }
 
-type capturingAuditLogger struct {
-	config  auditlog.Config
-	entries []*auditlog.LogEntry
+type capturingRequestLogger struct {
+	config  requestlog.Config
+	entries []*requestlog.LogEntry
 }
 
-func (l *capturingAuditLogger) Write(entry *auditlog.LogEntry) {
+func (l *capturingRequestLogger) Write(entry *requestlog.LogEntry) {
 	l.entries = append(l.entries, entry)
 }
 
-func (l *capturingAuditLogger) Config() auditlog.Config {
+func (l *capturingRequestLogger) Config() requestlog.Config {
 	return l.config
 }
 
-func (l *capturingAuditLogger) Close() error {
+func (l *capturingRequestLogger) Close() error {
 	return nil
 }
 
@@ -1985,23 +1985,23 @@ func TestRequestIDFromContextOrHeader(t *testing.T) {
 
 func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 	expectedErr := errors.New("upstream stream failed")
-	logger := &capturingAuditLogger{
-		config: auditlog.Config{Enabled: true},
+	logger := &capturingRequestLogger{
+		config: requestlog.Config{Enabled: true},
 	}
 
 	handler := NewHandler(&mockProvider{}, logger, nil, nil)
 
-	entry := &auditlog.LogEntry{
+	entry := &requestlog.LogEntry{
 		ID:        "entry-1",
 		Timestamp: time.Now(),
 		RequestID: "req-stream-1",
 		Method:    http.MethodPost,
 		Path:      "/v1/chat/completions",
-		Data:      &auditlog.LogData{},
+		Data:      &requestlog.LogData{},
 	}
 	c, _ := echotest.Post(t, "/v1/chat/completions", nil,
 		echotest.WithHeader("X-Request-ID", "req-stream-1"),
-		echotest.WithValue(string(auditlog.LogEntryKey), entry))
+		echotest.WithValue(string(requestlog.LogEntryKey), entry))
 
 	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", "primary-openai", func() (io.ReadCloser, error) {
 		return &erroringReadCloser{
@@ -2022,14 +2022,14 @@ func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 func TestHandleStreamingResponse_ClientDisconnectBeforeUpstream(t *testing.T) {
 	handler := NewHandler(&mockProvider{}, nil, nil, nil)
 
-	entry := &auditlog.LogEntry{
+	entry := &requestlog.LogEntry{
 		ID:        "entry-cancel",
 		Timestamp: time.Now(),
 		Method:    http.MethodPost,
 		Path:      "/v1/chat/completions",
-		Data:      &auditlog.LogData{},
+		Data:      &requestlog.LogData{},
 	}
-	c, _ := echotest.Post(t, "/v1/chat/completions", nil, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil, echotest.WithValue(string(requestlog.LogEntryKey), entry))
 	ctx, cancel := context.WithCancel(c.Request().Context())
 	cancel() // simulate client gone before streamFn returns
 	c.SetRequest(c.Request().WithContext(ctx))
@@ -2047,8 +2047,8 @@ func TestHandleStreamingResponse_ClientDisconnectBeforeUpstream(t *testing.T) {
 // belong to the provider and must surface as upstream failures rather than
 // be swallowed as client disconnects.
 func TestHandleStreamingResponse_UpstreamResetIsNotClassifiedAsClientDisconnect(t *testing.T) {
-	logger := &capturingAuditLogger{
-		config: auditlog.Config{Enabled: true},
+	logger := &capturingRequestLogger{
+		config: requestlog.Config{Enabled: true},
 	}
 
 	handler := NewHandler(&mockProvider{}, logger, nil, nil)
@@ -2061,14 +2061,14 @@ func TestHandleStreamingResponse_UpstreamResetIsNotClassifiedAsClientDisconnect(
 		{name: "wrapped syscall.EPIPE", err: fmt.Errorf("dial upstream: %w", syscall.EPIPE)},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			entry := &auditlog.LogEntry{
+			entry := &requestlog.LogEntry{
 				ID:        "entry-upstream-reset",
 				Timestamp: time.Now(),
 				Method:    http.MethodPost,
 				Path:      "/v1/chat/completions",
-				Data:      &auditlog.LogData{},
+				Data:      &requestlog.LogData{},
 			}
-			c, rec := echotest.Post(t, "/v1/chat/completions", nil, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+			c, rec := echotest.Post(t, "/v1/chat/completions", nil, echotest.WithValue(string(requestlog.LogEntryKey), entry))
 
 			err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", "primary-openai", func() (io.ReadCloser, error) {
 				return nil, tt.err
@@ -2164,7 +2164,7 @@ func TestRecordStreamingError_ClassifiesClientDisconnect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+			entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
 			recordStreamingError(entry, "gpt-4o-mini", "openai", "/v1/chat/completions", "req-"+tt.name, tt.ctx, tt.err)
 			require.Equal(t, tt.wantType, entry.ErrorType)
 
@@ -5159,11 +5159,11 @@ func TestGetFileWithoutProviderSkipsProviderErrors(t *testing.T) {
 
 	handler := NewHandler(mock, nil, nil, nil)
 
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
 	c, rec := echotest.Get(t, "/v1/files/file_ok_1",
 		echotest.WithPath("/v1/files/:id"),
 		echotest.WithPathValue("id", "file_ok_1"),
-		echotest.WithValue(string(auditlog.LogEntryKey), entry))
+		echotest.WithValue(string(requestlog.LogEntryKey), entry))
 	err := handler.GetFile(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -5620,7 +5620,7 @@ func TestProviderPassthrough_AnthropicV1AliasNormalizesByDefault(t *testing.T) {
 	require.Equal(t, "messages", got)
 }
 
-func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
+func TestProviderPassthrough_UsesPassthroughModelForRequestLogEntry(t *testing.T) {
 	provider := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{
 			StatusCode: http.StatusOK,
@@ -5635,8 +5635,8 @@ func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
 
 	handler := NewHandler(provider, nil, nil, nil)
 
-	entry := &auditlog.LogEntry{}
-	c, rec := echotest.Post(t, "/p/openai_test/v1/chat/completions", `{"model":"gpt-5-mini"}`, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	entry := &requestlog.LogEntry{}
+	c, rec := echotest.Post(t, "/p/openai_test/v1/chat/completions", `{"model":"gpt-5-mini"}`, echotest.WithValue(string(requestlog.LogEntryKey), entry))
 	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), &core.Workflow{
 		Mode:         core.ExecutionModePassthrough,
 		ProviderType: "openai",
@@ -5645,7 +5645,7 @@ func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
 			RawEndpoint:        "chat/completions",
 			NormalizedEndpoint: "chat/completions",
 			Model:              "gpt-5-mini",
-			AuditPath:          "/v1/chat/completions",
+			RequestLogPath:     "/v1/chat/completions",
 		},
 	})))
 	err := handler.ProviderPassthrough(c)
@@ -5682,7 +5682,7 @@ func TestProviderPassthrough_UsesConfiguredProviderNameForAccessValidation(t *te
 			RawEndpoint:        "chat/completions",
 			NormalizedEndpoint: "chat/completions",
 			Model:              "gpt-5-mini",
-			AuditPath:          "/p/openai_test/chat/completions",
+			RequestLogPath:     "/p/openai_test/chat/completions",
 		},
 	})))
 	err := handler.ProviderPassthrough(c)
@@ -5719,7 +5719,7 @@ func TestProviderPassthrough_FallsBackFromProviderTypeToCanonicalProviderNameFor
 			RawEndpoint:        "chat/completions",
 			NormalizedEndpoint: "chat/completions",
 			Model:              "gpt-5-mini",
-			AuditPath:          "/p/openai/chat/completions",
+			RequestLogPath:     "/p/openai/chat/completions",
 		},
 	})))
 	err := handler.ProviderPassthrough(c)
@@ -5895,7 +5895,7 @@ func TestProviderPassthrough_OpenAIStreamUsageKeepsClientVisibleRoute(t *testing
 			Provider:           "openai",
 			RawEndpoint:        "v1/responses",
 			NormalizedEndpoint: "responses",
-			AuditPath:          "/v1/responses",
+			RequestLogPath:     "/v1/responses",
 			Model:              "gpt-5-mini",
 		},
 	}))
@@ -5908,7 +5908,7 @@ func TestProviderPassthrough_OpenAIStreamUsageKeepsClientVisibleRoute(t *testing
 	require.Equal(t, "/p/openai/v1/responses", got)
 }
 
-func TestPassthroughStreamAuditPath_NormalizesKnownEndpoints(t *testing.T) {
+func TestPassthroughStreamRequestLogPath_NormalizesKnownEndpoints(t *testing.T) {
 	tests := []struct {
 		name        string
 		requestPath string
@@ -5941,8 +5941,8 @@ func TestPassthroughStreamAuditPath_NormalizesKnownEndpoints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := passthroughStreamAuditPath(tt.requestPath, tt.provider, tt.endpoint)
-			require.Equal(t, tt.want, got, "passthroughStreamAuditPath(%q, %q, %q) = %q, want %q", tt.requestPath, tt.provider, tt.endpoint, got, tt.want)
+			got := passthroughStreamRequestLogPath(tt.requestPath, tt.provider, tt.endpoint)
+			require.Equal(t, tt.want, got, "passthroughStreamRequestLogPath(%q, %q, %q) = %q, want %q", tt.requestPath, tt.provider, tt.endpoint, got, tt.want)
 		})
 	}
 }
@@ -6151,7 +6151,7 @@ func (w *stalledCachedClientWriter) Write([]byte) (int, error) {
 func (w *stalledCachedClientWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // TestHandleWithCache_ClassifiesStalledClientOnCachedStream records a client
-// that stalled while a cached stream was replayed: the audit entry carries
+// that stalled while a cached stream was replayed: the request log entry carries
 // error_type client_stalled instead of a clean cache hit, matching the live
 // stream path.
 func TestHandleWithCache_ClassifiesStalledClientOnCachedStream(t *testing.T) {
@@ -6185,8 +6185,8 @@ func TestHandleWithCache_ClassifiesStalledClientOnCachedStream(t *testing.T) {
 	require.NoError(t, err)
 
 	c := newContext(&stalledCachedClientWriter{ResponseWriter: httptest.NewRecorder()})
-	entry := &auditlog.LogEntry{ID: "audit-entry"}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{ID: "request-log-entry"}
+	c.Set(string(requestlog.LogEntryKey), entry)
 	err = handleWithCache(s, c, req, nil, func(*echo.Context, *core.ChatRequest, *core.Workflow) error {
 		t.Fatal("cached stream must not dispatch to the provider")
 		return nil
@@ -6195,7 +6195,7 @@ func TestHandleWithCache_ClassifiesStalledClientOnCachedStream(t *testing.T) {
 	require.Equal(t, "client_stalled", entry.ErrorType)
 	require.NotNil(t, entry.Data)
 	require.Contains(t, entry.Data.ErrorMessage, ErrClientStall.Error())
-	require.Equal(t, auditlog.CacheTypeExact, entry.CacheType)
+	require.Equal(t, requestlog.CacheTypeExact, entry.CacheType)
 }
 
 // guardrailChainWorkflow builds a resolved workflow whose policy carries the

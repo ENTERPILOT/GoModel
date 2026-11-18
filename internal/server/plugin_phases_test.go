@@ -14,11 +14,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
@@ -155,7 +155,7 @@ func phaseHandler(t *testing.T, inner core.RoutableProvider, chains *plugins.Cha
 	return phaseHandlerWithLogger(t, inner, nil, chains)
 }
 
-func phaseHandlerWithLogger(t *testing.T, inner core.RoutableProvider, logger auditlog.LoggerInterface, chains *plugins.Chains) *Handler {
+func phaseHandlerWithLogger(t *testing.T, inner core.RoutableProvider, logger requestlog.LoggerInterface, chains *plugins.Chains) *Handler {
 	t.Helper()
 	handler := newHandler(inner, logger, nil, nil, nil, nil, nil, guardrails.NewWorkflowRequestPatcher(staticChainsResolver{chains: chains}))
 	handler.pluginChains = staticChainsResolver{chains: chains}
@@ -468,7 +468,7 @@ func TestChatCompletion_BufferCapIsNotBorrowedByResponseChain(t *testing.T) {
 }
 
 // A blocked request belongs to its resolved workflow like any other outcome,
-// so the audit entry can carry it.
+// so the request log entry can carry it.
 func TestChatCompletion_BlockedRequestKeepsWorkflow(t *testing.T) {
 	chains := phaseChains(t, map[string]string{"prompt": "block"}, guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindPrompt, Step: 1})
 	handler := phaseHandler(t, phaseProvider(), chains)
@@ -480,17 +480,17 @@ func TestChatCompletion_BlockedRequestKeepsWorkflow(t *testing.T) {
 }
 
 // A prompt edit is applied back to the request once, after the whole chain;
-// the audit revision of the editing instance carries that applied body under
+// the request log revision of the editing instance carries that applied body under
 // the same gates as the ingress rewriters.
 func TestChatCompletion_PromptEditRecordsRevisionBody(t *testing.T) {
-	run := func(t *testing.T, logBodies, logRevisionBodies bool) *auditlog.LogEntry {
+	run := func(t *testing.T, logBodies, logRevisionBodies bool) *requestlog.LogEntry {
 		t.Helper()
 		chains := phaseChains(t, map[string]string{"prompt": "edit", "text": "rewritten by guardrail"},
 			guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindPrompt, Step: 1})
-		auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: logBodies, LogRevisionBodies: logRevisionBodies, LogGuardrailSteps: true}}
-		handler := phaseHandlerWithLogger(t, phaseProvider(), auditLogger, chains)
-		entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-		c, rec := chatContext(t, chatBody, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+		requestLogger := &capturingRequestLogger{config: requestlog.Config{Enabled: true, LogBodies: logBodies, LogRevisionBodies: logRevisionBodies, LogGuardrailSteps: true}}
+		handler := phaseHandlerWithLogger(t, phaseProvider(), requestLogger, chains)
+		entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+		c, rec := chatContext(t, chatBody, echotest.WithValue(string(requestlog.LogEntryKey), entry))
 		err := handler.ChatCompletion(c)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -528,33 +528,33 @@ func TestChatCompletion_PromptEditRecordsRevisionBody(t *testing.T) {
 }
 
 // runPromptRevisions runs one chat request through the prompt chains built
-// from cfgs under the given audit config and returns the audit entry's
+// from cfgs under the given request log config and returns the request log entry's
 // revision chain, complete.
-func runPromptRevisions(t *testing.T, body string, cfg auditlog.Config, cfgs map[string]map[string]string, steps ...guardrails.StepReference) []auditlog.RequestRevisionSnapshot {
+func runPromptRevisions(t *testing.T, body string, cfg requestlog.Config, cfgs map[string]map[string]string, steps ...guardrails.StepReference) []requestlog.RequestRevisionSnapshot {
 	t.Helper()
 	return runPromptRevisionsExpecting(t, http.StatusOK, body, cfg, cfgs, steps...)
 }
 
-func runPromptRevisionsExpecting(t *testing.T, wantStatus int, body string, cfg auditlog.Config, cfgs map[string]map[string]string, steps ...guardrails.StepReference) []auditlog.RequestRevisionSnapshot {
+func runPromptRevisionsExpecting(t *testing.T, wantStatus int, body string, cfg requestlog.Config, cfgs map[string]map[string]string, steps ...guardrails.StepReference) []requestlog.RequestRevisionSnapshot {
 	t.Helper()
 	chains := phaseChainsNamed(t, cfgs, steps...)
-	auditLogger := &capturingAuditLogger{config: cfg}
-	handler := phaseHandlerWithLogger(t, phaseProvider(), auditLogger, chains)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c, rec := chatContext(t, body, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	requestLogger := &capturingRequestLogger{config: cfg}
+	handler := phaseHandlerWithLogger(t, phaseProvider(), requestLogger, chains)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c, rec := chatContext(t, body, echotest.WithValue(string(requestlog.LogEntryKey), entry))
 	err := handler.ChatCompletion(c)
 	require.NoError(t, err)
 	require.Equal(t, wantStatus, rec.Code, rec.Body.String())
 
-	if len(auditLogger.entries) > 0 {
+	if len(requestLogger.entries) > 0 {
 		// A streamed request is written by the stream observer.
-		return auditLogger.entries[0].Data.RequestRevisions
+		return requestLogger.entries[0].Data.RequestRevisions
 	}
 	entry.CompleteRequestRevisions()
 	return entry.Data.RequestRevisions
 }
 
-func revisionBodyText(revision auditlog.RequestRevisionSnapshot) string {
+func revisionBodyText(revision requestlog.RequestRevisionSnapshot) string {
 	body, _ := json.Marshal(revision.Body)
 	return string(body)
 }
@@ -564,9 +564,9 @@ func revisionBodyText(revision auditlog.RequestRevisionSnapshot) string {
 // last body is what was forwarded; a mutating instance that changed nothing
 // is a no-op, and an objection is a no-change entry in its place.
 func TestChatCompletion_PromptEditsRecordEachStep(t *testing.T) {
-	run := func(t *testing.T, body string, cfgs map[string]map[string]string, steps ...guardrails.StepReference) []auditlog.RequestRevisionSnapshot {
+	run := func(t *testing.T, body string, cfgs map[string]map[string]string, steps ...guardrails.StepReference) []requestlog.RequestRevisionSnapshot {
 		t.Helper()
-		return runPromptRevisions(t, body, auditlog.Config{Enabled: true, LogBodies: true, LogRevisionBodies: true, LogGuardrailSteps: true}, cfgs, steps...)
+		return runPromptRevisions(t, body, requestlog.Config{Enabled: true, LogBodies: true, LogRevisionBodies: true, LogGuardrailSteps: true}, cfgs, steps...)
 	}
 	bodyText := revisionBodyText
 
@@ -644,7 +644,7 @@ func TestChatCompletion_PromptEditsRecordEachStep(t *testing.T) {
 	})
 
 	t.Run("editor then block", func(t *testing.T) {
-		revisions := runPromptRevisionsExpecting(t, http.StatusBadRequest, chatBody, auditlog.Config{Enabled: true, LogBodies: true, LogRevisionBodies: true, LogGuardrailSteps: true}, map[string]map[string]string{
+		revisions := runPromptRevisionsExpecting(t, http.StatusBadRequest, chatBody, requestlog.Config{Enabled: true, LogBodies: true, LogRevisionBodies: true, LogGuardrailSteps: true}, map[string]map[string]string{
 			"editor": {"prompt": "edit", "text": "rewritten by editor"},
 			"gate":   {"prompt": "block"},
 		}, guardrails.StepReference{Ref: "editor", Phase: pluginapi.KindPrompt, Step: 1},
@@ -661,7 +661,7 @@ func TestChatCompletion_PromptEditsRecordEachStep(t *testing.T) {
 	})
 
 	t.Run("edit then fail closed", func(t *testing.T) {
-		revisions := runPromptRevisionsExpecting(t, http.StatusInternalServerError, chatBody, auditlog.Config{Enabled: true, LogBodies: true, LogRevisionBodies: true, LogGuardrailSteps: true}, map[string]map[string]string{
+		revisions := runPromptRevisionsExpecting(t, http.StatusInternalServerError, chatBody, requestlog.Config{Enabled: true, LogBodies: true, LogRevisionBodies: true, LogGuardrailSteps: true}, map[string]map[string]string{
 			"editor": {"prompt": "edit_fail", "text": "rewritten then failed"},
 		}, guardrails.StepReference{Ref: "editor", Phase: pluginapi.KindPrompt, Step: 1})
 		require.Len(t, revisions, 1)
@@ -714,7 +714,7 @@ func TestPromptStepRevisionsKeepSizesWhenASnapshotFails(t *testing.T) {
 // one changed revision naming the editors and carrying the request as
 // forwarded, after the objections.
 func TestChatCompletion_PromptEditsRecordOneRevisionWithoutStepLogging(t *testing.T) {
-	revisions := runPromptRevisions(t, chatBody, auditlog.Config{Enabled: true, LogBodies: true, LogRevisionBodies: true}, map[string]map[string]string{
+	revisions := runPromptRevisions(t, chatBody, requestlog.Config{Enabled: true, LogBodies: true, LogRevisionBodies: true}, map[string]map[string]string{
 		"watch":  {"prompt": "warn"},
 		"first":  {"prompt": "edit", "text": "rewritten first"},
 		"second": {"prompt": "edit", "text": "rewritten second"},

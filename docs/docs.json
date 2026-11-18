@@ -76,7 +76,23 @@
         },
         {
             "source": "/api-reference/admin/get-conversation-thread-around-an-audit-log-entry",
-            "destination": "/api-reference/admin/get-the-interaction-session-containing-an-audit-log-entry"
+            "destination": "/api-reference/admin/get-the-interaction-session-containing-a-request-log-entry"
+        },
+        {
+            "source": "/api-reference/admin/get-the-interaction-session-containing-an-audit-log-entry",
+            "destination": "/api-reference/admin/get-the-interaction-session-containing-a-request-log-entry"
+        },
+        {
+            "source": "/api-reference/admin/get-paginated-audit-log-entries",
+            "destination": "/api-reference/admin/get-paginated-request-log-entries"
+        },
+        {
+            "source": "/api-reference/admin/get-paginated-audit-sessions-threads",
+            "destination": "/api-reference/admin/get-paginated-request-log-sessions-threads"
+        },
+        {
+            "source": "/api-reference/admin/get-audit-log-entry-detail",
+            "destination": "/api-reference/admin/get-request-log-entry-detail"
         },
         {
             "source": "/api-reference/admin/get-dashboard-runtime-configuration",

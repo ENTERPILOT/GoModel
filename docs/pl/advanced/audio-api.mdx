@@ -265,7 +265,7 @@ i wskazówka routingu `provider`, a także opcje transkrypcji, które emituje po
 `timestamp_granularities`), oraz dodatkowe części **plikowe** w uploadzie
 transkrypcji; wysyłane jest tylko audio z `file`.
 
-Przekazywane wartości nie są zapisywane w [logu audytowym](/pl/advanced/admin-endpoints):
+Przekazywane wartości nie są zapisywane w [logu requestów](/pl/advanced/admin-endpoints):
 ponieważ są dowolnymi danymi od klienta, które mogą zawierać dane uwierzytelniające providera,
 wpis zapisuje tylko **nazwy** pól w `forwarded_fields`.
 
@@ -309,7 +309,7 @@ i **nie przechodzą przez pełny orkiestrator inferencji**. W porównaniu z `/v1
 - **Brak failoveru, guardrails i cache’u odpowiedzi** – te etapy są pomijane.
   Requesty nadal są autoryzowane, sprawdzane pod kątem budżetu, mierzone (zobacz
   [śledzenie kosztów](#śledzenie-kosztów)) i zapisywane w
-  [logu audytowym](/pl/advanced/admin-endpoints) pod swoją ścieżką `/v1/audio/*`.
+  [logu requestów](/pl/advanced/admin-endpoints) pod swoją ścieżką `/v1/audio/*`.
 - **Na wejściu kształt requestu OpenAI, na wyjściu dialekt providera** – klienci zawsze wysyłają
   format audio OpenAI. Upstreamy kompatybilne z OpenAI otrzymują go bez zmian; requesty do Xiaomi MiMo,
   Cohere i MiniMax są tłumaczone na natywny kontrakt audio każdego z tych providerów.
@@ -321,11 +321,11 @@ Dla providera, którego natywne API audio różni się od OpenAI, użyj
 [passthrough API](/pl/features/passthrough-api) (`/p/{provider}/v1/audio/...`), aby
 przekazać bajty dosłownie do tego upstreamu.
 
-## Logowanie audytowe
+## Logowanie requestów
 
-Requesty audio pojawiają się w logu audytowym jak każda inna interakcja z modelem. Ponieważ
+Requesty audio pojawiają się w logu requestów jak każda inna interakcja z modelem. Ponieważ
 payloady audio są binarne i duże, ich body są kontrolowane osobnym
-ustawieniem, [`LOGGING_LOG_AUDIO_BODIES`](/pl/advanced/configuration#logowanie-audytowe)
+ustawieniem, [`LOGGING_LOG_AUDIO_BODIES`](/pl/advanced/configuration#logowanie-requestów)
 (domyślnie `false`), które **doprecyzowuje** `LOGGING_LOG_BODIES` – nie działa,
 dopóki logowanie body nie jest włączone:
 
@@ -339,7 +339,7 @@ dopóki logowanie body nie jest włączone:
   w dashboardzie) razem z metadanymi uploadu (nazwa pliku, model, parametry).
 
 Bajty audio trafiają do [magazynu mediów](/pl/advanced/configuration#storage-mediów),
-a nie do bazy audytowej: wpis zawiera `media_id`, a dashboard
+a nie do bazy logu requestów: wpis zawiera `media_id`, a dashboard
 pobiera plik przez `GET /admin/media/{id}`. Rozmiar nie jest w żaden sposób ograniczony,
 a streamowana odpowiedź jest zapisywana w trakcie przekazywania. Pliki są przechowywane tak długo
-jak wpisy audytowe, które się do nich odwołują (`LOGGING_RETENTION_DAYS`).
+jak wpisy logu requestów, które się do nich odwołują (`LOGGING_RETENTION_DAYS`).

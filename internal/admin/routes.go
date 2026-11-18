@@ -43,11 +43,18 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/usage/throughput", h.TokenThroughput, global)
 	g.POST("/usage/recalculate-pricing", h.RecalculateUsagePricing, global)
 
-	g.GET("/audit/log", h.AuditLog)
-	g.GET("/audit/sessions", h.AuditSessions)
-	g.GET("/audit/stats", h.AuditStats)
-	g.GET("/audit/detail", h.AuditLogDetail)
-	g.GET("/audit/conversation", h.AuditConversation)
+	g.GET("/request-logs", h.RequestLog)
+	g.GET("/request-logs/sessions", h.RequestLogSessions)
+	g.GET("/request-logs/stats", h.RequestLogStats)
+	g.GET("/request-logs/detail", h.RequestLogDetail)
+	g.GET("/request-logs/conversation", h.RequestLogConversation)
+	// Deprecated aliases: the request log was served under /audit before it
+	// was renamed. Existing clients keep working; new ones use /request-logs.
+	g.GET("/audit/log", h.RequestLog)
+	g.GET("/audit/sessions", h.RequestLogSessions)
+	g.GET("/audit/stats", h.RequestLogStats)
+	g.GET("/audit/detail", h.RequestLogDetail)
+	g.GET("/audit/conversation", h.RequestLogConversation)
 	g.GET("/media/:id", h.Media)
 
 	g.GET("/providers/status", h.ProviderStatus, global)

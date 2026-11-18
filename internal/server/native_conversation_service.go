@@ -14,9 +14,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // conversationService owns the gateway-managed Conversations lifecycle endpoints.
@@ -30,7 +30,7 @@ type conversationService struct {
 // CreateConversation handles POST /v1/conversations.
 func (s *conversationService) CreateConversation(c *echo.Context) error {
 	ctx, requestID := requestContextWithRequestID(c.Request())
-	auditConversationEntry(c)
+	requestLogConversationEntry(c)
 
 	body, err := requestBodyBytes(c)
 	if err != nil {
@@ -76,7 +76,7 @@ func (s *conversationService) CreateConversation(c *echo.Context) error {
 // GetConversation handles GET /v1/conversations/{id}.
 func (s *conversationService) GetConversation(c *echo.Context) error {
 	ctx, _ := requestContextWithRequestID(c.Request())
-	auditConversationEntry(c)
+	requestLogConversationEntry(c)
 
 	id, err := conversationIDFromRequest(c)
 	if err != nil {
@@ -93,7 +93,7 @@ func (s *conversationService) GetConversation(c *echo.Context) error {
 // merged into the existing metadata, matching OpenAI.
 func (s *conversationService) UpdateConversation(c *echo.Context) error {
 	ctx, _ := requestContextWithRequestID(c.Request())
-	auditConversationEntry(c)
+	requestLogConversationEntry(c)
 
 	id, err := conversationIDFromRequest(c)
 	if err != nil {
@@ -135,7 +135,7 @@ func (s *conversationService) UpdateConversation(c *echo.Context) error {
 // DeleteConversation handles DELETE /v1/conversations/{id}.
 func (s *conversationService) DeleteConversation(c *echo.Context) error {
 	ctx, _ := requestContextWithRequestID(c.Request())
-	auditConversationEntry(c)
+	requestLogConversationEntry(c)
 
 	id, err := conversationIDFromRequest(c)
 	if err != nil {
@@ -221,6 +221,6 @@ func cloneRawConversationItems(items []json.RawMessage) []json.RawMessage {
 	return cloned
 }
 
-func auditConversationEntry(c *echo.Context) {
-	auditlog.EnrichEntry(c, "conversation", "")
+func requestLogConversationEntry(c *echo.Context) {
+	requestlog.EnrichEntry(c, "conversation", "")
 }

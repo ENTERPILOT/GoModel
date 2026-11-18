@@ -14,11 +14,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/gateway"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -187,7 +187,7 @@ func TestSystemOne_CacheKeyCoversTheState(t *testing.T) {
 
 // When the primary fails with an availability error, the request moves to
 // the virtual model's next target in its own dialect. A target without the
-// System One API is skipped rather than called, and usage and audit carry the
+// System One API is skipped rather than called, and usage and request log carry the
 // model that answered.
 func TestSystemOne_FailsOverToTheNextSystemOneTarget(t *testing.T) {
 	provider := newScriptedSystemOneProvider(map[string]string{
@@ -202,8 +202,8 @@ func TestSystemOne_FailsOverToTheNextSystemOneTarget(t *testing.T) {
 		{Provider: "openrouter", Model: "typesafe/jev-1.13"},
 	}}, nil)
 
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c, rec := echotest.Post(t, "/v1/systemone", systemOneRequest("kev/kev-latest"), echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c, rec := echotest.Post(t, "/v1/systemone", systemOneRequest("kev/kev-latest"), echotest.WithValue(string(requestlog.LogEntryKey), entry))
 	require.NoError(t, handler.SystemOne(c))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 

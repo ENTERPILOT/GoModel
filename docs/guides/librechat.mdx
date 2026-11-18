@@ -1,6 +1,6 @@
 ---
 title: "GoModel & LibreChat"
-description: "Give LibreChat one custom endpoint to every provider through GoModel, and get audit logs, per-user cost tracking, and metrics for every chat."
+description: "Give LibreChat one custom endpoint to every provider through GoModel, and get request logs, per-user cost tracking, and metrics for every chat."
 icon: "message-circle"
 keywords: ["LibreChat", "librechat.yaml", "custom endpoint", "self-hosted chat", "per-user costs", "LLM observability", "setup guide"]
 ---
@@ -18,7 +18,7 @@ Flow:
 
 What you get:
 
-- Full request and response bodies for every chat in the GoModel audit log.
+- Full request and response bodies for every chat in the GoModel request log.
 - Cost per LibreChat user via header templates and
   [labels](/features/labelling).
 - All providers behind one custom endpoint; no per-provider setup in
@@ -130,7 +130,7 @@ including Anthropic and Gemini models and any
 Pick any model — `openai/gpt-5-mini`, `anthropic/claude-haiku-4-5-20251001`,
 `gemini/gemini-2.5-flash` — and chat. Streaming responses, and the title
 generation LibreChat runs after the first exchange, all pass through GoModel.
-Each call appears in the audit log with the full prompt, response, tokens,
+Each call appears in the request log with the full prompt, response, tokens,
 cost, and the header identifying the user.
 
 <Note>

@@ -7,7 +7,7 @@ import (
 )
 
 // ClientIPExtractor turns a resolved client-address policy into the strategy
-// echo uses for c.RealIP(), so every consumer — audit entries, rate limit
+// echo uses for c.RealIP(), so every consumer — request log entries, rate limit
 // keys, request logs — reports the same address. A policy that trusts no
 // proxy returns nil, leaving the direct extraction the server defaults to.
 func ClientIPExtractor(policy config.ClientIPPolicy) echo.IPExtractor {
