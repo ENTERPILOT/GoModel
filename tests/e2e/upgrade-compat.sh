@@ -257,6 +257,8 @@ seed() {
     '{"name":"compat-key","description":"upgrade compat key","user_path":"/compat","labels":["compat-label"]}' \
     > "$WORK/authkey.json"
 
+  # "audit" is the request_logs feature flag under the only name releases up to
+  # v0.2.5 know; the upgraded binary must read it as request logs switched on.
   jpost /admin/workflows \
     '{"scope_provider":"openai","scope_model":"gpt-4.1-mini","scope_user_path":"/compat","name":"compat-workflow","description":"upgrade compat workflow","workflow_payload":{"schema_version":1,"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"failover":false},"guardrails":[]}}' \
     > "$WORK/workflow.json"
@@ -492,7 +494,7 @@ write_check "mcp-server upsert" jput /admin/mcp-servers '{"name":"compat-mcp","u
 write_check "provider-credential upsert" jput /admin/provider-credentials '{"name":"compat-prov","type":"openai","api_keys":["***********"],"base_url":"https://example.invalid/v2","models":["compat-cred-model"]}'
 write_check "pricing override upsert" jput /admin/model-pricing-overrides '{"selector":"openai/gpt-4.1-mini","pricing":{"input_per_mtok":2.25,"output_per_mtok":9.75}}'
 write_check "auth-key create" jpost /admin/auth-keys '{"name":"compat-key-2","user_path":"/compat"}'
-write_check "workflow create" jpost /admin/workflows '{"scope_provider":"openai","scope_model":"gpt-4.1","scope_user_path":"/compat","name":"compat-workflow-2","workflow_payload":{"schema_version":1,"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"failover":false},"guardrails":[]}}'
+write_check "workflow create" jpost /admin/workflows '{"scope_provider":"openai","scope_model":"gpt-4.1","scope_user_path":"/compat","name":"compat-workflow-2","workflow_payload":{"schema_version":1,"features":{"cache":false,"request_logs":true,"usage":true,"guardrails":false,"failover":false},"guardrails":[]}}'
 write_check "chat completion (usage + request log)" vpost /v1/chat/completions '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly UPGRADE_OK"}],"max_tokens":16,"temperature":0}'
 write_check "response snapshot" vpost /v1/responses '{"model":"gpt-4.1-mini","input":"Reply with exactly UPGRADE_RESP_OK","store":true,"max_output_tokens":16}'
 write_check "conversation create" vpost /v1/conversations '{"metadata":{"purpose":"post-upgrade"}}'

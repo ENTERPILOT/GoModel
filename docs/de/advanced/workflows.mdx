@@ -14,12 +14,20 @@ Derzeit steuern sie Verhalten, das in der Verantwortung des Gateways liegt, etwa
 
 - Cache
 - Budgets
-- Request-Logging (Feature-Key `audit`)
+- Request-Logging (Feature-Key `request_logs`)
 - Nutzungserfassung
 - Guardrails: welche [Plugin-Instanzen](/de/advanced/guardrails) laufen, in welcher Phase und in welcher Reihenfolge
 - Failover für übersetzte Routen
 
 Jeder Request wird genau einem aktiven Workflow zugeordnet.
+
+<Note>
+  Der Feature-Key `request_logs` hieß bis einschließlich v0.2.5 `audit`.
+  `audit` ist veraltet: Die API akzeptiert den Key weiterhin, und Antworten
+  enthalten ihn weiterhin neben `request_logs` mit demselben Wert, sodass
+  bestehende Clients weiter funktionieren. Sendet ein Request beide Keys,
+  entscheidet `request_logs`.
+</Note>
 
 ## Scope-Felder
 
@@ -75,7 +83,7 @@ ihre Position:
 ```json
 {
   "schema_version": 2,
-  "features": { "cache": true, "audit": true, "usage": true, "budget": true, "guardrails": true, "failover": true },
+  "features": { "cache": true, "request_logs": true, "usage": true, "budget": true, "guardrails": true, "failover": true },
   "steps": [
     { "ref": "pii-redact",   "phase": "prompt",   "step": 10 },
     { "ref": "policy-judge", "phase": "prompt",   "step": 10 },
@@ -155,7 +163,7 @@ curl -X POST http://localhost:8080/admin/workflows \
       "features": {
         "cache": false,
         "budget": true,
-        "audit": true,
+        "request_logs": true,
         "usage": true,
         "guardrails": true,
         "failover": true
@@ -193,7 +201,7 @@ workflow = client.post(
             "features": {
                 "cache": False,
                 "budget": True,
-                "audit": True,
+                "request_logs": True,
                 "usage": True,
                 "guardrails": True,
                 "failover": True,
@@ -229,7 +237,7 @@ const workflow = await client.post("/admin/workflows", {
       features: {
         cache: false,
         budget: true,
-        audit: true,
+        request_logs: true,
         usage: true,
         guardrails: true,
         failover: true,

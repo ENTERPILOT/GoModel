@@ -526,12 +526,12 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 	}
 	if workflow.Policy != nil {
 		ensureLogData(entry).WorkflowFeatures = &WorkflowFeaturesSnapshot{
-			Cache:      workflow.Policy.Features.Cache,
-			Audit:      workflow.Policy.Features.Audit,
-			Usage:      workflow.Policy.Features.Usage,
-			Budget:     workflow.Policy.Features.Budget,
-			Guardrails: workflow.Policy.Features.Guardrails,
-			Failover:   workflow.Policy.Features.Failover,
+			Cache:       workflow.Policy.Features.Cache,
+			RequestLogs: workflow.Policy.Features.RequestLogs,
+			Usage:       workflow.Policy.Features.Usage,
+			Budget:      workflow.Policy.Features.Budget,
+			Guardrails:  workflow.Policy.Features.Guardrails,
+			Failover:    workflow.Policy.Features.Failover,
 		}
 	}
 }

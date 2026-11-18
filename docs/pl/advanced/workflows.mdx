@@ -14,12 +14,20 @@ Obecnie sterują zachowaniem należącym do gatewaya, takim jak:
 
 - cache
 - budżety
-- logowanie requestów (klucz funkcji `audit`)
+- logowanie requestów (klucz funkcji `request_logs`)
 - śledzenie użycia
 - guardrails: które [instancje pluginów](/pl/advanced/guardrails) są uruchamiane, w której fazie i w jakiej kolejności
 - failover tras tłumaczonych
 
 Każdy request pasuje do dokładnie jednego aktywnego workflow.
+
+<Note>
+  Klucz funkcji `request_logs` do wersji v0.2.5 włącznie nazywał się `audit`.
+  `audit` jest przestarzały: API nadal go przyjmuje, a odpowiedzi nadal
+  zawierają go obok `request_logs` z tą samą wartością, więc istniejące
+  klienty działają bez zmian. Gdy request zawiera oba klucze, decyduje
+  `request_logs`.
+</Note>
 
 ## Pola zakresu
 
@@ -77,7 +85,7 @@ Każdy krok wskazuje instancję (`ref`), fazę, w której działa, i swoją pozy
 ```json
 {
   "schema_version": 2,
-  "features": { "cache": true, "audit": true, "usage": true, "budget": true, "guardrails": true, "failover": true },
+  "features": { "cache": true, "request_logs": true, "usage": true, "budget": true, "guardrails": true, "failover": true },
   "steps": [
     { "ref": "pii-redact",   "phase": "prompt",   "step": 10 },
     { "ref": "policy-judge", "phase": "prompt",   "step": 10 },
@@ -157,7 +165,7 @@ curl -X POST http://localhost:8080/admin/workflows \
       "features": {
         "cache": false,
         "budget": true,
-        "audit": true,
+        "request_logs": true,
         "usage": true,
         "guardrails": true,
         "failover": true
@@ -195,7 +203,7 @@ workflow = client.post(
             "features": {
                 "cache": False,
                 "budget": True,
-                "audit": True,
+                "request_logs": True,
                 "usage": True,
                 "guardrails": True,
                 "failover": True,
@@ -231,7 +239,7 @@ const workflow = await client.post("/admin/workflows", {
       features: {
         cache: false,
         budget: true,
-        audit: true,
+        request_logs: true,
         usage: true,
         guardrails: true,
         failover: true,

@@ -849,7 +849,7 @@ function workflowChartModel(source, runtime, options, caps) {
     runtime,
   );
   const showUsage = !!features.usage;
-  const showRequestLog = forceRequestLog || !!features.audit;
+  const showRequestLog = forceRequestLog || !!features.request_logs;
   const showAsync = !!config.forceAsync || !!(showUsage || showRequestLog);
   const showFailover = !!features.failover || workflowRuntimeUsedFailover(runtime);
   const workflowID = workflowChartWorkflowID(source, config.entry);
@@ -943,7 +943,7 @@ export function workflowRequestLogChart(entry, source, caps) {
       ? workflowSourceFeatures(source, caps)
       : {
           cache: false,
-          audit: false,
+          request_logs: false,
           usage: false,
           budget: false,
           guardrails: false,

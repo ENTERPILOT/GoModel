@@ -469,7 +469,7 @@ func TestBrokerRequestLogActiveSnapshotMergesNestedPreviewData(t *testing.T) {
 		RequestID: "req-1",
 		Timestamp: now.Add(time.Second),
 		Data: &requestlog.LogData{
-			WorkflowFeatures: &requestlog.WorkflowFeaturesSnapshot{Audit: true, Usage: true},
+			WorkflowFeatures: &requestlog.WorkflowFeaturesSnapshot{RequestLogs: true, Usage: true},
 		},
 	})
 
@@ -487,8 +487,9 @@ func TestBrokerRequestLogActiveSnapshotMergesNestedPreviewData(t *testing.T) {
 	require.Equal(t, "[REDACTED]", headers["Authorization"], "request_headers = %#v, want redacted authorization", data["request_headers"])
 	features, ok := data["workflow_features"].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, true, features["audit"])
-	require.Equal(t, true, features["usage"], "workflow_features = %#v, want audit and usage flags", data["workflow_features"])
+	require.Equal(t, true, features["request_logs"])
+	require.Equal(t, true, features["audit"], "the deprecated alias of request_logs is still sent")
+	require.Equal(t, true, features["usage"], "workflow_features = %#v, want request_logs and usage flags", data["workflow_features"])
 }
 
 func TestBrokerRequestLogUpdatedPreviewIncludesRequestBodyOnly(t *testing.T) {
@@ -609,10 +610,10 @@ func TestBrokerRequestLogPreviewIncludesCompactWorkflowData(t *testing.T) {
 		Timestamp: time.Now(),
 		Data: &requestlog.LogData{
 			WorkflowFeatures: &requestlog.WorkflowFeaturesSnapshot{
-				Cache:    true,
-				Audit:    true,
-				Usage:    true,
-				Failover: true,
+				Cache:       true,
+				RequestLogs: true,
+				Usage:       true,
+				Failover:    true,
 			},
 			Failover: &requestlog.FailoverSnapshot{TargetModel: "fallback-model"},
 		},

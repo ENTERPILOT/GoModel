@@ -13,12 +13,18 @@ keywords: ["工作流", "workflows", "路由规则", "routing rules", "user_path
 
 - 缓存
 - 预算
-- 请求日志（功能键 `audit`）
+- 请求日志（功能键 `request_logs`）
 - 用量追踪
 - 护栏：运行哪些 [插件实例](/zh/advanced/guardrails)、在哪个阶段运行、以什么顺序运行
 - 翻译路由的故障转移
 
 每个请求只会匹配一个活动工作流。
+
+<Note>
+  功能键 `request_logs` 在 v0.2.5 及更早版本中名为 `audit`。`audit` 已弃用：API
+  仍然接受它，响应中也仍会在 `request_logs` 旁以相同的值返回它，因此现有客户端可以继续使用。
+  如果请求同时包含两个键，以 `request_logs` 为准。
+</Note>
 
 ## 作用域字段
 
@@ -72,7 +78,7 @@ keywords: ["工作流", "workflows", "路由规则", "routing rules", "user_path
 ```json
 {
   "schema_version": 2,
-  "features": { "cache": true, "audit": true, "usage": true, "budget": true, "guardrails": true, "failover": true },
+  "features": { "cache": true, "request_logs": true, "usage": true, "budget": true, "guardrails": true, "failover": true },
   "steps": [
     { "ref": "pii-redact",   "phase": "prompt",   "step": 10 },
     { "ref": "policy-judge", "phase": "prompt",   "step": 10 },
@@ -144,7 +150,7 @@ curl -X POST http://localhost:8080/admin/workflows \
       "features": {
         "cache": false,
         "budget": true,
-        "audit": true,
+        "request_logs": true,
         "usage": true,
         "guardrails": true,
         "failover": true
@@ -182,7 +188,7 @@ workflow = client.post(
             "features": {
                 "cache": False,
                 "budget": True,
-                "audit": True,
+                "request_logs": True,
                 "usage": True,
                 "guardrails": True,
                 "failover": True,
@@ -218,7 +224,7 @@ const workflow = await client.post("/admin/workflows", {
       features: {
         cache: false,
         budget: true,
-        audit: true,
+        request_logs: true,
         usage: true,
         guardrails: true,
         failover: true,
