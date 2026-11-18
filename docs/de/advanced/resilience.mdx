@@ -330,7 +330,12 @@ Die Modellerkennung wird erneut geprüft:
   `PROVIDER_RECHECK_INTERVAL` (`cache.model.recheck_interval` in `config.yaml`;
   Sekunden, Standardwert `60`; `0` deaktiviert), und
 - bei Bedarf, wenn ein Request ein Provider-qualifiziertes Modell
-  (`provider/model`) anfordert, das in der Registry fehlt.
+  (`provider/model`) anfordert, das in der Registry fehlt. Gleichzeitige
+  Fehltreffer für dasselbe `provider`-Präfix teilen sich einen Abruf, und jedes
+  Präfix wird auf diese Weise höchstens einmal pro Minute abgerufen; Fehltreffer
+  innerhalb dieser Minute erhalten das vorherige Ergebnis, einschließlich des
+  Fehlers einer fehlgeschlagenen Aktualisierung. Der Name eines Providers und
+  sein Typ sind getrennte Präfixe.
 
 ## Was passiert, während ein Provider ausgefallen ist
 

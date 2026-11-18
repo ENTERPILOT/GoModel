@@ -225,6 +225,22 @@ func TestUpsertAndDeleteRedirectVirtualModel(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, deleteRec.Code)
 }
 
+func TestUpsertVirtualModelAcceptsTheConfigTargetKey(t *testing.T) {
+	h := newVMHandler(t, redirectVM("smart", "openai/gpt-4o", true))
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smart","target":"openai/gpt-4o-mini","enabled":true}`)
+	require.NoError(t, h.UpsertVirtualModel(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	vm, ok := h.virtualModels.Get("smart")
+	require.True(t, ok, "a body using the YAML key must not delete the redirect")
+	require.Len(t, vm.Targets, 1)
+	assert.Equal(t, "openai/gpt-4o-mini", vm.Targets[0].Model)
+
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smart","target":"openai/a","target_model":"openai/b"}`)
+	require.NoError(t, h.UpsertVirtualModel(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
 func TestUpsertVirtualModelRemovesRedirectAndPreservesPolicyFields(t *testing.T) {
 	h := newVMHandler(t)
 
@@ -473,7 +489,7 @@ func TestUpsertVirtualModelLoadBalanced(t *testing.T) {
 	service := newVMService(t, catalog, newVMTestStore(), true)
 	h := NewHandler(nil, nil, WithVirtualModels(service))
 
-	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smart","strategy":"cost","targets":[{"model":"openai/gpt-4o"},{"model":"groq/llama","weight":2}]}`)
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smart","strategy":"cost","targets":[{"model":"openai/gpt-4o","reasoning_effort":"High"},{"model":"groq/llama","weight":2}]}`)
 	err := h.UpsertVirtualModel(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -483,6 +499,8 @@ func TestUpsertVirtualModelLoadBalanced(t *testing.T) {
 	assert.Equal(t, virtualmodels.StrategyCost, view.Strategy)
 	require.Len(t, view.Targets, 2)
 	assert.InDelta(t, 2, view.Targets[1].Weight, 0)
+	assert.Equal(t, "high", view.Targets[0].ReasoningEffort)
+	assert.Empty(t, view.Targets[1].ReasoningEffort)
 }
 
 func TestUpsertVirtualModelRejectsBlankTargets(t *testing.T) {

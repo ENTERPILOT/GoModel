@@ -3,10 +3,14 @@ package tagging
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // snapshot is the immutable, atomically swapped view served on the hot path.
@@ -75,6 +79,16 @@ func (s *Service) Refresh(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("load tagging rules: %w", err)
 	}
+	// The credential header list grows between releases, and a rule stored
+	// before its header joined the list must not stop the gateway from
+	// starting. It is skipped: its values would be stored as labels.
+	stored = slices.DeleteFunc(stored, func(rule Rule) bool {
+		refused := core.IsCredentialHeader(rule.Header)
+		if refused {
+			slog.Warn("tagging: ignoring a stored rule for a credential header", "header", rule.Header)
+		}
+		return refused
+	})
 	if err := NormalizeRules(stored); err != nil {
 		return fmt.Errorf("stored tagging rules: %w", err)
 	}

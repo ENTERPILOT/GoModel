@@ -50,6 +50,17 @@ API i inny stan administracyjny za pośrednictwem `STORAGE_TYPE`.
 | PostgreSQL | `postgresql` | Więcej niż jedna replika albo już utrzymujesz Postgresa. Typowy wybór produkcyjny. |
 | MongoDB | `mongodb` | Już utrzymujesz MongoDB i wolisz je od Postgresa. |
 
+Przy MongoDB wybieraj zestaw replik (replica set), nawet jednowęzłowy, taki jak
+ten uruchamiany przez `docker-compose.yaml` z repozytorium. Samodzielny `mongod`
+też działa, ale nie obsługuje transakcji: GoModel zapisuje wtedy ostrzeżenie
+w logach, a zmiany obejmujące wiele dokumentów (konfigurację budżetów i limitów,
+guardrails, wersje workflow, ponowne przeliczanie kosztów użycia) wykonuje
+osobnymi operacjami. Przerwana zmiana może więc zostać wprowadzona tylko
+częściowo; uruchom ją ponownie, aby ją dokończyć. Jeśli zapis workflow zostanie
+przerwany w trakcie aktywowania nowej wersji, zakres może zostać bez aktywnego
+workflow (dla zakresu globalnego przeładowanie workflow kończy się błędem), dopóki
+nie zapiszesz tego workflow ponownie.
+
 SQLite jest domyślny, aby GoModel działał bez żadnej konfiguracji, i jest pełnoprawną
 opcją produkcyjną dla pojedynczej instancji z trwałym wolumenem. Eliminuje przeskok
 sieciowy i komponent, który trzeba utrzymywać.
@@ -167,7 +178,10 @@ wolumen, ograniczaj dostęp i odpowiednio klasyfikuj kopie zapasowe.
 - **Nagłówki z danymi uwierzytelniającymi klienta są redagowane przed utrwaleniem.** Przy
   `LOGGING_LOG_HEADERS=true` nagłówki `Authorization`, `x-api-key`, `Cookie` i
   inne nagłówki z danymi uwierzytelniającymi są zastępowane przez `[REDACTED]` na ścieżce zapisu, więc
-  magazyn audytu nigdy ich nie otrzymuje.
+  magazyn audytu nigdy ich nie otrzymuje. To samo dotyczy każdego nagłówka, którego nazwa
+  wygląda na dane uwierzytelniające: kończy się na `token`, `-key` lub `-auth` albo zawiera
+  `authorization`, `api-key`, `apikey`, `secret`, `password`, `signature` lub `jwt`.
+  `Idempotency-Key` i `Sec-WebSocket-Key` pozostają bez zmian.
 - **Ustaw `GOMODEL_MASTER_KEY`.** Jeśli jest pusty i nie istnieją żadne zarządzane klucze, każdy
   request jest przepuszczany bez uwierzytelnienia, a `/admin/*` zostaje dodane do
   listy ścieżek pomijających uwierzytelnianie jako ścieżka odzyskiwania dostępu. Gateway dostępny z internetu w
@@ -210,6 +224,10 @@ SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
 - Po włączeniu TLS port nie odpowiada już na zwykłe HTTP. `gomodel --health` i
   `gomodel --ready`, które uruchamia dockerowy `HEALTHCHECK`, same przełączają
   się na HTTPS.
+- Odpowiedzi zawierają `Strict-Transport-Security: max-age=15552000` (180 dni,
+  bez `includeSubDomains` i `preload`), więc przeglądarki trzymają się HTTPS dla
+  tego hosta. Zwykłe HTTP za proxy terminującym TLS nie wysyła nagłówka HSTS;
+  ustaw go na proxy.
 
 **Kubernetes z cert-managerem.** Wystaw certyfikat do Secretu i zamontuj go jako
 wolumen. Nie używaj `subPath`: kubelet nie aktualizuje montowań `subPath`, więc
@@ -568,8 +586,12 @@ Dwie dodatkowe kwestie przy dużym wolumenie:
 
 - **Zapisy użycia i audytu są buforowane i odrzucane, a nie blokowane, gdy
   bufor się zapełni.** Skok ruchu lub wolna baza danych mogą po cichu zgubić wpisy użycia,
-  co oznacza utracone dane o kosztach i zaniżone obciążenie budżetów. Jedynym sygnałem jest
-  ostrzeżenie `usage log buffer full` w logach, więc ustaw na nie alert.
+  co oznacza utracone dane o kosztach i zaniżone obciążenie budżetów. Ustaw alert na
+  `gomodel_usage_entries_dropped_total` (zobacz
+  [Alerty na utracone użycie](/pl/guides/prometheus-metrics#alerty-na-utracone-użycie)),
+  a bez metryk na komunikaty `usage log buffer full`, `usage logger closed`
+  i `failed to write usage batch` w logach. Utracony wpis audytu zostawia
+  w logach `audit log buffer full`.
 - **Sprawdzenia budżetów odpytują tabelę użycia przy każdym requeście.** Trzymaj
   `USAGE_RETENTION_DAYS` na niskim poziomie, gdy budżety są włączone, i wybieraj Postgresa
   zamiast SQLite, którego pojedyncze połączenie sprawia, że to dominujący koszt.
@@ -640,7 +662,7 @@ wykonuj na nim VACUUM osobno.
 - Skieruj readiness na `/health/ready` i ustaw
   `terminationGracePeriodSeconds` powyżej 30.
 - Włącz metryki i ustaw alerty na `gomodel_circuit_breaker_state` oraz na
-  `usage log buffer full`.
+  `gomodel_usage_entries_dropped_total`.
 - W instalacjach air-gapped ustaw `GOMODEL_OFFLINE=true`, a następnie dostarcz katalog
   modeli jako plik lub zadeklaruj ceny modeli w konfiguracji, aby śledzenie kosztów i
   budżety nadal działały.

@@ -23,6 +23,7 @@ type countingRefreshProvider struct {
 	listModelsCalls atomic.Int32
 	release         chan struct{}
 	listModelsErr   error
+	listModelsPanic any
 
 	mu     sync.Mutex
 	models []string
@@ -42,6 +43,9 @@ func (p *countingRefreshProvider) ListModels(ctx context.Context) (*core.ModelsR
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+	}
+	if p.listModelsPanic != nil {
+		panic(p.listModelsPanic)
 	}
 	if p.listModelsErr != nil {
 		return nil, p.listModelsErr
@@ -197,6 +201,19 @@ func TestRouterOnDemandRefresh_FailedRefreshReusedWithinCooldown(t *testing.T) {
 		_, err := router.RefreshProviderModels(t.Context(), "ollama")
 		require.Error(t, err)
 		assert.Equal(t, int32(2), provider.listModelsCalls.Load())
+	})
+}
+
+func TestRouterOnDemandRefresh_PanicFailsTheRefreshInsteadOfTheProcess(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		provider := &countingRefreshProvider{name: "ollama", listModelsPanic: "malformed model list"}
+		router := newOnDemandRefreshRouter(t, provider)
+
+		for range 2 {
+			_, err := router.RefreshProviderModels(t.Context(), "ollama")
+			require.Error(t, err)
+		}
+		assert.Equal(t, int32(1), provider.listModelsCalls.Load(), "a panicked refresh is reused within the cooldown like a failed one")
 	})
 }
 

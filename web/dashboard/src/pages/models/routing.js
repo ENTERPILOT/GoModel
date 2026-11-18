@@ -44,12 +44,13 @@ function parseWeight(value) {
   return parsed;
 }
 
-// targetEntry builds a {provider?, model, weight?} API target from the
-// qualified name the editor shows, attaching weight only when it parses to a
-// positive number. An explicit provider is kept (it pins the target to a
-// concrete model, where a bare name may reach a virtual model) and split off
-// the name again, since the backend stores the two separately.
-export function targetEntry(model, weightValue, provider = "") {
+// targetEntry builds a {provider?, model, weight?, reasoning_effort?} API
+// target from the qualified name the editor shows, attaching weight only when
+// it parses to a positive number and the reasoning effort only when one is
+// set. An explicit provider is kept (it pins the target to a concrete model,
+// where a bare name may reach a virtual model) and split off the name again,
+// since the backend stores the two separately.
+export function targetEntry(model, weightValue, provider = "", effort = "") {
   const pinned = String(provider || "").trim();
   const name = String(model || "").trim();
   const entry = pinned
@@ -58,6 +59,10 @@ export function targetEntry(model, weightValue, provider = "") {
   const weight = parseWeight(weightValue);
   if (weight !== null) {
     entry.weight = weight;
+  }
+  const reasoningEffort = String(effort || "").trim();
+  if (reasoningEffort) {
+    entry.reasoning_effort = reasoningEffort;
   }
   return entry;
 }
@@ -70,7 +75,9 @@ export function collectExtraTargets(rows) {
   for (const row of safeRows) {
     const model = String((row && row.model) || "").trim();
     if (model) {
-      targets.push(targetEntry(model, row && row.weight, row && row.provider));
+      targets.push(
+        targetEntry(model, row.weight, row.provider, row.reasoning_effort),
+      );
     }
   }
   return targets;
@@ -181,6 +188,9 @@ export function mapRedirectView(view) {
     const mapped = { provider: entry.provider || "", model: entry.model || "" };
     if (entry.weight) {
       mapped.weight = entry.weight;
+    }
+    if (entry.reasoning_effort) {
+      mapped.reasoning_effort = entry.reasoning_effort;
     }
     return mapped;
   });

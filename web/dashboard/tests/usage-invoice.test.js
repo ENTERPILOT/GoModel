@@ -24,6 +24,10 @@ test("invoiceFilename keeps the server's plain CSV name", () => {
   const cases = [
     ['attachment; filename="gomodel-invoice-2026-03-01-to-2026-03-31.csv"', "gomodel-invoice-2026-03-01-to-2026-03-31.csv"],
     ["attachment; filename=invoice.csv", "invoice.csv"],
+    [
+      'attachment; filename="gomodel-invoice-2026-03-01-to-2026-03-31-Etc-GMT+5.csv"',
+      "gomodel-invoice-2026-03-01-to-2026-03-31-Etc-GMT+5.csv",
+    ],
     ['attachment; filename="../etc/passwd"', "gomodel-invoice.csv"],
     ["", "gomodel-invoice.csv"],
     [null, "gomodel-invoice.csv"],

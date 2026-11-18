@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -30,14 +29,10 @@ func (r *CredentialsResult) Close() error {
 		return nil
 	}
 	r.closeOnce.Do(func() {
-		var errs []error
 		if r.Store != nil {
 			if err := r.Store.Close(); err != nil {
-				errs = append(errs, fmt.Errorf("store close: %w", err))
+				r.closeErr = fmt.Errorf("store close: %w", err)
 			}
-		}
-		if len(errs) > 0 {
-			r.closeErr = fmt.Errorf("close errors: %w", errors.Join(errs...))
 		}
 	})
 	return r.closeErr
@@ -95,4 +90,16 @@ func createCredentialStore(ctx context.Context, store storage.Storage) (Credenti
 		func(db sqlx.DB) (CredentialStore, error) { return NewSQLCredentialStore(ctx, db) },
 		func(db *mongo.Database) (CredentialStore, error) { return NewMongoDBCredentialStore(db) },
 	)
+}
+
+// ListStoredCredentials returns the provider credentials saved in the
+// dashboard, secrets unsealed with box and references unresolved.
+func ListStoredCredentials(ctx context.Context, shared storage.Storage, box *encryption.Box) ([]ManagedProviderCredential, error) {
+	rawStore, err := createCredentialStore(ctx, shared)
+	if err != nil {
+		return nil, err
+	}
+	store := sealCredentialStore(rawStore, box)
+	defer func() { _ = store.Close() }()
+	return store.List(ctx)
 }

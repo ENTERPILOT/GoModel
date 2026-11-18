@@ -31,7 +31,7 @@ type OpenTelemetryConfig struct {
 
 	// Endpoint is the OTLP collector endpoint (OTEL_EXPORTER_OTLP_ENDPOINT).
 	// Default: "http://localhost:4318" for http/protobuf, "localhost:4317" for grpc
-	Endpoint string `yaml:"endpoint"`
+	Endpoint string `yaml:"endpoint" export:"url"`
 
 	// Protocol is "http/protobuf" or "grpc" (OTEL_EXPORTER_OTLP_PROTOCOL).
 	// Default: "http/protobuf"
@@ -39,7 +39,7 @@ type OpenTelemetryConfig struct {
 
 	// Headers are sent with every export request, for example an
 	// authorization header for a hosted backend (OTEL_EXPORTER_OTLP_HEADERS).
-	Headers map[string]string `yaml:"headers"`
+	Headers map[string]string `yaml:"headers" export:"secret"`
 
 	// TracesExporter is "otlp" or "none" (OTEL_TRACES_EXPORTER).
 	// Default: "otlp"

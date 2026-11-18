@@ -41,6 +41,11 @@ type CompatibleProviderConfig struct {
 	// context and body (e.g. conversation affinity headers). Nil results are
 	// ignored.
 	ChatRequestHeaders func(context.Context, *core.ChatRequest) http.Header
+	// NormalizeChatResponse rewrites the raw body of a buffered chat
+	// completion before the typed decode, for upstreams whose response shape
+	// the core types reject (e.g. Mistral's content chunk arrays). It returns
+	// the body to decode; returning its input unchanged is a no-op.
+	NormalizeChatResponse func([]byte) []byte
 	// ForwardAllowedTools sends an allowed_tools tool_choice upstream
 	// unchanged. Set it only for upstreams documented to honor the choice.
 	// When unset, the declared tools are narrowed to the allowed subset
@@ -70,8 +75,8 @@ type CompatibleProviderConfig struct {
 //     interface assertion).
 //
 // Provider quirks belong in CompatibleProviderConfig hooks (SetHeaders,
-// AdaptChatRequest, ChatRequestHeaders, RequestMutator), not in copies of
-// the transport methods.
+// AdaptChatRequest, ChatRequestHeaders, NormalizeChatResponse,
+// RequestMutator), not in copies of the transport methods.
 type CompatibleProvider struct {
 	client *llmclient.Client
 	// keys resolves the credential for each outbound request. Providers in this
@@ -83,21 +88,23 @@ type CompatibleProvider struct {
 	// configured instance name when the factory supplied one (so two
 	// instances of one type stay distinguishable), the provider type
 	// otherwise.
-	providerName        string
-	requestMutator      RequestMutator
-	adaptChatRequest    func(*core.ChatRequest) (*core.ChatRequest, error)
-	chatRequestHeaders  func(context.Context, *core.ChatRequest) http.Header
-	forwardAllowedTools bool
+	providerName          string
+	requestMutator        RequestMutator
+	adaptChatRequest      func(*core.ChatRequest) (*core.ChatRequest, error)
+	chatRequestHeaders    func(context.Context, *core.ChatRequest) http.Header
+	normalizeChatResponse func([]byte) []byte
+	forwardAllowedTools   bool
 }
 
 func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg CompatibleProviderConfig) *CompatibleProvider {
 	p := &CompatibleProvider{
-		keys:                opts.Keyring(apiKey),
-		providerName:        opts.ClientName(cfg.ProviderName),
-		requestMutator:      cfg.RequestMutator,
-		adaptChatRequest:    cfg.AdaptChatRequest,
-		chatRequestHeaders:  cfg.ChatRequestHeaders,
-		forwardAllowedTools: cfg.ForwardAllowedTools,
+		keys:                  opts.Keyring(apiKey),
+		providerName:          opts.ClientName(cfg.ProviderName),
+		requestMutator:        cfg.RequestMutator,
+		adaptChatRequest:      cfg.AdaptChatRequest,
+		chatRequestHeaders:    cfg.ChatRequestHeaders,
+		normalizeChatResponse: cfg.NormalizeChatResponse,
+		forwardAllowedTools:   cfg.ForwardAllowedTools,
 	}
 	clientCfg := llmclient.Config{
 		ProviderName:   opts.ClientName(cfg.ProviderName),
@@ -179,24 +186,42 @@ func (p *CompatibleProvider) ChatCompletion(ctx context.Context, req *core.ChatR
 	if err != nil {
 		return nil, err
 	}
-	var resp core.ChatResponse
 	body, err := chatRequestBody(adapted)
 	if err != nil {
 		return nil, err
 	}
-	err = p.Do(ctx, llmclient.Request{
+	request := llmclient.Request{
 		Method:    http.MethodPost,
 		Endpoint:  "/chat/completions",
 		Operation: llmclient.OperationChat,
 		Model:     req.Model,
 		Body:      body,
 		Headers:   p.chatHeaders(ctx, adapted),
-	}, &resp)
+	}
+	var resp core.ChatResponse
+	if p.normalizeChatResponse == nil {
+		err = p.Do(ctx, request, &resp)
+	} else {
+		err = p.doNormalizedChat(ctx, request, &resp)
+	}
 	if err != nil {
 		return nil, err
 	}
 	core.EnsureModel(&resp.Model, req.Model)
 	return &resp, nil
+}
+
+// doNormalizedChat sends a buffered chat request and decodes the response
+// through the NormalizeChatResponse hook.
+func (p *CompatibleProvider) doNormalizedChat(ctx context.Context, request llmclient.Request, resp *core.ChatResponse) error {
+	var raw json.RawMessage
+	if err := p.Do(ctx, request, &raw); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(p.normalizeChatResponse(raw), resp); err != nil {
+		return core.NewProviderError(p.providerName, http.StatusBadGateway, "failed to decode chat completion response", err)
+	}
+	return nil
 }
 
 func (p *CompatibleProvider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {

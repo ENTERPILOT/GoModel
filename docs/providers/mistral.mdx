@@ -1,0 +1,123 @@
+---
+title: "Mistral AI"
+description: "Configure Mistral AI (La Plateforme) in GoModel, including reasoning models and how thinking output is normalized for chat clients."
+icon: "sparkles"
+keywords: ["Mistral", "La Plateforme", "reasoning", "thinking", "provider setup"]
+---
+
+Mistral AI (La Plateforme) is served at `https://api.mistral.ai/v1` with an OpenAI-compatible
+API. GoModel routes chat completions, model listing, embeddings, and passthrough requests
+through the shared OpenAI adapter; the `/v1/responses` endpoint is translated through chat
+completions (Mistral also offers a native one, but serving it through chat lets the reasoning
+normalization below apply to chat completions, streaming, and `/v1/responses`; `/p/mistral/...`
+passthrough requests are forwarded unchanged). Files and batches are not exposed for this
+provider.
+
+## Reasoning (thinking) output
+
+When reasoning is enabled, models such as `mistral-large-4-0` and `mistral-small-2603`, and
+hosted models such as `zai-glm-5-3`, return the assistant content as a **list of
+typed chunks** — a `thinking` chunk for the reasoning trace and `text` chunks for the answer —
+in both buffered responses and SSE streams. That shape is not standard OpenAI chat output, and
+clients like SillyTavern render it as gibberish.
+
+GoModel's `mistral` provider converts it to the standard shape automatically:
+
+- the `thinking` chunks are joined into the `reasoning_content` field, and
+- the `text` chunks are joined into a plain string `content`
+
+on both streaming (`choices[].delta`) and non-streaming (`choices[].message`) responses. No
+client-side configuration is needed. Chunk types with no standard chat equivalent — Mistral's citation `reference`
+chunks, for example — are preserved in a `mistral_content_chunks` vendor member so no
+upstream data is dropped. SSE events larger than 16 MiB also pass through unconverted.
+
+Send effort with the standard nested parameter; GoModel maps it to Mistral's flat
+`reasoning_effort`:
+
+```json
+{
+  "model": "mistral-large-4-0",
+  "messages": [{ "role": "user", "content": "What is 17 * 23?" }],
+  "reasoning": { "effort": "high" }
+}
+```
+
+Mistral's API-wide enum is `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and the
+value is normalized to lowercase and passed through. Which levels a model accepts is model-specific — for
+example Mistral Large 4 takes `low`/`medium`/`high`, hosted GLM models take `low`/`high`/`max`,
+and `mistral-small-2603` also accepts `none` — so an unsupported level for the chosen model is
+rejected by Mistral itself, as with their own SDKs. On `zai-glm-5-3` the response is always a
+chunk list, whatever the effort value.
+
+When a client replays an earlier assistant turn, GoModel sends the turn's reasoning back as a
+Mistral `thinking` chunk inside the message content — Mistral's guide warns that stripping the
+trace degrades output — and drops members Mistral cannot parse but the client echoed
+(`mistral_content_chunks`), which Mistral rejects with a 422. A replayed `reasoning` member
+(the spelling some clients use) is treated like `reasoning_content`.
+
+Mistral rejects request members its schema does not define, so GoModel adapts common OpenAI
+fields instead of letting the request fail:
+
+- `max_completion_tokens` becomes `max_tokens`, and `seed` becomes `random_seed`.
+- `service_tier: "default"` becomes `standard_only`; tiers Mistral does not offer are dropped.
+- `stream_options`, `user`, `logit_bias`, `store`, `verbosity`, and `safety_identifier` are
+  dropped. Streams still report usage in their final chunk.
+- Messages keep only the members Mistral accepts for their role: for example, `name` stays on
+  tool messages only, and `refusal` or `annotations` echoed on assistant turns are dropped.
+
+## Configure
+
+```bash
+MISTRAL_API_KEY=...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  mistral:
+    type: mistral
+    base_url: "https://api.mistral.ai/v1"
+    api_key: "${MISTRAL_API_KEY}"
+```
+
+<Note>
+  The provider `type` is `mistral`. The config key (`mistral` in the example above) is
+  arbitrary and only identifies this entry inside your config; it may be changed.
+</Note>
+
+You can also override the base URL and model list with:
+
+```bash
+MISTRAL_BASE_URL=https://api.mistral.ai/v1
+MISTRAL_MODELS=mistral-large-4-0,mistral-small-2603,mistral-embed
+```
+
+<Note>
+  Setting `MISTRAL_MODELS` limits the models this provider serves to that list under the
+  default `allowlist` mode — requests for other models return 404. See
+  [Models modes](/advanced/config-yaml#models-modes) for `merge`/`fallback` alternatives.
+  The 404 applies to model-based routing only: when the operator enables passthrough for
+  this provider (`ENABLED_PASSTHROUGH_PROVIDERS`, see
+  [Passthrough](/features/passthrough-api)), `/p/mistral/...` requests reach the upstream
+  regardless of this list.
+</Note>
+
+## Models
+
+GoModel's `GET /v1/models` is a gateway-wide list (every configured provider's visible
+models, not only this one's); what this provider serves follows its models mode, so it can be
+a subset of your Mistral account's inventory. Call one of its models directly through the
+OpenAI-compatible `/v1/chat/completions` endpoint:
+
+```yaml
+virtual_models:
+  - source: mistral
+    # The target prefix is the providers map key, not the provider type;
+    # /p/mistral/... routes use the type.
+    target: mistral/mistral-large-4-0
+```
+
+## Embeddings
+
+Mistral's `/v1/embeddings` endpoint (for example `mistral-embed`) is supported.

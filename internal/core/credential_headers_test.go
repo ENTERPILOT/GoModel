@@ -27,6 +27,10 @@ func TestCredentialHeaderList(t *testing.T) {
 		"x-access-token",
 		"x-gomodel-key",
 		"xi-api-key", // ElevenLabs
+		"helicone-auth",
+		"cf-aig-authorization", // Cloudflare AI Gateway
+		"x-portkey-api-key",
+		"ocp-apim-subscription-key", // Azure API Management
 	}
 	require.Len(t, credentialHeaders, len(names), "credential list and cases drifted apart")
 
@@ -34,7 +38,8 @@ func TestCredentialHeaderList(t *testing.T) {
 		// Clients and providers spell the header however they like; the scratch
 		// buffer in IsCredentialHeader must fold all of them, and must be long
 		// enough for every name in the list.
-		for _, variant := range []string{name, strings.ToUpper(name), http.CanonicalHeaderKey(name), " " + name + " "} {
+		underscored := strings.ReplaceAll(name, "-", "_")
+		for _, variant := range []string{name, strings.ToUpper(name), http.CanonicalHeaderKey(name), " " + name + " ", underscored, strings.ToUpper(underscored)} {
 			assert.True(t, IsCredentialHeader(variant), "IsCredentialHeader(%q)", variant)
 		}
 	}

@@ -122,6 +122,38 @@ console.log(completion.choices[0].message.content);
 export OPENAI_API_KEY=change-me
 ```
 
+#### 推理强度
+
+只有当模型条目设置了 `"reasoning": true` 时，OpenCode 才会为自定义提供商的模型显示推理强度变体（通常为 `low`、`medium`、`high`）。没有该字段时，OpenCode 不提供内置变体，`--variant` 也不会生效。请在 `provider.gomodel.models` 下为每个推理模型添加该字段，键名为您发送给 GoModel 的模型 ID：
+
+```jsonc
+"models": {
+  "gpt-5-mini": {
+    "name": "GPT-5 Mini",
+    "reasoning": true,
+    "limit": {
+      "context": 400000,
+      "output": 128000
+    }
+  }
+}
+```
+
+使用 OpenCode 的 `variant_cycle` 快捷键切换变体，或在 `opencode run` 中传入 `--variant high`（已在 OpenCode 1.19.5 中验证）。OpenCode 会将所选值作为 `reasoning_effort` 发送。
+
+如需与模型支持的强度保持一致，请在同一模型条目中添加变体，或用 `"high": { "disabled": true }` 隐藏模型不支持的强度：
+
+```jsonc
+"gpt-5-mini": {
+  // name, reasoning and limit as above
+  "variants": {
+    "minimal": { "reasoningEffort": "minimal" }
+  }
+}
+```
+
+如需在网关上固定某一强度而不受客户端影响，请使用[推理强度覆盖](/zh/features/virtual-models#强制推理强度)。
+
 ### Cline
 
 在 Cline 中选择：

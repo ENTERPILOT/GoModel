@@ -11,6 +11,7 @@
   import ProviderCredentialField from "./ProviderCredentialField.svelte";
   import { providersConfig } from "./providersConfig.svelte.js";
   import {
+    providerCredentialTypeLabel,
     providerCredentialTypeOptions,
     suggestProviderCredentialName,
   } from "./providersConfigLogic.js";
@@ -85,7 +86,7 @@
     >
       <option value="" disabled>{m.providers_select_type()}</option>
       {#each typeOptions as type (type)}
-        <option value={type}>{type}</option>
+        <option value={type}>{providerCredentialTypeLabel(type)}</option>
       {/each}
     </select>
     {#if typeError}
@@ -152,7 +153,7 @@
 
       <div class="mcp-server-advanced-fields">
         {#each fields.advanced as field (field.name)}
-          <ProviderCredentialField {field} />
+          <ProviderCredentialField {field} collapsed />
         {/each}
       </div>
     </details>

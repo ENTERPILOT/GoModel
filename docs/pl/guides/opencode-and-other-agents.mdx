@@ -126,6 +126,46 @@ Następnie wyeksportuj klucz GoModel:
 export OPENAI_API_KEY=change-me
 ```
 
+#### Reasoning effort
+
+OpenCode pokazuje warianty reasoning effort (zwykle `low`, `medium`, `high`)
+dla modelu własnego providera tylko wtedy, gdy wpis modelu ustawia
+`"reasoning": true`. Bez tego OpenCode nie oferuje wbudowanych wariantów, a
+`--variant` nic nie zmienia. Dodaj to pole do każdego modelu z reasoningiem w
+`provider.gomodel.models`, pod ID modelu, które wysyłasz do GoModel:
+
+```jsonc
+"models": {
+  "gpt-5-mini": {
+    "name": "GPT-5 Mini",
+    "reasoning": true,
+    "limit": {
+      "context": 400000,
+      "output": 128000
+    }
+  }
+}
+```
+
+Warianty przełączasz skrótem OpenCode `variant_cycle` albo flagą
+`--variant high` w `opencode run` (sprawdzone z OpenCode 1.19.5). OpenCode
+wysyła wybór jako `reasoning_effort`.
+
+Aby dopasować poziomy do modelu, dodaj warianty w tym samym wpisie modelu albo
+ukryj odrzucany poziom przez `"high": { "disabled": true }`:
+
+```jsonc
+"gpt-5-mini": {
+  // name, reasoning and limit as above
+  "variants": {
+    "minimal": { "reasoningEffort": "minimal" }
+  }
+}
+```
+
+Aby ustawić jeden poziom na bramie niezależnie od klienta, użyj
+[nadpisania reasoning effort](/pl/features/virtual-models#wymuszanie-reasoning-effort).
+
 ### Cline
 
 W Cline wybierz:

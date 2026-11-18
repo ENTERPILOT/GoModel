@@ -8,6 +8,7 @@ import { overwriteGetLocale } from "../src/lib/paraglide/runtime.js";
 import {
   defaultProviderCredentialForm,
   filterProviderCredentials,
+  providerCredentialTypeLabel,
   providerCredentialTypeOptions,
   providerCredentialSchema,
   providerCredentialFormFields,
@@ -684,4 +685,28 @@ test("models_mode links to the docs table comparing the modes", () => {
   );
   assert.ok(meta.docsLabel);
   assert.equal(providerCredentialFieldMeta("proxy_url").docsUrl, undefined);
+});
+
+test("AWS types word Base URL as a region and say which API each Bedrock type calls", () => {
+  for (const type of ["bedrock", "bedrock-mantle"]) {
+    const { primary } = providerCredentialFormFields({
+      type,
+      fields: [
+        { name: "api_keys", required: false, advanced: false },
+        { name: "base_url", required: false, advanced: false },
+      ],
+    });
+    const baseURL = primary.find((field) => field.name === "base_url");
+    assert.equal(baseURL.label, "Region or endpoint", type);
+    assert.equal(baseURL.placeholder, "", type);
+    assert.match(baseURL.hint, /AWS credentials/, type);
+    assert.match(primary.find((field) => field.name === "api_keys").hint, /Optional Amazon Bedrock API key/, type);
+  }
+
+  const { primary, advanced } = providerCredentialFormFields(OPENAI_SCHEMA);
+  assert.equal([...primary, ...advanced].find((field) => field.name === "base_url").label, "Base URL");
+
+  assert.equal(providerCredentialTypeLabel("bedrock"), "bedrock (Converse API)");
+  assert.equal(providerCredentialTypeLabel("bedrock-mantle"), "bedrock-mantle (OpenAI-compatible API)");
+  assert.equal(providerCredentialTypeLabel("openai"), "openai");
 });

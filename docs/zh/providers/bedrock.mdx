@@ -8,7 +8,7 @@ keywords: ["Amazon Bedrock", "AWS 凭据", "Converse API", "Bedrock 模型路由
 
 GoModel 通过 Bedrock Runtime 的 Converse 和 ConverseStream API 路由 Bedrock 请求，并将不同模型系列（Anthropic、Amazon Nova、Meta Llama、Mistral、Cohere、AI21 等）的响应统一规范化为兼容 OpenAI 的 Chat Completions 格式。
 
-Bedrock 本身没有 API 密钥：GoModel 在运行时通过标准 AWS 凭据链（环境变量、`AWS_PROFILE`、IAM Identity Center、实例/容器角色）解析 AWS 凭据。
+可以使用 Amazon Bedrock API 密钥进行认证，也可以使用 AWS 凭据：GoModel 在运行时通过标准 AWS 凭据链（环境变量、`AWS_PROFILE`、IAM Identity Center、实例/容器角色）解析这些凭据。
 
 ## 配置
 
@@ -21,6 +21,15 @@ GOMODEL_MASTER_KEY=change-me
 ```
 
 在生产环境中，建议使用实例角色、IRSA 或 IAM Identity Center，而不是长期有效的访问密钥。当 `BEDROCK_BASE_URL` 为空时，GoModel 会回退到 `AWS_REGION` / `AWS_DEFAULT_REGION`。
+
+如需使用 Amazon Bedrock API 密钥代替 AWS 凭据：
+
+```bash
+BEDROCK_BASE_URL=us-east-1
+BEDROCK_API_KEY=ABSK...
+```
+
+已配置的密钥优先于 AWS 凭据和 `AWS_BEARER_TOKEN_BEDROCK`。在控制台中添加类型为 `bedrock` 的提供商，设置**区域或端点**，并将密钥粘贴到 **API 密钥**；留空时，如果网关主机设置了 `AWS_BEARER_TOKEN_BEDROCK`，则使用该令牌，否则使用主机的 AWS 凭据链。
 
 ## 运行 GoModel
 

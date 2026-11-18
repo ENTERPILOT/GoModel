@@ -366,11 +366,11 @@ Declared in the contract or the spec but not run by this release:
   plugins, request logging) but are not forwarded to the provider.
   `Headers.Upstream` was deferred when this ADR was written and no longer is:
   the host merges it into every provider call of the request that goes
-  through its HTTP client — failover attempts, token counting and compaction
-  included, the `bedrock` provider excluded — minus the names that carry credentials, frame
-  the connection or describe the body, plus `Accept-Encoding`,
-  `Anthropic-Beta` and `Idempotency-Key` (`#1203`, which updated this section
-  in place). Other provider headers, such as `OpenAI-Beta`, are not refused.
+  through its HTTP client — failover attempts and the Responses
+  `input_tokens` and `compact` routes included, the `bedrock` provider
+  excluded. It refuses the names that carry credentials, frame the connection
+  or describe the body, and also `Accept-Encoding`, `Anthropic-Beta` and
+  `Idempotency-Key` (`#1203`, which updated this section in place). Other provider headers, such as `OpenAI-Beta`, are not refused.
   Inference the gateway issues for its own work carries none of them.
 - `RouteRequest.Prompt` is nil; `RouteChoice.Reason` reaches debug logs
   only. Instance-scoped `secret` fields reach a route plugin redacted.

@@ -2,7 +2,6 @@ package mcpgateway
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -38,14 +37,10 @@ func (r *Result) Close() error {
 		if r.Service != nil {
 			r.Service.Close()
 		}
-		var errs []error
 		if r.Store != nil {
 			if err := r.Store.Close(); err != nil {
-				errs = append(errs, fmt.Errorf("store close: %w", err))
+				r.closeErr = fmt.Errorf("store close: %w", err)
 			}
-		}
-		if len(errs) > 0 {
-			r.closeErr = fmt.Errorf("close errors: %w", errors.Join(errs...))
 		}
 	})
 	return r.closeErr
@@ -189,4 +184,27 @@ func createStore(ctx context.Context, store storage.Storage) (Store, error) {
 func virtualStoreOf(store Store) VirtualStore {
 	virtualStore, _ := store.(VirtualStore)
 	return virtualStore
+}
+
+// ListStored returns the MCP servers and virtual servers saved in the
+// dashboard, header secrets unsealed with box and references unresolved.
+func ListStored(ctx context.Context, shared storage.Storage, box *encryption.Box) ([]ManagedServer, []ManagedVirtualServer, error) {
+	rawStore, err := createStore(ctx, shared)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = rawStore.Close() }()
+	servers, err := sealStore(rawStore, box).List(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	virtualStore := virtualStoreOf(rawStore)
+	if virtualStore == nil {
+		return servers, nil, nil
+	}
+	virtual, err := virtualStore.ListVirtual(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return servers, virtual, nil
 }

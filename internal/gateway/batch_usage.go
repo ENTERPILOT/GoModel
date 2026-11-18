@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -17,7 +18,10 @@ import (
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
-// LogBatchUsageFromBatchResults writes per-item usage from batch results once.
+// LogBatchUsageFromBatchResults writes per-item usage from batch results and
+// marks stored as logged. It skips a batch already marked, but claims nothing
+// in a store, so it does not guard against concurrent or repeated fetches of
+// one batch: result fetches go through BatchOrchestrator.Results, which does.
 func LogBatchUsageFromBatchResults(
 	stored *batchstore.StoredBatch,
 	result *core.BatchResultsResponse,
@@ -25,13 +29,84 @@ func LogBatchUsageFromBatchResults(
 	usageLogger usage.LoggerInterface,
 	pricingResolver usage.PricingResolver,
 ) bool {
+	return logBatchUsage(stored, result, fallbackRequestID, usageLogger, pricingResolver, nil)
+}
+
+// batchUsageClaim guards the write of one batch's usage entries.
+type batchUsageClaim struct {
+	// take reports whether this fetch writes the entries.
+	take func() bool
+	// repeated reports whether this process handed every entry to its logger
+	// before, so that the write only repeats them for storage.
+	repeated func() bool
+	// done records that every entry was handed to the usage logger.
+	done func(loggedAt time.Time)
+}
+
+// batchUsageHandoffLimit bounds batchUsageHandoffs. Past it an arbitrary
+// batch is forgotten, and its repeat is counted like another process's.
+const batchUsageHandoffLimit = 1024
+
+// batchUsageHandoffs remembers the batches whose usage entries this process
+// handed to its logger without their marker being saved. A later fetch
+// writes such a batch again; it marks the entries as repeated, so the token
+// and cost metrics count them once.
+type batchUsageHandoffs struct {
+	mu      sync.Mutex
+	batches map[string]struct{}
+}
+
+func (h *batchUsageHandoffs) has(id string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, ok := h.batches[id]
+	return ok
+}
+
+// set records whether the batch's entries were handed over without a marker.
+func (h *batchUsageHandoffs) set(id string, unmarked bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !unmarked {
+		delete(h.batches, id)
+		return
+	}
+	if h.batches == nil {
+		h.batches = make(map[string]struct{})
+	}
+	if _, ok := h.batches[id]; !ok && len(h.batches) >= batchUsageHandoffLimit {
+		for forgotten := range h.batches {
+			delete(h.batches, forgotten)
+			break
+		}
+	}
+	h.batches[id] = struct{}{}
+}
+
+// logBatchUsage builds the batch's usage entries, records their totals on
+// stored, and writes the entries when claim.take allows it, reporting whether
+// it wrote them. The totals follow from the results alone, so every fetch
+// computes the same ones and may save them, whichever fetch writes the
+// entries. UsageLoggedAt is set on stored, and claim.done called, only after
+// the last entry was handed to the logger. A nil claim always writes.
+// Entries are marked as repeated when claim.repeated says so.
+func logBatchUsage(
+	stored *batchstore.StoredBatch,
+	result *core.BatchResultsResponse,
+	fallbackRequestID string,
+	usageLogger usage.LoggerInterface,
+	pricingResolver usage.PricingResolver,
+	claim *batchUsageClaim,
+) bool {
 	if usageLogger == nil || !usageLogger.Config().Enabled || stored == nil || stored.Batch == nil || result == nil || len(result.Data) == 0 {
 		return false
 	}
 	if !stored.EffectiveUsageEnabled() {
 		return false
 	}
-	if stored.UsageLoggedAt != nil {
+	// Logged usage whose totals an update of an older copy dropped is
+	// summed again, without writing its entries again.
+	if stored.UsageLoggedAt != nil && hasBatchUsageSummary(stored.Batch.Usage) {
 		return false
 	}
 
@@ -43,7 +118,7 @@ func LogBatchUsageFromBatchResults(
 		requestID = "batch:" + stored.Batch.ID
 	}
 
-	loggedEntries := 0
+	var entries []*usage.UsageEntry
 	inputTotal := 0
 	outputTotal := 0
 	totalTokens := 0
@@ -125,8 +200,7 @@ func LogBatchUsageFromBatchResults(
 		entry.SessionID = stored.SessionID
 		entry.AuthKeyID = stored.AuthKeyID
 
-		usageLogger.Write(entry)
-		loggedEntries++
+		entries = append(entries, entry)
 		inputTotal += inputTokens
 		outputTotal += outputTokens
 		if hasTotal {
@@ -146,14 +220,11 @@ func LogBatchUsageFromBatchResults(
 		}
 	}
 
-	if loggedEntries == 0 {
+	if len(entries) == 0 {
 		return false
 	}
 
-	now := time.Now().UTC()
 	stored.RequestID = requestID
-	stored.UsageLoggedAt = &now
-
 	stored.Batch.Usage.InputTokens = inputTotal
 	stored.Batch.Usage.OutputTokens = outputTotal
 	stored.Batch.Usage.TotalTokens = totalTokens
@@ -167,6 +238,19 @@ func LogBatchUsageFromBatchResults(
 		stored.Batch.Usage.TotalCost = &totalCostTotal
 	}
 
+	if stored.UsageLoggedAt != nil || (claim != nil && !claim.take()) {
+		return false
+	}
+	repeated := claim != nil && claim.repeated()
+	for _, entry := range entries {
+		entry.Repeated = repeated
+		usageLogger.Write(entry)
+	}
+	now := time.Now().UTC()
+	stored.UsageLoggedAt = &now
+	if claim != nil {
+		claim.done(now)
+	}
 	return true
 }
 

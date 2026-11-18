@@ -63,7 +63,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"CONFIG_STRICT",
-		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "MASTER_KEY_DISABLED", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
+		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "MASTER_KEY_DISABLED", "AUTH_KEY_PREFIX", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
 		"SERVER_TRUSTED_PROXIES", "SERVER_CLIENT_IP_HEADER", "SERVER_TRUSTED_HOPS", "SERVER_TLS_CERT_FILE", "SERVER_TLS_KEY_FILE", "SERVER_TLS_CLIENT_CA_FILE",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL", "GOMODEL_OFFLINE", "GOMODEL_VERSION_CHECK_ENABLED", "ALLOWLIST_UPSTREAM_METADATA",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
@@ -78,6 +78,8 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"STORAGE_TYPE", "SQLITE_PATH", "POSTGRES_URL", "POSTGRES_MAX_CONNS",
 		"MONGODB_URL", "MONGODB_DATABASE", "GOMODEL_ENCRYPTION_KEY", "GOMODEL_ENCRYPTION_KEY_PREVIOUS",
 		"METRICS_ENABLED", "METRICS_ENDPOINT",
+		"METRICS_CALLER_USER_PATH", "METRICS_CALLER_USER_PATH_DEPTH", "METRICS_CALLER_AUTH_KEY",
+		"METRICS_CALLER_REQUEST_LABELS", "METRICS_CALLER_MAX_VALUES",
 		"LOGGING_ENABLED", "LOGGING_LOG_BODIES", "LOGGING_LOG_REVISION_BODIES", "LOGGING_LOG_GUARDRAIL_STEPS", "LOGGING_LOG_HEADERS",
 		"LOGGING_LOG_AUDIO_BODIES", "LOGGING_LOG_EMBEDDING_BODIES", "LOGGING_LOG_IMAGE_BODIES", "LOGGING_LOG_IMAGE_BODIES_SCOPE",
 		"LOGGING_ONLY_MODEL_INTERACTIONS", "LOGGING_BUFFER_SIZE",
@@ -135,7 +137,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.Equal(t, DefaultStreamStallTimeoutSeconds, cfg.Server.StreamStallTimeout)
 	assert.True(t, cfg.Server.EnablePassthroughRoutes)
 	assert.True(t, cfg.Server.AllowPassthroughV1Alias)
-	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "edenai", "jev"}, cfg.Server.EnabledPassthroughProviders)
+	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner", "edenai", "jev"}, cfg.Server.EnabledPassthroughProviders)
 	assert.Equal(t, ConfiguredProviderModelsModeAllowlist, cfg.Models.ConfiguredProviderModelsMode)
 	assert.Nil(t, cfg.Cache.Model.Local)
 	assert.Equal(t, 3600, cfg.Cache.Model.RefreshInterval)
@@ -160,6 +162,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.True(t, cfg.Budgets.ProviderBilledCacheHits)
 	assert.Equal(t, "/metrics", cfg.Metrics.Endpoint)
 	assert.False(t, cfg.Metrics.Enabled)
+	assert.Equal(t, MetricsCallerDimensionsConfig{UserPathDepth: 2, MaxValues: 100}, cfg.Metrics.CallerDimensions)
 	assert.Equal(t, 600, cfg.HTTP.Timeout)
 	assert.Equal(t, 600, cfg.HTTP.ResponseHeaderTimeout)
 	assert.Equal(t, time.Minute, cfg.Workflows.RefreshInterval)
@@ -1020,9 +1023,8 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 		require.Equal(t, ".cache", result.Config.Cache.Model.Local.CacheDir)
 		require.Nil(t, result.Config.Cache.Model.Redis)
 
-		gotProviders := result.Config.Server.EnabledPassthroughProviders
-		wantProviders := []string{"openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek", "bailian"}
-		require.Equal(t, wantProviders, gotProviders)
+		// The example shows the default allowlist, so it must not drift from it.
+		require.Equal(t, buildDefaultConfig().Server.EnabledPassthroughProviders, result.Config.Server.EnabledPassthroughProviders)
 	})
 }
 
@@ -1869,6 +1871,49 @@ func TestIsLocalModelListSource(t *testing.T) {
 	for _, tt := range tests {
 		got := IsLocalModelListSource(tt.in)
 		assert.Equal(t, tt.want, got, "IsLocalModelListSource(%q)", tt.in)
+	}
+}
+
+func TestLoad_AuthKeyPrefix(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		env     string
+		want    string
+		wantErr string
+	}{
+		{name: "default", want: "sk_gom_"},
+		{name: "yaml", yaml: `"sk-acme-"`, want: "sk-acme-"},
+		{name: "yaml empty keeps default", yaml: `""`, want: "sk_gom_"},
+		{name: "env", env: "acme_", want: "acme_"},
+		{name: "env trimmed", env: "  acme_  ", want: "acme_"},
+		{name: "env blank is default", env: "   ", want: "sk_gom_"},
+		{name: "env overrides yaml", yaml: `"sk-acme-"`, env: "sk-customnamehere-", want: "sk-customnamehere-"},
+		{name: "yaml invalid", yaml: `"sk acme"`, wantErr: "invalid server.auth_key_prefix"},
+		{name: "env invalid charset", env: "sk.acme", wantErr: "invalid server.auth_key_prefix (AUTH_KEY_PREFIX)"},
+		{name: "env too long", env: strings.Repeat("a", 33), wantErr: "at most 32 characters"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(dir string) {
+				if tt.yaml != "" {
+					writeConfigYAML(t, dir, "server:\n  auth_key_prefix: "+tt.yaml+"\n")
+				}
+				if tt.env != "" {
+					t.Setenv("AUTH_KEY_PREFIX", tt.env)
+				}
+
+				result, err := Load()
+				if tt.wantErr != "" {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), tt.wantErr)
+					return
+				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, result.Config.Server.AuthKeyPrefix)
+			})
+		})
 	}
 }
 

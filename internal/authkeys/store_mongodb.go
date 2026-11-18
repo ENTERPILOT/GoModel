@@ -151,6 +151,21 @@ func (s *MongoDBStore) UpdateImported(ctx context.Context, key AuthKey) error {
 	return nil
 }
 
+func (s *MongoDBStore) UpdateName(ctx context.Context, id, name string, now time.Time) error {
+	update := bson.D{{Key: "$set", Value: bson.D{
+		{Key: "name", Value: name},
+		{Key: "updated_at", Value: now.UTC()},
+	}}}
+	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, update)
+	if err != nil {
+		return fmt.Errorf("update auth key name: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *MongoDBStore) UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error {
 	if err := s.updateStringList(ctx, id, "labels", labels, now); err != nil {
 		return fmt.Errorf("update auth key labels: %w", err)

@@ -39,6 +39,7 @@ const PROVIDER_DOC_SLUGS = new Set([
   "llamacpp",
   "llmd",
   "minimax",
+  "mistral",
   "opencode-go",
   "oracle",
   "sglang",

@@ -22,5 +22,5 @@ export function invoiceExportPath(apiQuery) {
 export function invoiceFilename(contentDisposition) {
   const match = /filename="?([^";]+)"?/i.exec(String(contentDisposition || ""));
   const name = match ? match[1].trim() : "";
-  return /^[\w.-]+\.csv$/.test(name) ? name : FALLBACK_FILENAME;
+  return /^[\w.+-]+\.csv$/.test(name) ? name : FALLBACK_FILENAME;
 }

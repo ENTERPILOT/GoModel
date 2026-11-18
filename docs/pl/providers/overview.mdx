@@ -94,7 +94,7 @@ przez providera upstream.
 | vLLM | `VLLM_BASE_URL` (`VLLM_API_KEY` opcjonalnie) | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [vLLM](/pl/providers/vllm) |
 | llama.cpp / LM Studio | `LLAMACPP_BASE_URL` (`LLAMACPP_API_KEY` opcjonalnie) | `gemma-3-4b-it` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llama.cpp](/pl/providers/llamacpp) |
 | llm-d | `LLMD_BASE_URL` (`LLMD_API_KEY` opcjonalnie) | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llm-d](/pl/providers/llmd) |
-| Amazon Bedrock | `BEDROCK_BASE_URL` (region lub endpoint) + dane uwierzytelniające AWS | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/pl/providers/bedrock) |
+| Amazon Bedrock | `BEDROCK_BASE_URL` (region lub endpoint) + `BEDROCK_API_KEY` lub dane uwierzytelniające AWS | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/pl/providers/bedrock) |
 | Amazon Bedrock Mantle | `BEDROCK_MANTLE_API_KEY` lub dane uwierzytelniające AWS | `openai.gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Bedrock Mantle](/pl/providers/bedrock-mantle) |
 
 ✅ Obsługiwane ❌ Nieobsługiwane
@@ -355,8 +355,8 @@ To providerzy, z którymi użytkownicy najczęściej mają problemy:
 
 - **Google Vertex AI** – wymaga projektu GCP, regionu oraz Application Default
   Credentials albo klucza JSON konta serwisowego.
-- **Amazon Bedrock** – nie ma własnego klucza API; używa łańcucha danych
-  uwierzytelniających AWS i wymaga jawnego dostępu do modeli w konsoli Bedrock.
+- **Amazon Bedrock** – klucz API Bedrock lub łańcuch danych uwierzytelniających
+  AWS; wymaga jawnego dostępu do modeli w konsoli Bedrock.
 - **Azure OpenAI** – base URL-e w zakresie wdrożenia lub `/openai/v1`, parametr zapytania
   `api-version` i nagłówek `api-key` zamiast `Authorization: Bearer`.
 - **Oracle GenAI** – wymaga polityki OCI IAM dla `generativeaiapikey` i

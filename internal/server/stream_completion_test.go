@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"syscall"
@@ -147,6 +148,71 @@ func TestGuardStreamCompletion_TruncatedStreamsEndWithErrorEvent(t *testing.T) {
 	}
 }
 
+// terminalPayloadCases are SSE data payloads with the guard's verdict and
+// whether the byte prefilter must already rule them out without parsing.
+var terminalPayloadCases = []struct {
+	name        string
+	kind        streamKind
+	payload     string
+	terminal    bool
+	prefiltered bool
+}{
+	{name: "chat content with null finish_reason", kind: chatStream, payload: `{"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}`, prefiltered: true},
+	{name: "chat content without finish_reason", kind: chatStream, payload: `{"choices":[{"delta":{"content":"hi"}}]}`, prefiltered: true},
+	{name: "chat content naming finish_reason", kind: chatStream, payload: `{"choices":[{"delta":{"content":"set finish_reason to stop"},"finish_reason":null}]}`, prefiltered: true},
+	{name: "chat content quoting a finish_reason member", kind: chatStream, payload: `{"choices":[{"delta":{"content":"{\"finish_reason\":\"stop\"}"},"finish_reason":null}]}`, prefiltered: true},
+	{name: "chat tool arguments quoting an error member", kind: chatStream, payload: `{"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"{\"error\":1}"}}]},"finish_reason":null}]}`, prefiltered: true},
+	{name: "chat nested finish_reason member", kind: chatStream, payload: `{"choices":[{"delta":{"finish_reason":"stop"},"finish_reason":null}]}`},
+	{name: "chat terminal chunk", kind: chatStream, payload: `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`, terminal: true},
+	{name: "chat terminal chunk with spaced member", kind: chatStream, payload: `{"choices":[{"delta":{},"finish_reason" : "length"}]}`, terminal: true},
+	{name: "chat second choice finishes", kind: chatStream, payload: `{"choices":[{"index":0,"finish_reason":null},{"index":1,"finish_reason":"stop"}]}`, terminal: true},
+	{name: "chat non-string finish_reason", kind: chatStream, payload: `{"choices":[{"finish_reason":1}]}`, terminal: true},
+	{name: "chat empty finish_reason", kind: chatStream, payload: `{"choices":[{"finish_reason":""}]}`},
+	{name: "chat in-band error", kind: chatStream, payload: `{"error":{"message":"boom","type":"server_error"}}`, terminal: true},
+	{name: "chat null error member", kind: chatStream, payload: `{"error":null,"choices":[{"delta":{"content":"hi"}}]}`},
+	{name: "chat nested error member", kind: chatStream, payload: `{"choices":[{"delta":{"content":"hi"},"logprobs":{"error":"x"}}]}`},
+	{name: "chat escaped error key", kind: chatStream, payload: `{"\u0065rror":{"message":"boom"}}`, terminal: true},
+	{name: "chat escaped finish_reason key", kind: chatStream, payload: `{"choices":[{"finish_\u0072eason":"stop"}]}`, terminal: true},
+	{name: "chat invalid JSON", kind: chatStream, payload: `{"choices":[{"finish_reason":"stop"}]`},
+	{name: "responses delta", kind: responsesStream, payload: `{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"hi"}`, prefiltered: true},
+	{name: "responses item done", kind: responsesStream, payload: `{"type":"response.output_item.done","item":{"type":"message"}}`, prefiltered: true},
+	{name: "responses delta quoting response.completed", kind: responsesStream, payload: `{"type":"response.output_text.delta","delta":"\"response.completed\""}`, prefiltered: true},
+	{name: "responses delta ending in a quoted type", kind: responsesStream, payload: `{"type":"response.output_text.delta","delta":"\"response.completed"}`},
+	{name: "responses completed", kind: responsesStream, payload: `{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`, terminal: true},
+	{name: "responses incomplete", kind: responsesStream, payload: `{"type":"response.incomplete","response":{}}`, terminal: true},
+	{name: "responses failed", kind: responsesStream, payload: `{"type":"response.failed","response":{}}`, terminal: true},
+	{name: "responses done", kind: responsesStream, payload: `{"type":"response.done"}`, terminal: true},
+	{name: "responses error event", kind: responsesStream, payload: `{"type":"error","code":"server_error","message":"boom"}`, terminal: true},
+	{name: "responses escaped type", kind: responsesStream, payload: `{"t\u0079pe":"response.\u0063ompleted"}`, terminal: true},
+	{name: "responses finish_reason is not terminal", kind: responsesStream, payload: `{"type":"response.output_text.delta","finish_reason":"stop"}`, prefiltered: true},
+}
+
+func TestIsTerminalPayload(t *testing.T) {
+	for _, tt := range terminalPayloadCases {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := []byte(tt.payload)
+			assert.Equal(t, tt.terminal, isTerminalPayload(tt.kind, payload))
+			assert.Equal(t, tt.terminal, isTerminalObject(tt.kind, payload), "prefilter must not change the verdict")
+			assert.Equal(t, tt.prefiltered, !mayBeTerminal(tt.kind, payload), "prefiltered")
+		})
+	}
+}
+
+// FuzzMayBeTerminal checks the prefilter never rules out a payload the full
+// parse treats as terminal.
+func FuzzMayBeTerminal(f *testing.F) {
+	for _, tt := range terminalPayloadCases {
+		f.Add(tt.kind == responsesStream, []byte(tt.payload))
+	}
+	f.Fuzz(func(t *testing.T, responses bool, payload []byte) {
+		kind := chatStream
+		if responses {
+			kind = responsesStream
+		}
+		assert.True(t, mayBeTerminal(kind, payload) || !isTerminalObject(kind, payload), "prefilter hid a terminal payload: %q", payload)
+	})
+}
+
 func TestGuardStreamCompletion_LargeEvents(t *testing.T) {
 	large := strings.Repeat("a", maxGuardLineBytes)
 	tests := []struct {
@@ -224,6 +290,49 @@ func TestClassifyStreamError_ProviderStreamFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, classifyStreamError(tt.ctx, tt.err))
+		})
+	}
+}
+
+func BenchmarkStreamCompletionGuard(b *testing.B) {
+	var chat strings.Builder
+	for i := range 100 {
+		fmt.Fprintf(&chat, "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"token %d \"},\"finish_reason\":null}]}\n\n", i)
+	}
+	chat.WriteString("data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+
+	var responses strings.Builder
+	responses.WriteString("event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\"}}\n\n")
+	for i := range 100 {
+		fmt.Fprintf(&responses, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"token %d \"}\n\n", i)
+	}
+	responses.WriteString("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\"}}\n\n")
+
+	cases := []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "chat_100_chunks", path: "/v1/chat/completions", body: chat.String()},
+		{name: "responses_100_deltas", path: "/v1/responses", body: responses.String()},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			buf := make([]byte, 32*1024)
+			b.SetBytes(int64(len(tc.body)))
+			b.ReportAllocs()
+			for b.Loop() {
+				guarded := guardStreamCompletion(tc.path, io.NopCloser(strings.NewReader(tc.body)))
+				for {
+					_, err := guarded.Read(buf)
+					if err == io.EOF {
+						break
+					}
+					if err != nil {
+						b.Fatalf("read guarded stream: %v", err)
+					}
+				}
+			}
 		})
 	}
 }

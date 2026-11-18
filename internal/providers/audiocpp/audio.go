@@ -22,7 +22,8 @@ import (
 //
 // The "voice" a caller sends names an audio.cpp voice preset, cached voice id,
 // or voice-library wav rather than an OpenAI voice, since audio.cpp has no
-// fixed voice set.
+// fixed voice set. audio.cpp takes only a string voice, so an OpenAI
+// custom-voice object ({"id": ...}) is sent as its id.
 //
 // The one field that does not travel is a voice_ref naming a server-side path:
 // see serverPathVoiceRefError.
@@ -47,7 +48,7 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechReques
 		Method:   http.MethodPost,
 		Endpoint: "/v1/audio/speech",
 		Model:    req.Model,
-		Body:     req,
+		Body:     req.WithStringVoice(),
 	})
 	if err != nil {
 		return nil, err

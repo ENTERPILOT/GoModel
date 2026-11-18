@@ -21,11 +21,11 @@ type StorageConfig struct {
 	// accepted; 32 random bytes in base64 (openssl rand -base64 32) is
 	// recommended. Losing it makes those secrets unrecoverable.
 	// Default: empty (secrets are stored in plaintext).
-	EncryptionKey string `yaml:"encryption_key" env:"GOMODEL_ENCRYPTION_KEY"`
+	EncryptionKey string `yaml:"encryption_key" env:"GOMODEL_ENCRYPTION_KEY" export:"secret"`
 
 	// EncryptionKeyPrevious is the old EncryptionKey during a key rotation.
 	// It is only used at startup to re-wrap the data key with EncryptionKey.
-	EncryptionKeyPrevious string `yaml:"encryption_key_previous" env:"GOMODEL_ENCRYPTION_KEY_PREVIOUS"`
+	EncryptionKeyPrevious string `yaml:"encryption_key_previous" env:"GOMODEL_ENCRYPTION_KEY_PREVIOUS" export:"secret"`
 }
 
 // SQLiteStorageConfig holds SQLite-specific storage configuration
@@ -39,7 +39,7 @@ type SQLiteStorageConfig struct {
 // PostgreSQLStorageConfig holds PostgreSQL-specific storage configuration
 type PostgreSQLStorageConfig struct {
 	// URL is the connection string (e.g., postgres://user:pass@localhost/dbname)
-	URL string `yaml:"url" env:"POSTGRES_URL"`
+	URL string `yaml:"url" env:"POSTGRES_URL" export:"url"`
 	// MaxConns is the maximum connection pool size (default: 10)
 	MaxConns int `yaml:"max_conns" env:"POSTGRES_MAX_CONNS"`
 }
@@ -48,7 +48,7 @@ type PostgreSQLStorageConfig struct {
 type MongoDBStorageConfig struct {
 	// URL is the connection string; a database named in its path is honored
 	// (e.g., mongodb://localhost:27017/gomodel)
-	URL string `yaml:"url" env:"MONGODB_URL"`
+	URL string `yaml:"url" env:"MONGODB_URL" export:"url"`
 	// Database overrides the database named in the URL (default: gomodel)
 	Database string `yaml:"database" env:"MONGODB_DATABASE"`
 }

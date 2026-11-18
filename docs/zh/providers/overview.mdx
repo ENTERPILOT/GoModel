@@ -57,7 +57,7 @@ GoModel 通过一个网关将兼容 OpenAI 的请求路由到众多 AI 提供商
 | vLLM | `VLLM_BASE_URL`（`VLLM_API_KEY` 可选） | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [vLLM](/zh/providers/vllm) |
 | llama.cpp / LM Studio | `LLAMACPP_BASE_URL`（`LLAMACPP_API_KEY` 可选） | `gemma-3-4b-it` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llama.cpp](/zh/providers/llamacpp) |
 | llm-d | `LLMD_BASE_URL`（`LLMD_API_KEY` 可选） | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llm-d](/zh/providers/llmd) |
-| Amazon Bedrock | `BEDROCK_BASE_URL`（区域或端点）+ AWS 凭据 | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/zh/providers/bedrock) |
+| Amazon Bedrock | `BEDROCK_BASE_URL`（区域或端点）+ `BEDROCK_API_KEY` 或 AWS 凭据 | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/zh/providers/bedrock) |
 | Amazon Bedrock Mantle | `BEDROCK_MANTLE_API_KEY` 或 AWS 凭据 | `openai.gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Bedrock Mantle](/zh/providers/bedrock-mantle) |
 
 ✅ 支持 ❌ 不支持
@@ -110,7 +110,7 @@ GoModel 通过一个网关将兼容 OpenAI 的请求路由到众多 AI 提供商
 以下是大多数用户在配置时容易遇到问题的提供商：
 
 - **Google Vertex AI**：需要一个 GCP 项目、区域，以及应用默认凭据或服务账号 JSON 密钥。
-- **Amazon Bedrock**：没有自己的 API 密钥；使用 AWS 凭据链，并且需要在 Bedrock 控制台中显式开通模型访问权限。
+- **Amazon Bedrock**：使用 Bedrock API 密钥或 AWS 凭据链，并且需要在 Bedrock 控制台中显式开通模型访问权限。
 - **Azure OpenAI**：基于部署或 `/openai/v1` 的 Base URL、`api-version` 查询参数，以及使用 `api-key` 请求头而不是 `Authorization: Bearer`。
 - **Oracle GenAI**：需要针对 `generativeaiapikey` 的 OCI IAM 策略，以及特定区域的兼容 OpenAI 端点 URL。
 - **Google Gemini（AI Studio）**：两种路由模式（原生 `generateContent` 与兼容 OpenAI），图片输入行为各不相同。

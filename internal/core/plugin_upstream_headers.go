@@ -52,9 +52,11 @@ var pluginUpstreamReservedHeaders = map[string]struct{}{
 // IsPluginUpstreamHeaderDenied reports whether a plugin may not add the header
 // to a provider call through Exchange.Headers.Upstream: it carries a
 // credential, it controls the transport or the body encoding, or the provider
-// or the gateway owns it. Matching is case-insensitive.
+// or the gateway owns it. Matching is case-insensitive and reads "_" as "-",
+// like IsCredentialHeader: a proxy that folds Content_Type into Content-Type
+// would otherwise receive a header the gateway owns.
 func IsPluginUpstreamHeaderDenied(name string) bool {
-	canonical := http.CanonicalHeaderKey(strings.TrimSpace(name))
+	canonical := http.CanonicalHeaderKey(strings.ReplaceAll(strings.TrimSpace(name), "_", "-"))
 	if _, denied := pluginUpstreamTransportHeaders[canonical]; denied {
 		return true
 	}
