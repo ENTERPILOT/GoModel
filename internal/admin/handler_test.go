@@ -1100,7 +1100,7 @@ func TestRequestLogDetail_NotFound(t *testing.T) {
 
 func TestRequestLogDetail_PropagatesReaderError(t *testing.T) {
 	h := NewHandler(nil, nil, WithRequestLogReader(&mockRequestLogReader{
-		logByIDErr: core.NewProviderError("audit", http.StatusServiceUnavailable, "request log reader unavailable", nil),
+		logByIDErr: core.NewProviderError("request-log", http.StatusServiceUnavailable, "request log reader unavailable", nil),
 	}))
 	c, rec := echotest.Get(t, "/admin/request-logs/detail?log_id=log-1")
 	require.NoError(t, h.RequestLogDetail(c))

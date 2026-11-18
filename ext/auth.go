@@ -29,7 +29,8 @@ type Authentication struct {
 	UserPath        string
 	Labels          []string
 	DashboardAccess bool
-	// Method is a short, stable request log identifier such as "oidc" or "saml".
+	// Method is a short, stable identifier recorded in the request log, such as
+	// "oidc" or "saml".
 	// Core normalizes safe identifiers and records "extension" when it is empty
 	// or invalid.
 	Method string
@@ -45,8 +46,9 @@ type RequestAuthenticator interface {
 }
 
 // AuthenticationEvent is a security event emitted by an extension
-// authentication flow, which Core records in its request log. Reason must be a short, stable machine identifier; it
-// must not contain provider responses, tokens, claims, or other secrets.
+// authentication flow, which Core records in its request log. Reason must be
+// a short, stable machine identifier; it must not contain provider responses,
+// tokens, claims, or other secrets.
 type AuthenticationEvent struct {
 	Timestamp   time.Time
 	Type        string

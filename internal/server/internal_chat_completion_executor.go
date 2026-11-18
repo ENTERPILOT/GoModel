@@ -52,7 +52,7 @@ type InternalChatCompletionExecutor struct {
 }
 
 // NewInternalChatCompletionExecutor creates a transport-free translated chat
-// executor that reuses workflow resolution, failover, usage, and request logic.
+// executor that reuses workflow resolution, failover, usage, and request logging.
 func NewInternalChatCompletionExecutor(provider core.RoutableProvider, cfg InternalChatCompletionExecutorConfig) *InternalChatCompletionExecutor {
 	inference := gateway.InferenceConfig{
 		Provider:                 provider,

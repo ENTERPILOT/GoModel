@@ -46,7 +46,7 @@ type GatewayError struct {
 	// Original error for debugging (not exposed to clients)
 	Err error `json:"-"`
 	// ResponseBody and ResponseHeaders carry the raw upstream error response so
-	// failed provider attempts can be logged. Never serialized to API clients.
+	// failed provider attempts can be recorded in the request log. Never serialized to API clients.
 	ResponseBody    []byte      `json:"-"`
 	ResponseHeaders http.Header `json:"-"`
 }

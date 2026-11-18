@@ -149,7 +149,7 @@ func IsResponseBodyCapturedByHandler(c interface{ Get(string) any }) bool {
 	return captured
 }
 
-// EnrichEntryWithResponseBody sets the request log response body from a handler that
+// EnrichEntryWithResponseBody sets the logged response body from a handler that
 // captures its own response payload (e.g. audio output served as raw bytes).
 // A nil body or missing entry is a no-op.
 func EnrichEntryWithResponseBody(c *echo.Context, body any) {
@@ -273,7 +273,7 @@ func EnrichEntryWithAttempts(c *echo.Context, attempts []AttemptSnapshot) {
 }
 
 // gateAttemptCaptureFromContext strips per-attempt response bodies/headers that
-// the request's request log config did not opt into. When the config cannot be
+// the request's logging config did not opt into. When the config cannot be
 // resolved, opt-in-only captures are dropped rather than persisted.
 func gateAttemptCaptureFromContext(c *echo.Context, attempts []AttemptSnapshot) []AttemptSnapshot {
 	if c == nil || len(attempts) == 0 {
@@ -317,7 +317,7 @@ func EnrichEntryWithCacheType(c *echo.Context, cacheType string) {
 	publishLiveRequestLogUpdate(c, entry)
 }
 
-// NormalizeAuthMethod returns a bounded lowercase request log identifier. Extension
+// NormalizeAuthMethod returns a bounded lowercase auth method identifier. Extension
 // methods are intentionally opaque to Core; restricting their alphabet keeps
 // persisted values safe for logs, filters, and metrics without enumerating
 // provider-specific mechanisms.
@@ -415,7 +415,7 @@ func EnrichEntryWithError(c *echo.Context, errorType, errorMessage string, error
 	publishLiveRequestLogUpdate(c, entry)
 }
 
-// HasRecordedError reports whether the request's request log entry already carries an
+// HasRecordedError reports whether the request's log entry already carries an
 // error. Late failure paths consult it so a generic follow-up error cannot
 // replace the original cause on the request log row.
 func HasRecordedError(c *echo.Context) bool {

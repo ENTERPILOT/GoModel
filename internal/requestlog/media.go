@@ -34,7 +34,7 @@ func NewMediaCapturer(store *mediastore.Service, retentionDays int) *MediaCaptur
 	return &MediaCapturer{store: store, ttl: ttl}
 }
 
-// For binds the capturer to one request's request log entry, or returns nil when
+// For binds the capturer to one request's log entry, or returns nil when
 // the request has no live entry (request logging inactive) so there is nothing
 // a stored object could be referenced from.
 func (m *MediaCapturer) For(c *echo.Context) *MediaCapture {

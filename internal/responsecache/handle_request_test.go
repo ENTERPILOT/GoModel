@@ -780,7 +780,7 @@ func TestHandleRequest_StreamingExactHitWritesSyntheticUsageEntry(t *testing.T) 
 	require.Equal(t, "chatcmpl-cache-hit", entry.ProviderID)
 }
 
-func TestHandleRequest_StreamingExactHitRequestLogsCachedResponseBody(t *testing.T) {
+func TestHandleRequest_StreamingExactHitLogsCachedResponseBody(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()
 

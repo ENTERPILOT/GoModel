@@ -187,7 +187,7 @@ func TestSystemOne_CacheKeyCoversTheState(t *testing.T) {
 
 // When the primary fails with an availability error, the request moves to
 // the virtual model's next target in its own dialect. A target without the
-// System One API is skipped rather than called, and usage and request log carry the
+// System One API is skipped rather than called, and usage and the request log carry the
 // model that answered.
 func TestSystemOne_FailsOverToTheNextSystemOneTarget(t *testing.T) {
 	provider := newScriptedSystemOneProvider(map[string]string{

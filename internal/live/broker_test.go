@@ -298,7 +298,7 @@ func TestBrokerSignalsResetWhenCursorFallsOutOfReplayWindow(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 1, ReplayLimit: 1})
 	for range 3 {
 		b.PublishRequestLogEvent(EventRequestLogStarted, &requestlog.LogEntry{
-			ID:        "audit",
+			ID:        "request-log",
 			RequestID: "req",
 			Timestamp: time.Now(),
 		})
@@ -365,7 +365,7 @@ func TestBrokerDropsSlowSubscribers(t *testing.T) {
 
 	for range 4 {
 		b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
-			ID:        "audit",
+			ID:        "request-log",
 			RequestID: "req",
 			Timestamp: time.Now(),
 		})

@@ -21,7 +21,7 @@ func startPendingRequestRevisions(compute func() []RequestRevisionSnapshot) *pen
 		defer close(pending.done)
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Error("request log revisions panicked", "panic", r)
+				slog.Error("requestlog: request revisions panicked", "panic", r)
 			}
 		}()
 		pending.revisions = compute()

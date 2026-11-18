@@ -325,19 +325,19 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	// Global middleware stack (order matters)
-	// Scrub credential-like query values before the outer request logger
+	// Scrub credential-like query values before the outer access logger
 	// snapshots RequestURI. URL.RawQuery remains intact for handlers.
 	e.Use(redactSensitiveRequestURI())
 	e.Use(middleware.Recover())
 	// Outer extension middleware covers the complete HTTP request while still
-	// seeing the credential-redacted URI. It runs before request logging,
+	// seeing the credential-redacted URI. It runs before access logging,
 	// limits, request logging, and auth, so it must not depend on identity.
 	if cfg != nil {
 		for _, m := range cfg.OuterMiddleware {
 			e.Use(m)
 		}
 	}
-	// Request logger with optional filtering for model-only interactions
+	// Access logger (Echo's RequestLogger) with optional filtering for model-only interactions
 	if cfg != nil && cfg.LogOnlyModelInteractions {
 		e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
 			Skipper: func(c *echo.Context) bool {

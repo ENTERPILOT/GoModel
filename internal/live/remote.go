@@ -132,7 +132,7 @@ func newRemoteFeed(b *Broker, cfg RemoteConfig) *remoteFeed {
 		timeout:        remotePollTimeout,
 		now:            time.Now,
 		newTicker:      realTicker,
-		requestLogSeen: remoteSeen{table: "audit"},
+		requestLogSeen: remoteSeen{table: "request log"},
 		usageSeen:      remoteSeen{table: "usage"},
 	}
 }

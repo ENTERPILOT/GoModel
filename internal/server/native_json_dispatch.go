@@ -137,7 +137,7 @@ func nativeJSONResult(providerType string, resp *core.PassthroughResponse, err e
 }
 
 // executedNativeWorkflow returns a copy of workflow routed to the failover
-// target that answered, so usage is priced and logged under the model that
+// target that answered, so usage is priced and the request is logged under the model that
 // did the work rather than the primary that failed.
 func executedNativeWorkflow(workflow *core.Workflow, executed core.ModelSelector, meta gateway.ExecutionMeta) *core.Workflow {
 	if workflow == nil || workflow.Resolution == nil {

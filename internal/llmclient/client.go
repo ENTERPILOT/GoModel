@@ -235,8 +235,8 @@ type Response struct {
 	// ContentType is the upstream response Content-Type header, preserved so
 	// callers can describe the bytes actually returned (e.g. audio formats).
 	ContentType string
-	// Header carries the upstream response headers. It is used to log failed
-	// provider attempts; it is not relayed to API clients.
+	// Header carries the upstream response headers. It is used to record failed
+	// provider attempts in the request log; it is not relayed to API clients.
 	Header http.Header
 	Body   []byte
 	// Stream is the live upstream body of a streaming response (DoStreamResponse),

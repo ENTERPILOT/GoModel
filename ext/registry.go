@@ -75,7 +75,7 @@ func (r *Registry) HasCapability(capability Capability) bool {
 }
 
 // UseOuterMiddleware adds middleware at the outer HTTP boundary, after
-// credential-like request URI values are redacted and before request logging,
+// credential-like request URI values are redacted and before access logging,
 // recovery, limits, request log capture, and authentication. It is intended for
 // observability and correlation middleware that must cover the whole request.
 // It must not depend on an authenticated identity.

@@ -118,7 +118,7 @@ func mcpRequestLogLabel(body []byte, resolveTool func(name, target string) strin
 }
 
 // mcpResponseCapture tees an MCP POST response so its SSE-framed JSON-RPC
-// reply can be request-logged. The middleware's own capture deliberately skips
+// reply can be recorded in the request log. The middleware's own capture deliberately skips
 // text/event-stream (chat streams belong to the stream observer), so without
 // this tee MCP responses would never reach the request log entry. Capture is capped
 // at the request log body limit; overflow only sets the truncation flag.
