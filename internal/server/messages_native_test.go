@@ -1,9 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -11,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/ext"
+	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -141,9 +145,61 @@ func TestMessages_NativeNonStreamingBodyErrorSkipsUsage(t *testing.T) {
 
 	reqBody := `{"model":"claude-fable-5","max_tokens":64,"messages":[{"role":"user","content":"Hi"}]}`
 	c, _ := echotest.Post(t, "/v1/messages", reqBody)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
 
-	require.Error(t, handler.Messages(c))
+	// The response has started, so the failure is recorded on the audit entry
+	// before the handler returns rather than returned as an error.
+	require.NoError(t, handler.Messages(c))
 	require.Empty(t, usageLogger.entries)
+	assert.Equal(t, "stream_error", entry.ErrorType)
+	assert.Equal(t, io.ErrUnexpectedEOF.Error(), entry.Data.ErrorMessage)
+}
+
+// The same failure through the real server is logged once as a broken relay
+// and not as a gateway 500, under both request loggers.
+func TestMessages_NativeNonStreamingBodyErrorIsNotLoggedAsServerError(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+	}{
+		{name: "model interaction request logger", cfg: &Config{LogOnlyModelInteractions: true}},
+		{name: "default request logger"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			original := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			t.Cleanup(func() { slog.SetDefault(original) })
+
+			provider := &mockProvider{
+				supportedModels: []string{"claude-fable-5"},
+				providerTypes:   map[string]string{"claude-fable-5": "anthropic"},
+				passthroughResponse: &core.PassthroughResponse{
+					StatusCode: http.StatusOK,
+					Headers:    map[string][]string{"Content-Type": {"application/json"}},
+					Body: io.NopCloser(io.MultiReader(
+						strings.NewReader(anthropicNonStreamingJSON[:40]),
+						&failingReader{},
+					)),
+				},
+			}
+			srv := New(provider, tc.cfg)
+
+			reqBody := `{"model":"claude-fable-5","max_tokens":64,"messages":[{"role":"user","content":"Hi"}]}`
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Equal(t, anthropicNonStreamingJSON[:40], rec.Body.String())
+			assert.Equal(t, 1, strings.Count(logs.String(), `"msg":"response terminated abnormally"`), logs.String())
+			assert.Contains(t, logs.String(), `"error_type":"stream_error"`)
+			assert.NotContains(t, logs.String(), `"msg":"request failed"`)
+		})
+	}
 }
 
 type failingReader struct{}

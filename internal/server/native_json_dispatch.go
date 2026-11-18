@@ -49,7 +49,7 @@ func (s *translatedInferenceService) dispatchNativeJSONWithCache(c *echo.Context
 	c.SetRequest(c.Request().WithContext(s.inference().WithCacheRequestContext(c.Request().Context(), workflow)))
 	err := s.responseCache.HandleRequest(c, body, dispatch)
 	if replayErr, ok := errors.AsType[*responsecache.ReplayError](err); ok {
-		recordCachedStreamError(c, replayErr.Err)
+		recordStreamFailure(c, nil, "cached stream terminated abnormally", replayErr.Err)
 		return nil
 	}
 	return err
