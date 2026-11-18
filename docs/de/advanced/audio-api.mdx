@@ -113,6 +113,12 @@ seine `id` als Stimme. Ein Objekt ohne `id` als String mit sichtbaren Zeichen li
 Ein kompatibler Provider ohne Unterstützung für eigene Stimmen kann das Objekt
 ablehnen.
 
+OpenAI akzeptiert eine eigene Stimme nur in der Objektform. Für OpenAI
+(`api.openai.com` und regionale Hosts) sendet GoModel deshalb einen String,
+der mit `voice_` beginnt, als `{"id": "voice_…"}`. So funktioniert eine `id`
+aus [Stimmen abfragen](/de/advanced/api-endpoints#stimmen-abfragen) auch als
+einfacher String.
+
 Synthetisiertes Audio wird **so weitergereicht, wie der Provider es erzeugt** –
 siehe [Streaming](/de/advanced/audio-api#streaming).
 

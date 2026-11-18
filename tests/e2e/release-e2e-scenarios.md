@@ -8797,10 +8797,11 @@ jq -e '(.choices[0].message.reasoning_content // "") == "" and (.choices[0].mess
 
 ### S270 Voice listing on OpenAI returns the built-in voices
 
-Checks `GET /v1/audio/voices`: OpenAI has no voice-listing route, so the
-gateway answers for an OpenAI model from its static list of built-in voices,
-normalized to `id` and `name`. A request without `model` is rejected before any
-provider is asked.
+Checks `GET /v1/audio/voices`: OpenAI's own listing covers custom voices only,
+so the gateway answers for an OpenAI model from its static list of built-in
+voices, followed by the organization's custom voices (ids starting with
+`voice_`, none in most accounts), normalized to `id` and `name`. A request
+without `model` is rejected before any provider is asked.
 
 ```bash
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s270.headers.XXXXXX")
@@ -8809,12 +8810,12 @@ curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices?model=gpt
 sed -n '1,20p' "$HEADERS_FILE"
 jq '.' "$BODY_FILE"
 grep -Eiq '^HTTP/.* 200 ' "$HEADERS_FILE"
-jq -e 'all(.voices[]; (.name | type == "string" and length > 0)) and ([.voices[].id] | sort) == (["alloy","ash","ballad","coral","echo","fable","nova","onyx","sage","shimmer","verse","marin","cedar"] | sort)' "$BODY_FILE" >/dev/null
+jq -e 'all(.voices[]; (.name | type == "string" and length > 0)) and ([.voices[:13][].id] | sort) == (["alloy","ash","ballad","coral","echo","fable","nova","onyx","sage","shimmer","verse","marin","cedar"] | sort) and all(.voices[13:][]; .id | startswith("voice_"))' "$BODY_FILE" >/dev/null
 
 # The tts-1 family supports a smaller set.
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices?model=tts-1"
 grep -Eiq '^HTTP/.* 200 ' "$HEADERS_FILE"
-jq -e '([.voices[].id] | sort) == (["alloy","ash","coral","echo","fable","nova","onyx","sage","shimmer"] | sort)' "$BODY_FILE" >/dev/null
+jq -e '([.voices[:9][].id] | sort) == (["alloy","ash","coral","echo","fable","nova","onyx","sage","shimmer"] | sort) and all(.voices[9:][]; .id | startswith("voice_"))' "$BODY_FILE" >/dev/null
 
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
