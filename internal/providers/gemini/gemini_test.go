@@ -1034,6 +1034,21 @@ func TestChatCompletion_NativeUsageMetadata(t *testing.T) {
 	assert.Equal(t, 7, resp.Usage.RawUsage["completion_reasoning_tokens"])
 }
 
+func TestUsageFromGeminiCountsToolUsePromptTokens(t *testing.T) {
+	usage := usageFromGemini(geminiUsageMetadata{
+		PromptTokenCount:        100,
+		CandidatesTokenCount:    20,
+		ThoughtsTokenCount:      7,
+		ToolUsePromptTokenCount: 30,
+		TotalTokenCount:         157,
+	})
+
+	assert.Equal(t, 130, usage.PromptTokens)
+	assert.Equal(t, 27, usage.CompletionTokens)
+	assert.Equal(t, 157, usage.TotalTokens)
+	assert.Equal(t, 30, usage.RawUsage["tool_use_prompt_token_count"])
+}
+
 func TestCopyJSONNumberAcceptsOnlyNumericValues(t *testing.T) {
 	tests := []struct {
 		name    string

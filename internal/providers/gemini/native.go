@@ -1353,7 +1353,10 @@ func openAIMessageFromGeminiParts(parts []geminiPart, ids *toolCallIDs, supplied
 func usageFromGemini(usage geminiUsageMetadata) core.Usage {
 	completionTokens := usage.CandidatesTokenCount + usage.ThoughtsTokenCount
 	out := core.Usage{
-		PromptTokens:     usage.PromptTokenCount,
+		// Tokens fed back by built-in tools (search, url_context, code
+		// execution) are billed as input and counted in totalTokenCount, but
+		// reported apart from promptTokenCount.
+		PromptTokens:     usage.PromptTokenCount + usage.ToolUsePromptTokenCount,
 		CompletionTokens: completionTokens,
 		TotalTokens:      usage.TotalTokenCount,
 	}
