@@ -51,7 +51,8 @@ type peerView struct {
 	fullAt   time.Time
 }
 
-// merge folds a load into the cache. A full load replaces it.
+// merge folds a load into the cache. A full load replaces it. Loads already
+// leave out self's rows; any that reach it are skipped all the same.
 func (v *peerView) merge(rows []WindowSnapshot, self string, full bool) {
 	if full || v.rows == nil {
 		v.rows = make(map[rowIdentity]WindowSnapshot, len(rows))
@@ -226,7 +227,7 @@ func (s *Service) loadPeers(ctx context.Context) error {
 	// The read runs outside persistMu, so a slow store never holds up a
 	// Refresh. installPeers sums under the rules in force when it runs.
 	loadCtx, cancel := persistContext(ctx)
-	rows, err := s.store.LoadCounters(loadCtx, since)
+	rows, err := s.store.LoadCounters(loadCtx, since, s.writer)
 	cancel()
 	if err != nil {
 		// Sum the cached rows again anyway: an in-flight row only counts
