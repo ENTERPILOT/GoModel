@@ -118,6 +118,11 @@ type CredentialStore interface {
 // mcpgateway.Service. Declarative names are read-only here (shadowed),
 // mirroring every other config-store precedence rule in the gateway.
 type CredentialsService struct {
+	// lifetime is the context the service was created with. Background work
+	// such as a model fetch after a refresh is bounded by it, not by the
+	// caller's, so a poll deadline cannot cut the fetch short while shutdown
+	// still ends it.
+	lifetime context.Context
 	factory  *ProviderFactory
 	registry *ModelRegistry
 	store    CredentialStore
@@ -197,6 +202,7 @@ func NewCredentialsService(ctx context.Context, factory *ProviderFactory, regist
 	}
 
 	s := &CredentialsService{
+		lifetime:     ctx,
 		factory:      factory,
 		registry:     registry,
 		store:        store,
@@ -258,16 +264,18 @@ func (s *CredentialsService) Reload(ctx context.Context) error {
 // gateway instance sharing the database may have changed: it installs new
 // and edited credentials, and unregisters deleted and disabled ones.
 // Unchanged credentials keep their running provider. The model inventory of
-// newly installed providers is fetched in the background, bounded by ctx,
-// even when a later pass fails: the next Refresh sees them as running and
-// would not fetch it again.
+// newly installed providers is fetched in the background, even when a later
+// pass fails: the next Refresh sees them as running and would not fetch it
+// again. The fetch is bounded by the service's lifetime and its own timeout
+// rather than by ctx, since a caller such as the cluster syncer bounds ctx by
+// its poll and the fetch can outlast that.
 func (s *CredentialsService) Refresh(ctx context.Context) error {
 	installed, err := s.reconcile(ctx)
 	if installed {
 		go func() {
-			refreshCtx, cancel := context.WithTimeout(ctx, credentialModelRefreshTimeout)
+			refreshCtx, cancel := context.WithTimeout(s.lifetime, credentialModelRefreshTimeout)
 			defer cancel()
-			if err := s.registry.Refresh(refreshCtx); err != nil && ctx.Err() == nil {
+			if err := s.registry.Refresh(refreshCtx); err != nil {
 				slog.Warn("provider credentials reconciled but the model catalog refresh failed", "error", err)
 			}
 		}()
@@ -278,6 +286,13 @@ func (s *CredentialsService) Refresh(ctx context.Context) error {
 // credentialModelRefreshTimeout bounds the background model fetch after a
 // Refresh, as InitializeAsync bounds the one at startup.
 const credentialModelRefreshTimeout = 60 * time.Second
+
+// credentialSaveRefreshTimeout bounds the model refresh inside a save
+// request. It must stay well under the inbound write timeout, so a slow
+// fetch degrades to a warn instead of dropping the response of an
+// already-persisted save. A var rather than a const so tests can shorten
+// it instead of waiting out the full budget.
+var credentialSaveRefreshTimeout = 20 * time.Second
 
 // reconcile applies the stored rows to the registry, reporting whether it
 // installed a provider. A credential that no longer builds keeps whatever is
@@ -452,6 +467,11 @@ func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCre
 		return &CredentialFieldError{Field: "type", Message: "unknown provider type: " + cred.Type}
 	}
 	cred.Name = name
+	// The refresh budget starts here rather than at the sweep, so time spent
+	// on persistence and notification shortens the sweep instead of adding to
+	// it. Persistence itself still runs on ctx and is not bounded by it.
+	refreshCtx, cancel := context.WithTimeout(ctx, credentialSaveRefreshTimeout)
+	defer cancel()
 	// ErrSealUnconfirmed means the row was written and applied: refresh like
 	// any other save, then report the error.
 	saveErr := s.apply(ctx, cred)
@@ -465,7 +485,13 @@ func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCre
 	// of silently vanishing. That is not a save failure: an admin fixing a
 	// typo'd API key should see "saved", not a scary error on every attempt
 	// until the key happens to be valid.
-	if err := s.registry.Refresh(ctx); err != nil {
+	//
+	// The sweep is bounded by credentialSaveRefreshTimeout: unbounded, it
+	// waits on every provider's upstream, so one unreachable base_url would
+	// delay every save by the slowest provider's timeout x retries and, past
+	// the inbound write timeout, silently drop the response of an
+	// already-persisted save.
+	if err := s.registry.Refresh(refreshCtx); err != nil {
 		slog.Warn("provider credential saved but its model catalog refresh failed", "provider", name, "error", err)
 	}
 	return saveErr
@@ -478,13 +504,18 @@ func (s *CredentialsService) Delete(ctx context.Context, name string) error {
 	if s.IsManaged(name) {
 		return fmt.Errorf("provider %q is managed by config/env and is read-only", name)
 	}
+	// The refresh budget starts before persistence, as in Upsert.
+	refreshCtx, cancel := context.WithTimeout(ctx, credentialSaveRefreshTimeout)
+	defer cancel()
 	if err := s.deleteStored(ctx, name); err != nil {
 		return err
 	}
 	s.notifyChanged(ctx)
 	// See the matching comment in Upsert: a Refresh failure here reflects a
-	// remaining provider's own health, not whether the delete succeeded.
-	if err := s.registry.Refresh(ctx); err != nil {
+	// remaining provider's own health, not whether the delete succeeded. The
+	// sweep is bounded the same way, so a slow upstream cannot delay the
+	// delete response past the inbound write timeout and drop it.
+	if err := s.registry.Refresh(refreshCtx); err != nil {
 		slog.Warn("provider credential deleted but the model catalog refresh failed", "provider", name, "error", err)
 	}
 	return nil
@@ -729,6 +760,7 @@ func (s *CredentialsService) providerConfig(stored, resolved ManagedProviderCred
 	}
 	cfg := buildProviderConfig(rawCfg, s.resilience)
 	cfg.Name = name
+	cfg.Managed = true
 	return cfg, nil
 }
 

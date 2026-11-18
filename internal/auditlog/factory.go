@@ -2,7 +2,6 @@ package auditlog
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -22,14 +21,10 @@ type Result struct {
 // Close releases all resources held by the audit logger.
 // Safe to call multiple times.
 func (r *Result) Close() error {
-	var errs []error
 	if r.Logger != nil {
 		if err := r.Logger.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("logger close: %w", err))
+			return fmt.Errorf("logger close: %w", err)
 		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("close errors: %w", errors.Join(errs...))
 	}
 	return nil
 }

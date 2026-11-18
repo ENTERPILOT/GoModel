@@ -25,6 +25,10 @@ type Options struct {
 	// PreviousWrappers unwrap data keys held by wrappers Wrapper replaces,
 	// so they can be re-wrapped with it.
 	PreviousWrappers []Wrapper
+	// ReadOnly opens the data keys without writing to the store, for a
+	// command that only reads secrets: no first data key is created, and a
+	// data key wrapped by an older KEK is not re-wrapped.
+	ReadOnly bool
 }
 
 func (o Options) current() kek {
@@ -63,7 +67,8 @@ func (o Options) fallbacks() []kek {
 // error. With a KEK and no data key yet, it creates the first one. A data key
 // wrapped by an older KEK (GOMODEL_ENCRYPTION_KEY_PREVIOUS, or the local KEK
 // when an extension wrapper is now configured) is re-wrapped with the current
-// one.
+// one. Options.ReadOnly skips both writes; with no data key, the Box is then
+// disabled, as there is no sealed value to open.
 func Open(ctx context.Context, store KeyStore, opts Options) (*Box, error) {
 	current := opts.current()
 	keys, err := store.List(ctx)
@@ -78,6 +83,9 @@ func Open(ctx context.Context, store KeyStore, opts Options) (*Box, error) {
 		return Disabled(), nil
 	}
 	if len(keys) == 0 {
+		if opts.ReadOnly {
+			return Disabled(), nil
+		}
 		if keys, err = createFirstKey(ctx, store, current); err != nil {
 			return nil, err
 		}
@@ -85,7 +93,7 @@ func Open(ctx context.Context, store KeyStore, opts Options) (*Box, error) {
 
 	deks := make(map[string][]byte, len(keys))
 	for _, key := range keys {
-		dek, err := unwrapKey(ctx, store, key, current, opts.fallbacks())
+		dek, err := unwrapKey(ctx, store, key, current, opts.fallbacks(), !opts.ReadOnly)
 		if err != nil {
 			return nil, err
 		}
@@ -183,7 +191,9 @@ func newWrappedKey(ctx context.Context, current kek, id string) (Key, error) {
 
 // unwrapKey unwraps one data key with the first KEK that can, and re-wraps it
 // with the current KEK when another one succeeded.
-func unwrapKey(ctx context.Context, store KeyStore, key Key, current kek, fallbacks []kek) ([]byte, error) {
+// unwrapKey unwraps key with current or a fallback, re-wrapping it with
+// current when a fallback unwrapped it and writeBack is set.
+func unwrapKey(ctx context.Context, store KeyStore, key Key, current kek, fallbacks []kek, writeBack bool) ([]byte, error) {
 	// Index 0 is the current KEK. Indexes rather than interface comparison:
 	// an extension's wrapper type need not be comparable.
 	all := append([]kek{current}, fallbacks...)
@@ -199,7 +209,7 @@ func unwrapKey(ctx context.Context, store KeyStore, key Key, current kek, fallba
 			lastErr = err
 			continue
 		}
-		if i != 0 {
+		if i != 0 && writeBack {
 			if err := rewrap(ctx, store, key, current, dek); err != nil {
 				return nil, err
 			}

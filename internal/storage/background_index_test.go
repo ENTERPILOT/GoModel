@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
@@ -121,6 +123,50 @@ func TestBackgroundIndexBuilderWaitsForLockHolder(t *testing.T) {
 	exists, valid = indexState(t, pool)
 	assert.True(t, exists)
 	assert.True(t, valid)
+}
+
+// WithLock waits for the session holding the lock, then runs on its own
+// session while that one holds it, and returns it afterwards.
+func TestBackgroundIndexBuilderWithLockWaitsForLockHolder(t *testing.T) {
+	pool := newBackgroundIndexPool(t)
+	if pool == nil {
+		return
+	}
+	release := holdLock(t, pool)
+	var released atomic.Bool
+	time.AfterFunc(200*time.Millisecond, func() {
+		released.Store(true)
+		release()
+	})
+
+	builder := BackgroundIndexBuilder{Pool: pool, LockKey: testIndexLockKey}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := builder.WithLock(ctx, func(db sqlx.DB) error {
+		assert.True(t, released.Load(), "ran while another session held the lock")
+		var held int
+		err := db.QueryRow(ctx, `SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid = pg_backend_pid()`).Scan(&held)
+		assert.Equal(t, 1, held, "the session running the change holds the lock")
+		return err
+	})
+	require.NoError(t, err)
+	assert.True(t, builder.TryBuild(ctx, testIndex), "the lock is returned")
+}
+
+func TestBackgroundIndexBuilderWithLockEndsWithItsContext(t *testing.T) {
+	pool := newBackgroundIndexPool(t)
+	if pool == nil {
+		return
+	}
+	holdLock(t, pool)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	err := BackgroundIndexBuilder{Pool: pool, LockKey: testIndexLockKey}.WithLock(ctx, func(sqlx.DB) error {
+		assert.Fail(t, "ran while another session held the lock")
+		return nil
+	})
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestBackgroundIndexBuilderRetriesUntilBuilt(t *testing.T) {

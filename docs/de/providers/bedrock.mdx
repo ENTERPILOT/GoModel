@@ -11,9 +11,10 @@ Bedrock Runtime und normalisiert die Responses über alle Modellfamilien
 hinweg (Anthropic, Amazon Nova, Meta Llama, Mistral, Cohere, AI21 und weitere)
 in OpenAI-kompatible Chat Completions.
 
-Bedrock hat keinen eigenen API-Key – GoModel ermittelt AWS-Zugangsdaten zur
-Laufzeit über die Standard-Credential-Chain von AWS (Umgebung, `AWS_PROFILE`,
-IAM Identity Center, Instanz- und Container-Rollen).
+Authentifizieren Sie sich mit einem Amazon-Bedrock-API-Key oder mit
+AWS-Zugangsdaten, die GoModel zur Laufzeit über die Standard-Credential-Chain
+von AWS ermittelt (Umgebung, `AWS_PROFILE`, IAM Identity Center, Instanz- und
+Container-Rollen).
 
 ## Konfigurieren
 
@@ -28,6 +29,19 @@ GOMODEL_MASTER_KEY=change-me
 Bevorzugen Sie im Produktivbetrieb Instanzrollen, IRSA oder IAM Identity
 Center gegenüber langlebigen Access Keys. Ist `BEDROCK_BASE_URL` leer, greift
 GoModel auf `AWS_REGION` / `AWS_DEFAULT_REGION` zurück.
+
+So verwenden Sie statt AWS-Zugangsdaten einen Amazon-Bedrock-API-Key:
+
+```bash
+BEDROCK_BASE_URL=us-east-1
+BEDROCK_API_KEY=ABSK...
+```
+
+Ein konfigurierter Key hat Vorrang vor AWS-Zugangsdaten und vor
+`AWS_BEARER_TOKEN_BEDROCK`. Legen Sie im Dashboard einen Provider vom Typ
+`bedrock` an, setzen Sie **Region oder Endpunkt** und fügen Sie den Key unter
+**API-Schlüssel** ein. Leer gelassen, nutzt das Gateway `AWS_BEARER_TOKEN_BEDROCK`
+seines Hosts, falls gesetzt, und sonst die AWS-Credential-Chain des Hosts.
 
 ## GoModel starten
 

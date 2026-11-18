@@ -3,9 +3,11 @@ package server
 import (
 	"bytes"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-json"
+	"github.com/tidwall/gjson"
 
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
@@ -35,16 +37,10 @@ func withPreviousResponseID(stream io.ReadCloser, id string) io.ReadCloser {
 	return &chainedResponseStream{
 		upstream: stream,
 		id:       id,
-		scanner:  streaming.EventScanner{MaxEventBytes: chainedEventMaxBytes},
+		scanner:  streaming.EventScanner{MaxEventBytes: streaming.MaxObservedEventBytes},
 		buf:      make([]byte, 32*1024),
 	}
 }
-
-// chainedEventMaxBytes bounds the events held for rewriting, as transform
-// streams bound theirs: the terminal event repeats the whole output, so it
-// can far exceed the scanner's default. A larger event passes through
-// unnamed.
-const chainedEventMaxBytes = 4 * 1024 * 1024
 
 func (s *chainedResponseStream) Read(p []byte) (int, error) {
 	for len(s.out) == 0 {
@@ -71,26 +67,21 @@ func (s *chainedResponseStream) Close() error {
 	return s.upstream.Close()
 }
 
-// responseEventTypes are the quoted types of the events that carry the
-// response object. Matching the type value, not the member layout, keeps the
-// check independent of how the provider formats its JSON while text deltas
-// are never decoded.
-var responseEventTypes = [][]byte{
-	[]byte(`"response.created"`),
-	[]byte(`"response.in_progress"`),
-	[]byte(`"response.queued"`),
-	[]byte(`"response.completed"`),
-	[]byte(`"response.incomplete"`),
-	[]byte(`"response.failed"`),
+// responseEventTypes are the events that carry the response object.
+var responseEventTypes = []string{
+	"response.created",
+	"response.in_progress",
+	"response.queued",
+	"response.completed",
+	"response.incomplete",
+	"response.failed",
+	"response.done",
 }
 
+// carriesResponse reads only the payload's type member, so text deltas are
+// never decoded further.
 func carriesResponse(data []byte) bool {
-	for _, t := range responseEventTypes {
-		if bytes.Contains(data, t) {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(responseEventTypes, gjson.GetBytes(data, "type").Str)
 }
 
 // appendEvent appends ev to out, naming the predecessor on the response
@@ -107,16 +98,18 @@ func (s *chainedResponseStream) appendEvent(out []byte, ev streaming.RawEvent) [
 }
 
 // appendWithData appends the SSE block raw with its data lines replaced by
-// one line carrying data. Every other field (event, id, retry, comments)
-// stays in place, so reconnection metadata survives the rewrite.
+// data, one data line per line of it. Every other field (event, id, retry,
+// comments) stays in place, so reconnection metadata survives the rewrite.
 func appendWithData(out, raw, data []byte) []byte {
 	written := false
 	for line := range bytes.SplitSeq(bytes.TrimRight(raw, "\r\n"), []byte("\n")) {
 		if bytes.HasPrefix(line, []byte("data:")) {
 			if !written {
-				out = append(out, "data: "...)
-				out = append(out, data...)
-				out = append(out, '\n')
+				for part := range bytes.SplitSeq(data, []byte("\n")) {
+					out = append(out, "data: "...)
+					out = append(out, part...)
+					out = append(out, '\n')
+				}
 				written = true
 			}
 			continue
@@ -129,33 +122,41 @@ func appendWithData(out, raw, data []byte) []byte {
 
 // nameResponse returns the event payload with previous_response_id set on
 // its response object; ok is false when the payload carries none or it
-// already names a predecessor.
+// already names a predecessor. The id is spliced into the payload's bytes
+// rather than decoding and re-encoding it: a terminal event can carry
+// megabytes of generated image, and the rest of the payload is left as the
+// provider formatted it.
 func (s *chainedResponseStream) nameResponse(data []byte) ([]byte, bool) {
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(data, &payload); err != nil {
+	if !gjson.ValidBytes(data) {
 		return nil, false
 	}
-	var response map[string]json.RawMessage
-	if err := json.Unmarshal(payload["response"], &response); err != nil || response == nil {
+	response := gjson.GetBytes(data, "response")
+	if !response.IsObject() || response.Index == 0 {
 		return nil, false
 	}
-	var current string
-	if raw, ok := response["previous_response_id"]; ok && json.Unmarshal(raw, &current) == nil && current != "" {
+	current := gjson.Get(response.Raw, "previous_response_id")
+	if current.Type == gjson.String && current.Str != "" {
 		return nil, false
 	}
 	id, err := json.Marshal(s.id)
 	if err != nil {
 		return nil, false
 	}
-	response["previous_response_id"] = id
-	encodedResponse, err := json.Marshal(response)
-	if err != nil {
-		return nil, false
+	out := make([]byte, 0, len(data)+len(id)+len(`"previous_response_id":,`))
+	if current.Exists() && current.Index > 0 {
+		// A null or empty predecessor is replaced in place.
+		start := response.Index + current.Index
+		out = append(out, data[:start]...)
+		out = append(out, id...)
+		return append(out, data[start+len(current.Raw):]...), true
 	}
-	payload["response"] = encodedResponse
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return nil, false
+	// Otherwise the member goes right after the object's opening brace.
+	start := response.Index + 1
+	out = append(out, data[:start]...)
+	out = append(out, `"previous_response_id":`...)
+	out = append(out, id...)
+	if rest := strings.TrimLeft(response.Raw[1:], " \t\r\n"); rest != "" && rest[0] != '}' {
+		out = append(out, ',')
 	}
-	return encoded, true
+	return append(out, data[start:]...), true
 }

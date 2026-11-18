@@ -218,11 +218,12 @@ Pfad, wenn Parameter greifen); Batches, Provider-Passthrough unter `/p/`,
 Embeddings und Medien-Endpunkte werden nicht umgeschrieben.
 Der exakte [Cache](/de/features/cache)-Schlüssel wird aus dem angewendeten
 Request gebildet, sodass zwei Aliase desselben Modells einen exakten Eintrag
-nur dann teilen, wenn sie denselben Request upstream senden. Der semantische
-Cache hasht nur seine ausgabeprägenden Parameter (Modell, temperature, top_p,
-Token-Limit, Reasoning, Tools, Response-Format), sodass Aliase, die sich nur
-in anderen Schlüsseln wie `top_k` oder `chat_template_kwargs` unterscheiden,
-einen semantischen Eintrag teilen können.
+nur dann teilen, wenn sie denselben Request upstream senden. Der Schlüssel des
+semantischen Caches umfasst ebenfalls die angewendeten Request-Parameter (siehe
+[Woraus der Schlüssel des semantischen Caches besteht](/de/features/cache#woraus-der-schlüssel-des-semantischen-caches-besteht)
+für die genauen Felder), sodass Aliase, deren angewendete Werte sich
+unterscheiden — auch für `top_k` oder `chat_template_kwargs` —, ebenfalls nie
+einen semantischen Eintrag teilen.
 
 Der Rest dieser Seite behandelt Redirects.
 

@@ -130,11 +130,14 @@ await writeFile("speech.mp3", Buffer.from(await speech.arrayBuffer()));
 - `response_format` supports `mp3` (default), `wav`, `flac`, and `pcm`.
 - `speed` supports `0.5`–`2.0` (default `1.0`).
 
-Speech models are usually not returned by MiniMax's `/models` listing, so add
-them to the configured model list to make them routable:
+Speech models are usually not returned by MiniMax's `/models` listing, so list
+them in `MINIMAX_MODELS` and set `MINIMAX_MODELS_MODE=merge` to make them
+routable alongside the discovered models (see
+[Models modes](/advanced/config-yaml#models-modes)):
 
 ```bash
 MINIMAX_MODELS=speech-2.6-hd,speech-2.6-turbo
+MINIMAX_MODELS_MODE=merge
 ```
 
 MiniMax reports failures as HTTP 200 with a native status code; GoModel maps

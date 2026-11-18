@@ -4,9 +4,9 @@
 #
 # Dependabot bumps both images with the root Dockerfile. Keep Go at the go.mod version (the golang image sets
 # GOTOOLCHAIN=local, so an older image fails the build) and Node at the version CI uses.
-FROM node:22.23.4-bookworm AS node
+FROM node:22.23.5-bookworm AS node
 
-FROM golang:1.27.3-bookworm
+FROM golang:1.27.4-bookworm
 
 # Node builds the embedded Svelte dashboard and runs its JS tests.
 COPY --from=node /usr/local/bin/node /usr/local/bin/node

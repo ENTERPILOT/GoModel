@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -265,7 +266,11 @@ func applicationType(redirectURI string) string {
 }
 
 func isLoopbackHost(host string) bool {
-	return strings.EqualFold(host, "localhost") || host == "127.0.0.1" || host == "::1"
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.Unmap().IsLoopback()
 }
 
 // tokenAuthStyle picks how a pre-registered client authenticates at the

@@ -1,0 +1,107 @@
+---
+title: "Mistral AI"
+description: "在 GoModel 中配置 Mistral AI（La Plateforme），包括推理模型以及思考输出如何为聊天客户端标准化。"
+icon: "sparkles"
+keywords: ["Mistral", "La Plateforme", "推理", "思考", "提供商配置"]
+---
+
+Mistral AI（La Plateforme）通过 `https://api.mistral.ai/v1` 提供 OpenAI 兼容 API。GoModel
+通过共享的 OpenAI 适配器路由聊天补全、模型列表、Embedding 与透传请求；`/v1/responses`
+端点通过聊天补全进行翻译（Mistral 也提供原生端点；经由聊天翻译可以保证下文的推理标准化在聊天补全、流式
+以及 `/v1/responses` 上都生效；`/p/mistral/...` 透传请求原样转发，不做此转换）。该提供商不提供文件和批处理。
+
+## 推理（思考）输出
+
+在启用推理时，例如 `mistral-large-4-0`、`mistral-small-2603` 以及托管的
+`zai-glm-5-3` 等模型会将助手内容作为**类型化分块列表**返回——推理轨迹是 `thinking` 分块，
+回答是 `text` 分块——同时在缓冲响应和 SSE 流中。这种格式不是标准的 OpenAI 聊天输出，
+SillyTavern 等客户端会将其渲染为乱码。
+
+GoModel 的 `mistral` 提供商会自动将其转换为标准格式：
+
+- `thinking` 分块合并为 `reasoning_content` 字段；
+- `text` 分块合并为纯字符串 `content`。
+
+流式（`choices[].delta`）与非流式（`choices[].message`）响应均适用此转换。无需任何客户端配置。
+没有标准聊天对应形式的分块类型（例如 Mistral 引用功能在工具调用后返回的 `reference` 分块）会保留在 `mistral_content_chunks`
+厂商成员中，因此不会丢失任何上游数据。超过 16 MiB 的 SSE 事件也会原样转发而不做转换。
+
+请使用标准的嵌套参数发送推理力度；GoModel 会将其映射为 Mistral 的扁平 `reasoning_effort`：
+
+```json
+{
+  "model": "mistral-large-4-0",
+  "messages": [{ "role": "user", "content": "17 * 23 是多少？" }],
+  "reasoning": { "effort": "high" }
+}
+```
+
+Mistral 的 API 级枚举为 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，
+该值会规范化为小写后透传。每个模型接受哪些档位因模型而异——例如 Mistral Large 4 接受
+`low`/`medium`/`high`，托管的 GLM 模型接受 `low`/`high`/`max`，`mistral-small-2603` 还
+接受 `none`——因此为所选模型传入不支持的档位会被 Mistral 自身拒绝，这与使用 Mistral
+自家 SDK 的行为一致。在 `zai-glm-5-3` 上，无论推理力度为何，响应始终是分块列表。
+
+当客户端回放先前的助手回合时，GoModel 会将该回合的推理作为 Mistral `thinking` 分块放回消息内容中——Mistral 的指南警告，删除推理痕迹会降低输出质量——并丢弃 Mistral 无法解析的成员（`mistral_content_chunks`，Mistral 对它们会返回 422）。回放的 `reasoning` 成员（部分客户端使用的写法）会按 `reasoning_content` 处理。
+
+Mistral 会拒绝其模式未定义的请求成员，因此 GoModel 会调整常见的 OpenAI 字段，而不是让请求失败：
+
+- `max_completion_tokens` 改为 `max_tokens`，`seed` 改为 `random_seed`。
+- `service_tier: "default"` 改为 `standard_only`；Mistral 不提供的层级会被丢弃。
+- `stream_options`、`user`、`logit_bias`、`store`、`verbosity` 和 `safety_identifier` 会被丢弃。流式响应仍会在最后一个分块中报告用量。
+- 消息只保留 Mistral 对其角色接受的成员：例如 `name` 只保留在工具消息上，助手回合中回传的 `refusal` 或 `annotations` 会被丢弃。
+
+## 配置
+
+```bash
+MISTRAL_API_KEY=...
+```
+
+或在 `config.yaml` 中：
+
+```yaml
+providers:
+  mistral:
+    type: mistral
+    base_url: "https://api.mistral.ai/v1"
+    api_key: "${MISTRAL_API_KEY}"
+```
+
+<Note>
+  提供商 `type` 为 `mistral`。配置键（上例中的 `mistral`）是任意的，仅用于在配置中标识
+  此条目，可以更改。
+</Note>
+
+您还可以覆盖基础 URL 和模型列表：
+
+```bash
+MISTRAL_BASE_URL=https://api.mistral.ai/v1
+MISTRAL_MODELS=mistral-large-4-0,mistral-small-2603,mistral-embed
+```
+
+<Note>
+  在默认的 `allowlist` 模式下，设置 `MISTRAL_MODELS` 会将此提供商服务的模型限制为该
+  列表——其他模型的请求返回 404。
+  [Models modes](/advanced/config-yaml#models-modes) 提供了 `merge`/`fallback` 替代方案。
+  404 仅适用于基于模型的路由：当运营者为该提供商启用透传（`ENABLED_PASSTHROUGH_PROVIDERS`，
+  参见 [Passthrough](/features/passthrough-api)）时，`/p/mistral/...` 请求不受此列表限制，
+  仍会到达上游。
+</Note>
+
+## 模型
+
+GoModel 的 `GET /v1/models` 是网关范围的列表（包含所有已配置提供商的可见模型，而不仅限于此提供商）；
+此提供商实际服务的模型取决于其模型模式，因此可能只是您 Mistral 账户可用模型的一个子集。
+可通过 OpenAI 兼容的 `/v1/chat/completions` 端点直接调用其模型：
+
+```yaml
+virtual_models:
+  - source: mistral
+    # target 的前缀是 providers 配置键，而不是 provider type；
+    # /p/mistral/... 路由使用 type。
+    target: mistral/mistral-large-4-0
+```
+
+## Embedding
+
+Mistral 的 `/v1/embeddings` 端点（例如 `mistral-embed`）受支持。

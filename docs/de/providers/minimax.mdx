@@ -134,11 +134,13 @@ await writeFile("speech.mp3", Buffer.from(await speech.arrayBuffer()));
 - `speed` unterstützt `0.5`–`2.0` (Standard `1.0`).
 
 Speech-Modelle werden von MiniMax' `/models`-Auflistung meist nicht
-zurückgegeben. Fügen Sie sie daher der konfigurierten Modellliste hinzu, damit
-sie routbar sind:
+zurückgegeben. Tragen Sie sie daher in `MINIMAX_MODELS` ein und setzen Sie
+`MINIMAX_MODELS_MODE=merge`, damit sie neben den erkannten Modellen routbar sind
+(siehe [Modellmodi](/de/advanced/config-yaml#modellmodi)):
 
 ```bash
 MINIMAX_MODELS=speech-2.6-hd,speech-2.6-turbo
+MINIMAX_MODELS_MODE=merge
 ```
 
 MiniMax meldet Fehler als HTTP 200 mit einem nativen Statuscode; GoModel

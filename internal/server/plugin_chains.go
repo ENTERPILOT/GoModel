@@ -57,6 +57,13 @@ func applyPluginRequestHeaders(c *echo.Context) {
 	if changed := state.ApplyRequestHeaders(c.Request().Header); len(changed) > 0 {
 		slog.Debug("plugins edited request headers", "request_id", core.GetRequestID(c.Request().Context()), "headers", changed)
 	}
+	// Prompt-phase plugins may also add headers to provider calls. Carry them
+	// on the request context so every provider client of this request applies
+	// them to its outgoing calls.
+	if upstream := state.UpstreamHeaders(); len(upstream) > 0 {
+		req := c.Request()
+		*req = *req.WithContext(core.WithPluginUpstreamHeaders(req.Context(), upstream))
+	}
 }
 
 // pluginDecisionDetail is the audit-visible summary of one plugin decision.

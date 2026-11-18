@@ -179,6 +179,19 @@ func TestOpenRotatesKEKWithPreviousKey(t *testing.T) {
 	})
 }
 
+func TestOpenReadOnlyWritesNothing(t *testing.T) {
+	runKeyStoreSuite(t, func(t *testing.T, store encryption.KeyStore) {
+		box := open(t, store, encryption.Options{Key: "k1", ReadOnly: true})
+		assert.False(t, box.Enabled())
+		assert.Empty(t, onlyKeys(t, store), "no first data key is created")
+
+		sealed := seal(t, open(t, store, encryption.Options{Key: "old"}), "sk-one")
+		before := onlyKey(t, store)
+		assertOpens(t, open(t, store, encryption.Options{Key: "new", PreviousKey: "old", ReadOnly: true}), sealed, "sk-one")
+		assert.Equal(t, before, onlyKey(t, store), "the data key is not re-wrapped")
+	})
+}
+
 func TestOpenMovesDataKeyToExtensionWrapper(t *testing.T) {
 	runKeyStoreSuite(t, func(t *testing.T, store encryption.KeyStore) {
 		ctx := context.Background()

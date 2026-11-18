@@ -109,6 +109,31 @@ wartość. To odwrotność spowolnienia, gdzie wygrywa alias. Tak jak przy
 spowolnieniu, dokładne nadpisanie wygrywa z ustawieniem dla całego modelu, a
 wpis bez effort nie przesłania ogólniejszego.
 
+### Ustawianie effort dla każdego celu
+
+Model wirtualny z kilkoma celami może wymuszać inny effort na każdym z nich,
+więc aplikacja, która zna tylko nazwę modelu wirtualnego, dostaje właściwy
+poziom niezależnie od tego, który model ją obsłuży. W panelu wybierz go z listy
+obok każdego celu; lista pojawia się, gdy model wirtualny ma drugi cel albo gdy
+cel ma już ustawiony effort. Pozostaw **dziedzicz** (domyślnie), aby
+zachować nadpisanie samego modelu wirtualnego lub wartość klienta.
+
+```yaml
+virtual_models:
+  - source: faq-reply-bot
+    strategy: failover
+    targets:
+      - { model: deepseek/deepseek-chat, reasoning_effort: high }
+      - { model: openai/gpt-5.2, reasoning_effort: low }
+      - { model: gemini/gemini-2.5-pro } # zachowuje wartość klienta
+```
+
+Działa z każdą strategią, dla pierwszej próby i dla każdej próby failover.
+Effort celu wygrywa z `reasoning_effort` modelu wirtualnego, do którego cel
+należy. Nadal wygrywa to, na co cel wskazuje: nadpisanie na konkretnym modelu
+albo na [połączonym w łańcuch](#łączenie-modeli-wirtualnych-w-łańcuchy) modelu
+wirtualnym, który jest celem.
+
 ## Ustawianie parametrów żądania
 
 Ustaw **params** i **default_params** na przekierowaniu lub konkretnym modelu,
@@ -205,10 +230,11 @@ zastosowanie parametry); batche, passthrough providera pod `/p/`, embeddingi i
 endpointy mediów nie są przepisywane. Klucz dokładnego
 [cache](/pl/features/cache) jest budowany z zastosowanego żądania, więc dwa
 aliasy jednego modelu dzielą dokładny wpis tylko wtedy, gdy wysyłają upstream
-to samo żądanie. Cache semantyczny haszuje tylko parametry kształtujące
-odpowiedź (model, temperature, top_p, limit tokenów, reasoning, narzędzia,
-response format), więc aliasy różniące się tylko innymi kluczami, np. `top_k`
-lub `chat_template_kwargs`, mogą dzielić wpis semantyczny.
+to samo żądanie. Klucz cache'u semantycznego również obejmuje zastosowane
+parametry żądania (dokładną listę pól znajdziesz w sekcji
+[Na czym opiera się klucz cache'u semantycznego](/pl/features/cache#na-czym-opiera-się-klucz-cache’u-semantycznego)),
+więc aliasy, których zastosowane wartości się różnią, także dla `top_k` czy
+`chat_template_kwargs`, również nigdy nie dzielą wpisu semantycznego.
 
 Reszta tej strony dotyczy przekierowań.
 
@@ -442,7 +468,9 @@ Każdy wpis przyjmuje `source`, pojedynczy `target` (skrót) lub listę `targets
 [Wymuszanie reasoning effort](#wymuszanie-reasoning-effort)), `params` i
 `default_params` (zobacz
 [Ustawianie parametrów żądania](#ustawianie-parametrów-żądania)) oraz `enabled`.
-`model` celu może wskazywać inny zadeklarowany model wirtualny (zobacz
+Cel ma `model` oraz opcjonalne `provider`, `weight` i `reasoning_effort` (zobacz
+[Ustawianie effort dla każdego celu](#ustawianie-effort-dla-każdego-celu)). Jego
+`model` może wskazywać inny zadeklarowany model wirtualny (zobacz
 [Łączenie modeli wirtualnych w łańcuchy](#łączenie-modeli-wirtualnych-w-łańcuchy)).
 Zostaw cele puste, aby zadeklarować politykę dostępu dla selektora `source`.
 Nieprawidłowa deklaracja (nieznana strategia, brakujący lub odwołujący się do samego siebie cel,

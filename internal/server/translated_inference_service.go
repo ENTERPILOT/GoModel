@@ -386,10 +386,10 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		if turn := conversationTurnFromContext(ctx); turn != nil {
 			stream = turn.persistingStream(ctx, stream)
 		}
-		stream = s.snapshotStream(ctx, workflow, req, result.Meta.ProviderType, result.Meta.ProviderName, requestID, stream)
+		snapshot := s.snapshotObserver(ctx, workflow, req, result.Meta.ProviderType, result.Meta.ProviderName, requestID)
 		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, result.GenerationObserver(), func(stream io.ReadCloser) io.ReadCloser {
 			return result.WrapDeliveryStream(ctx, stream)
-		})
+		}, snapshot)
 	}
 
 	result, err := s.inference().ExecuteResponses(ctx, workflow, req, requestID, "/v1/responses")
@@ -677,6 +677,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 	stream io.ReadCloser,
 	generation streaming.Observer,
 	outerWrap func(io.ReadCloser) io.ReadCloser,
+	extra ...streaming.Observer,
 ) error {
 	model, provider, providerName := meta.Model, meta.ProviderType, meta.ProviderName
 	auditlog.MarkEntryAsStreaming(c, true)
@@ -697,7 +698,8 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 
 	requestID := requestIDFromContextOrHeader(c.Request())
 	endpoint := c.Request().URL.Path
-	observers := make([]streaming.Observer, 0, 4)
+	observers := make([]streaming.Observer, 0, 4+len(extra))
+	observers = append(observers, extra...)
 	if generation != nil {
 		observers = append(observers, generation)
 	}
@@ -711,6 +713,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 			usageObserver.SetSessionID(core.SessionIDFromContext(c.Request().Context()))
 			usageObserver.SetAuthKeyID(core.GetAuthKeyID(c.Request().Context()))
 			usageObserver.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
+			usageObserver.SetGenAIOperation(core.GenAIOperationFromContext(c.Request().Context()))
 			usageObserver.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
 			observers = append(observers, usageObserver)
 		}

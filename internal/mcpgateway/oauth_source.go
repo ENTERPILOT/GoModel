@@ -2,17 +2,15 @@ package mcpgateway
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"slices"
 	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
-
-	"github.com/enterpilot/gomodel/internal/encryption"
 )
 
 // OAuth sign-in states shown in admin views.
@@ -25,17 +23,20 @@ const (
 // oauthSaveTimeout bounds persisting a refreshed token.
 const oauthSaveTimeout = 10 * time.Second
 
-// oauthLookupTimeout bounds reading the stored record before or after a
-// refresh; it runs under the source's lock, so requests queue behind it.
+// oauthLookupTimeout bounds one read of the stored record around a refresh.
 const oauthLookupTimeout = 3 * time.Second
 
 // oauthRefreshTimeout bounds one token-endpoint request, so a stalled
-// authorization server cannot hold the source's lock for a whole tool call.
+// authorization server cannot hold up a tool call indefinitely.
 const oauthRefreshTimeout = 15 * time.Second
 
 // errOAuthExpired means the access token expired and no refresh token can
 // renew it: an operator has to sign in again.
 var errOAuthExpired = errors.New("the OAuth access token expired and the server issued no refresh token; sign in again from the dashboard")
+
+// errOAuthRejected means the MCP server refused an unexpired access token
+// and no refresh token can replace it: an operator has to sign in again.
+var errOAuthRejected = errors.New("the mcp server rejected the OAuth access token and the server issued no refresh token; sign in again from the dashboard")
 
 // OAuthView is the admin-facing sign-in state of one server. It never
 // carries a token or client secret.
@@ -51,10 +52,17 @@ type OAuthView struct {
 // oauthSource hands out access tokens for one signed-in server. It refreshes
 // an expired token with the refresh token and persists the result, because
 // authorization servers rotate refresh tokens for public clients.
+//
+// mu guards record and lastErr and is never held across I/O, so admin views
+// and reloads never wait for a refresh. refreshing admits one refresh at a
+// time: callers that waited for it reuse its result.
 type oauthSource struct {
 	name       string
 	store      *oauthStore
 	httpClient *http.Client
+	// owner names this source in the stored refresh lease.
+	owner      string
+	refreshing chan struct{}
 
 	mu      sync.Mutex
 	record  oauthRecord
@@ -62,7 +70,14 @@ type oauthSource struct {
 }
 
 func newOAuthSource(name string, record oauthRecord, store *oauthStore, httpClient *http.Client) *oauthSource {
-	return &oauthSource{name: name, record: record, store: store, httpClient: httpClient}
+	return &oauthSource{
+		name:       name,
+		record:     record,
+		store:      store,
+		httpClient: httpClient,
+		owner:      rand.Text(),
+		refreshing: make(chan struct{}, 1),
+	}
 }
 
 // sameSignIn reports whether record comes from the sign-in this source was
@@ -70,7 +85,7 @@ func newOAuthSource(name string, record oauthRecord, store *oauthStore, httpClie
 func (o *oauthSource) sameSignIn(record oauthRecord) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.record.SignedInAt.Equal(record.SignedInAt) && o.record.ClientID == record.ClientID
+	return o.record.sameSignIn(record)
 }
 
 // adopt takes tokens another instance refreshed and stored after this one
@@ -98,110 +113,111 @@ func (o *oauthSource) view() *OAuthView {
 	switch {
 	case o.lastErr != "":
 		view.Status = OAuthStatusError
-	case o.record.RefreshToken == "" && !o.token().Valid():
+	case o.record.RefreshToken == "" && !o.record.token().Valid():
 		view.Status = OAuthStatusExpired
 	}
 	return view
 }
 
-// token returns the stored token; mu must be held.
-func (o *oauthSource) token() *oauth2.Token {
+// token returns the record's token set.
+func (r oauthRecord) token() *oauth2.Token {
 	return &oauth2.Token{
-		AccessToken:  o.record.AccessToken,
-		RefreshToken: o.record.RefreshToken,
-		TokenType:    o.record.TokenType,
-		Expiry:       o.record.Expiry,
+		AccessToken:  r.AccessToken,
+		RefreshToken: r.RefreshToken,
+		TokenType:    r.TokenType,
+		Expiry:       r.Expiry,
 	}
+}
+
+// usable reports whether r holds a valid access token other than rejected.
+func (r oauthRecord) usable(rejected string) bool {
+	return r.token().Valid() && (rejected == "" || r.AccessToken != rejected)
 }
 
 // accessToken returns a valid access token, refreshing it when it expired.
-// Refreshes are serialized, so concurrent requests share one.
 func (o *oauthSource) accessToken(ctx context.Context) (string, error) {
+	return o.tokenOtherThan(ctx, "")
+}
+
+// tokenOtherThan returns a valid access token other than rejected, one the
+// upstream refused before it expired: a token another request or instance
+// obtained meanwhile, else a refreshed one. An empty rejected only refreshes
+// an expired token.
+func (o *oauthSource) tokenOtherThan(ctx context.Context, rejected string) (string, error) {
+	if token, ok := o.current(rejected); ok {
+		return token, nil
+	}
+	// A canceled caller still gets an idle slot: its refresh is detached.
+	select {
+	case o.refreshing <- struct{}{}:
+	default:
+		select {
+		case o.refreshing <- struct{}{}:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	defer func() { <-o.refreshing }()
+	// A refresh that finished while this caller waited is shared.
+	if token, ok := o.current(rejected); ok {
+		return token, nil
+	}
+	record, err := o.renew(ctx, rejected)
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.token().Valid() {
-		return o.record.AccessToken, nil
-	}
-	if o.record.RefreshToken == "" {
-		o.lastErr = errOAuthExpired.Error()
-		return "", errOAuthExpired
-	}
-	// Another instance may have refreshed already: start from its tokens, so
-	// a refresh token it consumed is never sent again.
-	if o.adoptStored(ctx, true) && o.token().Valid() {
-		return o.record.AccessToken, nil
-	}
-	base := o.record.UpdatedAt
-	fresh, err := o.refresh(ctx, o.record)
-	if err != nil && o.adoptStored(ctx, false) {
-		// Another instance rotated the refresh token meanwhile: use its result.
-		if o.token().Valid() {
-			return o.record.AccessToken, nil
-		}
-		base = o.record.UpdatedAt
-		fresh, err = o.refresh(ctx, o.record)
+	// A grant that cannot be retried is still the sign-in's current tokens.
+	if record.AccessToken != "" && !o.record.UpdatedAt.After(record.UpdatedAt) {
+		o.record = record
 	}
 	if err != nil {
 		o.lastErr = err.Error()
+		if errors.Is(err, errOAuthExpired) || errors.Is(err, errOAuthRejected) {
+			return "", err
+		}
 		return "", fmt.Errorf("refresh the OAuth token of mcp server %q: %w; sign in again from the dashboard if it persists", o.name, err)
 	}
-	o.record.AccessToken = fresh.AccessToken
-	o.record.RefreshToken = fresh.RefreshToken
-	o.record.TokenType = fresh.TokenType
-	o.record.Expiry = fresh.Expiry
-	o.record.UpdatedAt = time.Now().UTC()
+	// A reload may have adopted a newer stored token meanwhile; it is the
+	// one to hand out while it works.
 	o.lastErr = ""
-	o.persist(ctx, base)
-	return o.record.AccessToken, nil
+	if o.record.UpdatedAt.After(record.UpdatedAt) && o.record.usable(rejected) {
+		return o.record.AccessToken, nil
+	}
+	return record.AccessToken, nil
 }
 
-// adoptStored replaces the in-memory record with the stored one when that
-// holds a different refresh token from the same sign-in and, with newerOnly,
-// was saved after the in-memory one. The read is detached from the caller's
-// cancellation like refresh, and bounded by oauthLookupTimeout. mu must be
-// held.
-func (o *oauthSource) adoptStored(ctx context.Context, newerOnly bool) bool {
-	if o.store == nil {
-		return false
+// rejected records that the upstream refused token right after a refresh,
+// so the sign-in shows the problem instead of "signed in".
+func (o *oauthSource) rejected(token string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.record.AccessToken == token {
+		o.lastErr = "the mcp server rejected a freshly refreshed access token; check the sign-in's scopes or sign in again from the dashboard"
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthLookupTimeout)
-	defer cancel()
-	stored, err := o.store.get(ctx, o.name)
-	if err != nil || !stored.SignedInAt.Equal(o.record.SignedInAt) || stored.RefreshToken == o.record.RefreshToken {
-		return false
-	}
-	if newerOnly && !stored.UpdatedAt.After(o.record.UpdatedAt) {
-		return false
-	}
-	o.record = *stored
-	// The adopted tokens supersede the failed refresh; a later failure sets
-	// the error again.
-	o.lastErr = ""
-	return true
 }
 
-// persist saves the refreshed token only while the stored record still
-// belongs to this sign-in and was not saved after base, the record the
-// refresh started from: a sign-out, a newer sign-in, or another instance's
-// refresh that landed meanwhile wins, and the next reload adopts or drops
-// it. mu must be held.
-func (o *oauthSource) persist(ctx context.Context, base time.Time) {
-	if o.store == nil {
-		return
+// closeIdle drops the idle connections of this source's token-endpoint
+// client once the source is retired.
+func (o *oauthSource) closeIdle() {
+	if o.httpClient != nil {
+		o.httpClient.CloseIdleConnections()
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthSaveTimeout)
-	defer cancel()
-	saved, err := o.store.update(ctx, o.name, o.record, func(stored oauthRecord) bool {
-		return stored.SignedInAt.Equal(o.record.SignedInAt) && stored.ClientID == o.record.ClientID &&
-			!stored.UpdatedAt.After(base)
-	})
-	switch {
-	case err != nil && !errors.Is(err, encryption.ErrSealUnconfirmed):
-		// The refreshed token keeps working in memory; only a restart loses it.
-		slog.Warn("failed to save a refreshed mcp oauth token", "server", o.name, "error", err)
-	case !saved && err == nil:
-		slog.Info("mcp oauth sign-in or tokens changed while a token refresh ran; keeping the stored ones", "server", o.name)
+}
+
+// current returns the in-memory access token when it is usable.
+func (o *oauthSource) current(rejected string) (string, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.record.usable(rejected) {
+		return o.record.AccessToken, true
 	}
+	return "", false
+}
+
+// snapshot copies the in-memory record.
+func (o *oauthSource) snapshot() oauthRecord {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.record
 }
 
 // serverURL is the upstream URL this source's tokens were issued for.
@@ -209,39 +225,6 @@ func (o *oauthSource) serverURL() string {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.record.ServerURL
-}
-
-// refresh runs the refresh-token grant, sending the RFC 8707 resource
-// indicator like the authorization and code exchange requests did. It is
-// detached from the caller's cancellation and bounded by oauthRefreshTimeout
-// instead: the authorization server can consume the refresh token before a
-// cancellation reaches it, and dropping the rotated one would force a new
-// sign-in.
-func (o *oauthSource) refresh(ctx context.Context, record oauthRecord) (*oauth2.Token, error) {
-	cfg := record.config("")
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthRefreshTimeout)
-	defer cancel()
-	ctx = context.WithValue(ctx, oauth2.HTTPClient, resourceClient(o.httpClient, record.TokenURL, record.Resource))
-	token, err := cfg.TokenSource(ctx, &oauth2.Token{RefreshToken: record.RefreshToken}).Token()
-	if err != nil {
-		return nil, oauthTokenError(err)
-	}
-	return token, nil
-}
-
-// config builds the oauth2 client configuration for token requests.
-func (r oauthRecord) config(authURL string) *oauth2.Config {
-	return &oauth2.Config{
-		ClientID:     r.ClientID,
-		ClientSecret: r.ClientSecret,
-		Endpoint: oauth2.Endpoint{
-			AuthURL:   authURL,
-			TokenURL:  r.TokenURL,
-			AuthStyle: oauth2.AuthStyle(r.AuthStyle),
-		},
-		RedirectURL: r.RedirectURI,
-		Scopes:      r.Scopes,
-	}
 }
 
 // oauthTokenError keeps the OAuth error code and description of a failed
@@ -291,7 +274,49 @@ func (t *bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 		}
 		return nil, err
 	}
+	resp, err := t.base.RoundTrip(withBearer(req, token))
+	if err != nil || resp.StatusCode != http.StatusUnauthorized {
+		return resp, err
+	}
+	// The server refused a token that had not expired, such as one revoked
+	// early or issued without expires_in: refresh it and retry once. A failed
+	// refresh shows on the server's sign-in state, and the 401 goes back.
+	fresh, err := t.source.tokenOtherThan(req.Context(), token)
+	if err != nil {
+		return resp, nil
+	}
+	retry, ok := rewindRequest(req)
+	if !ok {
+		return resp, nil
+	}
+	_ = resp.Body.Close()
+	resp, err = t.base.RoundTrip(withBearer(retry, fresh))
+	if err == nil && resp.StatusCode == http.StatusUnauthorized {
+		t.source.rejected(fresh)
+	}
+	return resp, err
+}
+
+func withBearer(req *http.Request, token string) *http.Request {
 	clone := req.Clone(req.Context())
 	clone.Header.Set("Authorization", "Bearer "+token)
-	return t.base.RoundTrip(clone)
+	return clone
+}
+
+// rewindRequest returns a copy of req that can be sent again after req was:
+// one without a body, or with a body GetBody can produce again.
+func rewindRequest(req *http.Request) (*http.Request, bool) {
+	if req.Body == nil || req.Body == http.NoBody {
+		return req, true
+	}
+	if req.GetBody == nil {
+		return nil, false
+	}
+	body, err := req.GetBody()
+	if err != nil {
+		return nil, false
+	}
+	clone := req.Clone(req.Context())
+	clone.Body = body
+	return clone, true
 }

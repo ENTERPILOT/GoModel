@@ -206,7 +206,9 @@
                                 "pages": [
                                     "pro/overview",
                                     "pro/compression",
+                                    "pro/courtesy-replies",
                                     "pro/sso",
+                                    "pro/saml",
                                     "pro/intelligent-routing",
                                     "pro/egress"
                                 ]
@@ -329,6 +331,7 @@
                             "providers/kimicode",
                             "providers/hetzner",
                             "providers/edenai",
+                            "providers/mistral",
                             {
                                 "group": "Cloud Platforms",
                                 "icon": "cloud",
@@ -391,7 +394,9 @@
                                 "pages": [
                                     "de/pro/overview",
                                     "de/pro/compression",
+                                    "de/pro/courtesy-replies",
                                     "de/pro/sso",
+                                    "de/pro/saml",
                                     "de/pro/intelligent-routing",
                                     "de/pro/egress"
                                 ]
@@ -514,6 +519,7 @@
                             "de/providers/kimicode",
                             "de/providers/hetzner",
                             "de/providers/edenai",
+                            "de/providers/mistral",
                             {
                                 "group": "Cloud-Plattformen",
                                 "icon": "cloud",
@@ -568,7 +574,9 @@
                                 "pages": [
                                     "zh/pro/overview",
                                     "zh/pro/compression",
+                                    "zh/pro/courtesy-replies",
                                     "zh/pro/sso",
+                                    "zh/pro/saml",
                                     "zh/pro/intelligent-routing",
                                     "zh/pro/egress"
                                 ]
@@ -691,6 +699,7 @@
                             "zh/providers/kimicode",
                             "zh/providers/hetzner",
                             "zh/providers/edenai",
+                            "zh/providers/mistral",
                             {
                                 "group": "云平台",
                                 "icon": "cloud",
@@ -745,7 +754,9 @@
                                 "pages": [
                                     "pl/pro/overview",
                                     "pl/pro/compression",
+                                    "pl/pro/courtesy-replies",
                                     "pl/pro/sso",
+                                    "pl/pro/saml",
                                     "pl/pro/intelligent-routing",
                                     "pl/pro/egress"
                                 ]
@@ -868,6 +879,7 @@
                             "pl/providers/kimicode",
                             "pl/providers/hetzner",
                             "pl/providers/edenai",
+                            "pl/providers/mistral",
                             {
                                 "group": "Platformy chmurowe",
                                 "icon": "cloud",

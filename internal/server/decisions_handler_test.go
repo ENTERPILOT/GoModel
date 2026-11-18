@@ -15,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -44,6 +45,9 @@ type scriptedDecisionsProvider struct {
 	// endpoints records each call's Endpoint, which marks System One models
 	// on providers that also serve Decisions natively.
 	endpoints []string
+	// upstream records the plugin upstream headers each call's context
+	// carried.
+	upstream []http.Header
 }
 
 func (p *scriptedDecisionsProvider) DecisionsReadImages(providerName string) (bool, bool) {
@@ -69,7 +73,8 @@ func newScriptedDecisionsProvider(models map[string]string, types ...string) *sc
 
 func (p *scriptedDecisionsProvider) DecisionsProviderTypes() []string { return p.types }
 
-func (p *scriptedDecisionsProvider) Decisions(_ context.Context, providerType string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
+func (p *scriptedDecisionsProvider) Decisions(ctx context.Context, providerType string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
+	p.upstream = append(p.upstream, core.PluginUpstreamHeaders(ctx))
 	raw, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil, err
@@ -225,6 +230,22 @@ func TestDecisions_GuardrailsEditInput(t *testing.T) {
 	assert.Equal(t, "I was charged twice for card [card].", sent["input"])
 	assert.Equal(t, "gpt-6-luna", sent["model"])
 	assert.Equal(t, "support", sent["prompt_cache_key"])
+}
+
+// A header a prompt-phase plugin wrote to Exchange.Headers.Upstream reaches
+// the provider, also when the guardrails leave the input unchanged.
+func TestDecisions_CarriesPluginUpstreamHeaders(t *testing.T) {
+	provider := newDecisionsTestProvider()
+	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, decisionAliases, nil, nil, nil, upstreamHeaderPatcher{})
+
+	c, rec := echotest.Post(t, "/v1/decisions", decisionBody("classifier"))
+	ctx, _ := plugins.WithRequestState(c.Request().Context())
+	c.SetRequest(c.Request().WithContext(ctx))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	require.Len(t, provider.upstream, 1)
+	assert.Equal(t, "acme", provider.upstream[0].Get("Helicone-Property-Tenant"))
 }
 
 // Failover moves between providers with a Decisions API, across APIs: a

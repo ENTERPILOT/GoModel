@@ -31,6 +31,9 @@ type Router struct {
 	// onEmptyResponse observes 200 responses without choices, output, or
 	// usage; nil disables the hook (the warning log still fires).
 	onEmptyResponse func(context.Context, llmclient.EmptyResponseInfo)
+	// onDemand throttles the request-time model refreshes that requests for
+	// unknown provider-qualified models trigger.
+	onDemand onDemandRefresher
 }
 
 // lookupCaps records which optional interfaces the lookup implements. A nil
@@ -409,12 +412,14 @@ func (r *Router) refreshProviderModelsForRequest(ctx context.Context, requested 
 		return false, nil
 	}
 
-	_, err = r.caps.refresher.RefreshProviderModels(ctx, providerSelector)
+	_, err = r.onDemand.refresh(ctx, providerSelector, r.caps.refresher.RefreshProviderModels)
 	return true, err
 }
 
 // RefreshProviderModels refreshes a configured provider's model inventory when
-// the backing lookup supports request-time provider refreshes.
+// the backing lookup supports request-time provider refreshes. Concurrent
+// calls for one selector share a fetch, and a selector refreshed within
+// onDemandRefreshCooldown returns that result without calling the provider.
 func (r *Router) RefreshProviderModels(ctx context.Context, providerSelector string) (int, error) {
 	providerSelector = strings.TrimSpace(providerSelector)
 	if !r.hasRegisteredProviderSelector(providerSelector) {
@@ -423,7 +428,7 @@ func (r *Router) RefreshProviderModels(ctx context.Context, providerSelector str
 	if r.caps.refresher == nil {
 		return 0, nil
 	}
-	return r.caps.refresher.RefreshProviderModels(ctx, providerSelector)
+	return r.onDemand.refresh(ctx, providerSelector, r.caps.refresher.RefreshProviderModels)
 }
 
 // hasRegisteredProviderSelector reports whether a trimmed selector names a

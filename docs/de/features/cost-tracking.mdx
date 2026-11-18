@@ -33,6 +33,8 @@ Wenn ein Provider exakte Kosten zurückgibt (OpenRouter-Credits, xAI `cost_in_us
   Input-Preis berechnet.
 </Note>
 
+Gemini-Thinking-Tokens zählen in beiden API-Modi als Output-Token und werden zum Output-Preis berechnet, oder zu `reasoning_output_per_mtok`, wenn das Modell einen solchen Preis hat. Im Modus `openai_compatible` lässt Google sie in `completion_tokens` aus, daher rechnet GoModel sie vor der Bepreisung wieder hinzu, und die erfassten Kosten steigen um das Thinking. Weist die Antwort keine Reasoning-Tokens aus, wird der gesamte Teil von `total_tokens`, der über Prompt- und Completion-Tokens hinausgeht, als Reasoning-Tokens erfasst und zum Output-Preis berechnet, oder zu `reasoning_output_per_mtok`, wenn das Modell einen solchen Preis hat; er kann Prompt-Tokens von Googles eingebauten Tools enthalten. Weist sie welche aus, wird höchstens die ausgewiesene Anzahl hinzugerechnet, und es werden nie mehr Reasoning-Tokens als Output-Token erfasst. Siehe [Gemini](/de/providers/gemini#reasoning-effort).
+
 Anthropic rechnet Cache-Schreibvorgänge nach TTL ab: die standardmäßigen 5-Minuten-Schreibvorgänge zu `cache_write_per_mtok` und 1-Stunden-Schreibvorgänge (`"ttl": "1h"`) zu `cache_write_1h_per_mtok`. GoModel bepreist jeden Anteil anhand der Aufteilung in `usage.cache_creation` zu seinem eigenen Preis. Ohne einen `cache_write_1h_per_mtok`-Preis werden 1-Stunden-Schreibvorgänge zu `cache_write_per_mtok` berechnet.
 
 ## Tageszeitabhängige Preise
@@ -168,6 +170,8 @@ Ein Wert `---` bedeutet, dass die Kosten unbekannt sind, weil keine Preise verf�
 
 Die Nutzungsseite filtert jede Karte, jedes Diagramm und das Request-Log nach Modell, Anbieter, Label, API-Schlüssel, Endpunkt, Nutzerpfad und Session. Jedes Dropdown nimmt mehrere Werte an: Ein Request erfüllt einen Filter, wenn er einen der gewählten Werte hat, und er muss jeden Filter erfüllen. Die Nutzerpfad-Auswahl zeigt bekannte Pfade als Baum, gruppiert nach Präfix; ein gewählter Knoten schließt alles darunter ein, und Sie können einen nicht aufgeführten Pfad eintippen.
 
+Standardmäßig blendet der API-Schlüssel-Filter deaktivierte und abgelaufene Schlüssel aus, und der Nutzerpfad-Filter blendet Pfade aus, die weder eine Richtlinie noch einen aktiven API-Schlüssel haben. Aktivieren Sie **Inaktive Schlüssel anzeigen** oder **Inaktive Pfade anzeigen** neben dem Filter, um sie aufzulisten, etwa für den Verlauf eines ehemaligen Kunden. Ein gewählter Wert bleibt immer aufgeführt. Ist die Nutzerliste nicht verfügbar, zeigt der Nutzerpfad-Filter alle Pfade.
+
 Der Bereich **Aufschlüsselung** schlüsselt die gefilterte Nutzung nach zwei Dimensionen auf. Zum Beispiel zeigen Zeilen **Nutzerpfad**, Spalten **Zeitraum** und Zeitraum **Monatlich** die Kosten pro Monat und Nutzerpfad. Wählen Sie die Kennzahl (Kosten, Tokens oder Requests); die Top 10 Zeilen und Spalten bleiben erhalten, der Rest wird unter **Sonstige** zusammengefasst. **Nutzerpfade gruppieren** fasst Pfade nach ihren ersten Segmenten zusammen, sodass `/team/alice/laptop` unter `/team/alice` zählt. Wechseln Sie zwischen gestapeltem Diagramm und Tabelle, und exportieren Sie die Tabelle samt Summen mit **CSV herunterladen**.
 
 Filter, Zeitraum und Aufschlüsselung stehen in der URL der Seite, ein kopierter Link öffnet also dieselbe Ansicht. Dieselben Daten liefert [`GET /admin/usage/breakdown`](/de/advanced/admin-endpoints#get-adminusagebreakdown), die Filter gelten für jeden Nutzungs-Endpunkt außer `/admin/usage/throughput` (siehe [Mehrwertige Filter](/de/advanced/admin-endpoints#mehrwertige-filter)).
@@ -185,6 +189,80 @@ Die Neuberechnung bepreist die abgerechneten Kosten mit dem Aufschlag neu, zu de
   fehlen. Token-Anzahlen werden nie verändert.
 </Warning>
 
+## Kosten pro aktivem Nutzer (Benchmark)
+
+Der Benchmark beantwortet die Frage „Was kostet ein aktiver Entwickler pro Monat, und wie verteilt sich das?“. `GET /admin/usage/benchmark` behandelt jedes direkte Kind von `parent` als einen Nutzer und summiert dessen gesamten Teilbaum, so wie der [Rechnungsexport](#rechnungsexport-gomodel-pro) und [Budgets pro Kind](/de/features/budgets#dynamische-budgets-pro-kind) Pfade gruppieren: Mit `parent=/eng` zählen `/eng/alice/laptop` und `/eng/alice/ci` beide als `/eng/alice`. Eine Pro-Lizenz ist nicht nötig.
+
+Auf der Nutzungsseite zeigt der Bereich **Kosten pro aktivem Nutzer** unterhalb von **Aufschlüsselung** dieselben Daten: Wählen Sie die Gruppe und die Anzahl der Monate und wechseln Sie zwischen einem Diagramm mit Median- und p90-Kosten pro aktivem Nutzer samt Anzahl aktiver Nutzer und einer Tabelle der Monatsstatistiken. Der Bereich folgt den Filtern der Seite, nicht aber ihrem Zeitraum, und bietet bis zu 12 Monate. Bei aktivierten Aufschlägen wechselt ein Schalter zwischen Provider-Kosten und abgerechneten Kosten. Der aktuelle Monat ist als laufend markiert, statt mit dem Vormonat verglichen zu werden, Nutzer mit fehlenden Preisen zählt die Spalte **Preislücken**, und Kosten, die auf der Gruppe selbst erfasst wurden, erscheinen mit einem Hinweis.
+
+| Parameter | Standard | Ändern, wenn |
+| --- | --- | --- |
+| `parent` | Die Wurzel des [Bereichs](/de/advanced/admin-endpoints#bereichsbeschränkter-admin-zugriff) der Zugangsdaten, oder `/` für globale Zugangsdaten (Nutzer sind dann die Pfade der obersten Ebene) | Sie die Personen einer Gruppe sehen wollen, zum Beispiel `parent=/eng` |
+| `months` | `7`: sechs vollständige Monate plus der aktuelle | Sie einen längeren oder kürzeren Verlauf wollen, `1` bis `12` Monate bis `end_month`. Jeder andere Wert, auch `0`, liefert `400` |
+| `start_month`, `end_month` | `end_month` ist der aktuelle Monat; `start_month` ergibt sich aus `months` | Sie einen festen Bereich von höchstens 12 Monaten wollen (`YYYY-MM`). Mit `start_month` wird `months` ignoriert und nicht geprüft; `end_month` darf nicht nach dem aktuellen Monat liegen |
+| `cost_basis` | `provider` | Sie Zugang weiterverkaufen: `billed` misst Provider-Kosten plus Aufschlag, einschließlich abgerechneter Treffer des Response-Caches. Erfordert `PRICING_MARKUPS_ENABLED=true`, sonst `409` `markups_disabled` |
+| `top_users` | `0` | Sie sehen wollen, wer die Kosten verursacht: Jeder Monat listet seine N teuersten Nutzer, höchstens `50` |
+
+<Note>
+  Standardmäßig nennt die Antwort keine User Paths: Sie enthält nur Anzahlen,
+  Summen und Statistiken pro Monat. Zeilen pro Nutzer
+  (`top_users: [{user, requests, cost}]`) erscheinen nur, wenn Sie
+  `top_users` setzen. Die Statistiken sind nicht anonymisiert: In einem Monat
+  mit einem aktiven Nutzer sind `mean`, `p50`, `p90` und `max` genau dessen
+  Kosten, und bei wenigen Nutzern liegen sie nahe daran.
+</Note>
+
+Der Endpunkt akzeptiert außerdem die Datenfilter `model`, `provider`, `label`, `endpoint`, `operation`, `session_id`, `auth_key_id` und `user_path`. Das Datumsfenster der übrigen Nutzungs-Endpunkte (`start_date`, `end_date`, `days`) wird ignoriert und nicht geprüft: Den Bereich bestimmen `months`, `start_month` und `end_month`. `cache_mode` ist wie beim Rechnungsexport fest: Requests und Provider-Kosten stammen aus Requests an Provider, während ein Treffer des Response-Caches seinen Nutzer aktiv macht und seinen abgerechneten Betrag zu den abgerechneten Kosten hinzufügt, den Provider aber nichts kostet.
+
+```bash
+curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "parent": "/eng",
+  "time_zone": "UTC",
+  "currency": "USD",
+  "cost_basis": "provider",
+  "months": [
+    {
+      "month": "2026-10",
+      "partial": false,
+      "active_users": 42,
+      "unpriced_users": 0,
+      "partly_priced_users": 1,
+      "total_cost": 1260.5,
+      "mean": 30.01,
+      "p50": 22.4,
+      "p90": 61.2,
+      "max": 140.75,
+      "mean_change_percent": 4.2,
+      "p50_change_percent": -1.5,
+      "unattributed_cost": 3.1
+    }
+  ]
+}
+```
+
+`months` listet jeden Monat des Bereichs, den ältesten zuerst, auch Monate ohne Nutzung. Pro Monat:
+
+- `active_users` — Nutzer mit mindestens einem Request im Monat; Treffer des Response-Caches zählen mit.
+- `total_cost` — die Monatssumme: die Kosten aller aktiven Nutzer des Monats zusammen in USD. In einem Monat ohne aktive Nutzer ist sie `0`, nicht `null`.
+- `mean`, `p50` (Median), `p90` und `max` — Kosten in USD pro aktivem Nutzer; `null` in einem Monat ohne aktive Nutzer. Die Kosten eines Nutzers sind die, die der [Rechnungsexport](#rechnungsexport-gomodel-pro) für diesen Kunden im selben Monat auf der gewählten `cost_basis` ausweist.
+- `mean_change_percent` und `p50_change_percent` — Veränderung gegenüber dem Vormonat; `null` für den ersten Monat, für den laufenden aktuellen Monat, für einen Monat ohne aktive Nutzer oder wenn der Wert des Vormonats nicht positiv ist.
+- `unpriced_users` — aktive Nutzer, deren gesamte Monatskosten unbekannt sind, weil ihre Modelle keine Preise haben. Sie zählen mit Kosten `0`. Die Rechnung zeigt für sie `null` oder lässt sie aus, wenn ihre einzige Nutzung abgerechnete Treffer des Response-Caches mit unbekannten Kosten sind.
+- `partly_priced_users` — aktive Nutzer mit teilweise unbepreister Nutzung; bei `billed` gehören dazu abgerechnete Treffer des Response-Caches mit unbekannten Kosten. Sie zählen mit ihren bekannten Kosten; ist der Wert nicht `0`, liegen `total_cost` und die Statistiken für den Monat zu niedrig.
+- `unattributed_cost` — Nutzung, die direkt auf `parent` erfasst wurde. Sie gehört keinem Nutzer und ist nicht Teil von `total_cost`.
+- `partial` — `true` für den aktuellen, noch laufenden Monat; er hat keine Veränderungswerte.
+- `top_users[].requests` — Requests an Provider, wie auf der Rechnung; Treffer des Response-Caches zählen nicht mit.
+
+Perzentile werden linear zwischen den nächstgelegenen Rängen interpoliert, wie bei Excels `PERCENTILE.INC`, dem Standard von NumPy und PostgreSQLs `percentile_cont`: Bei n sortierten Kosten liegt das p-te Perzentil auf dem 0-basierten Rang (n−1)·p, zwischen seinen beiden Nachbarn. Zwei Nutzer mit $10 und $20 ergeben ein `p50` von $15 und ein `p90` von $19; ein einzelner Nutzer ist jede Statistik. SQLite, PostgreSQL und MongoDB liefern dieselben Werte.
+
+Monate laufen von Mitternacht bis Mitternacht in der Zeitzone des Headers `X-GoModel-Timezone`, wie beim [Rechnungsexport](#rechnungsexport-gomodel-pro): Das Dashboard sendet seine eingestellte Zeitzone, ein API-Aufruf ohne den Header verwendet UTC. `time_zone` meldet die verwendete Zeitzone.
+
+Jeder Nutzer wird gezählt: Anders als bei der Aufschlüsselung wird nichts unter **Sonstige** zusammengefasst. Ein Bereich umfasst höchstens 12 Monate einschließlich des aktuellen, passend zur 365-Tage-Grenze der übrigen Nutzungs-Endpunkte, und wird geprüft, bevor etwas gelesen wird. Ein Benchmark enthält höchstens 100.000 Nutzermonate (Nutzer × Monate); das Lesen bricht mit `400` ab, sobald es diese Grenze überschreitet, statt Nutzer auszulassen. Wählen Sie einen tieferen `parent`, weniger Monate oder engere Filter. `parent` nennt eine Gruppe; wird es wiederholt, folgt `400`. [Bereichsbeschränkte Zugangsdaten](/de/advanced/admin-endpoints#bereichsbeschränkter-admin-zugriff) können nur Gruppen innerhalb ihres Teilbaums auswerten; jeder andere `parent` liefert `403` `user_path_out_of_scope`.
+
 ## Rechnungsexport (GoModel Pro)
 
 <Info>
@@ -199,16 +277,18 @@ Die Neuberechnung bepreist die abgerechneten Kosten mit dem Aufschlag neu, zu de
 
 Der Endpunkt akzeptiert denselben Datumsbereich und dieselben Filter wie die anderen Nutzungsendpunkte, dazu `format=csv` (Standard, heruntergeladen als `gomodel-invoice-<start>-to-<end>.csv`) oder `format=json`. Auf der Nutzungsseite lädt **Rechnung exportieren** die CSV für den gewählten Datumsbereich und die Filter herunter.
 
+Die Tage des Zeitraums laufen von Mitternacht bis Mitternacht in der Zeitzone des Headers `X-GoModel-Timezone`, den das Dashboard auf die in seinen Einstellungen gewählte Zeitzone setzt, standardmäßig auf die des Browsers; ein API-Aufruf ohne ihn verwendet UTC. Jeder Export meldet seine Zeitzone in `time_zone`, und eine Datei, die in einer anderen Zeitzone als UTC exportiert wurde, trägt sie im Namen (`gomodel-invoice-2026-10-01-to-2026-10-31-America-Los_Angeles.csv`). Rechnen Sie aus einer Zeitzone ab: Dieselben Daten decken in zwei Zeitzonen unterschiedliche Stunden ab, sodass Nutzung nahe einer Monatsgrenze auf zwei Rechnungen oder auf keiner landet, wenn aufeinanderfolgende Rechnungen Zeitzonen mischen.
+
 ```bash
 curl -OJ "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31" \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
 
 ```csv
-row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent
-item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20
-subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20
-total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
+row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent,time_zone
+item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20,UTC
+subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20,UTC
+total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20,UTC
 ```
 
-Jede Position ist ein Modell auf einer Provider-Instanz. `row_type` unterscheidet Positionen (`item`) von der Zwischensumme jedes Kunden (`subtotal`) und der Gesamtsumme (`total`); filtern Sie also in einer Tabellenkalkulation vor dem Summieren auf `item`. Beträge sind einfache Dezimalzahlen in USD; leere Kosten sind unbekannt (keine Preise). Requests, Tokens und Provider-Kosten umfassen an Provider gesendete Requests; die abgerechneten Kosten enthalten zusätzlich abgerechnete Treffer des Response-Caches, wie in den anderen Abrechnungsansichten. `effective_markup_percent` ist das Verhältnis von abgerechneten Kosten zu Provider-Kosten minus eins, abgerechnete Cache-Treffer erhöhen den Wert also.
+Jede Position ist ein Modell auf einer Provider-Instanz. `row_type` unterscheidet Positionen (`item`) von der Zwischensumme jedes Kunden (`subtotal`) und der Gesamtsumme (`total`); filtern Sie also in einer Tabellenkalkulation vor dem Summieren auf `item`. Beträge sind einfache Dezimalzahlen in USD; leere Kosten sind unbekannt (keine Preise). Requests, Tokens und Provider-Kosten umfassen an Provider gesendete Requests; die abgerechneten Kosten enthalten zusätzlich abgerechnete Treffer des Response-Caches, wie in den anderen Abrechnungsansichten; eine Position, die nur aus Cache-Treffern besteht, zeigt daher Provider-Kosten von `0`. `effective_markup_percent` ist das Verhältnis von abgerechneten Kosten zu Provider-Kosten minus eins, abgerechnete Cache-Treffer erhöhen den Wert also bei einer Position mit Provider-Kosten; eine Position nur aus Cache-Treffern hat keinen.

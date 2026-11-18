@@ -186,6 +186,8 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
+# The root filesystem is read-only. The chart mounts writable volumes at
+# /app/data, /app/.cache, and /tmp (SQLite's temp directory).
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true

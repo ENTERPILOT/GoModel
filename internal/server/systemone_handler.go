@@ -373,6 +373,7 @@ func guardNativeMember[Req any](
 		}
 		return nil, err
 	}
+	applyPluginRequestHeaders(c)
 	if patched == nil || bytes.Equal(valueOf(patched), original) {
 		return body, nil
 	}

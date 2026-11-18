@@ -18,7 +18,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
 
-const defaultBaseURL = "https://inference.hetzner.com/api/v1"
+const defaultBaseURL = "https://inference.hetzner.com/v1"
 
 // Registration provides factory registration for the Hetzner provider.
 var Registration = providers.Registration{

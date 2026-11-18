@@ -72,6 +72,11 @@
           <input id="auth-key-expires" type="date" bind:value={store.form.expires_at} />
         </div>
       </div>
+      {#if store.formNameWarning}
+        <p class="alert alert-warning auth-key-name-warning" role="status" aria-live="polite">
+          {store.formNameWarning}
+        </p>
+      {/if}
       <div class="form-field">
         <InlineHelpSection copyId="auth-key-user-path-help-copy" label={m.api_keys_user_path_help_label()}>
           {#snippet title()}
@@ -186,6 +191,11 @@
 <style>
   .auth-key-form-fields > :global(.form-field) {
     margin-bottom: 4px;
+  }
+
+  .auth-key-name-warning {
+    margin: 0 0 12px;
+    font-size: 13px;
   }
 
   .auth-key-allowed-models-select :global(.search-select) {

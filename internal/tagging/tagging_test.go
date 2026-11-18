@@ -127,6 +127,17 @@ func (f *fakeStore) SaveRules(_ context.Context, rules []Rule) error {
 }
 func (f *fakeStore) Close() error { return nil }
 
+func TestRefreshSkipsStoredCredentialHeaderRules(t *testing.T) {
+	store := &fakeStore{rules: []Rule{{Header: "Helicone-Auth"}, {Header: "X_Api_Key"}, {Header: "X-Env"}}}
+	service := NewService(nil, store)
+	require.NoError(t, service.Refresh(context.Background()))
+
+	rules := service.Rules()
+	require.Len(t, rules, 1)
+	require.Equal(t, "X-Env", rules[0].Header)
+	require.Empty(t, service.ExtractLabels(http.Header{"Helicone-Auth": {"sk-secret"}}))
+}
+
 func TestServiceMergesConfigOverStore(t *testing.T) {
 	store := &fakeStore{rules: []Rule{
 		{Header: "X-Team", Prefix: "stored-"}, // shadowed by config

@@ -8,12 +8,14 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -316,6 +318,31 @@ func TestSystemOne_GuardrailsEditState(t *testing.T) {
 			body := forwardedSystemOneBody(t, provider)
 			assert.Equal(t, "I was charged twice for card [card].", body["state"])
 			assert.Equal(t, "kev-latest", body["model"])
+		})
+	}
+}
+
+// A header a prompt-phase plugin wrote to Exchange.Headers.Upstream reaches
+// the provider on every System One route, also when the guardrails leave the
+// state unchanged.
+func TestSystemOne_CarriesPluginUpstreamHeaders(t *testing.T) {
+	routes := map[string]func(*Handler, *echo.Context) error{
+		"/v1/systemone":          (*Handler).SystemOne,
+		"/v1/systemone/permute":  (*Handler).SystemOnePermute,
+		"/v1/systemone/separate": (*Handler).SystemOneSeparate,
+	}
+	for path, serve := range routes {
+		t.Run(path, func(t *testing.T) {
+			provider := newSystemOneProvider(systemOneAnswer)
+			handler := newHandlerWithAuthorizer(provider, nil, nil, nil, systemOneAliases, nil, nil, nil, upstreamHeaderPatcher{})
+
+			c, rec := echotest.Post(t, path, systemOneBody("decider"))
+			ctx, _ := plugins.WithRequestState(c.Request().Context())
+			c.SetRequest(c.Request().WithContext(ctx))
+			require.NoError(t, serve(handler, c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+			assert.Equal(t, "acme", provider.lastPassthroughUpstream.Get("Helicone-Property-Tenant"))
 		})
 	}
 }

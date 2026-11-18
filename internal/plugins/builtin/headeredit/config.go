@@ -2,10 +2,12 @@ package headeredit
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
@@ -37,19 +39,6 @@ type config struct {
 	UpstreamSet    []string
 }
 
-// credentialHeaders can never be set, added, or removed by this plugin.
-var credentialHeaders = map[string]bool{
-	"authorization":       true,
-	"proxy-authorization": true,
-	"cookie":              true,
-	"set-cookie":          true,
-	"x-api-key":           true,
-	"api-key":             true,
-	"x-goog-api-key":      true,
-	"x-anthropic-api-key": true,
-	"x-auth-token":        true,
-}
-
 func decodeConfig(raw json.RawMessage) (config, error) {
 	cfg, err := pluginapi.ParseConfig(Name, New().Manifest().ConfigSchema, raw)
 	if err != nil {
@@ -66,10 +55,16 @@ func decodeConfig(raw json.RawMessage) (config, error) {
 	return c, cfg.Err()
 }
 
+// errRefusedHeader marks a well-formed line naming a header the plugin may
+// not edit. Such a line is skipped, not an error: see Plugin.Init.
+var errRefusedHeader = errors.New("refused header")
+
 // parseEdits turns the lines of one config field into edits. Blank lines and
 // lines starting with # are ignored. Set and add lines look like
-// "Name: value"; remove lines are a bare "Name".
-func parseEdits(field string, entries []string, o op) ([]edit, error) {
+// "Name: value"; remove lines are a bare "Name". A line naming a header the
+// plugin may not edit, or for an upstream field one the provider call merge
+// would drop, is skipped and reported to ignored.
+func parseEdits(field string, entries []string, o op, upstream bool, ignored func(field string, line int, err error)) ([]edit, error) {
 	var out []edit
 	for i, line := range entries {
 		line = strings.TrimSpace(line)
@@ -77,6 +72,15 @@ func parseEdits(field string, entries []string, o op) ([]edit, error) {
 			continue
 		}
 		e, err := parseLine(line, o)
+		if err == nil && upstream && core.IsPluginUpstreamHeaderDenied(e.name) {
+			err = fmt.Errorf("header %q is set by the gateway and cannot be sent upstream: %w", e.name, errRefusedHeader)
+		}
+		if errors.Is(err, errRefusedHeader) {
+			if ignored != nil {
+				ignored(field, i+1, err)
+			}
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("header_edit: %s line %d: %w", field, i+1, err)
 		}
@@ -112,11 +116,11 @@ func checkName(name string, o op) error {
 		}
 	}
 	lower := strings.ToLower(name)
-	if credentialHeaders[lower] {
-		return fmt.Errorf("header %q carries credentials and cannot be edited", name)
+	if core.IsCredentialHeader(lower) {
+		return fmt.Errorf("header %q carries credentials and cannot be edited: %w", name, errRefusedHeader)
 	}
 	if o != opRemove && (strings.Contains(lower, "secret") || strings.Contains(lower, "token")) {
-		return fmt.Errorf("header %q looks like a credential and cannot be set", name)
+		return fmt.Errorf("header %q looks like a credential and cannot be set: %w", name, errRefusedHeader)
 	}
 	return nil
 }

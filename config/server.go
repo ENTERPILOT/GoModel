@@ -23,8 +23,8 @@ var bodySizeLimitRegex = regexp.MustCompile(`(?i)^(\d+)([KMG])?B?$`)
 // ServerConfig holds HTTP server configuration
 type ServerConfig struct {
 	Port      string `yaml:"port" env:"PORT"`
-	BasePath  string `yaml:"base_path" env:"BASE_PATH"`           // URL path prefix where the app is mounted (e.g., "/g")
-	MasterKey string `yaml:"master_key" env:"GOMODEL_MASTER_KEY"` // Optional: Master key for authentication
+	BasePath  string `yaml:"base_path" env:"BASE_PATH"`                           // URL path prefix where the app is mounted (e.g., "/g")
+	MasterKey string `yaml:"master_key" env:"GOMODEL_MASTER_KEY" export:"secret"` // Optional: Master key for authentication
 	// MasterKeyDisabled turns off master key authentication. Default: false.
 	// Set it to leave managed keys and any configured authentication extension
 	// as the only credentials: the master key is forgotten at startup, and the
@@ -45,7 +45,7 @@ type ServerConfig struct {
 	UserPathHeader string `yaml:"user_path_header" env:"USER_PATH_HEADER"`
 	// EnabledPassthroughProviders lists the provider types enabled on
 	// /p/{provider}/... passthrough routes. Default:
-	// ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "jev"].
+	// ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner", "edenai", "jev"].
 	EnabledPassthroughProviders []string `yaml:"enabled_passthrough_providers" env:"ENABLED_PASSTHROUGH_PROVIDERS"`
 	// RealtimeEnabled exposes the realtime (speech-to-speech) websocket endpoints
 	// at /v1/realtime and /v1/realtime/translations, their WebRTC signaling
@@ -58,6 +58,12 @@ type ServerConfig struct {
 	// Default: false — turn it on only when a service in front of the gateway
 	// needs to validate keys without holding a copy of them.
 	AuthVerifyEnabled bool `yaml:"auth_verify_enabled" env:"AUTH_VERIFY_ENABLED"`
+	// AuthKeyPrefix starts every managed API key issued from now on.
+	// Default: "sk_gom_" (authkeys.DefaultTokenPrefix); empty keeps it. Up to
+	// 32 ASCII letters, digits, "_" and "-". Change it to white-label keys or
+	// to match a key format your secret scanners know. Keys issued before a
+	// change keep authenticating: only the secret after the prefix is hashed.
+	AuthKeyPrefix string `yaml:"auth_key_prefix" env:"AUTH_KEY_PREFIX"`
 	// PIDFile records the process id of the running gateway so `gomodel --reload`
 	// can find it. Default: DefaultPIDFilePath(). Set it per instance when
 	// several gateways share a host, or to "" in config.yaml to write no pid

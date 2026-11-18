@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func TestCallObservationCoversBedrockSDKAndFirstChunk(t *testing.T) {
@@ -567,6 +570,111 @@ func TestNew_BearerTokenOnly(t *testing.T) {
 	assert.Equal(t, "us-east-1", p.region)
 	err := p.ready()
 	assert.NoError(t, err)
+}
+
+// authEchoBody answers both Bedrock clients: the control plane reads
+// modelSummaries, Converse reads output/stopReason/usage, and each ignores the
+// other's fields.
+const authEchoBody = `{"modelSummaries":[],"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`
+
+// assertBothClientsAuth sends one control-plane and one Converse request and
+// checks the Authorization header of each: the provider configures the two
+// SDK clients separately.
+func assertBothClientsAuth(t *testing.T, p *Provider, capture *providertest.Capture, want string) {
+	t.Helper()
+	_, err := p.ListModels(context.Background())
+	require.NoError(t, err)
+	_, err = p.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "amazon.nova-micro-v1:0",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	requests := capture.All()
+	require.Len(t, requests, 2)
+	for _, req := range requests {
+		auth := req.Header.Get("Authorization")
+		assert.True(t, strings.HasPrefix(auth, want), "%s Authorization = %q", req.Path, auth)
+	}
+}
+
+// TestNew_AuthScheme pins which credential reaches Bedrock: a configured API
+// key beats both AWS_BEARER_TOKEN_BEDROCK and SigV4, the env token beats
+// SigV4, and SigV4 signs when neither is set.
+func TestNew_AuthScheme(t *testing.T) {
+	tests := []struct {
+		name     string
+		apiKeys  []string
+		envToken string
+		want     string
+	}{
+		{name: "configured key wins over env token", apiKeys: []string{"ABSK-configured"}, envToken: "ABSK-env", want: "Bearer ABSK-configured"},
+		{name: "env token without configured key", envToken: "ABSK-env", want: "Bearer ABSK-env"},
+		{name: "sigv4 without any key", want: "AWS4-HMAC-SHA256"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AWS_BEARER_TOKEN_BEDROCK", tt.envToken)
+			t.Setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
+			t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+			t.Setenv("AWS_SESSION_TOKEN", "")
+			t.Setenv("AWS_PROFILE", "")
+			t.Setenv("AWS_REGION", "us-east-1")
+			t.Setenv("AWS_CONFIG_FILE", "/dev/null")
+			t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null")
+
+			// Bearer tokens require HTTPS.
+			server, capture := providertest.TLSServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, authEchoBody)
+			})
+			opts := providers.ProviderOptions{HTTPClient: server.Client()}
+			if len(tt.apiKeys) > 0 {
+				opts.Keys = providers.NewKeyring(tt.apiKeys...)
+			}
+			p := New(providers.ProviderConfig{BaseURL: server.URL}, opts).(*Provider)
+			require.NoError(t, p.configErr)
+
+			assertBothClientsAuth(t, p, capture, tt.want)
+		})
+	}
+}
+
+// TestNew_APIKeySkipsUnresolvableProfile keeps a configured key usable when
+// AWS_PROFILE names an assume-role profile the SDK cannot resolve without an
+// MFA token provider: bearer auth never needs that profile.
+func TestNew_APIKeySkipsUnresolvableProfile(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config")
+	require.NoError(t, os.WriteFile(configFile, []byte(`[profile base]
+aws_access_key_id = AKIDEXAMPLE
+aws_secret_access_key = secret
+
+[profile mfa]
+role_arn = arn:aws:iam::123456789012:role/example
+source_profile = base
+mfa_serial = arn:aws:iam::123456789012:mfa/example
+`), 0o600))
+	t.Setenv("AWS_CONFIG_FILE", configFile)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(dir, "missing"))
+	t.Setenv("AWS_PROFILE", "mfa")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	t.Setenv("AWS_REGION", "us-east-1")
+
+	keyless := New(providers.ProviderConfig{BaseURL: "us-east-1"}, providers.ProviderOptions{}).(*Provider)
+	require.Error(t, keyless.configErr, "precondition: the MFA profile fails the SigV4 chain")
+
+	server, capture := providertest.TLSServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, authEchoBody)
+	})
+	withKey := New(providers.ProviderConfig{BaseURL: server.URL}, providers.ProviderOptions{
+		Keys:       providers.NewKeyring("ABSK-configured"),
+		HTTPClient: server.Client(),
+	}).(*Provider)
+	require.NoError(t, withKey.configErr)
+	assertBothClientsAuth(t, withKey, capture, "Bearer ABSK-configured")
 }
 
 func TestRegistration(t *testing.T) {

@@ -26,10 +26,12 @@ type InvoiceParams struct {
 
 // Invoice is billed usage for a period, one block per customer. Requests,
 // tokens and provider cost cover provider-served requests; billed cost also
-// includes billed response-cache hits, like every other billed view.
+// includes billed response-cache hits, like every other billed view. The
+// period's days start and end at midnight in TimeZone.
 type Invoice struct {
 	StartDate string            `json:"start_date,omitempty"`
 	EndDate   string            `json:"end_date,omitempty"`
+	TimeZone  string            `json:"time_zone"`
 	Currency  string            `json:"currency"`
 	Parent    string            `json:"parent,omitempty"`
 	Customers []InvoiceCustomer `json:"customers"`
@@ -69,6 +71,15 @@ func (a *InvoiceAmounts) add(other InvoiceAmounts) {
 	a.OutputTokens += other.OutputTokens
 	a.ProviderCost = addCost(a.ProviderCost, other.ProviderCost)
 	a.BilledCost = addCost(a.BilledCost, other.BilledCost)
+}
+
+// zeroCacheOnlyCost sets the provider cost of amounts made of billed cache
+// hits alone to 0: they cost the provider nothing. Amounts with provider
+// requests keep an unknown cost unknown.
+func (a *InvoiceAmounts) zeroCacheOnlyCost() {
+	if a.Requests == 0 && a.ProviderCost == nil {
+		a.ProviderCost = new(0.0)
+	}
 }
 
 func (a *InvoiceAmounts) setMarkup() {
@@ -218,13 +229,21 @@ func (l invoiceLines) invoice(params InvoiceParams) *Invoice {
 		}
 		customer := &invoice.Customers[len(invoice.Customers)-1]
 		line := InvoiceLine{Model: key.model, Provider: key.provider, InvoiceAmounts: *l.amounts[key]}
+		// Sums take the stored amounts: a cache-only line's 0 must not make
+		// a sibling line's unknown provider cost read as 0 in the subtotal.
+		customer.Subtotal.add(line.InvoiceAmounts)
+		line.zeroCacheOnlyCost()
 		line.setMarkup()
 		customer.Lines = append(customer.Lines, line)
-		customer.Subtotal.add(line.InvoiceAmounts)
 	}
 	for i := range invoice.Customers {
-		invoice.Customers[i].Subtotal.setMarkup()
-		invoice.Total.add(invoice.Customers[i].Subtotal)
+		subtotal := &invoice.Customers[i].Subtotal
+		invoice.Total.add(*subtotal)
+		subtotal.zeroCacheOnlyCost()
+		subtotal.setMarkup()
+	}
+	if len(invoice.Customers) > 0 {
+		invoice.Total.zeroCacheOnlyCost()
 	}
 	invoice.Total.setMarkup()
 	invoice.roundCosts()
@@ -233,7 +252,7 @@ func (l invoiceLines) invoice(params InvoiceParams) *Invoice {
 
 // EmptyInvoice returns an invoice for params' period without customers.
 func EmptyInvoice(params InvoiceParams) *Invoice {
-	invoice := &Invoice{Currency: InvoiceCurrency, Parent: params.Parent, Customers: []InvoiceCustomer{}}
+	invoice := &Invoice{Currency: InvoiceCurrency, TimeZone: usageTimeZone(params.UsageQueryParams), Parent: params.Parent, Customers: []InvoiceCustomer{}}
 	if !params.StartDate.IsZero() {
 		invoice.StartDate = params.StartDate.Format("2006-01-02")
 	}

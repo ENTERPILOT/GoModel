@@ -3,6 +3,7 @@ package plugintest
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/enterpilot/gomodel/pluginapi"
@@ -49,13 +50,15 @@ func Completion(texts ...string) *pluginapi.Completion {
 	return c
 }
 
-// Exchange returns an exchange for a hook call, with a Values bag, a
+// Exchange returns an exchange for a hook call, with a Values bag, empty
+// request, response and upstream header maps (as the host provides them), a
 // stream state, and a request ID in Meta. Either argument may be nil.
 func Exchange(prompt *pluginapi.Prompt, resp *pluginapi.Completion) *pluginapi.Exchange {
 	return &pluginapi.Exchange{
 		Meta:     pluginapi.Meta{RequestID: "test-request"},
 		Prompt:   prompt,
 		Response: resp,
+		Headers:  &pluginapi.Headers{Request: http.Header{}, Response: http.Header{}, Upstream: http.Header{}},
 		Stream:   &pluginapi.StreamState{},
 		Values:   pluginapi.Values{},
 	}

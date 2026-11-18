@@ -30,6 +30,12 @@ import {
   normalizeMcpUserPaths,
   mcpDiscoveredTools,
   mcpToolFilterFromServer,
+  mcpToolCatalogExport,
+  mcpToolCatalogIssues,
+  mcpToolCatalogMembers,
+  mcpToolCatalogRows,
+  mcpToolCatalogServedScope,
+  mcpToolCatalogSummary,
   mcpToolModeSwitchable,
   mcpToolPickerRows,
   mcpToolSelectionSummary,
@@ -809,6 +815,211 @@ test("a virtual-server save only closes the editor that submitted it", () => {
   assert.match(submit, /const sameEditor = formSeq === this\.#virtualFormSeq;/);
   assert.match(submit, /if \(sameEditor\) \{\s*\n\s*this\.closeVirtualForm\(\);/, "only the submitting editor is closed");
   assert.equal(/\n      this\.closeVirtualForm\(\);/.test(submit), false, "no unconditional close remains");
+});
+
+function toolCatalogEntries() {
+  return [
+    {
+      server: "linear",
+      status: "connected",
+      catalog: normalizeMcpCatalog("linear", {
+        tools: [{ name: "list_issues", description: "List issues", read_only: true }],
+      }),
+      error: "",
+    },
+    {
+      server: "github",
+      status: "connected",
+      catalog: normalizeMcpCatalog("github", {
+        tools: [
+          { name: "search_code", description: "Search code" },
+          { name: "create_issue", description: "Open an issue" },
+        ],
+        excluded_tools: [{ name: "delete_repo", destructive: true }],
+      }),
+      error: "",
+    },
+    { server: "jira", status: "degraded", catalog: null, error: "dial failed" },
+  ];
+}
+
+test("mcpToolCatalogRows flattens every server's exposed tools under their /mcp names", () => {
+  const rows = mcpToolCatalogRows(toolCatalogEntries());
+  assert.deepEqual(
+    rows.map((row) => row.aggregated),
+    ["github_create_issue", "github_search_code", "linear_list_issues"],
+  );
+  assert.deepEqual(rows[2], {
+    key: "linear:list_issues",
+    server: "linear",
+    name: "list_issues",
+    aggregated: "linear_list_issues",
+    description: "List issues",
+    readOnly: true,
+    destructive: false,
+    excluded: false,
+    shadowedBy: "",
+  });
+});
+
+test("mcpToolCatalogRows marks a tool whose /mcp name another server already serves", () => {
+  // Server "a" with tool "b_read" and server "a_b" with tool "read" both
+  // produce a_b_read; the gateway keeps the server first in slug byte order.
+  const entries = [
+    { server: "a_b", status: "connected", catalog: normalizeMcpCatalog("a_b", { tools: [{ name: "read" }] }) },
+    { server: "a", status: "connected", catalog: normalizeMcpCatalog("a", { tools: [{ name: "b_read" }] }) },
+  ];
+  const rows = mcpToolCatalogRows(entries);
+  assert.deepEqual(
+    rows.map((row) => [row.key, row.aggregated, row.shadowedBy]),
+    [
+      ["a:b_read", "a_b_read", ""],
+      ["a_b:read", "a_b_read", "a"],
+    ],
+  );
+  assert.deepEqual(mcpToolCatalogSummary(entries), { tools: 1, servers: 2 });
+  // Outside the winner's scope the name is reachable again.
+  assert.equal(mcpToolCatalogRows(entries, { members: ["a_b"] })[0].shadowedBy, "");
+});
+
+test("mcpToolCatalogRows filters by scope, hidden tools, and query", () => {
+  const entries = toolCatalogEntries();
+  const cases = [
+    { name: "virtual scope", options: { members: ["linear"] }, want: ["linear:list_issues"] },
+    { name: "empty scope", options: { members: [] }, want: [] },
+    {
+      name: "hidden tools last, without an /mcp name",
+      options: { members: ["github"], showExcluded: true },
+      want: ["github:create_issue", "github:search_code", "github:delete_repo"],
+    },
+    { name: "query by namespaced name", options: { query: "GITHUB_SEARCH" }, want: ["github:search_code"] },
+    { name: "query by server", options: { query: "linear" }, want: ["linear:list_issues"] },
+    { name: "query by description", options: { query: "open an" }, want: ["github:create_issue"] },
+    { name: "query by subsequence", options: { query: "ghsearchcode" }, want: ["github:search_code"] },
+  ];
+  for (const { name, options, want } of cases) {
+    assert.deepEqual(
+      mcpToolCatalogRows(entries, options).map((row) => row.key),
+      want,
+      name,
+    );
+  }
+  const hidden = mcpToolCatalogRows(entries, { showExcluded: true }).find((row) => row.excluded);
+  assert.equal(hidden.aggregated, "");
+  assert.equal(hidden.destructive, true);
+});
+
+test("mcpToolCatalogRows keeps upstream names and the first of repeated tools", () => {
+  const entries = [
+    {
+      server: "docs",
+      status: "connected",
+      catalog: normalizeMcpCatalog("docs", {
+        tools: [
+          { name: "search", description: "first" },
+          { name: "search", description: "second" },
+          { name: " padded " },
+        ],
+      }),
+    },
+  ];
+  const rows = mcpToolCatalogRows(entries);
+  assert.deepEqual(
+    rows.map((row) => [row.key, row.aggregated, row.description]),
+    [
+      ["docs: padded ", "docs_ padded ", ""],
+      ["docs:search", "docs_search", "first"],
+    ],
+  );
+  assert.deepEqual(mcpToolCatalogSummary(entries), { tools: 2, servers: 1 });
+});
+
+test("mcpToolCatalogExport asks the export endpoint for the endpoint in view", () => {
+  const cases = [
+    ["csv", "", "/admin/mcp-servers/catalog?format=csv", "gomodel-mcp-tools.csv"],
+    ["json", "", "/admin/mcp-servers/catalog?format=json", "gomodel-mcp-tools.json"],
+    ["csv", "dev", "/admin/mcp-servers/catalog?format=csv&virtual_server=dev", "gomodel-mcp-tools-dev.csv"],
+    ["json", "a/b c", "/admin/mcp-servers/catalog?format=json&virtual_server=a%2Fb%20c", "gomodel-mcp-tools-a-b-c.json"],
+    ["xml", undefined, "/admin/mcp-servers/catalog?format=csv", "gomodel-mcp-tools.csv"],
+  ];
+  for (const [format, scope, path, filename] of cases) {
+    assert.deepEqual(mcpToolCatalogExport(format, scope), { path, filename }, format + " " + scope);
+  }
+});
+
+// The export is not cancelled when the modal closes, so its response can land
+// after the dashboard switched API keys. The modal uses runes and the DOM, so
+// this asserts the wiring on the source.
+test("a tool catalog export answered after an API key change is not downloaded", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const modal = readFileSync(join(SRC, "pages/mcp-servers/McpToolCatalogModal.svelte"), "utf8");
+  const exportCatalog = (modal.match(/async function exportCatalog\(format\) \{[\s\S]*?\n  \}/) || [""])[0];
+  assert.ok(exportCatalog, "exportCatalog missing");
+
+  const stale = "if (generation < auth.generation) return;";
+  // Each expression must exist: indexOf's -1 would pass an order check.
+  const assertOrder = (expressions, message) => {
+    let from = 0;
+    for (const expression of expressions) {
+      const index = exportCatalog.indexOf(expression, from);
+      assert.ok(index >= 0, message + ": " + expression);
+      from = index + expression.length;
+    }
+  };
+  assertOrder(
+    ["const generation = auth.generation;", "await apiFetch(", stale, "flash.error("],
+    "a previous key's failure must be dropped before it is reported",
+  );
+  assertOrder(
+    ["await res.blob();", stale, "URL.createObjectURL("],
+    "a previous key's file must be dropped before the download starts",
+  );
+});
+
+test("mcpToolCatalogServedScope drops a virtual server that is no longer served", () => {
+  const virtualServers = [
+    { name: "dev", servers: ["github"] },
+    { name: "github", servers: ["github"], conflict: "a server holds this name" },
+  ];
+  const cases = [
+    { scope: "", want: "" },
+    { scope: "dev", want: "dev" },
+    { scope: "gone", want: "" },
+    { scope: "github", want: "" },
+  ];
+  for (const { scope, want } of cases) {
+    assert.equal(mcpToolCatalogServedScope(virtualServers, scope), want, scope);
+  }
+  assert.equal(mcpToolCatalogServedScope(undefined, "dev"), "");
+});
+
+test("mcpToolCatalogMembers resolves the scope to member slugs", () => {
+  const virtualServers = [{ name: "dev", servers: ["github", "linear"] }];
+  assert.equal(mcpToolCatalogMembers(virtualServers, ""), null);
+  assert.deepEqual(mcpToolCatalogMembers(virtualServers, "dev"), ["github", "linear"]);
+  assert.deepEqual(mcpToolCatalogMembers(virtualServers, "gone"), []);
+  assert.deepEqual(mcpToolCatalogMembers(undefined, "dev"), []);
+});
+
+test("mcpToolCatalogSummary counts exposed tools and servers in scope", () => {
+  const entries = toolCatalogEntries();
+  assert.deepEqual(mcpToolCatalogSummary(entries), { tools: 3, servers: 3 });
+  assert.deepEqual(mcpToolCatalogSummary(entries, ["github"]), { tools: 2, servers: 1 });
+  assert.deepEqual(mcpToolCatalogSummary([]), { tools: 0, servers: 0 });
+});
+
+test("mcpToolCatalogIssues lists servers whose tools may be missing", () => {
+  const entries = [
+    ...toolCatalogEntries(),
+    { server: "slack", status: "", catalog: null, error: "" },
+    { server: "notion", status: "connected", catalog: null, error: "Failed" },
+  ];
+  assert.deepEqual(mcpToolCatalogIssues(entries), [
+    { server: "jira", status: "degraded", error: "dial failed", statusClass: "status-error" },
+    { server: "slack", status: "connecting", error: "", statusClass: "status-neutral" },
+    { server: "notion", status: "connected", error: "Failed", statusClass: "status-error" },
+  ]);
+  assert.deepEqual(mcpToolCatalogIssues(entries, ["github"]), []);
 });
 
 test("mcpServerCanSignIn allows HTTP transports only", () => {

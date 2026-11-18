@@ -48,6 +48,11 @@ Google stores Gemini API requests by default on new paid-tier projects. In
 native mode a Chat Completions `store: false` is forwarded as Gemini's
 per-request opt-out; the OpenAI-compatible endpoint has no such member.
 
+In native AI Studio mode `/v1/messages/count_tokens` is answered by Gemini's
+own `countTokens`, so the count includes the per-request overhead Gemini 4
+bills. `openai_compatible` mode, Vertex, and any request whose `countTokens`
+call fails get GoModel's estimate.
+
 ## Base URLs
 
 GoModel keeps separate internal bases for native Gemini and the
@@ -133,16 +138,37 @@ Gemini's `thinkingConfig`:
 | Gemini 3 Pro, 3.1 Pro, 3.7 Flash, 3.8 Flash, Gemini 4 | `thinkingLevel: low` | `thinkingLevel` as given |
 
 Thinking cannot be turned off on Gemini 3 or 4, and Pro models, 3.7 and 3.8
-Flash and Gemini 4 (`gemini-4-argon`, ...) reject `minimal`, so GoModel sends
-the lowest level those models accept instead of surfacing Google's 400. An
+Flash, Gemini 4 (`gemini-4-argon`, ...) and the `-latest` aliases reject `minimal`, so GoModel sends
+the lowest level those models accept instead of surfacing Google's 400.
+Likewise only Gemini 4 Hydrogen accepts `xhigh`, so every other Gemini model gets
+`high` (the `high` budget on Gemini 2.5). An
 explicit `extra_body.google.thinking_config` is forwarded unchanged when it
 sets `thinking_budget` or `thinking_level`; otherwise `reasoning_effort` adds
-its level or budget to it. The same clamp applies in `openai_compatible` mode, where Google's endpoint
+its level or budget to it. The same clamps apply to Gemini 3 and 4 in `openai_compatible` mode, where Google's endpoint
 forwards `reasoning_effort` as a thinking level and rejects the same values.
 
 On Gemini 4, thinking tokens count against `max_tokens`, and a long answer that
 hits the per-request output cap finishes with `length` (Gemini's
 `CONTINUATION`); GoModel does not resume it.
+
+Google bills thinking tokens as output. Its OpenAI-compatible endpoint counts
+them in `total_tokens` but leaves them out of `completion_tokens`, so in
+`openai_compatible` mode GoModel adds them back before it records usage and
+answers the client. As in native mode, the output count then includes thinking:
+Chat Completions report it in `completion_tokens` and
+`completion_tokens_details.reasoning_tokens`, the Responses API in
+`output_tokens` and `output_tokens_details.reasoning_tokens`. Recorded output
+tokens and cost rise accordingly. How much is added depends on the response:
+
+- **Reasoning tokens itemised**: at most that count is added, and an explicit
+  `0` adds nothing. `reasoning_tokens` reports the itemised count, or the
+  output count when the itemised count is larger, whether or not anything was
+  added, so it never exceeds the output count.
+- **Not itemised** (the shape recorded from Gemini 2.5 Flash and 3 Flash): the
+  whole part of `total_tokens` beyond prompt and completion tokens is added
+  and reported as reasoning tokens. It can include prompt tokens of Google's
+  built-in tools, which are then priced as thinking: at the output rate, or at
+  `reasoning_output_per_mtok` when the model has one.
 
 ## Sampling parameters on Gemini 3 and 4
 

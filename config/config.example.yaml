@@ -14,6 +14,7 @@ server:
   base_path: "/" # env: BASE_PATH; set to "/g" to serve the gateway under https://example.com/g/
   master_key: "your-secret-key"
   master_key_disabled: false # env: MASTER_KEY_DISABLED; true forgets the master key, leaving managed gateway API keys and any configured authentication extension as the only credentials. The gateway then requires a credential on every request and keeps the admin API gated, so issue one with dashboard access first
+  auth_key_prefix: "sk_gom_" # env: AUTH_KEY_PREFIX; prefix of newly issued managed API keys, up to 32 ASCII letters, digits, "_" and "-"; empty keeps the default. Keys issued under an earlier prefix keep working
   body_size_limit: "10M"
   stream_stall_timeout: 60 # env: STREAM_STALL_TIMEOUT; seconds one response write on a model route may wait for the client to read it. Fires only when a client stops reading, never while the provider is slow; 0 disables
   swagger_enabled: false # env: SWAGGER_ENABLED; requires a binary built with -tags=swagger
@@ -21,7 +22,7 @@ server:
   enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
   user_path_header: "X-GoModel-User-Path" # env: USER_PATH_HEADER; inbound header used for user_path scoping
-  enabled_passthrough_providers: ["openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
+  enabled_passthrough_providers: ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner", "edenai", "jev"] # env: ENABLED_PASSTHROUGH_PROVIDERS; providers enabled on /p/{provider}/... (default shown); others, such as cohere, audiocpp or bailian, are opt-in
   auth_verify_enabled: false # env: AUTH_VERIFY_ENABLED; expose GET /v1/auth/verify, which reports whether the API key a request carries authenticates against this gateway (401 when it does not; 200 with {"valid":false,"method":"none"} when the gateway has no authentication configured). Outside /admin, so it works with the admin API disabled
   realtime_enabled: true # env: REALTIME_ENABLED; expose the /v1/realtime and /v1/realtime/translations websockets, their calls/client_secrets siblings, and /p/{provider}/v1/realtime upgrades
   # Client address resolution. Leave trusted_proxies empty (default) and every
@@ -128,7 +129,7 @@ models:
 #     targets:
 #       - { model: gpt-4o }
 #       - { model: azure/gpt-4o }
-#       - { model: gemini/gemini-2.5-pro }
+#       - { model: gemini/gemini-2.5-pro, reasoning_effort: low } # per-target effort: beats the entry's own reasoning_effort for this target
 #   - source: smart-router # plugin: a routing-strategy plugin picks the target; weights are ignored
 #     strategy: plugin
 #     strategy_plugin: cheapest_healthy # built in; GET /admin/plugins lists loaded plugins with kind "route"
@@ -395,6 +396,19 @@ rate_limits:
 metrics:
   enabled: false
   endpoint: "/metrics"
+  # Who made the request, on the token and cost metrics (Prometheus and
+  # OpenTelemetry alike) and on the Prometheus per-caller request counter. All
+  # off by default: each dimension multiplies the exported series by its
+  # distinct values.
+  caller_dimensions:
+    user_path: false # the user path, cut to user_path_depth segments
+    user_path_depth: 2 # "/team/alice/laptop" is reported as "/team/alice"; a value below 1 uses 2
+    auth_key: false # the managed API key's name (never its secret or ID)
+    request_labels: false # the request labels, sorted and comma-separated ("," inside a label is written "%2C")
+    # Distinct values per dimension; a value below 1 uses 100. Later values,
+    # ones over 256 bytes or not valid UTF-8, and reserved names become
+    # "{other}" ("/{other}" for user paths).
+    max_values: 100
 
 # OpenTelemetry export (traces and metrics over OTLP). The settings below
 # mirror the standard OTEL_* environment variables; a variable set in the
@@ -702,6 +716,13 @@ providers:
     # base_url defaults to "https://llm.chutes.ai/v1".
     # Set base_url when using a different compatible endpoint.
 
+  mistral:
+    type: mistral
+    api_key: "${MISTRAL_API_KEY}"
+    # base_url defaults to "https://api.mistral.ai/v1".
+    # Reasoning models return thinking as reasoning_content; replayed
+    # assistant reasoning is sent back as Mistral thinking chunks.
+
   edenai:
     type: edenai
     api_key: "${EDENAI_API_KEY}"
@@ -897,14 +918,17 @@ providers:
   #   base_url: "https://api.deepseek.com"
   #   api_key: "${DEEPSEEK_API_KEY}"
 
-  # Example: Amazon Bedrock. The provider has no API key — auth is taken from
-  # the standard AWS credential chain (env vars, AWS_PROFILE, IAM Identity
-  # Center, container/instance roles). Set base_url to either an AWS region
-  # ("us-east-1") or a full https endpoint to enable the provider; without it
-  # gomodel falls back to AWS_REGION / AWS_DEFAULT_REGION.
+  # Example: Amazon Bedrock. Authenticate with an Amazon Bedrock API key, or
+  # omit api_key to use AWS_BEARER_TOKEN_BEDROCK when set, and otherwise the
+  # standard AWS credential chain (env vars, AWS_PROFILE, IAM Identity Center,
+  # container/instance roles). Set base_url
+  # to either an AWS region ("us-east-1") or a full https endpoint to enable
+  # the provider; without it gomodel falls back to AWS_REGION /
+  # AWS_DEFAULT_REGION.
   # bedrock:
   #   type: "bedrock"
   #   base_url: "us-east-1"
+  #   api_key: "${BEDROCK_API_KEY}" # optional
   #   # Optional configured model allowlist (model IDs or inference profiles)
   #   # models:
   #   #   - anthropic.claude-3-5-haiku-20241022-v1:0

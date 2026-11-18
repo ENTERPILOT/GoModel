@@ -106,10 +106,11 @@ await writeFile("speech.mp3", Buffer.from(await speech.arrayBuffer()));
 - `response_format` 支持 `mp3`（默认）、`wav`、`flac` 和 `pcm`。
 - `speed` 支持 `0.5`–`2.0`（默认 `1.0`）。
 
-MiniMax 的 `/models` 列表通常不会返回语音模型，因此请将它们添加到配置的模型列表中，使其可被路由：
+MiniMax 的 `/models` 列表通常不会返回语音模型，因此请在 `MINIMAX_MODELS` 中列出它们，并设置 `MINIMAX_MODELS_MODE=merge`，使其与发现的模型并存并可被路由（参见[模型模式](/zh/advanced/config-yaml#模型模式)）：
 
 ```bash
 MINIMAX_MODELS=speech-2.6-hd,speech-2.6-turbo
+MINIMAX_MODELS_MODE=merge
 ```
 
 MiniMax 以 HTTP 200 加原生状态码的形式报告失败；GoModel 会将常见错误映射为真实的错误（无效参数和被拦截的内容 → 400，认证 → 401，余额不足 → 402，速率限制 → 429），而不是作为含义不明的网关错误转发。

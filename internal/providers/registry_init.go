@@ -42,6 +42,7 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 		providerNames,
 		configuredProviderModels,
 		configuredProviderModelsModes,
+		providerListingTimeout,
 	)
 
 	if len(providers) == 0 {
@@ -99,10 +100,20 @@ type fetchedInventory struct {
 	failedProviders  int
 }
 
-// fetchAllProviderModels runs ListModels (or applies a configured allowlist)
-// for every registered provider and aggregates the results. Network calls
-// happen outside any registry lock so live readers keep serving the previous
+// providerListingTimeout bounds one provider's model listing within a full
+// sweep, retries included. A provider whose /models never answers would
+// otherwise hold the sweep until the caller's deadline, or, for a caller
+// without one, for as long as the upstream HTTP timeouts allow. A listing
+// that times out is a failed fetch like any other: the provider serves its
+// configured models when it has any, and otherwise keeps its previous
 // inventory.
+const providerListingTimeout = 10 * time.Second
+
+// fetchAllProviderModels runs ListModels (or applies a configured allowlist)
+// for every given provider and aggregates the results. Network calls happen
+// outside any registry lock so live readers keep serving the previous
+// inventory. A positive listingTimeout bounds each provider's listing on its
+// own; zero leaves that to ctx.
 func (r *ModelRegistry) fetchAllProviderModels(
 	ctx context.Context,
 	providers []core.Provider,
@@ -110,6 +121,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 	providerNames map[core.Provider]string,
 	configuredProviderModels map[string][]string,
 	configuredProviderModelsModes map[string]config.ConfiguredProviderModelsMode,
+	listingTimeout time.Duration,
 ) fetchedInventory {
 	out := fetchedInventory{
 		models:           make(map[string]*ModelInfo),
@@ -134,6 +146,9 @@ func (r *ModelRegistry) fetchAllProviderModels(
 	// (30s on background refresh), so a sequential loop would let a single
 	// slow upstream starve every provider after it — and a starved provider
 	// is recorded as failed, dropping its models from the registry.
+	// A full sweep also bounds each listing on its own (listingTimeout), so it
+	// ends without waiting on the caller's deadline, which an admin-triggered
+	// refresh does not have.
 	// Aggregation below stays sequential in registration order so
 	// first-provider-wins dedup remains deterministic.
 	type fetchResult struct {
@@ -151,7 +166,13 @@ func (r *ModelRegistry) fetchAllProviderModels(
 		wg.Add(1)
 		go func(i int, provider core.Provider) {
 			defer wg.Done()
-			resp, configuredReason, fetchAt, err := fetchProviderInventory(ctx, provider, providerInventoryInput{
+			fetchCtx := ctx
+			if listingTimeout > 0 {
+				var cancel context.CancelFunc
+				fetchCtx, cancel = context.WithTimeout(ctx, listingTimeout)
+				defer cancel()
+			}
+			resp, configuredReason, fetchAt, err := fetchProviderInventory(fetchCtx, provider, providerInventoryInput{
 				name:              names[i],
 				providerType:      providerTypes[provider],
 				mode:              configuredProviderModelsModes[names[i]],
@@ -469,7 +490,7 @@ func fetchProviderInventory(ctx context.Context, provider core.Provider, in prov
 		return resp, reason, fetchAt, nil
 	}
 
-	resp, err := provider.ListModels(llmclient.WithoutCircuitBreaker(ctx))
+	resp, err := listModels(llmclient.WithoutCircuitBreaker(ctx), provider, in.name)
 	fetchAt = time.Now().UTC()
 	resp, reason := applyConfiguredProviderModels(in.name, in.providerType, in.mode, in.configuredModels, resp, err, fetchAt.Unix())
 	if err != nil && reason == configuredProviderModelsNotApplied && len(in.catalogModels) > 0 {
@@ -477,6 +498,15 @@ func fetchProviderInventory(ctx context.Context, provider core.Provider, in prov
 		reason = catalogProviderModelsUpstreamError
 	}
 	return resp, reason, fetchAt, err
+}
+
+// listModels calls provider.ListModels and turns a panic into an error, so
+// the configured-model and catalog fallbacks apply as for any failed listing.
+// Listings run on their own goroutines during startup and refreshes, where no
+// request's recover middleware is above them and a panic would end the process.
+func listModels(ctx context.Context, provider core.Provider, providerName string) (resp *core.ModelsResponse, err error) {
+	defer recoverProviderPanic(&err, "list models", providerName)
+	return provider.ListModels(ctx)
 }
 
 // catalogFallbackModels returns, per provider name, the model catalog's model

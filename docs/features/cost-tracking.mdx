@@ -30,6 +30,8 @@ When a provider returns an exact cost (OpenRouter credits, xAI `cost_in_usd_tick
   `cached_input_per_mtok` rate. Without it, they are priced at the full input rate.
 </Note>
 
+Gemini thinking tokens are counted as output tokens in both API modes and priced at the output rate, or at `reasoning_output_per_mtok` when the model has one. In `openai_compatible` mode Google leaves them out of `completion_tokens`, so GoModel adds them back before pricing and the recorded cost rises to include thinking. When the response does not itemise reasoning tokens, the whole part of `total_tokens` beyond prompt and completion tokens is recorded as reasoning tokens and priced at the output rate, or at `reasoning_output_per_mtok` when the model has one; it can include prompt tokens of Google's built-in tools. When it does itemise them, at most the itemised count is added, and no more reasoning tokens are recorded than output tokens. See [Gemini](/providers/gemini#reasoning-effort).
+
 Anthropic bills cache writes by TTL: the default 5-minute writes at `cache_write_per_mtok` and 1-hour writes (`"ttl": "1h"`) at `cache_write_1h_per_mtok`. GoModel prices each share at its own rate from the `usage.cache_creation` split. Without a `cache_write_1h_per_mtok` rate, 1-hour writes are priced at `cache_write_per_mtok`.
 
 ## Time-of-day pricing
@@ -165,6 +167,8 @@ A `---` value means the cost is unknown because no pricing was available, which 
 
 The usage page filters every card, chart, and the request log by model, provider, label, API key, endpoint, user path, and session. Each dropdown takes several values: a request matches a filter when it has any of the selected values, and it must match every filter. The user path picker lists known paths as a tree grouped by prefix; picking a node includes everything below it, and you can type a path that is not listed.
 
+By default, the API key filter hides deactivated and expired keys, and the user path filter hides paths that have neither a policy nor an active API key. Turn on **Show inactive keys** or **Show inactive paths** next to the filter to list them, for example to look at a former customer's history. A selected value always stays listed. When the list of users is unavailable, the user path filter shows every path.
+
 The **Breakdown** section pivots the filtered usage by two dimensions. For example, rows **User path**, columns **Period** and period **Monthly** show cost per month per user path. Pick the metric (cost, tokens, or requests); the top 10 rows and columns are kept and the rest fold into **Other**. **User path grouping** folds paths by their first segments, so `/team/alice/laptop` counts under `/team/alice`. Switch between the stacked chart and the table, and use **Download CSV** to export the table with its totals.
 
 Filters, the date range, and the breakdown settings are kept in the page URL, so a copied link opens the same view. The same data is available from [`GET /admin/usage/breakdown`](/advanced/admin-endpoints#get-adminusagebreakdown), and the filters from every usage endpoint except `/admin/usage/throughput` (see [Multi-value filters](/advanced/admin-endpoints#multi-value-filters)).
@@ -182,6 +186,79 @@ Recalculation reprices billed cost with the markup each row was billed at, and b
   modified.
 </Warning>
 
+## Cost per active user (benchmark)
+
+The benchmark answers "what does an active developer cost per month, and how is that spread?". `GET /admin/usage/benchmark` treats each direct child of `parent` as one user and sums its whole subtree, the same way the [invoice export](#invoice-export-gomodel-pro) and [per-child budgets](/features/budgets#dynamic-per-child-budgets) group paths: with `parent=/eng`, `/eng/alice/laptop` and `/eng/alice/ci` both count as `/eng/alice`. It needs no Pro license.
+
+On the usage page, the **Cost per active user** section below **Breakdown** shows the same data: pick the group and the number of months, then switch between a chart of the median and p90 cost per active user with the number of active users, and a table of the monthly statistics. It follows the page's filters but not its date range, and offers up to 12 months. With markups enabled, a toggle switches between provider and billed cost. The current month is marked as in progress rather than compared with the previous one, users with missing pricing are counted in a **Pricing gaps** column, and cost recorded on the group itself is shown with a note.
+
+| Parameter | Default | Change it when |
+| --- | --- | --- |
+| `parent` | The credential's [scope](/advanced/admin-endpoints#scoped-admin-access) root, or `/` for a global credential (users are then the top-level paths) | You want the people of one group, for example `parent=/eng` |
+| `months` | `7`: six complete months plus the current one | You want a longer or shorter trend, `1` to `12` months ending at `end_month`. Any other value, including `0`, returns `400` |
+| `start_month`, `end_month` | `end_month` is the current month; `start_month` follows from `months` | You want a fixed range (`YYYY-MM`) of at most 12 months. With `start_month`, `months` is ignored and not validated; `end_month` cannot be after the current month |
+| `cost_basis` | `provider` | You resell access: `billed` measures provider cost plus markup, including billed response-cache hits. Needs `PRICING_MARKUPS_ENABLED=true`, otherwise `409` `markups_disabled` |
+| `top_users` | `0` | You want to see who drives the cost: each month lists its N highest-cost users, up to `50` |
+
+<Note>
+  By default the response names no user paths: it returns per-month counts,
+  totals, and statistics only. Per-user rows (`top_users: [{user, requests,
+  cost}]`) appear only when you set `top_users`. The statistics are not
+  anonymized: in a month with one active user, `mean`, `p50`, `p90`, and `max`
+  are that user's exact cost, and with few users they come close to it.
+</Note>
+
+It also takes the data filters `model`, `provider`, `label`, `endpoint`, `operation`, `session_id`, `auth_key_id`, and `user_path`. The date window of the other usage endpoints (`start_date`, `end_date`, `days`) is ignored and not validated: the range comes from `months`, `start_month`, and `end_month`. `cache_mode` is fixed, as on the invoice: requests and provider cost come from requests sent to providers, while a response-cache hit makes its user active and adds its billed charge to billed cost, but costs the provider nothing.
+
+```bash
+curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "parent": "/eng",
+  "time_zone": "UTC",
+  "currency": "USD",
+  "cost_basis": "provider",
+  "months": [
+    {
+      "month": "2026-10",
+      "partial": false,
+      "active_users": 42,
+      "unpriced_users": 0,
+      "partly_priced_users": 1,
+      "total_cost": 1260.5,
+      "mean": 30.01,
+      "p50": 22.4,
+      "p90": 61.2,
+      "max": 140.75,
+      "mean_change_percent": 4.2,
+      "p50_change_percent": -1.5,
+      "unattributed_cost": 3.1
+    }
+  ]
+}
+```
+
+`months` lists every month in the range, oldest first, including months without usage. Per month:
+
+- `active_users` — users with at least one request in the month; response-cache hits count.
+- `total_cost` — the month's total: the USD cost of all its active users together. It is `0`, not `null`, in a month without active users.
+- `mean`, `p50` (median), `p90`, and `max` — USD cost per active user; `null` in a month without active users. Each user's cost is the one the [invoice export](#invoice-export-gomodel-pro) reports for that customer over the same month, on the chosen `cost_basis`.
+- `mean_change_percent` and `p50_change_percent` — change from the previous month; `null` for the first month, for the partial current month, for a month without active users, or when the previous month's value is not positive.
+- `unpriced_users` — active users whose whole month cost is unknown because their models have no pricing. They count at cost `0`. The invoice shows `null` for them, or leaves them out when their only usage is billed response-cache hits of unknown cost.
+- `partly_priced_users` — active users with some unpriced usage; on `billed` cost that includes billed response-cache hits of unknown cost. They count at their known cost, so `total_cost` and the statistics understate the month when it is not `0`.
+- `unattributed_cost` — usage recorded on `parent` itself. It belongs to no user and is not part of `total_cost`.
+- `partial` — `true` for the current month, which is still running; it has no change percentages.
+- `top_users[].requests` — requests sent to providers, as on the invoice; response-cache hits are not counted.
+
+Percentiles interpolate linearly between the closest ranks, like Excel's `PERCENTILE.INC`, NumPy's default, and PostgreSQL's `percentile_cont`: for n sorted costs, the p-th percentile sits at 0-based rank (n−1)·p, between its two neighbours. Two users costing $10 and $20 give a `p50` of $15 and a `p90` of $19; a single user is every statistic. SQLite, PostgreSQL, and MongoDB return the same figures.
+
+Months run midnight to midnight in the zone of the `X-GoModel-Timezone` header, as on the [invoice export](#invoice-export-gomodel-pro): the dashboard sends its configured zone, and an API call without the header uses UTC. `time_zone` reports the zone used.
+
+Every user is counted: unlike the breakdown, nothing folds into **Other**. A range covers at most 12 months, the current one included, in line with the 365-day limit of the other usage endpoints, and is checked before anything is read. One benchmark holds at most 100,000 user months (users × months); the read stops with `400` as soon as it passes that, rather than leave users out. Pick a deeper `parent`, fewer months, or narrower filters. `parent` names one group; repeating it returns `400`. A [scoped credential](/advanced/admin-endpoints#scoped-admin-access) can benchmark only groups inside its subtree; any other `parent` returns `403` `user_path_out_of_scope`.
+
 ## Invoice export (GoModel Pro)
 
 <Info>
@@ -195,16 +272,18 @@ Recalculation reprices billed cost with the markup each row was billed at, and b
 
 It takes the same date range and filters as the other usage endpoints, plus `format=csv` (default, downloaded as `gomodel-invoice-<start>-to-<end>.csv`) or `format=json`. On the usage page, **Export invoice** downloads the CSV for the selected date range and filters.
 
+The period's days run midnight to midnight in the time zone of the `X-GoModel-Timezone` header, which the dashboard sets to the zone chosen in its settings, or the browser's zone by default; an API call without it uses UTC. Every export reports its zone in `time_zone`, and a file exported in another zone than UTC carries it in its name (`gomodel-invoice-2026-10-01-to-2026-10-31-America-Los_Angeles.csv`). Bill from one zone: the same dates in two zones cover different hours, so when consecutive invoices mix zones, usage near a month boundary lands on two invoices or on none.
+
 ```bash
 curl -OJ "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31" \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
 
 ```csv
-row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent
-item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20
-subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20
-total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
+row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent,time_zone
+item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20,UTC
+subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20,UTC
+total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20,UTC
 ```
 
-Each line item is one model on one provider instance. `row_type` tells line items from each customer's `subtotal` and the grand `total`, so filter on `item` before summing in a spreadsheet. Amounts are plain USD decimals; an empty cost means it is unknown (no pricing). Requests, tokens, and provider cost cover requests sent to providers; billed cost also includes billed response-cache hits, as in the other billed views. `effective_markup_percent` is billed cost over provider cost, minus one, so billed cache hits raise it.
+Each line item is one model on one provider instance. `row_type` tells line items from each customer's `subtotal` and the grand `total`, so filter on `item` before summing in a spreadsheet. Amounts are plain USD decimals; an empty cost means it is unknown (no pricing). Requests, tokens, and provider cost cover requests sent to providers; billed cost also includes billed response-cache hits, as in the other billed views, so a line made only of cache hits shows a provider cost of `0`. `effective_markup_percent` is billed cost over provider cost, minus one, so billed cache hits raise it on a line with a provider cost; a line of cache hits alone has none.

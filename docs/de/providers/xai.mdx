@@ -27,8 +27,14 @@ providers:
 
 <Note>
   Sprachmodelle (z. B. `grok-voice-latest`) werden vom Endpunkt `/models` von xAI nicht
-  aufgelistet. Um Realtime-Sessions an sie zu routen, fügen Sie sie explizit über
-  `XAI_MODELS=grok-voice-latest` oder eine konfigurierte Modellliste hinzu.
+  aufgelistet. Um Realtime-Sessions an sie zu routen, tragen Sie sie in
+  `XAI_MODELS` ein (zum Beispiel `XAI_MODELS=grok-voice-latest`) und setzen
+  `XAI_MODELS_MODE=merge`, damit die erkannten Modelle daneben routbar bleiben;
+  in `config.yaml` tragen Sie sie unter `models:` des Providers ein und setzen
+  `models_mode: merge` (siehe [Modellmodi](/de/advanced/config-yaml#modellmodi)).
+  Bis die erste `/models`-Abfrage gelingt, stellt `merge` nur die konfigurierten
+  IDs bereit; eine später fehlschlagende Aktualisierung behält die bereits
+  erkannten Modelle.
 </Note>
 
 Bildmodelle wie `grok-2-image` werden über die [Images API](/de/advanced/images-api)
