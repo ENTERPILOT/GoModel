@@ -13,8 +13,10 @@ import (
 // of streamed tool_calls deltas, which OpenAI SDK helpers key their
 // accumulation on, and finishes a tool-call turn with "stop" rather than
 // "tool_calls". Each tool call arrives whole in one chunk, so indexes are
-// handed out per choice in arrival order. Chunks without tool calls pass
-// through byte for byte; only lines that need a repair are re-encoded.
+// handed out per choice in arrival order. A usage chunk that leaves thinking
+// tokens out of completion_tokens is corrected (foldCompatThinkingTokens).
+// Every other chunk passes through byte for byte; only lines that need a
+// repair are re-encoded.
 func newCompatToolCallStream(body io.ReadCloser) io.ReadCloser {
 	pr, pw := io.Pipe()
 	stream := &geminiNativeStream{reader: pr, body: body}
@@ -82,7 +84,8 @@ func repairCompatChunkLine(line string, choices map[int]*compatChoiceState) (str
 	}
 	payload := strings.TrimSpace(strings.TrimPrefix(line, prefix))
 	hasToolCalls := strings.Contains(payload, `"tool_calls"`)
-	if !hasToolCalls && (len(choices) == 0 || !strings.Contains(payload, `"finish_reason"`)) {
+	hasUsage := strings.Contains(payload, `"total_tokens"`)
+	if !hasToolCalls && !hasUsage && (len(choices) == 0 || !strings.Contains(payload, `"finish_reason"`)) {
 		return line, false
 	}
 	var chunk map[string]any
@@ -90,7 +93,7 @@ func repairCompatChunkLine(line string, choices map[int]*compatChoiceState) (str
 		return line, false
 	}
 	rawChoices, _ := chunk["choices"].([]any)
-	changed := false
+	changed := hasUsage && foldCompatChunkUsage(chunk)
 	for position, raw := range rawChoices {
 		choice, ok := raw.(map[string]any)
 		if !ok {

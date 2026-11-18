@@ -10,13 +10,13 @@ keywords: ["Anthropic Messages API", "/v1/messages", "count_tokens", "Token 计�
 
 除兼容 OpenAI 的 API 外，GoModel 还在 `POST /v1/messages` 上接收 **Anthropic Messages API** 请求格式。使用 Anthropic 格式的客户端和 SDK 无需修改即可指向 GoModel。
 
-请求在入口处被转换为 GoModel 的规范聊天类型，并经过与 `/v1/chat/completions` 相同的处理流水线，因此虚拟模型、工作流策略、预算、故障转移、响应缓存、用量/成本追踪和审计日志都会生效。由于每个提供商都实现了聊天补全，Anthropic 格式的请求可以路由到**任意**已配置的提供商（OpenAI、Gemini、Bedrock 等），而不仅限于 Anthropic。
+请求在入口处被转换为 GoModel 的规范聊天类型，并经过与 `/v1/chat/completions` 相同的处理流水线，因此虚拟模型、工作流策略、预算、故障转移、响应缓存、用量/成本追踪和请求日志都会生效。由于每个提供商都实现了聊天补全，Anthropic 格式的请求可以路由到**任意**已配置的提供商（OpenAI、Gemini、Bedrock 等），而不仅限于 Anthropic。
 
 这与[透传 API](/zh/features/passthrough-api) 不同：`/p/anthropic/v1/messages` 只会将字节原样转发给 Anthropic 上游，而托管的 `/v1/messages` 端点可以路由到任意提供商，并完全由网关管理。
 
 ## 原生转发到 Anthropic
 
-当 `/v1/messages` 请求解析到 **Anthropic** 提供商时，GoModel 会跳过往返转换，原样转发原始请求体（仅当别名解析为不同名称时才改写 `model` 字段），然后原样返回提供商的原生响应或 SSE 流。这样可以保留规范转换无法表示的所有内容，例如 `cache_control` 断点、thinking 块签名、`anthropic-beta` 请求头，而 Claude Code 等编码智能体依赖这些内容。无论流式还是非流式响应，速率限制、预算、审计日志和用量追踪仍然生效。
+当 `/v1/messages` 请求解析到 **Anthropic** 提供商时，GoModel 会跳过往返转换，原样转发原始请求体（仅当别名解析为不同名称时才改写 `model` 字段），然后原样返回提供商的原生响应或 SSE 流。这样可以保留规范转换无法表示的所有内容，例如 `cache_control` 断点、thinking 块签名、`anthropic-beta` 请求头，而 Claude Code 等编码智能体依赖这些内容。无论流式还是非流式响应，速率限制、预算、请求日志和用量追踪仍然生效。
 
 原生转发是自动进行的。当启用了作用于规范请求的功能时，请求会回退到转换流水线：护栏请求修补、响应缓存、故障转移路由或强制的[推理强度](/zh/features/virtual-models#强制推理强度)。[减速](/zh/features/slowdown)会直接延迟原生转发。解析到任何非 Anthropic 提供商的请求始终会进行转换。
 
@@ -27,7 +27,7 @@ keywords: ["Anthropic Messages API", "/v1/messages", "count_tokens", "Token 计�
 | 端点 | 行为 |
 | --- | --- |
 | `POST /v1/messages` | 通过转换后的模型路由创建消息。支持流式传输（`stream: true`），返回 Anthropic 格式的 SSE 事件。 |
-| `POST /v1/messages/count_tokens` | 计算输入 Token 数。对于提供商具备计数端点的模型（Anthropic、OpenAI），结果是精确的；否则为经过校准的估算值。 |
+| `POST /v1/messages/count_tokens` | 计算输入 Token 数。对于提供商具备计数端点的模型（Anthropic、OpenAI、原生 AI Studio 模式下的 Gemini），结果是精确的；否则为经过校准的估算值。 |
 | `GET /v1/models` | 当请求携带 Anthropic SDK 始终发送的 `anthropic-version` 请求头时，以 Anthropic 列表格式（`type: "model"`、`display_name`、`created_at`）返回模型目录；否则返回 OpenAI 格式。除非客户端使用 `limit`、`after_id` 或 `before_id` 分页（Anthropic 分页，并相应设置 `has_more`），否则整个目录会在一页中返回；如果游标指向的模型不在列表中，将返回 `400`，此时请从第一页重新开始。 |
 | `GET /v1/models/{model}` | 获取单个模型。当请求携带 `anthropic-version` 时使用 Anthropic 模型格式，否则使用 OpenAI 格式。可用于推理的裸 ID（`gpt-6-luna`）会返回其解析到的已列出模型。在同样条件下，失败（例如未知模型）会使用 Anthropic 错误结构（`{"type": "error", "error": {...}}`）。 |
 | `POST /v1/messages/batches` | 创建 Message Batch。内联的 `requests[].params` 会逐项转换，因此批处理可以面向任何具备原生批处理支持的提供商（Anthropic、OpenAI 等），而不仅限于 Anthropic。 |
@@ -136,9 +136,9 @@ console.log(message.content[0].text);
 
 流式响应会发出 Anthropic SSE 事件序列（`message_start`、`content_block_start`/`content_block_delta`/`content_block_stop`、`message_delta`、`message_stop`）。
 
-## 成本追踪与审计日志
+## 成本追踪与请求日志
 
-`/v1/messages` 请求的追踪和审计方式与兼容 OpenAI 的路由完全相同。成本根据实际处理请求的提供商计算，用量记录在 `/v1/messages` 端点下，以便在控制台中筛选。
+`/v1/messages` 请求的追踪和日志记录方式与兼容 OpenAI 的路由完全相同。成本根据实际处理请求的提供商计算，用量记录在 `/v1/messages` 端点下，以便在控制台中筛选。
 
 ## 限制
 
@@ -162,7 +162,7 @@ console.log(message.content[0].text);
 - **`stop_sequences`**：所有提供商都支持。原生报告所匹配序列的提供商（Anthropic）会返回完整约定：`stop_reason: "stop_sequence"` 加上 `stop_sequence` 值。OpenAI 推理模型（GPT-5 及更高版本、o 系列）也是如此，因为 OpenAI 对这些模型拒绝 `stop` 参数，GoModel 会自行截断输出。其他 OpenAI 系列模型在 `finish_reason` 中不区分命中停止参数和自然停止，因此这些模型的补全会报告 `stop_reason: "end_turn"`（输出仍会被正确截断）。OpenAI（上述推理模型除外）、Azure OpenAI 和 Groq 最多接受四个停止序列；更长的列表会被截断为前四个（并在网关日志中记录一条警告），而不是让请求失败。Anthropic 接受完整列表。
 - **`output_config`**：`effort` 用于设置推理强度（优先于根据 `thinking` 推导出的值），`format`（或较旧的顶层 `output_format`）会转换为 JSON schema 结构化输出。当 schema 满足 OpenAI 严格模式规则（`additionalProperties: false`、所有属性都是必填项、不使用 `allOf`、`not` 或条件关键字）时为严格模式。其他 schema 以 `strict: false` 发送：它们会引导输出，但不保证输出符合 schema。`json_schema` 以外的格式会被拒绝并返回 `400`。
 - **`thinking`**：在非 Anthropic 模型上会转换为推理强度（预算低于 10000 Token 为 `low`，低于 20000 为 `medium`，否则为 `high`；adaptive 为 `medium`），并以各提供商自己的字段发送：在 OpenAI、Groq、Fireworks 和 xAI 上为 `reasoning_effort`。对于拒绝该字段的模型（OpenAI `gpt-4*`、除 gpt-oss 和 qwen3 以外的 Groq 模型、xAI 的 `-non-reasoning`、`grok-build`、`grok-2` 以及除 `grok-3-mini` 以外的 `grok-3`），请求会去掉该字段后发送，而不是返回错误。无论提供商使用哪个成员（`reasoning_content` 或 `reasoning`）返回推理内容，都会以 `thinking` 块返回。
-- **`count_tokens`**：当模型的提供商能自行计数时，结果是精确的。Anthropic 模型由 Anthropic 自己的 `count_tokens` 端点计数。转发的请求携带解析后的模型（别名会先被解析），且只包含该端点接受的成员：`messages`、`system`、`tools`、`tool_choice`、`thinking`、`cache_control` 和 `output_config`；`max_tokens`、`stream`、`metadata` 和采样控制参数会被省略，因为 Anthropic 在该端点会拒绝它们。OpenAI 模型由 OpenAI 的 `/v1/responses/input_tokens` 端点按 GoModel 实际将发送的请求进行计数。在 GPT-5 及更高版本上，计数与计费输入一致（误差在一个 Token 以内）：对于由 Chat Completions 处理且带有工具的请求，会加上其计费的固定工具前导内容。在较旧的模型系列上，这类请求的计数可能比计费输入少几个 Token（`gpt-4o-mini` 上为 6 个）。计数时不会运行护栏，因此当请求的工作流配置了提示词护栏时，提示词绝不会被发送给提供商计数，而是由估算值作答（仅作用于响应和流的护栏仍保持精确计数）。对于其他所有提供商，以及上述调用失败时，网关会返回一个估算值：它根据文本的 Token 化密度对文本加权（普通文本、代码和 JSON、CJK、emoji），加上每条消息和每个工具的框架开销以及工具调用系统提示词，并按像素面积为图片计价。在普通的智能体流量上，估算值与分词器精确计数的偏差约在百分之十以内；文本中的原始 base64 仍会被低估，无法读取尺寸的图片会按提供商保留的最大尺寸计费。同一估算值会作为流式 `message_start` 事件中 `usage.input_tokens` 的初始值；权威计数在最终的 `message_delta` 事件中到达，SDK 累加器会优先采用它。
+- **`count_tokens`**：当模型的提供商能自行计数时，结果是精确的。Anthropic 模型由 Anthropic 自己的 `count_tokens` 端点计数。转发的请求携带解析后的模型（别名会先被解析），且只包含该端点接受的成员：`messages`、`system`、`tools`、`tool_choice`、`thinking`、`cache_control` 和 `output_config`；`max_tokens`、`stream`、`metadata` 和采样控制参数会被省略，因为 Anthropic 在该端点会拒绝它们。OpenAI 模型由 OpenAI 的 `/v1/responses/input_tokens` 端点按 GoModel 实际将发送的请求进行计数。在 GPT-5 及更高版本上，计数与计费输入一致（误差在一个 Token 以内）：对于由 Chat Completions 处理且带有工具的请求，会加上其计费的固定工具前导内容。在较旧的模型系列上，这类请求的计数可能比计费输入少几个 Token（`gpt-4o-mini` 上为 6 个）。原生 AI Studio 模式下的 Gemini 模型由 Gemini 的 `countTokens` 计数；在 Gemini 4 上，带响应 schema 或工具调用历史的请求，计数可能低于计费输入。计数时不会运行护栏，因此当请求的工作流配置了提示词护栏时，提示词绝不会被发送给提供商计数，而是由估算值作答（仅作用于响应和流的护栏仍保持精确计数）。对于其他所有提供商，以及上述调用失败时，网关会返回一个估算值：它根据文本的 Token 化密度对文本加权（普通文本、代码和 JSON、CJK、emoji），加上每条消息和每个工具的框架开销以及工具调用系统提示词，并按像素面积为图片计价。在普通的智能体流量上，估算值与分词器精确计数的偏差约在百分之十以内；文本中的原始 base64 仍会被低估，无法读取尺寸的图片会按提供商保留的最大尺寸计费。同一估算值会作为流式 `message_start` 事件中 `usage.input_tokens` 的初始值；权威计数在最终的 `message_delta` 事件中到达，SDK 累加器会优先采用它。
 
 如果需要超出所支持缓存控制范围的、逐字节一致的 Anthropic 行为，请改用 `/p/anthropic/v1/messages` 透传路由。
 

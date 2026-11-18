@@ -549,7 +549,7 @@ func watchForReload(ctx context.Context, endGeneration context.CancelFunc, reloa
 // blocks until the server stops and Shutdown is what stops it. Waiting for that
 // goroutine here is the load-bearing part: the process exits the moment Run
 // returns, so anything Shutdown had not reached yet — the buffered usage and
-// audit records, the database handle — would be dropped on every Ctrl+C.
+// request log records, the database handle — would be dropped on every Ctrl+C.
 //
 // Every generation that serves is torn down here, exactly once and on a single
 // shutdownTimeout budget, whichever way the server ended: a signal, a reload, a

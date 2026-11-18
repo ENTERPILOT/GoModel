@@ -20,7 +20,7 @@ const maxStatusMessageLength = 2048
 // surfaced with their real meaning rather than a blanket 502. operation names
 // the request in the message ("speech", "image"), statusMessage carries
 // MiniMax's own diagnostic, and body is the raw upstream response retained for
-// auditing.
+// request logging.
 func statusError(operation string, statusCode int, statusMessage string, body []byte) error {
 	message := fmt.Sprintf("minimax %s request failed (status %d)", operation, statusCode)
 	if statusMessage = truncateStatusMessage(strings.TrimSpace(statusMessage)); statusMessage != "" {

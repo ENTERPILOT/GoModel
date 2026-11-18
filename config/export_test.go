@@ -301,6 +301,7 @@ var credentialFieldName = regexp.MustCompile(`(?i)(key|token|secret|password|cre
 var plainCredentialLookalikes = map[string]bool{
 	"server.host":                                       true,
 	"server.user_path_header":                           true,
+	"server.auth_key_prefix":                            true,
 	"server.client_ip_header":                           true,
 	"cache.model.redis.key":                             true,
 	"cache.response.simple.redis.key":                   true,

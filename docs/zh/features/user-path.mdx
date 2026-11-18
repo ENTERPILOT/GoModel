@@ -1,6 +1,6 @@
 ---
 title: "用户路径"
-description: "使用 user_path 为密钥、模型访问、模型列表、工作流、用量和审计日志划定作用域。"
+description: "使用 user_path 为密钥、模型访问、模型列表、工作流、用量和请求日志划定作用域。"
 icon: "route"
 keywords: ["user_path", "用户路径", "多租户", "作用域", "访问控制", "团队隔离", "multi-tenancy", "scoping", "access control", "team isolation"]
 ---
@@ -10,7 +10,7 @@ keywords: ["user_path", "用户路径", "多租户", "作用域", "访问控制"
 `user_path` 是调用方的规范化层级路径，例如
 `/team/alpha` 或 `/team/alpha/service`。
 
-GoModel 使用它将模型访问、工作流、预算、用量和审计数据限定在正确的团队、租户、服务或客户范围内。
+GoModel 使用它将模型访问、工作流、预算、用量和请求日志数据限定在正确的团队、租户、服务或客户范围内。
 
 ## API 密钥
 
@@ -41,7 +41,7 @@ X-GoModel-User-Path: /team/alpha
 `server.user_path_header` 配置。如果未设置，GoModel 使用
 `X-GoModel-User-Path`。
 
-如果 API 密钥有自己的 `user_path`，则以密钥为准。在工作流匹配、审计日志记录、用量追踪和模型访问检查运行之前，GoModel 会用密钥绑定的路径覆盖请求头中的值。
+如果 API 密钥有自己的 `user_path`，则以密钥为准。在工作流匹配、请求日志记录、用量追踪和模型访问检查运行之前，GoModel 会用密钥绑定的路径覆盖请求头中的值。
 
 ## 访问作用域
 
@@ -103,7 +103,7 @@ Response、Conversation、Batch 和上传的文件都会记住创建它们时所
 
 ## 工作流
 
-工作流也可以包含 `scope_user_path`，因此不同的团队或服务可以使用不同的预算、缓存、审计、用量、护栏和故障转移设置。
+工作流也可以包含 `scope_user_path`，因此不同的团队或服务可以使用不同的预算、缓存、请求日志、用量、护栏和故障转移设置。
 
 您可以将用户路径与提供商和模型作用域组合使用，例如：
 

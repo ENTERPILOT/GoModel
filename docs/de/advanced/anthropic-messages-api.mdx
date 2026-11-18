@@ -15,7 +15,7 @@ Anthropic-Format sprechen, können unverändert auf GoModel zeigen.
 Der Request wird beim Eingang in den kanonischen Chat-Typ von GoModel übersetzt und
 durchläuft dieselbe Pipeline wie `/v1/chat/completions` — virtuelle Modelle,
 Workflow-Richtlinien, Budgets, Failover, der Response-Cache, Nutzungs- und
-Kostenerfassung sowie Audit-Logging greifen also alle. Da jeder Provider Chat
+Kostenerfassung sowie Request-Logging greifen also alle. Da jeder Provider Chat
 Completion implementiert, lässt sich ein Request im Anthropic-Format zu **jedem**
 konfigurierten Provider routen (OpenAI, Gemini, Bedrock und weitere), nicht nur zu
 Anthropic.
@@ -35,7 +35,7 @@ provider-native Response bzw. der SSE-Stream unverändert zurückgegeben. So ble
 alles erhalten, was die kanonische Übersetzung nicht abbilden kann —
 `cache_control`-Breakpoints, Signaturen von Thinking-Blöcken, `anthropic-beta`-Header
 —, worauf Coding-Agents wie Claude Code angewiesen sind. Rate-Limits, Budgets,
-Audit-Logging und Nutzungserfassung gelten weiterhin, sowohl für Streaming- als
+Request-Logging und Nutzungserfassung gelten weiterhin, sowohl für Streaming- als
 auch für Nicht-Streaming-Responses.
 
 Die native Weiterleitung erfolgt automatisch. Requests fallen auf die
@@ -58,7 +58,7 @@ unverändert.
 | Endpunkt | Verhalten |
 | --- | --- |
 | `POST /v1/messages` | Erstellt eine Nachricht über das übersetzte Modell-Routing. Unterstützt Streaming (`stream: true`) mit SSE-Events im Anthropic-Format. |
-| `POST /v1/messages/count_tokens` | Zählt Input-Tokens. Exakt für Modelle, deren Provider einen Zähl-Endpunkt hat (Anthropic, OpenAI); andernfalls eine kalibrierte Schätzung. |
+| `POST /v1/messages/count_tokens` | Zählt Input-Tokens. Exakt für Modelle, deren Provider einen Zähl-Endpunkt hat (Anthropic, OpenAI, Gemini im nativen AI-Studio-Modus); andernfalls eine kalibrierte Schätzung. |
 | `GET /v1/models` | Gibt den Katalog in der Anthropic-Listenform zurück (`type: "model"`, `display_name`, `created_at`), wenn der Request den Header `anthropic-version` trägt, den die Anthropic-SDKs immer senden; andernfalls in der OpenAI-Form. Der gesamte Katalog wird auf einer Seite zurückgegeben, sofern der Client nicht mit `limit`, `after_id` oder `before_id` paginiert (Anthropic-Paginierung, `has_more` wird entsprechend gesetzt); ein Cursor, der kein gelistetes Modell benennt, ergibt einen `400` – beginnen Sie dann wieder bei der ersten Seite. |
 | `GET /v1/models/{model}` | Ruft ein einzelnes Modell ab, in der Anthropic-Modellform, wenn der Request `anthropic-version` trägt; andernfalls in der OpenAI-Form. Eine reine ID, die für Inferenz funktioniert (`gpt-6-luna`), liefert das gelistete Modell, zu dem sie aufgelöst wird. Fehler (zum Beispiel ein unbekanntes Modell) verwenden unter derselben Bedingung den Anthropic-Fehler-Envelope (`{"type": "error", "error": {...}}`). |
 | `POST /v1/messages/batches` | Erstellt einen Message Batch. Inline-`requests[].params` werden pro Eintrag übersetzt, sodass ein Batch jeden Provider mit nativer Batch-Unterstützung ansprechen kann (Anthropic, OpenAI, …), nicht nur Anthropic. |
@@ -190,9 +190,9 @@ Streaming-Responses geben die Anthropic-SSE-Event-Sequenz aus (`message_start`,
 `content_block_start`/`content_block_delta`/`content_block_stop`, `message_delta`,
 `message_stop`).
 
-## Kostenerfassung und Audit-Logs
+## Kostenerfassung und Request-Logs
 
-`/v1/messages`-Requests werden genauso erfasst und auditiert wie die
+`/v1/messages`-Requests werden genauso erfasst und protokolliert wie die
 OpenAI-kompatiblen Routen. Die Kosten werden anhand des Providers berechnet, der
 den Request tatsächlich bedient hat, und die Nutzung wird unter dem Endpunkt
 `/v1/messages` erfasst, sodass sie im Dashboard gefiltert werden kann.
@@ -329,7 +329,9 @@ durchgängig erhalten:
   Token genau): Für einen Request, den Chat Completions mit Tools bedient, wird die
   feste Tools-Präambel addiert, die dort abgerechnet wird. Bei älteren
   Modellfamilien kann ein solcher Request einige Tokens unter dem abgerechneten
-  Input liegen (6 bei `gpt-4o-mini`). Guardrails laufen bei einer Zählung nicht;
+  Input liegen (6 bei `gpt-4o-mini`). Gemini-Modelle im nativen AI-Studio-Modus zählt
+  Geminis `countTokens`; bei Gemini 4 kann ein Request mit Antwortschema oder
+  Tool-Call-Verlauf unter dem abgerechneten Input liegen. Guardrails laufen bei einer Zählung nicht;
   wenn der Workflow des Requests Prompt-Guardrails hat, wird der Prompt daher nie zum
   Zählen an einen Provider gesendet, und die Schätzung antwortet (Guardrails nur für
   Responses bzw. Streams behalten exakte Zählungen). Für alle anderen Provider und

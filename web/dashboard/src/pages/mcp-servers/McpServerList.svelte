@@ -62,12 +62,12 @@
           >
           <td>
             <span
-              class="audit-status-badge {mcpServerStatusClass(server)}"
+              class="request-log-status-badge {mcpServerStatusClass(server)}"
               title={statusTitle(server)}>{mcpServerStatusLabel(server)}</span
             >
             {#if mcpServerOAuthState(server)}
               <span
-                class="audit-status-badge {mcpServerOAuthClass(mcpServerOAuthState(server))}"
+                class="request-log-status-badge {mcpServerOAuthClass(mcpServerOAuthState(server))}"
                 title={server.oauth?.last_error || server.oauth?.issuer || ""}
                 >{mcpServerOAuthLabel(mcpServerOAuthState(server))}</span
               >

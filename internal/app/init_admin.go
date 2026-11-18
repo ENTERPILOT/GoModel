@@ -13,7 +13,6 @@ import (
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/admin"
 	"github.com/enterpilot/gomodel/internal/admin/dashboard"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -25,6 +24,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/runtimesettings"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/tagging"
@@ -66,7 +66,7 @@ func (b *bootstrap) initAdmin() error {
 				setDashboardLicense(&adminRuntimeConfig, license)
 			}
 		}
-		adminHandler, dashHandler, auditReader, adminErr := newAdminHandlers(
+		adminHandler, dashHandler, requestLogReader, adminErr := newAdminHandlers(
 			b.usageReader,
 			app.storage,
 			app.providers.Registry,
@@ -102,7 +102,7 @@ func (b *bootstrap) initAdmin() error {
 		} else {
 			serverCfg.AdminEndpointsEnabled = true
 			serverCfg.AdminHandler = adminHandler
-			serverCfg.AuditReader = auditReader
+			serverCfg.RequestLogReader = requestLogReader
 			b.livePublishersEnabled = true
 			slog.Info("admin API enabled",
 				"api", config.JoinBasePath(appCfg.Server.BasePath, "/admin"),
@@ -170,7 +170,7 @@ func newAdminHandlers(
 	billing usage.Billing,
 	basePath string,
 	uiEnabled bool,
-) (*admin.Handler, *dashboard.Handler, auditlog.Reader, error) {
+) (*admin.Handler, *dashboard.Handler, requestlog.Reader, error) {
 	// Pricing recalculation writes through the same storage the reader uses.
 	var pricingRecalculator usage.PricingRecalculator
 	if sharedStorage != nil && usagePricingRecalculationEnabled {
@@ -183,13 +183,13 @@ func newAdminHandlers(
 	}
 	runtimeConfig.PricingRecalculation = dashboardEnabledValue(usagePricingRecalculationEnabled && pricingRecalculator != nil)
 
-	// Create audit reader from the shared storage.
-	var auditReader auditlog.Reader
+	// Create request log reader from the shared storage.
+	var requestLogReader requestlog.Reader
 	if sharedStorage != nil {
 		var err error
-		auditReader, err = auditlog.NewReader(sharedStorage)
+		requestLogReader, err = requestlog.NewReader(sharedStorage)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to create audit reader: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to create request log reader: %w", err)
 		}
 	}
 
@@ -216,7 +216,7 @@ func newAdminHandlers(
 		admin.WithUsagePricingRecalculator(pricingRecalculator),
 		admin.WithPricingResolver(pricingOverrideService),
 		admin.WithBilling(billing),
-		admin.WithAuditReader(auditReader),
+		admin.WithRequestLogReader(requestLogReader),
 		admin.WithAuthKeys(authKeyService),
 		admin.WithUsers(userService),
 		admin.WithVirtualModels(virtualModelService),
@@ -253,7 +253,7 @@ func newAdminHandlers(
 		}
 	}
 
-	return adminHandler, dashHandler, auditReader, nil
+	return adminHandler, dashHandler, requestLogReader, nil
 }
 
 func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptiveRouting bool) admin.DashboardConfigResponse {

@@ -77,7 +77,7 @@ func (s *SQLStore) recalculationEntries(ctx context.Context, q sqlx.Querier, par
 	args = append(args, batchSize)
 
 	rows, err := q.Query(ctx, `
-		SELECT id, timestamp, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data, COALESCE(costs_calculation_caveat, ''), COALESCE(cache_type, ''), markup_percent, billable
+		SELECT id, timestamp, model, provider, provider_name, endpoint, input_tokens, output_tokens, total_tokens, rewrite_tokens_saved, raw_data, COALESCE(costs_calculation_caveat, ''), COALESCE(cache_type, ''), markup_percent, billable
 		FROM usage`+sqlutil.BuildWhereClause(conditions)+`
 		ORDER BY id
 		LIMIT ?`+s.dialect.lockRows, args...)
@@ -101,6 +101,7 @@ func (s *SQLStore) recalculationEntries(ctx context.Context, q sqlx.Querier, par
 			&entry.Endpoint,
 			&entry.InputTokens,
 			&entry.OutputTokens,
+			&entry.TotalTokens,
 			&entry.RewriteTokensSaved,
 			&rawData,
 			&entry.Caveat,

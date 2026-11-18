@@ -551,6 +551,10 @@ func (h *Handler) RecalculateUsagePricing(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
+	// A recalculation rewrites every matching usage row, which on a large
+	// table outlasts the server-wide write timeout.
+	clearWriteDeadline(c)
+
 	h.pricingMu.Lock()
 	defer h.pricingMu.Unlock()
 

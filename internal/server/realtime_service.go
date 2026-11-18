@@ -11,9 +11,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/realtime"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -224,7 +224,7 @@ func (s *realtimeService) prepare(c *echo.Context, model, providerHint string) (
 	if err := enforceBudget(c, s.budgetChecker, rateLimitRoute{provider: providerName}); err != nil {
 		return nil, realtimeRoute{}, err
 	}
-	auditlog.EnrichEntry(c, selector.Model, "")
+	requestlog.EnrichEntry(c, selector.Model, "")
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
 	c.SetRequest(c.Request().WithContext(ctx))

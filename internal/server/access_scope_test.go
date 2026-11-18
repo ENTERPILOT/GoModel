@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/ext"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 type scopeRequestAuthenticator struct {
@@ -79,7 +79,7 @@ func TestAuthMiddleware_AccessScopeFollowsCredential(t *testing.T) {
 				return c.String(http.StatusOK, "ok")
 			})
 
-			opts := []echotest.Option{echotest.WithValue(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})}
+			opts := []echotest.Option{echotest.WithValue(string(requestlog.LogEntryKey), &requestlog.LogEntry{Data: &requestlog.LogData{}})}
 			if tt.bearer != "" {
 				opts = append(opts, echotest.WithHeader("Authorization", "Bearer "+tt.bearer))
 			}
