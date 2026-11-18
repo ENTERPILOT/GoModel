@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/goccy/go-json"
+
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -110,6 +112,46 @@ func TestCreateSpeech_Voice(t *testing.T) {
 				assert.Equal(t, tt.want, voice)
 			}
 			assert.Equal(t, tt.voice, req.Voice, "caller's request must not be modified")
+		})
+	}
+}
+
+// TestCreateSpeech_VoiceForms checks that the voice reaches the upstream in the
+// form the client sent it: a custom-voice object unchanged (extra members
+// included, never replaced by the native default) and a string as a string.
+func TestCreateSpeech_VoiceForms(t *testing.T) {
+	tests := []struct {
+		name   string
+		native bool
+		body   string
+		want   string // raw JSON of the upstream voice member
+	}{
+		{name: "native keeps object", native: true, body: `{"model":"tts","input":"hi","voice":{"id":"voice_1234"}}`, want: `{"id":"voice_1234"}`},
+		{name: "compatible keeps object", body: `{"model":"tts","input":"hi","voice":{"id":"voice_1234"}}`, want: `{"id":"voice_1234"}`},
+		{name: "object extra members", native: true, body: `{"model":"tts","input":"hi","voice":{"id":"voice_1234","future":{"a":1}}}`, want: `{"id":"voice_1234","future":{"a":1}}`},
+		{name: "native keeps string", native: true, body: `{"model":"tts","input":"hi","voice":"nova"}`, want: `"nova"`},
+		{name: "native fills absent voice", native: true, body: `{"model":"tts","input":"hi"}`, want: `"alloy"`},
+		{name: "native fills null voice", native: true, body: `{"model":"tts","input":"hi","voice":null}`, want: `"alloy"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compat, capture := newTestProvider(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "audio/mpeg")
+				_, _ = w.Write([]byte("audio-bytes"))
+			})
+			var provider core.AudioProvider = compat
+			if tt.native {
+				provider = &Provider{CompatibleProvider: compat}
+			}
+			req, err := core.DecodeAudioSpeechRequest([]byte(tt.body), nil)
+			require.NoError(t, err)
+
+			_, err = provider.CreateSpeech(context.Background(), req)
+			require.NoError(t, err)
+
+			var sent map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(capture.Last(t).Body, &sent))
+			assert.Equal(t, tt.want, string(sent["voice"]))
 		})
 	}
 }

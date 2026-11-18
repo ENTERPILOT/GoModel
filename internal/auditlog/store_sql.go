@@ -168,33 +168,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
-	if err := db.Schema(ctx, sqlTables...); err != nil {
-		return nil, fmt.Errorf("failed to create audit log tables: %w", err)
-	}
-	if err := renameAuditColumn(ctx, db, auditLogTable, "model", "requested_model"); err != nil {
-		return nil, fmt.Errorf("failed to rename audit_logs.model to requested_model: %w", err)
-	}
-	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
+	// Under the lock the index builds below take: see withSchemaLock.
+	if err := withSchemaLock(ctx, db, func(session sqlx.DB) error { return ensureSQLSchema(ctx, session) }); err != nil {
 		return nil, err
-	}
-	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
-	indexes = append(indexes, writtenAtIndexes(db.Dialect())...)
-	if db.Dialect() != sqlx.PostgreSQL {
-		indexes = append(indexes, modelIndexStatements(db.Dialect())...)
-	}
-	// One Schema call per statement keeps them best-effort, and on PostgreSQL
-	// skips the indexes that already exist instead of queueing each for a
-	// lock on audit_logs. A statement that gave up on that lock ends the
-	// loop: each of the rest would wait it out again, a minute at a time.
-	for _, statement := range indexes {
-		err := db.Schema(ctx, statement)
-		if errors.Is(err, sqlx.ErrTableLocked) {
-			slog.Warn("audit log table is locked; the remaining indexes are left for the next start", "error", err)
-			break
-		}
-		if err != nil {
-			slog.Warn("failed to create index", "error", err)
-		}
 	}
 
 	store := &SQLStore{
@@ -217,8 +193,14 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		if buildCtx.Err() != nil {
 			return
 		}
-		ensureModelIndexesConcurrently(buildCtx, db)
-		ensureTrigramSearchIndex(buildCtx, db, postgresErrorMessage)
+		err := withSchemaLock(buildCtx, db, func(session sqlx.DB) error {
+			ensureModelIndexesConcurrently(buildCtx, session)
+			ensureTrigramSearchIndex(buildCtx, session, postgresErrorMessage)
+			return nil
+		})
+		if err != nil && buildCtx.Err() == nil {
+			slog.Warn("auditlog: failed to build model and search indexes", "error", err)
+		}
 		if !built {
 			writtenAt.Build(buildCtx, writtenAtBackgroundIndex)
 		}
@@ -227,6 +209,40 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
 	}
 	return store, nil
+}
+
+// ensureSQLSchema creates the audit tables, brings older ones up to date and
+// creates the indexes built at startup.
+func ensureSQLSchema(ctx context.Context, db sqlx.DB) error {
+	if err := db.Schema(ctx, sqlTables...); err != nil {
+		return fmt.Errorf("failed to create audit log tables: %w", err)
+	}
+	if err := renameAuditColumn(ctx, db, auditLogTable, "model", "requested_model"); err != nil {
+		return fmt.Errorf("failed to rename audit_logs.model to requested_model: %w", err)
+	}
+	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
+		return err
+	}
+	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
+	indexes = append(indexes, writtenAtIndexes(db.Dialect())...)
+	if db.Dialect() != sqlx.PostgreSQL {
+		indexes = append(indexes, modelIndexStatements(db.Dialect())...)
+	}
+	// One Schema call per statement keeps them best-effort, and on PostgreSQL
+	// skips the indexes that already exist instead of queueing each for a
+	// lock on audit_logs. A statement that gave up on that lock ends the
+	// loop: each of the rest would wait it out again, a minute at a time.
+	for _, statement := range indexes {
+		err := db.Schema(ctx, statement)
+		if errors.Is(err, sqlx.ErrTableLocked) {
+			slog.Warn("audit log table is locked; the remaining indexes are left for the next start", "error", err)
+			break
+		}
+		if err != nil {
+			slog.Warn("failed to create index", "error", err)
+		}
+	}
+	return nil
 }
 
 // userPathIndexes serve the user-path filter: the exact-match term and the

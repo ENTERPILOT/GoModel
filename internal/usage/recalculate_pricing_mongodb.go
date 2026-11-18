@@ -86,6 +86,7 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 			Endpoint           string         `bson:"endpoint"`
 			InputTokens        int            `bson:"input_tokens"`
 			OutputTokens       int            `bson:"output_tokens"`
+			TotalTokens        int            `bson:"total_tokens"`
 			RewriteTokensSaved int            `bson:"rewrite_tokens_saved"`
 			RawData            map[string]any `bson:"raw_data"`
 			Caveat             string         `bson:"costs_calculation_caveat"`
@@ -106,6 +107,7 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 			Endpoint:           row.Endpoint,
 			InputTokens:        row.InputTokens,
 			OutputTokens:       row.OutputTokens,
+			TotalTokens:        row.TotalTokens,
 			RewriteTokensSaved: row.RewriteTokensSaved,
 			RawData:            row.RawData,
 			Caveat:             row.Caveat,

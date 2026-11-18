@@ -571,6 +571,37 @@ nad listą, ponieważ może brakować ich narzędzi. Lista pokazuje widok całej
 bramy: nie uwzględnia limitów `user_paths` danego klucza API, więc niektórzy
 klienci mogą nie widzieć wszystkich wymienionych serwerów.
 
+### Eksport spisu narzędzi
+
+Na potrzeby przeglądu bezpieczeństwa pobierz wszystkie narzędzia wszystkich
+serwerów jako jeden plik. Kliknij **Pobierz CSV** lub **Pobierz JSON** w widoku
+**Wszystkie narzędzia** albo wywołaj API administracyjne globalnym kluczem
+administratora:
+
+```bash
+curl -OJ "http://localhost:8080/admin/mcp-servers/catalog?format=csv" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+Każdy wiersz to jedno narzędzie wraz z serwerem albo serwer bez narzędzi: slug,
+nazwa wyświetlana, transport, flaga włączenia i status serwera; nazwa, którą
+wywołują klienci (`{slug}_{name}`), nazwa z serwera upstream, opis oraz
+wskazówki read-only i destructive; informacja, czy filtry narzędzi serwera je
+udostępniają; a także `user_paths` i `disallowed_user_paths` serwera. Narzędzia
+ukryte przez filtry są uwzględnione z `exposed` równym `false`. Gdy dwa serwery
+dają to samo `{slug}_{name}`, brama zachowuje pierwszy w kolejności slugów;
+drugie narzędzie nie ma nazwy dla klientów, a `shadowed_by` wskazuje serwer, do
+którego należy nazwa. Wyłączony lub nieosiągalny serwer nie przerywa eksportu.
+Serwer wyłączony lub taki, który nigdy się nie połączył, jest wymieniony ze
+swoim statusem i bez narzędzi; serwer w stanie `degraded`, który wcześniej się
+połączył, zachowuje ostatni katalog, więc jego narzędzia zostają w eksporcie.
+
+Aby zawęzić eksport, dodaj `server=<slug>`, `virtual_server=<name>` lub
+`user_path=/team/x`, który zostawia tylko serwery widoczne dla wywołującego z
+tą ścieżką użytkownika. Plik pobrany z dashboardu obejmuje endpoint wybrany w
+widoku **Wszystkie narzędzia**. Pełny schemat opisuje
+[GET /admin/mcp-servers/catalog](/pl/advanced/admin-endpoints#get-adminmcp-serverscatalog).
+
 ## Uwagi dotyczące bezpieczeństwa
 
 - **Granica danych uwierzytelniających.** Specyfikacja MCP zabrania przekazywania
