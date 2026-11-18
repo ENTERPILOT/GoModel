@@ -1,6 +1,6 @@
 ---
 title: "GoModel & Open WebUI"
-description: "Give Open WebUI one connection to every provider through GoModel, and get audit logs, per-user cost tracking, and metrics for every chat."
+description: "Give Open WebUI one connection to every provider through GoModel, and get request logs, per-user cost tracking, and metrics for every chat."
 icon: "messages-square"
 keywords: ["Open WebUI", "open-webui", "self-hosted chat", "base URL", "OpenAI connection", "per-user costs", "LLM observability", "setup guide"]
 ---
@@ -8,7 +8,7 @@ keywords: ["Open WebUI", "open-webui", "self-hosted chat", "base URL", "OpenAI c
 ## Overview
 
 Open WebUI is a self-hosted chat UI, but on its own it cannot tell you what
-each user's chats cost or keep an audit trail of model traffic. Pointing its
+each user's chats cost or keep a log of model traffic. Pointing its
 OpenAI connection at GoModel fixes that: one connection, and every chat is
 logged, priced, and attributed to the signed-in Open WebUI user. The same
 connection puts Anthropic, Gemini, and every other provider configured in
@@ -20,7 +20,7 @@ Flow:
 
 What you get:
 
-- Full request and response bodies for every chat in the GoModel audit log.
+- Full request and response bodies for every chat in the GoModel request log.
 - Cost per Open WebUI user via forwarded user headers and
   [labels](/features/labelling).
 - All providers behind one OpenAI connection; no per-provider setup in
@@ -95,7 +95,7 @@ environment variables.
 Pick any model — `openai/gpt-5-mini`, `anthropic/claude-haiku-4-5-20251001`,
 `gemini/gemini-2.5-flash` — and chat. Streaming responses, and the follow-up
 title and tag generation Open WebUI runs after each chat, all pass through
-GoModel. Each call appears in the audit log with the full prompt, response,
+GoModel. Each call appears in the request log with the full prompt, response,
 tokens, cost, and the headers identifying the user.
 
 <Note>
@@ -135,7 +135,7 @@ keep the picker usable:
 
 After each chat, Open WebUI generates a title and tags using the same model
 as the chat by default — a few hundred extra prompt tokens per conversation,
-which you will now see itemised in the audit log. Set a small model (for
+which you will now see itemised in the request log. Set a small model (for
 example `openai/gpt-5-mini`) as the task model under
 `Admin Panel -> Settings -> Interface` to keep that overhead cheap. Task
 calls go through GoModel too, so they stay logged and priced.

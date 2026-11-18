@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/ext"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/session"
 )
 
@@ -419,11 +419,11 @@ func TestExtensionRoutesMiddlewareAndAuthSkipPaths(t *testing.T) {
 	})
 }
 
-func TestRequestRewriteMiddlewareAuditKeepsOriginalBody(t *testing.T) {
+func TestRequestRewriteMiddlewareRequestLogKeepsOriginalBody(t *testing.T) {
 	provider := newRewriteTestProvider()
-	auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: true}}
+	requestLogger := &capturingRequestLogger{config: requestlog.Config{Enabled: true, LogBodies: true}}
 	srv := New(provider, &Config{
-		AuditLogger:      auditLogger,
+		RequestLogger:    requestLogger,
 		RequestRewriters: []ext.RequestRewriter{replaceBodyRewriter("swap", "PING", "PONG")},
 	})
 
@@ -434,14 +434,14 @@ func TestRequestRewriteMiddlewareAuditKeepsOriginalBody(t *testing.T) {
 
 	content, _ := provider.capturedChatReq.Messages[0].Content.(string)
 	require.Equal(t, "PONG", content)
-	require.NotEmpty(t, auditLogger.entries)
+	require.NotEmpty(t, requestLogger.entries)
 
-	entryJSON, err := json.Marshal(auditLogger.entries[0])
+	entryJSON, err := json.Marshal(requestLogger.entries[0])
 	require.NoError(t, err)
-	assert.Contains(t, string(entryJSON), "PING", "audit entry must contain the original client body: %s", entryJSON)
+	assert.Contains(t, string(entryJSON), "PING", "request log entry must contain the original client body: %s", entryJSON)
 
 	if strings.Contains(string(entryJSON), "PONG") {
-		assert.Contains(t, string(entryJSON), `"ok"`, "audit request body appears rewritten")
+		assert.Contains(t, string(entryJSON), `"ok"`, "logged request body appears rewritten")
 	}
 }
 
@@ -459,11 +459,11 @@ func TestRequestRewriteMiddlewareRecordsRevisions(t *testing.T) {
 		},
 	}
 
-	run := func(t *testing.T, logBodies, logRevisionBodies bool) *auditlog.LogEntry {
+	run := func(t *testing.T, logBodies, logRevisionBodies bool) *requestlog.LogEntry {
 		t.Helper()
-		auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: logBodies, LogRevisionBodies: logRevisionBodies}}
+		requestLogger := &capturingRequestLogger{config: requestlog.Config{Enabled: true, LogBodies: logBodies, LogRevisionBodies: logRevisionBodies}}
 		srv := New(newRewriteTestProvider(), &Config{
-			AuditLogger: auditLogger,
+			RequestLogger: requestLogger,
 			RequestRewriters: []ext.RequestRewriter{
 				detailed,
 				replaceBodyRewriter("upper", "PONG", "PONG!"),
@@ -472,9 +472,9 @@ func TestRequestRewriteMiddlewareRecordsRevisions(t *testing.T) {
 		rec := postJSON(t, srv, "/v1/chat/completions",
 			`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"PING"}]}`)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		require.NotEmpty(t, auditLogger.entries)
+		require.NotEmpty(t, requestLogger.entries)
 
-		return auditLogger.entries[0]
+		return requestLogger.entries[0]
 	}
 
 	t.Run("with body logging", func(t *testing.T) {
@@ -547,9 +547,9 @@ func TestRequestRewriteMiddlewareRecordsNoChangeRevisions(t *testing.T) {
 		},
 	}
 
-	auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: true}}
+	requestLogger := &capturingRequestLogger{config: requestlog.Config{Enabled: true, LogBodies: true}}
 	srv := New(newRewriteTestProvider(), &Config{
-		AuditLogger: auditLogger,
+		RequestLogger: requestLogger,
 		RequestRewriters: []ext.RequestRewriter{
 			quiet,
 			replaceBodyRewriter("swap", "PING", "PONG"),
@@ -560,9 +560,9 @@ func TestRequestRewriteMiddlewareRecordsNoChangeRevisions(t *testing.T) {
 		`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"PING"}]}`)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, "skipped", rec.Header().Get("X-Test-Rewriter"))
-	require.NotEmpty(t, auditLogger.entries)
+	require.NotEmpty(t, requestLogger.entries)
 
-	revisions := auditLogger.entries[0].Data.RequestRevisions
+	revisions := requestLogger.entries[0].Data.RequestRevisions
 	require.Len(t, revisions, 3)
 
 	for i, want := range []struct {

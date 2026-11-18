@@ -27,7 +27,7 @@ import {
 } from "../src/pages/workflows/workflowsLogic.js";
 import {
   workflowChart,
-  workflowAuditChart,
+  workflowRequestLogChart,
   workflowChartWorkflowID,
   workflowRuntimeFromEntry,
   workflowGuardrailLabel,
@@ -261,10 +261,10 @@ test("workflowChart returns the shared chart contract for workflow sources", () 
       authNodeClass: "",
       authNodeSublabel: null,
       usageNodeClass: "",
-      auditNodeClass: "",
+      requestLogNodeClass: "",
       showAsync: true,
       showUsage: false,
-      showAudit: true,
+      showRequestLog: true,
       workflowID: "workflow-openai-gpt-5-v7",
     },
   );
@@ -299,7 +299,7 @@ test("workflowChart masks globally disabled workflow features from persisted wor
   assert.equal(chart.showFailover, true);
   assert.equal(chart.showAsync, false);
   assert.equal(chart.showUsage, false);
-  assert.equal(chart.showAudit, false);
+  assert.equal(chart.showRequestLog, false);
   assert.equal(chart.workflowID, null);
 });
 
@@ -320,7 +320,7 @@ test("workflowChartWorkflowID ignores the draft preview sentinel and falls back 
   );
 });
 
-test("workflowAuditChart returns the shared chart contract for audit runtime entries", () => {
+test("workflowRequestLogChart returns the shared chart contract for request log runtime entries", () => {
   const source = {
     id: "historical-v1",
     scope: {
@@ -341,7 +341,7 @@ test("workflowAuditChart returns the shared chart contract for audit runtime ent
   };
 
   assert.deepEqual(
-    workflowAuditChart(
+    workflowRequestLogChart(
       {
         workflow_version_id: "historical-v1",
         cache_type: "semantic",
@@ -405,17 +405,17 @@ test("workflowAuditChart returns the shared chart contract for audit runtime ent
       authNodeClass: "",
       authNodeSublabel: null,
       usageNodeClass: "workflow-node-success",
-      auditNodeClass: "workflow-node-success",
+      requestLogNodeClass: "workflow-node-success",
       showAsync: true,
       showUsage: true,
-      showAudit: true,
+      showRequestLog: true,
       workflowID: "historical-v1",
     },
   );
 });
 
-test("workflowAuditChart forces audit nodes even when the workflow version cannot be resolved", () => {
-  const chart = workflowAuditChart(
+test("workflowRequestLogChart forces request log nodes even when the workflow version cannot be resolved", () => {
+  const chart = workflowRequestLogChart(
     {
       workflow_version_id: "missing-workflow",
       cache_type: "exact",
@@ -436,12 +436,12 @@ test("workflowAuditChart forces audit nodes even when the workflow version canno
   assert.equal(chart.responseNodeClass, "workflow-node-success");
   assert.equal(chart.showAsync, true);
   assert.equal(chart.showUsage, false);
-  assert.equal(chart.showAudit, true);
-  assert.equal(chart.auditNodeClass, "workflow-node-success");
+  assert.equal(chart.showRequestLog, true);
+  assert.equal(chart.requestLogNodeClass, "workflow-node-success");
   assert.equal(chart.workflowID, "missing-workflow");
 });
 
-test("workflowAuditChart names the configured provider instance, not its type", () => {
+test("workflowRequestLogChart names the configured provider instance, not its type", () => {
   const entry = {
     workflow_version_id: "missing-workflow",
     provider: "deepseek",
@@ -450,19 +450,19 @@ test("workflowAuditChart names the configured provider instance, not its type", 
     status_code: 200,
   };
 
-  assert.equal(workflowAuditChart(entry, null, ALL_CAPS).aiLabel, "mockds");
+  assert.equal(workflowRequestLogChart(entry, null, ALL_CAPS).aiLabel, "mockds");
   // Entries recorded without an instance name still show the provider type.
   assert.equal(
-    workflowAuditChart({ ...entry, provider_name: "" }, null, ALL_CAPS).aiLabel,
+    workflowRequestLogChart({ ...entry, provider_name: "" }, null, ALL_CAPS).aiLabel,
     "deepseek",
   );
   assert.equal(
-    workflowAuditChart({ ...entry, provider_name: "   " }, null, ALL_CAPS).aiLabel,
+    workflowRequestLogChart({ ...entry, provider_name: "   " }, null, ALL_CAPS).aiLabel,
     "deepseek",
   );
 });
 
-test("workflowAuditChart prefers request-time workflow features over current workflow state", () => {
+test("workflowRequestLogChart prefers request-time workflow features over current workflow state", () => {
   const source = {
     id: "historical-v2",
     scope: {
@@ -482,7 +482,7 @@ test("workflowAuditChart prefers request-time workflow features over current wor
     },
   };
 
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     {
       workflow_version_id: "historical-v2",
       provider: "openai",
@@ -509,10 +509,10 @@ test("workflowAuditChart prefers request-time workflow features over current wor
   assert.equal(chart.showFailover, true);
   assert.equal(chart.aiNodeClass, "workflow-node-success");
   assert.equal(chart.showUsage, false);
-  assert.equal(chart.showAudit, true);
+  assert.equal(chart.showRequestLog, true);
 });
 
-test("workflowAuditChart highlights configured failover redirects and exposes the target", () => {
+test("workflowRequestLogChart highlights configured failover redirects and exposes the target", () => {
   const source = {
     id: "historical-v3",
     scope: {
@@ -532,7 +532,7 @@ test("workflowAuditChart highlights configured failover redirects and exposes th
     },
   };
 
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     {
       workflow_version_id: "historical-v3",
       provider: "azure",
@@ -629,7 +629,7 @@ test("workflowRuntimeFromEntry derives cache hit state from cache_type", () => {
   assert.equal(empty.statusCode, null);
 });
 
-test("audit runtime uses explicit cache-hit labels and highlights the uncached 200 path", () => {
+test("request log runtime uses explicit cache-hit labels and highlights the uncached 200 path", () => {
   const semanticHit = workflowRuntimeFromEntry({
     cache_type: "semantic",
     status_code: 200,
@@ -660,7 +660,7 @@ test("response runtime maps status ranges to chart colors", () => {
   assert.equal(runtimeFor(204).aiSuccess, true);
 });
 
-test("auth runtime highlights auth node state from audit entries", () => {
+test("auth runtime highlights auth node state from request log entries", () => {
   const failedAuth = workflowRuntimeFromEntry({
     auth_method: "api_key",
     error_type: "authentication_error",
@@ -676,7 +676,7 @@ test("auth runtime highlights auth node state from audit entries", () => {
   assert.equal(workflowAuthNodeSublabel(masterKeyAuth), "master_key");
 });
 
-test("budget runtime highlights audit budget node success and exceeded states", () => {
+test("budget runtime highlights request log budget node success and exceeded states", () => {
   const successfulBudget = workflowRuntimeFromEntry({
     status_code: 200,
     data: { workflow_features: { budget: true } },
@@ -698,7 +698,7 @@ test("budget runtime highlights audit budget node success and exceeded states", 
   assert.equal(workflowBudgetNodeClass(true, exceededBudget, true), "workflow-node-error");
   assert.equal(workflowBudgetStatusLabel(exceededBudget), "Exceeded");
 
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     {
       workflow_version_id: "missing-budget-workflow",
       status_code: 429,
@@ -719,10 +719,10 @@ test("workflowAsyncNodeClass only marks async nodes green when highlighted", () 
   assert.equal(workflowAsyncNodeClass(true, false, true), "workflow-node-current");
 });
 
-test("workflowAuditChart marks live current steps and waits for async flushes", () => {
-  const started = workflowAuditChart(
+test("workflowRequestLogChart marks live current steps and waits for async flushes", () => {
+  const started = workflowRequestLogChart(
     {
-      id: "audit-live-1",
+      id: "request-log-live-1",
       request_id: "req-live-1",
       _live: true,
       _live_state: "audit.started",
@@ -732,11 +732,11 @@ test("workflowAuditChart marks live current steps and waits for async flushes", 
     ALL_CAPS,
   );
   assert.equal(started.authNodeClass, "workflow-node-current");
-  assert.equal(started.auditNodeClass, "");
+  assert.equal(started.requestLogNodeClass, "");
 
-  const inAi = workflowAuditChart(
+  const inAi = workflowRequestLogChart(
     {
-      id: "audit-live-1",
+      id: "request-log-live-1",
       request_id: "req-live-1",
       provider: "openai",
       requested_model: "gpt-5",
@@ -749,9 +749,9 @@ test("workflowAuditChart marks live current steps and waits for async flushes", 
   );
   assert.equal(inAi.aiNodeClass, "workflow-node-current");
 
-  const auditQueued = workflowAuditChart(
+  const requestLogQueued = workflowRequestLogChart(
     {
-      id: "audit-live-1",
+      id: "request-log-live-1",
       request_id: "req-live-1",
       provider: "openai",
       requested_model: "gpt-5",
@@ -767,12 +767,12 @@ test("workflowAuditChart marks live current steps and waits for async flushes", 
     null,
     ALL_CAPS,
   );
-  assert.equal(auditQueued.responseNodeClass, "workflow-node-success");
-  assert.equal(auditQueued.auditNodeClass, "workflow-node-current");
-  assert.equal(auditQueued.usageNodeClass, "workflow-node-current");
+  assert.equal(requestLogQueued.responseNodeClass, "workflow-node-success");
+  assert.equal(requestLogQueued.requestLogNodeClass, "workflow-node-current");
+  assert.equal(requestLogQueued.usageNodeClass, "workflow-node-current");
 
-  const auditFlushedUsageQueuedEntry = {
-    id: "audit-live-1",
+  const requestLogFlushedUsageQueuedEntry = {
+    id: "request-log-live-1",
     request_id: "req-live-1",
     provider: "openai",
     requested_model: "gpt-5",
@@ -781,23 +781,23 @@ test("workflowAuditChart marks live current steps and waits for async flushes", 
     _live: true,
     _live_state: "audit.flushed",
     _live_pending: false,
-    _audit_flushed: true,
+    _request_log_flushed: true,
     _usage_live_state: "usage.completed",
     _usage_live_pending: true,
     _usage_flushed: false,
     data: { workflow_features: { audit: true, usage: true } },
   };
-  const auditFlushedUsageQueued = workflowAuditChart(
-    auditFlushedUsageQueuedEntry,
+  const requestLogFlushedUsageQueued = workflowRequestLogChart(
+    requestLogFlushedUsageQueuedEntry,
     null,
     ALL_CAPS,
   );
-  assert.equal(auditFlushedUsageQueued.auditNodeClass, "workflow-node-success");
-  assert.equal(auditFlushedUsageQueued.usageNodeClass, "workflow-node-current");
+  assert.equal(requestLogFlushedUsageQueued.requestLogNodeClass, "workflow-node-success");
+  assert.equal(requestLogFlushedUsageQueued.usageNodeClass, "workflow-node-current");
 
-  const fullyFlushed = workflowAuditChart(
+  const fullyFlushed = workflowRequestLogChart(
     {
-      ...auditFlushedUsageQueuedEntry,
+      ...requestLogFlushedUsageQueuedEntry,
       _usage_live_state: "usage.flushed",
       _usage_live_pending: false,
       _usage_flushed: true,
@@ -805,7 +805,7 @@ test("workflowAuditChart marks live current steps and waits for async flushes", 
     null,
     ALL_CAPS,
   );
-  assert.equal(fullyFlushed.auditNodeClass, "workflow-node-success");
+  assert.equal(fullyFlushed.requestLogNodeClass, "workflow-node-success");
   assert.equal(fullyFlushed.usageNodeClass, "workflow-node-success");
 });
 
@@ -1969,7 +1969,7 @@ test("guardrail labels carry the code only for a stop", () => {
 });
 
 test("a prompt block colors the node red, skips the model and keeps the response status", () => {
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     guardedEntry(
       [
         { seq: 1, phase: "prompt", step: 10, instance: "pii-filter", action: "allow", edited: true },
@@ -2025,7 +2025,7 @@ test("a prompt block colors the node red, skips the model and keeps the response
 });
 
 test("a prompt respond marks the response as answered by the guardrail", () => {
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     guardedEntry([
       { seq: 1, phase: "prompt", step: 10, instance: "pii-filter", action: "allow" },
       { seq: 2, phase: "prompt", step: 20, instance: "policy", action: "respond", code: "canned" },
@@ -2048,7 +2048,7 @@ test("a prompt respond marks the response as answered by the guardrail", () => {
 
 test("guardrail phase rollups rank failures by fail mode and warnings over passes", () => {
   const rollup = (outcomes) => {
-    const chart = workflowAuditChart(guardedEntry(outcomes), GUARDED_SOURCE, ALL_CAPS);
+    const chart = workflowRequestLogChart(guardedEntry(outcomes), GUARDED_SOURCE, ALL_CAPS);
     return [chart.guardrailNodeClass, chart.guardrailStatusLabel];
   };
   assert.deepEqual(
@@ -2093,7 +2093,7 @@ test("guardrail phase rollups rank failures by fail mode and warnings over passe
   );
 
   // A fail-open failure keeps the model call: the AI node stays green.
-  const open = workflowAuditChart(
+  const open = workflowRequestLogChart(
     guardedEntry([{ phase: "prompt", instance: "pii-filter", action: "failure", fail_mode: "open" }]),
     GUARDED_SOURCE,
     ALL_CAPS,
@@ -2110,7 +2110,7 @@ test("guardrail phase rollups rank failures by fail mode and warnings over passe
 });
 
 test("a response-phase block leaves the AI node green and colors the response node by status", () => {
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     guardedEntry(
       [
         { seq: 1, phase: "prompt", step: 10, instance: "pii-filter", action: "allow" },
@@ -2135,7 +2135,7 @@ test("a response-phase block leaves the AI node green and colors the response no
 
 test("guardrail phases without outcomes are skipped only once the entry finished", () => {
   // Live, still running: nothing is known yet.
-  const running = workflowAuditChart(
+  const running = workflowRequestLogChart(
     { ...guardedEntry([]), status_code: null, _live: true, _live_pending: true, _live_state: "audit.started" },
     GUARDED_SOURCE,
     ALL_CAPS,
@@ -2149,7 +2149,7 @@ test("guardrail phases without outcomes are skipped only once the entry finished
   ]);
   // A finished entry with a passed prompt phase but no later outcomes (the
   // stream phase does not run for a non-streaming call, say).
-  const finished = workflowAuditChart(
+  const finished = workflowRequestLogChart(
     guardedEntry([
       { phase: "prompt", instance: "pii-filter", action: "allow" },
       { phase: "prompt", instance: "policy", action: "allow" },
@@ -2163,7 +2163,7 @@ test("guardrail phases without outcomes are skipped only once the entry finished
   assert.equal(finished.streamGuardrailNodeClass, "workflow-node-skipped");
   assert.equal(finished.streamGuardrailStatusLabel, "Skipped");
   // A configured ref the phase never reached is skipped inside a phase that ran.
-  const partial = workflowAuditChart(
+  const partial = workflowRequestLogChart(
     guardedEntry([{ phase: "prompt", step: 10, instance: "pii-filter", action: "block" }], { status_code: 403 }),
     GUARDED_SOURCE,
     ALL_CAPS,
@@ -2182,7 +2182,7 @@ test("guardrail phases without outcomes are skipped only once the entry finished
 });
 
 test("recorded outcomes show guardrail nodes even when the workflow version is unresolved", () => {
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     {
       workflow_version_id: "gone",
       provider: "openai",

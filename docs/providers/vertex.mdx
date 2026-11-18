@@ -71,6 +71,14 @@ Default bases are derived from project and location:
 - OpenAI-compatible: `.../projects/{project}/locations/{location}/endpoints/openapi`
 - native Gemini: `.../projects/{project}/locations/{location}/publishers/google`
 
+A provider saved in the dashboard uses the host's Application Default
+Credentials, or a service-account file on the host, only for Google's Vertex AI
+endpoints: `aiplatform.googleapis.com`, `{location}-aiplatform.googleapis.com`,
+and `aiplatform.{location}.rep.googleapis.com`, over HTTPS. For any other base
+URL, such as a proxy or a Private Service Connect endpoint, set the auth type to
+`gcp_service_account` and save service-account JSON with the provider. Providers declared in `config.yaml` or environment
+variables are not restricted.
+
 Vertex embeddings use Vertex AI native prediction regardless of
 `VERTEX_API_MODE`. In native mode (the default) the
 [image endpoints](/advanced/images-api) are served through the publisher

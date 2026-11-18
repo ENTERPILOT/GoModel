@@ -1,5 +1,5 @@
 // Overview page state: provider status (with the "Starting" poll loop and
-// card expand preferences), audit stats, the MCP servers summary, and the
+// card expand preferences), request stats, the MCP servers summary, and the
 // activity-calendar data.
 
 import { getJSON, isAbortError } from "$lib/api/client.js";
@@ -15,7 +15,7 @@ import {
   saveCardOverrides,
   PROVIDER_STATUS_POLL_MS,
 } from "./providersLogic.js";
-import { emptyAuditStats, normalizeAuditStats } from "./auditStatsLogic.js";
+import { emptyRequestStats, normalizeRequestStats } from "./requestStatsLogic.js";
 import { browserStorage } from "$lib/utils/storage.js";
 
 class ProviderStatusState {
@@ -132,8 +132,8 @@ class ProviderStatusState {
   }
 }
 
-class AuditStatsState {
-  stats = $state(emptyAuditStats());
+class RequestStatsState {
+  stats = $state(emptyRequestStats());
   loading = $state(false);
   #fetchToken = 0;
 
@@ -141,20 +141,20 @@ class AuditStatsState {
     const requestToken = ++this.#fetchToken;
     this.loading = true;
     try {
-      const result = await getJSON("/admin/audit/stats?" + dateRange.queryStr(), {
-        label: "audit stats",
+      const result = await getJSON("/admin/request-logs/stats?" + dateRange.queryStr(), {
+        label: "request stats",
       });
       if (result.stale) return;
       if (requestToken !== this.#fetchToken) return;
       if (!result.ok) {
-        this.stats = emptyAuditStats();
+        this.stats = emptyRequestStats();
         return;
       }
-      this.stats = normalizeAuditStats(result.data);
+      this.stats = normalizeRequestStats(result.data);
     } catch (e) {
-      console.error("Failed to fetch audit stats:", e);
+      console.error("Failed to fetch request stats:", e);
       if (requestToken !== this.#fetchToken) return;
-      this.stats = emptyAuditStats();
+      this.stats = emptyRequestStats();
     } finally {
       if (requestToken === this.#fetchToken) {
         this.loading = false;
@@ -240,6 +240,6 @@ class CalendarState {
 }
 
 export const providerStatusState = new ProviderStatusState();
-export const auditStatsState = new AuditStatsState();
+export const requestStatsState = new RequestStatsState();
 export const mcpServersState = new McpServersState();
 export const calendarState = new CalendarState();

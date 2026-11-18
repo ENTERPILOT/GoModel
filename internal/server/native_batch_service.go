@@ -7,10 +7,10 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	batchstore "github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -67,7 +67,7 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	storeWorkflow(c, result.Workflow)
-	auditBatchEntry(c, result.ProviderType)
+	requestLogBatchEntry(c, result.ProviderType)
 
 	return c.JSON(http.StatusOK, result.Batch)
 }
@@ -84,7 +84,7 @@ func (s *nativeBatchService) GetBatch(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	auditBatchEntry(c, result.ProviderType)
+	requestLogBatchEntry(c, result.ProviderType)
 
 	return c.JSON(http.StatusOK, result.Batch)
 }
@@ -107,7 +107,7 @@ func (s *nativeBatchService) ListBatches(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	auditBatchEntry(c, "")
+	requestLogBatchEntry(c, "")
 
 	return c.JSON(http.StatusOK, resp)
 }
@@ -124,7 +124,7 @@ func (s *nativeBatchService) CancelBatch(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	auditBatchEntry(c, result.ProviderType)
+	requestLogBatchEntry(c, result.ProviderType)
 
 	return c.JSON(http.StatusOK, result.Batch)
 }
@@ -141,7 +141,7 @@ func (s *nativeBatchService) BatchResults(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	auditBatchEntry(c, result.ProviderType)
+	requestLogBatchEntry(c, result.ProviderType)
 
 	return c.JSON(http.StatusOK, result.Response)
 }
@@ -191,9 +191,9 @@ func batchAdmissionEnforcer(limiter RateLimiter, checker BudgetChecker) func(con
 	}
 }
 
-func auditBatchEntry(c *echo.Context, providerType string) {
+func requestLogBatchEntry(c *echo.Context, providerType string) {
 	if c == nil {
 		return
 	}
-	auditlog.EnrichEntry(c, "batch", providerType)
+	requestlog.EnrichEntry(c, "batch", providerType)
 }

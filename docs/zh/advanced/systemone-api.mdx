@@ -1,6 +1,6 @@
 ---
 title: "System One API"
-description: "通过 GoModel 发送 TypeSafe System One 决策请求（Jev、Kev），以原生方式转发，并支持虚拟模型、护栏、缓存、故障转移、审计和用量统计。"
+description: "通过 GoModel 发送 TypeSafe System One 决策请求（Jev、Kev），以原生方式转发，并支持虚拟模型、护栏、缓存、故障转移、请求日志和用量统计。"
 icon: "scale"
 keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "决策模型", "decision model", "noul", "choice", "score", "OpenRouter", "Azure", "Microsoft-Decision-1"]
 ---
@@ -68,7 +68,7 @@ Kev 路由的行为与 `/v1/systemone` 相同。OpenRouter 和 Azure 只支持�
 2. 对 `state` 运行工作流中的 prompt [护栏](/zh/advanced/guardrails)。
 3. 从 [响应缓存](/zh/features/cache) 中为相同的历史请求提供结果。
 4. 转发请求体时只修改 `model`（解析后的名称）和 `state`（如果护栏编辑了它）。问题、标准以及其他所有字段都会逐字节原样到达提供商。
-5. 原样转发回答，并将其记录到审计日志（请求类型为
+5. 原样转发回答，并将其记录到请求日志（请求类型为
    **Decisions**）和用量中。
 
 ## 图像
@@ -128,7 +128,7 @@ virtual_models:
       - { model: openrouter/typesafe/jev-1.13 }  # Kev 不可用时使用托管 Jev
 ```
 
-审计日志会显示每次尝试，用量记录在实际作答的目标下，故障转移得到的回答不会被缓存。
+请求日志会显示每次尝试，用量记录在实际作答的目标下，故障转移得到的回答不会被缓存。
 
 ## 护栏
 
@@ -152,7 +152,7 @@ One 的调用方期望得到类型化的回答，而不是文本。
 | System One 模型被发送到 `/v1/chat/completions`、`/v1/responses` 或 `/v1/embeddings` | `400 invalid_request_error`，并指向 `/v1/decisions` 和 `/v1/systemone` |
 | 上游错误，例如格式错误的问题 | 提供商的状态码及其消息 |
 
-## 审计、用量与成本
+## 请求日志、用量与成本
 
-每次调用都会在其路由下生成一条审计条目，包含请求的模型和解析后的模型、提供商、请求体和响应体、护栏结果以及故障转移尝试；可按 **Decisions** 请求类型过滤审计日志。用量会将回答中的 `input_tokens` 和 `output_tokens` 记录在实际作答的模型下。OpenRouter 会报告自己的 `usage.cost`，并将其记录为该请求的成本；对于托管的 Jev，请在提供商上声明定价（参见
+每次调用都会在其路由下生成一条请求日志条目，包含请求的模型和解析后的模型、提供商、请求体和响应体、护栏结果以及故障转移尝试；可按 **Decisions** 请求类型过滤请求日志。用量会将回答中的 `input_tokens` 和 `output_tokens` 记录在实际作答的模型下。OpenRouter 会报告自己的 `usage.cost`，并将其记录为该请求的成本；对于托管的 Jev，请在提供商上声明定价（参见
 [Jev / Kev](/zh/providers/jev#模型、访问控制与成本)）。

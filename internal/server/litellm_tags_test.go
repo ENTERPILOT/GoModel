@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 func TestTakeBodyTags(t *testing.T) {
@@ -63,8 +63,8 @@ func postWithHeaders(t *testing.T, srv *Server, path, body string, header http.H
 
 func TestLiteLLMTags_ChatBecomesLabels(t *testing.T) {
 	provider := newRewriteTestProvider()
-	auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: true}}
-	srv := New(provider, &Config{AuditLogger: auditLogger})
+	requestLogger := &capturingRequestLogger{config: requestlog.Config{Enabled: true, LogBodies: true}}
+	srv := New(provider, &Config{RequestLogger: requestLogger})
 
 	body := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"tags":["eu"],"metadata":{"tags":["search","eu"],"env":"prod"}}`
 	rec := postWithHeaders(t, srv, "/v1/chat/completions", body, http.Header{"X-Litellm-Tags": {"team-a, prod"}})
@@ -78,11 +78,11 @@ func TestLiteLLMTags_ChatBecomesLabels(t *testing.T) {
 	assert.Contains(t, string(forwarded), `"metadata":{"env":"prod"}`)
 	assert.Contains(t, core.TaggingStripHeadersFromContext(provider.capturedChatCtx), "X-Litellm-Tags")
 
-	require.NotEmpty(t, auditLogger.entries)
-	entry, err := json.Marshal(auditLogger.entries[0])
+	require.NotEmpty(t, requestLogger.entries)
+	entry, err := json.Marshal(requestLogger.entries[0])
 	require.NoError(t, err)
-	assert.Contains(t, string(entry), `"request_body":{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"tags":["eu"]`, "the audit entry keeps the body the client sent: %s", entry)
-	assert.Equal(t, []string{"team-a", "prod", "eu", "search"}, auditLogger.entries[0].Data.Labels)
+	assert.Contains(t, string(entry), `"request_body":{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"tags":["eu"]`, "the request log entry keeps the body the client sent: %s", entry)
+	assert.Equal(t, []string{"team-a", "prod", "eu", "search"}, requestLogger.entries[0].Data.Labels)
 }
 
 func TestLiteLLMTags_ResponsesAcceptListMetadataTags(t *testing.T) {

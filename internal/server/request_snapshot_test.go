@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 type explodingReadCloser struct{}
@@ -143,7 +143,7 @@ func TestRequestSnapshotCapture_PeeksSelectorsWithoutReadingWholeBody(t *testing
 }
 
 func TestSemanticJSONBodyRefreshesPromptFromFullBody(t *testing.T) {
-	largeContent := strings.Repeat("x", int(auditlog.MaxBodyCapture)+1)
+	largeContent := strings.Repeat("x", int(requestlog.MaxBodyCapture)+1)
 	reqBody := `{"messages":[{"role":"user","content":"` + largeContent + `"}],"model":"gpt-5-mini","provider":"openai"}`
 	c, _ := echotest.Post(t, "/v1/chat/completions", reqBody)
 
@@ -204,7 +204,7 @@ func TestStoreRequestBodySnapshot_PreservesPassthroughEnrichment(t *testing.T) {
 		SemanticOperation:  "vllm.chat_completions",
 		GenAIOperation:     "chat",
 		StreamUncertain:    true,
-		AuditPath:          "/v1/chat/completions",
+		RequestLogPath:     "/v1/chat/completions",
 		Model:              "stub-model",
 	})
 	ctx := core.WithRequestSnapshot(c.Request().Context(), snapshot)
@@ -222,7 +222,7 @@ func TestStoreRequestBodySnapshot_PreservesPassthroughEnrichment(t *testing.T) {
 	assert.Equal(t, "chat/completions", info.NormalizedEndpoint)
 	assert.Equal(t, "vllm.chat_completions", info.SemanticOperation)
 	assert.Equal(t, "chat", info.GenAIOperation)
-	assert.Equal(t, "/v1/chat/completions", info.AuditPath)
+	assert.Equal(t, "/v1/chat/completions", info.RequestLogPath)
 	assert.Equal(t, "stub-model", info.Model)
 	assert.True(t, info.Stream)
 	assert.False(t, info.StreamUncertain)
@@ -338,7 +338,7 @@ func TestRequestSnapshotCapture_PreservesPassthroughRouteParams(t *testing.T) {
 	if info := capturedEnv.CachedPassthroughRouteInfo(); assert.NotNil(t, info) {
 		assert.Equal(t, "openai", info.Provider)
 		assert.Equal(t, "responses", info.RawEndpoint)
-		assert.Equal(t, "/p/openai/responses", info.AuditPath)
+		assert.Equal(t, "/p/openai/responses", info.RequestLogPath)
 	}
 }
 
@@ -411,7 +411,7 @@ func TestModelValidation_UsesSemanticEnvelopeWithoutReadingBody(t *testing.T) {
 }
 
 func TestRequestSnapshotCapture_SkipsOversizedBodies(t *testing.T) {
-	largeContent := strings.Repeat("x", int(auditlog.MaxBodyCapture)+128)
+	largeContent := strings.Repeat("x", int(requestlog.MaxBodyCapture)+128)
 	reqBody := `{"model":"gpt-5-mini","messages":[{"role":"user","content":"` + largeContent + `"}]}`
 	c, _ := echotest.Post(t, "/v1/chat/completions", reqBody)
 

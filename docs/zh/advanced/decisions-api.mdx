@@ -104,7 +104,7 @@ print(decision.answers[0].probability)
 ## 网关的处理
 
 与 [System One](/zh/advanced/systemone-api#网关的处理过程) 一样，该端点会解析
-`model`（包括[虚拟模型](/zh/features/virtual-models)和固定版本的 Jev），应用调用方的允许列表、速率限制和预算，对输入运行提示词[护栏](/zh/advanced/guardrails)，通过精确[响应缓存](/zh/features/cache)响应相同的请求，在出现可用性错误时故障转移到下一个目标，并以实际作答的模型记录审计和用量。在审计日志中按 **Decisions** 请求类型过滤即可。
+`model`（包括[虚拟模型](/zh/features/virtual-models)和固定版本的 Jev），应用调用方的允许列表、速率限制和预算，对输入运行提示词[护栏](/zh/advanced/guardrails)，通过精确[响应缓存](/zh/features/cache)响应相同的请求，在出现可用性错误时故障转移到下一个目标，并以实际作答的模型记录请求日志和用量。在请求日志中按 **Decisions** 请求类型过滤即可。
 
 `/v1/decisions` 上的用量只对输入 Token 计费，全部按模型的输入费率计算，与 OpenAI 对 Decisions API 的计费方式一致：在该 API 中，输出、缓存读取和缓存写入 Token 都是免费的，即使是像 `gpt-6-luna` 这样目录定价中带有聊天费率的模型也是如此。长上下文档位仍决定输入费率。OpenRouter
 会以 `usage.cost` 报告其实际收费；转换后的回答会保留该值，用量记录也将其作为该请求的成本。

@@ -11,7 +11,7 @@ import (
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
-// Decision codes recorded in the audit trail.
+// Decision codes recorded in the request log.
 const (
 	// Code marks a block verdict.
 	Code = "llm_judge_block"
