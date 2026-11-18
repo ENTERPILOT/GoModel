@@ -1,7 +1,7 @@
 // Client for the gateway's SSE-framed admin streams (GET /admin/live/logs).
 //
-// Two consumers read that endpoint — the audit-log live stream
-// (pages/audit-logs/live-logs-logic.js) and the overview's token-throughput
+// Two consumers read that endpoint — the request-log live stream
+// (pages/requests/live-logs-logic.js) and the overview's token-throughput
 // signal stream (pages/overview/liveTokensState.svelte.js) — and each used to
 // carry its own copy of the framing, the `data:` parsing and the reconnect
 // backoff. The transport lives here once; the consumers keep their own

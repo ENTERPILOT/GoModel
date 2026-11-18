@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
@@ -20,23 +20,23 @@ import (
 
 // sharedStores is one database as two replicas see it.
 type sharedStores struct {
-	newAuditStore func(t *testing.T) auditlog.LogStore
-	newUsageStore func(t *testing.T) usage.UsageStore
-	auditReader   auditlog.RecentWriteReader
-	usageReader   usage.RecentWriteReader
+	newRequestLogStore func(t *testing.T) requestlog.LogStore
+	newUsageStore      func(t *testing.T) usage.UsageStore
+	requestLogReader   requestlog.RecentWriteReader
+	usageReader        usage.RecentWriteReader
 }
 
 func runSharedStores(t *testing.T, body func(t *testing.T, stores sharedStores)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
-		auditReader, err := auditlog.NewSQLReader(db)
+		requestLogReader, err := requestlog.NewSQLReader(db)
 		require.NoError(t, err)
 		usageReader, err := usage.NewSQLReader(db)
 		require.NoError(t, err)
 		body(t, sharedStores{
-			newAuditStore: func(t *testing.T) auditlog.LogStore {
-				store, err := auditlog.NewSQLStore(ctx, db, 0)
+			newRequestLogStore: func(t *testing.T) requestlog.LogStore {
+				store, err := requestlog.NewSQLStore(ctx, db, 0)
 				require.NoError(t, err)
 				t.Cleanup(func() { _ = store.Close() })
 				return store
@@ -47,18 +47,18 @@ func runSharedStores(t *testing.T, body func(t *testing.T, stores sharedStores))
 				t.Cleanup(func() { _ = store.Close() })
 				return store
 			},
-			auditReader: auditReader,
-			usageReader: usageReader,
+			requestLogReader: requestLogReader,
+			usageReader:      usageReader,
 		})
 	})
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
-		auditReader, err := auditlog.NewMongoDBReader(db)
+		requestLogReader, err := requestlog.NewMongoDBReader(db)
 		require.NoError(t, err)
 		usageReader, err := usage.NewMongoDBReader(db)
 		require.NoError(t, err)
 		body(t, sharedStores{
-			newAuditStore: func(t *testing.T) auditlog.LogStore {
-				store, err := auditlog.NewMongoDBStore(db, 0)
+			newRequestLogStore: func(t *testing.T) requestlog.LogStore {
+				store, err := requestlog.NewMongoDBStore(db, 0)
 				require.NoError(t, err)
 				return store
 			},
@@ -67,8 +67,8 @@ func runSharedStores(t *testing.T, body func(t *testing.T, stores sharedStores))
 				require.NoError(t, err)
 				return store
 			},
-			auditReader: auditReader,
-			usageReader: usageReader,
+			requestLogReader: requestLogReader,
+			usageReader:      usageReader,
 		})
 	})
 }
@@ -78,31 +78,31 @@ func runSharedStores(t *testing.T, body func(t *testing.T, stores sharedStores))
 // only through A's live events.
 func TestRemoteFeedAcrossReplicasOnOneStore(t *testing.T) {
 	runSharedStores(t, func(t *testing.T, stores sharedStores) {
-		auditStore := stores.newAuditStore(t)
+		requestLogStore := stores.newRequestLogStore(t)
 		usageStore := stores.newUsageStore(t)
 		clock := &testClock{now: time.Now()}
 		// Replica A is this process: its loggers stamp storage.WriterID().
-		a := newTestHarness(t, storage.WriterID(), stores.auditReader, stores.usageReader, clock)
-		b := newTestHarness(t, testPeer, stores.auditReader, stores.usageReader, clock)
+		a := newTestHarness(t, storage.WriterID(), stores.requestLogReader, stores.usageReader, clock)
+		b := newTestHarness(t, testPeer, stores.requestLogReader, stores.usageReader, clock)
 		subA := a.subscribe(t)
 		subB := b.subscribe(t)
 		require.Empty(t, pendingEvents(subA))
 		require.Empty(t, pendingEvents(subB))
 
-		auditLogger := auditlog.NewLogger(auditStore, auditlog.Config{Enabled: true, BufferSize: 10, FlushInterval: time.Hour})
-		auditLogger.SetLivePublisher(a.broker)
+		requestLogger := requestlog.NewLogger(requestLogStore, requestlog.Config{Enabled: true, BufferSize: 10, FlushInterval: time.Hour})
+		requestLogger.SetLivePublisher(a.broker)
 		usageLogger := usage.NewLogger(usageStore, usage.Config{Enabled: true, BufferSize: 10, FlushInterval: time.Hour})
 		usageLogger.SetLivePublisher(a.broker)
 
 		const usageID = "00000000-0000-4000-8000-0000000000aa"
-		auditLogger.Write(&auditlog.LogEntry{
-			ID:             "audit-on-a",
+		requestLogger.Write(&requestlog.LogEntry{
+			ID:             "request-log-on-a",
 			RequestID:      "req-on-a",
 			Timestamp:      clock.Now(),
 			RequestedModel: "gpt-5",
 			Provider:       "openai",
 			StatusCode:     200,
-			Data:           &auditlog.LogData{RequestBody: auditlog.CaptureLoggedBody([]byte(`{"model":"gpt-5"}`))},
+			Data:           &requestlog.LogData{RequestBody: requestlog.CaptureLoggedBody([]byte(`{"model":"gpt-5"}`))},
 		})
 		usageLogger.Write(&usage.UsageEntry{
 			ID:          usageID,
@@ -115,34 +115,34 @@ func TestRemoteFeedAcrossReplicasOnOneStore(t *testing.T) {
 			TotalTokens: 15,
 		})
 		// Close flushes both batches to the database before returning.
-		require.NoError(t, auditLogger.Close())
+		require.NoError(t, requestLogger.Close())
 		require.NoError(t, usageLogger.Close())
 
 		assert.Equal(t, []string{
-			EventAuditCompleted + ":audit-on-a",
+			EventRequestLogCompleted + ":request-log-on-a",
 			EventUsageCompleted + ":" + usageID,
-			EventAuditFlushed + ":audit-on-a",
+			EventRequestLogFlushed + ":request-log-on-a",
 			EventUsageFlushed + ":" + usageID,
 		}, eventIDs(t, pendingEvents(subA)), "A streams its own request live")
 
 		b.tick(t)
 		events := pendingEvents(subB)
 		assert.Equal(t, []string{
-			EventAuditFlushed + ":audit-on-a",
+			EventRequestLogFlushed + ":request-log-on-a",
 			EventUsageFlushed + ":" + usageID,
 		}, eventIDs(t, events), "B shows A's request once it is persisted")
 		if len(events) == 2 {
 			assert.Equal(t, "req-on-a", events[0].RequestID)
 			assert.Equal(t, "req-on-a", events[1].RequestID)
 
-			var audit struct {
+			var requestLog struct {
 				RemoteWrittenAt int64          `json:"_remote_written_at"`
 				Data            map[string]any `json:"data"`
 			}
-			require.NoError(t, json.Unmarshal(events[0].Data, &audit))
-			assert.Positive(t, audit.RemoteWrittenAt, "marked as another replica's")
-			assert.NotContains(t, audit.Data, "request_body", "the body stays in the database")
-			assert.Equal(t, true, audit.Data["request_body_captured"])
+			require.NoError(t, json.Unmarshal(events[0].Data, &requestLog))
+			assert.Positive(t, requestLog.RemoteWrittenAt, "marked as another replica's")
+			assert.NotContains(t, requestLog.Data, "request_body", "the body stays in the database")
+			assert.Equal(t, true, requestLog.Data["request_body_captured"])
 		}
 
 		b.tick(t)

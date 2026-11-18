@@ -102,7 +102,7 @@ Failover jest podejmowany tylko wtedy, gdy próba zwróci:
 
 Dotyczy requestów `/v1/chat/completions`, `/v1/responses`, `/v1/messages`
 i `/v1/embeddings` z translacją. Log requestów pokazuje każdą próbę, więc
-obsłużony failover jest widoczny w ścieżce audytu i wyceniany według modelu,
+obsłużony failover jest w nim widoczny i wyceniany według modelu,
 który odpowiedział.
 
 Requesty embeddingów używają tego samego skonfigurowanego łańcucha failoveru oraz

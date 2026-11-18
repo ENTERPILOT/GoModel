@@ -119,7 +119,7 @@ func (h *host) Metrics() pluginapi.Metrics {
 }
 
 // Complete runs a chat completion through the gateway with origin "plugin".
-// The call is scoped to "<user path>/<scope>/<instance>" so budgets and audit
+// The call is scoped to "<user path>/<scope>/<instance>" so budgets and request logs
 // attribute it to the instance.
 func (h *host) Complete(ctx context.Context, req pluginapi.InferenceRequest) (*pluginapi.Completion, error) {
 	if h.deps.Chat == nil {

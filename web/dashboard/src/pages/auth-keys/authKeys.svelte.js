@@ -44,8 +44,8 @@ class AuthKeysStore {
   // Load and in-form errors only; row-action feedback goes through the
   // flash store.
   error = $state("");
-  // Audit retention window in days, from the runtime-config store (0 means
-  // retention is disabled and audit entries are kept forever, so a missing
+  // Request log retention window in days, from the runtime-config store (0 means
+  // retention is disabled and request log entries are kept forever, so a missing
   // entry really means the key was never used). null means unknown.
   retentionDays = $derived(retentionDaysFromConfig(runtimeConfig.config.LOGGING_RETENTION_DAYS));
 

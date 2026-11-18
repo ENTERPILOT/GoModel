@@ -130,7 +130,7 @@ func TestSQLiteGetUsageByLabel(t *testing.T) {
 
 // TestSQLiteAggregatesRespectDataFilters exercises the shared filter path:
 // model/provider/label filters must shape every aggregate the same way they
-// shape the request log.
+// shape the usage log.
 func TestSQLiteAggregatesRespectDataFilters(t *testing.T) {
 	reader := newLabelledSQLiteReader(t)
 	ctx := context.Background()

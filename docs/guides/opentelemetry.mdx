@@ -301,7 +301,7 @@ newer OpenTelemetry instrumentations.
   With capture on, every sampled prompt and completion leaves the gateway with
   its trace. Enable it only for a backend that may store that data, and
   consider sampling (`OTEL_TRACES_SAMPLER`) to limit the volume. The
-  [audit log](/advanced/configuration#audit-logging) keeps content inside your own storage
+  [request log](/advanced/configuration#request-logging) keeps content inside your own storage
   instead.
 </Warning>
 
@@ -320,7 +320,7 @@ without leaking what flows through the gateway:
   dimensions are excluded from HTTP metrics so a client cannot inflate metric
   cardinality through the `Host` header.
 - Spans carry the caller's [user path](/features/user-path) as
-  `gomodel.user_path`, the same value usage and audit records carry, and
+  `gomodel.user_path`, the same value usage and request log records carry, and
   never the API key name or request labels.
 - User paths, API key names, and request labels reach metrics only on the
   token and cost metrics, and only when you turn on the matching
@@ -331,7 +331,7 @@ without leaking what flows through the gateway:
 
 Every gateway span of a request carries the caller's
 [user path](/features/user-path) as `gomodel.user_path`. It is the effective
-path that usage, budgets, and audit logs use: the API key's bound path when it
+path that usage, budgets, and request logs use: the API key's bound path when it
 has one, otherwise the `X-GoModel-User-Path` header.
 
 It is always the full path, independent of the

@@ -133,7 +133,7 @@ func (c *closeTracker) Close() error {
 
 // TestStreamConverterCloseClosesUnderlying guards a regression where Read
 // marked the converter closed on EOF, making the deferred Close a no-op that
-// skipped the underlying stream — which suppressed audit/usage OnStreamClose
+// skipped the underlying stream — which suppressed request log/usage OnStreamClose
 // and leaked the provider connection.
 func TestStreamConverterCloseClosesUnderlying(t *testing.T) {
 	body := &closeTracker{Reader: strings.NewReader("data: [DONE]\n\n")}

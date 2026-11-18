@@ -13,9 +13,9 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // BearerTokenAuthenticator authenticates managed bearer tokens and returns
@@ -93,7 +93,7 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 			// If no auth mechanism is configured, allow all requests unless the
 			// deployment asked for a credential regardless.
 			if !cfg.RequireCredential && masterKey == "" && (authenticator == nil || !authenticator.Enabled()) && !hasRequestAuthenticator {
-				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
+				requestlog.EnrichEntryWithAuthMethod(c, requestlog.AuthMethodNoKey)
 				setInteractionContinuationAllowed(c, true)
 				return next(c)
 			}
@@ -107,11 +107,11 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 				if strings.HasSuffix(skipPath, "/*") {
 					prefix := strings.TrimSuffix(skipPath, "*")
 					if strings.HasPrefix(requestPath, prefix) {
-						auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
+						requestlog.EnrichEntryWithAuthMethod(c, requestlog.AuthMethodNoKey)
 						return next(c)
 					}
 				} else if requestPath == skipPath {
-					auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
+					requestlog.EnrichEntryWithAuthMethod(c, requestlog.AuthMethodNoKey)
 					return next(c)
 				}
 			}
@@ -136,13 +136,13 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 					return writeGatewayError(c, authErr)
 				}
 				if masterKey != "" && subtle.ConstantTimeCompare([]byte(token), []byte(masterKey)) == 1 {
-					auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodMasterKey)
+					requestlog.EnrichEntryWithAuthMethod(c, requestlog.AuthMethodMasterKey)
 					setInteractionContinuationAllowed(c, true)
 					return next(c)
 				}
 
 				if authenticator != nil && authenticator.Enabled() {
-					auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodAPIKey)
+					requestlog.EnrichEntryWithAuthMethod(c, requestlog.AuthMethodAPIKey)
 					authResult, err := authenticator.Authenticate(c.Request().Context(), token)
 					if err == nil {
 						applyAuthKeyResult(c, authResult, userPathHeaderName)
@@ -150,7 +150,7 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 						return next(c)
 					}
 
-					authErr := authenticationErrorWithAudit(c, authFailureMessage(err), "authentication failed")
+					authErr := authenticationErrorWithRequestLog(c, authFailureMessage(err), "authentication failed")
 					return writeGatewayError(c, authErr)
 				}
 				message := "invalid credentials"
@@ -248,9 +248,9 @@ func applyExtensionAuthResult(c *echo.Context, result *ext.Authentication, userP
 	normalized := *result
 	normalized.PrincipalID = principalID
 	normalized.UserPath = userPath
-	normalized.Method = auditlog.NormalizeAuthMethod(result.Method)
+	normalized.Method = requestlog.NormalizeAuthMethod(result.Method)
 	if normalized.Method == "" {
-		normalized.Method = auditlog.AuthMethodExtension
+		normalized.Method = requestlog.AuthMethodExtension
 	}
 	ctx := context.WithValue(c.Request().Context(), managedDashboardAccessKey{}, normalized.DashboardAccess)
 	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, normalized.DashboardAccess)
@@ -268,12 +268,12 @@ func applyExtensionAuthResult(c *echo.Context, result *ext.Authentication, userP
 			ctx = core.WithRequestSnapshot(ctx, snapshot.WithUserPathHeader(userPath, userPathHeaderName))
 		}
 		c.Request().Header.Set(userPathHeaderName, userPath)
-		auditlog.EnrichEntryWithUserPath(c, userPath)
+		requestlog.EnrichEntryWithUserPath(c, userPath)
 	}
 	c.SetRequest(c.Request().WithContext(ctx))
 	setAuthenticationUserHeader(c, userPath)
-	auditlog.EnrichEntryWithAuthMethod(c, normalized.Method)
-	auditlog.EnrichEntryWithPrincipalID(c, normalized.PrincipalID)
+	requestlog.EnrichEntryWithAuthMethod(c, normalized.Method)
+	requestlog.EnrichEntryWithPrincipalID(c, normalized.PrincipalID)
 	return nil
 }
 
@@ -285,7 +285,7 @@ func AdminAccessMiddleware() echo.MiddlewareFunc {
 		return func(c *echo.Context) error {
 			if allowed, isManagedKey := managedDashboardAccess(c.Request().Context()); isManagedKey && !allowed {
 				const message = "identity does not have dashboard access"
-				auditlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message)
+				requestlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message)
 				gatewayErr := (&core.GatewayError{
 					Type:       core.ErrorTypeAuthentication,
 					Message:    message,
@@ -315,7 +315,7 @@ func extensionAuthenticationError(c *echo.Context) *core.GatewayError {
 		message = "authentication failed"
 		code    = "extension_authentication_failed"
 	)
-	auditlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message, code)
+	requestlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message, code)
 	return core.NewAuthenticationError("", message).WithCode(code)
 }
 
@@ -380,7 +380,7 @@ func interactionContinuationAllowed(ctx context.Context) bool {
 	return allowed
 }
 
-// applyAuthKeyResult enriches the request context and audit entry with the
+// applyAuthKeyResult enriches the request context and request log entry with the
 // authenticated managed key's identity, labels, and bound user path.
 func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResult, userPathHeaderName string) {
 	ctx := core.WithAuthKeyID(c.Request().Context(), authResult.ID)
@@ -405,11 +405,11 @@ func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResul
 			ctx = core.WithRequestSnapshot(ctx, snapshot.WithUserPathHeader(userPath, userPathHeaderName))
 		}
 		c.Request().Header.Set(userPathHeaderName, userPath)
-		auditlog.EnrichEntryWithUserPath(c, userPath)
+		requestlog.EnrichEntryWithUserPath(c, userPath)
 	}
 	c.SetRequest(c.Request().WithContext(ctx))
 	setAuthenticationUserHeader(c, strings.TrimSpace(authResult.UserPath))
-	auditlog.EnrichEntryWithAuthKeyID(c, authResult.ID)
+	requestlog.EnrichEntryWithAuthKeyID(c, authResult.ID)
 }
 
 // setAuthenticationUserHeader publishes the authenticated identity's user path
@@ -445,11 +445,11 @@ func authFailureMessage(err error) string {
 }
 
 func authenticationError(c *echo.Context, message string) *core.GatewayError {
-	auditlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message)
+	requestlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), message)
 	return core.NewAuthenticationError("", message)
 }
 
-func authenticationErrorWithAudit(c *echo.Context, auditMessage, responseMessage string) *core.GatewayError {
-	auditlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), auditMessage)
+func authenticationErrorWithRequestLog(c *echo.Context, requestLogMessage, responseMessage string) *core.GatewayError {
+	requestlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), requestLogMessage)
 	return core.NewAuthenticationError("", responseMessage)
 }

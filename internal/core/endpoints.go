@@ -82,7 +82,7 @@ func describeEndpointPath(path string) EndpointDescriptor {
 		// Conversations are a gateway-managed resource store (no provider
 		// call), but they are an ingress-managed /v1 endpoint and are
 		// classified as a model interaction path so they appear in request
-		// and audit logs alongside the other /v1 endpoints.
+		// logs alongside the other /v1 endpoints.
 		return EndpointDescriptor{
 			ModelInteraction: true,
 			IngressManaged:   true,
@@ -132,7 +132,7 @@ func describeEndpointPath(path string) EndpointDescriptor {
 		}
 	case path == "/v1/audio/speech":
 		// Audio endpoints call a provider and incur usage, so they are model
-		// interactions and must appear in audit/request logs. They are not
+		// interactions and must appear in request logs. They are not
 		// IngressManaged: the handlers parse the body themselves (JSON for
 		// speech, multipart for transcriptions) rather than going through the
 		// translated inference pipeline.

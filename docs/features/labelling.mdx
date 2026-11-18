@@ -1,6 +1,6 @@
 ---
 title: "Labelling"
-description: "Attach labels to requests from HTTP headers or API keys, and break down usage and audit logs by label."
+description: "Attach labels to requests from HTTP headers or API keys, and break down usage and request logs by label."
 icon: "tags"
 keywords: ["labels", "tagging", "request labels", "header tagging", "cost attribution"]
 ---
@@ -15,7 +15,7 @@ can apply at once:
 - **API key labels** — labels bound to a managed API key, applied to every request authenticated with it.
 
 Labels from both sources are merged and de-duplicated. They are recorded on
-usage entries and audit log entries, and power the by-label usage breakdown in
+usage entries and request log entries, and power the by-label usage breakdown in
 the dashboard.
 
 ## API key labels
@@ -210,7 +210,7 @@ reads them as labels from:
 GoModel removes them before the request reaches the provider, which would
 reject them: OpenAI has no `tags` parameter, and its `metadata` values must be
 strings. Other `metadata` keys pass through, and a string `metadata.tags` is
-left alone as ordinary OpenAI metadata. Audit logs keep the body as the client
+left alone as ordinary OpenAI metadata. Request logs keep the body as the client
 sent it.
 
 One request contributes at most **32** distinct tags, counted across the
@@ -244,9 +244,9 @@ as the client sent them, so a provider that rejects `tags` returns its error.
 - **Usage dashboard** — the usage page shows a by-label breakdown
   (`GET /admin/usage/labels`). A request with several labels counts once under
   each of them.
-- **Request log** — label chips per request, filterable with the `label` query
-  param on `GET /admin/usage/log`.
-- **Audit logs** — recorded under `data.labels` on each entry (audit logging is enabled
+- **Usage log** — label chips per request on the usage page, filterable with
+  the `label` query param on `GET /admin/usage/log`.
+- **Request logs** — recorded under `data.labels` on each entry (request logging is enabled
   by default).
 - **API keys page** — each key's labels are listed alongside its user path.
 - **Budgets** — a budget can be scoped to a label, capping the spend of every

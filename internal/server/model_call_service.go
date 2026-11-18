@@ -6,8 +6,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -53,14 +53,14 @@ func (s *modelCallService) prepare(c *echo.Context, model, providerHint string) 
 	if err := enforceBudget(c, s.budgetChecker, rateLimitRoute{provider: selectorProviderName(s.provider, selector)}); err != nil {
 		return nil, modelCallRoute{}, err
 	}
-	auditlog.EnrichEntry(c, selector.Model, "")
+	requestlog.EnrichEntry(c, selector.Model, "")
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
 	c.SetRequest(c.Request().WithContext(ctx))
 	route := s.routeFor(selector, requestID)
-	// Stamp the executed route so audit rows carry the resolved model and
+	// Stamp the executed route so request log rows carry the resolved model and
 	// provider, as the inference orchestrator does for chat.
-	auditlog.EnrichEntryWithResolvedRoute(c, selector.QualifiedModel(), route.providerType, route.providerName)
+	requestlog.EnrichEntryWithResolvedRoute(c, selector.QualifiedModel(), route.providerType, route.providerName)
 	route.slowdown = resolveModelSlowdown(
 		ctx,
 		s.modelResolver,

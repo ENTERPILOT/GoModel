@@ -41,7 +41,7 @@ func TestService_PutAndOpen(t *testing.T) {
 
 	object, err := svc.Put(context.Background(), Descriptor{
 		Kind:        KindAudio,
-		Source:      SourceAudit,
+		Source:      SourceRequestLog,
 		ContentType: "Audio/MPEG; codecs=mp3",
 		RequestID:   "req-1",
 		UserPath:    "/team",
@@ -65,7 +65,7 @@ func TestService_PutAndOpen(t *testing.T) {
 func TestService_UploadCloseWithoutCommitLeavesNothing(t *testing.T) {
 	svc, blobs, _ := newTestService(t)
 	ctx := context.Background()
-	upload, err := svc.Begin(ctx, Descriptor{Kind: KindImage, Source: SourceAudit, ContentType: "image/png"})
+	upload, err := svc.Begin(ctx, Descriptor{Kind: KindImage, Source: SourceRequestLog, ContentType: "image/png"})
 	require.NoError(t, err)
 	_, err = upload.Write([]byte("partial"))
 	require.NoError(t, err)
@@ -85,7 +85,7 @@ func TestService_CommitFailureRemovesBlob(t *testing.T) {
 	svc := NewService(failingStore{}, blobs)
 	t.Cleanup(func() { _ = svc.Close() })
 
-	_, err := svc.Put(context.Background(), Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav"}, strings.NewReader("x"))
+	_, err := svc.Put(context.Background(), Descriptor{Kind: KindAudio, Source: SourceRequestLog, ContentType: "audio/wav"}, strings.NewReader("x"))
 	require.Error(t, err)
 	assert.Equal(t, 0, blobs.Len(), "a blob without a record must not be left behind")
 }
@@ -94,7 +94,7 @@ func TestService_ExpiredObjectReadsAsMissing(t *testing.T) {
 	svc, _, now := newTestService(t)
 	ctx := context.Background()
 
-	object, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav", TTL: time.Hour}, strings.NewReader("x"))
+	object, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceRequestLog, ContentType: "audio/wav", TTL: time.Hour}, strings.NewReader("x"))
 	require.NoError(t, err)
 	_, err = svc.Get(ctx, object.ID)
 	require.NoError(t, err)
@@ -110,11 +110,11 @@ func TestService_SweepRemovesExpiredRecordsAndBlobs(t *testing.T) {
 	svc, blobs, now := newTestService(t)
 	ctx := context.Background()
 
-	short, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav", TTL: time.Hour}, strings.NewReader("short"))
+	short, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceRequestLog, ContentType: "audio/wav", TTL: time.Hour}, strings.NewReader("short"))
 	require.NoError(t, err)
-	long, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav", TTL: 48 * time.Hour}, strings.NewReader("long"))
+	long, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceRequestLog, ContentType: "audio/wav", TTL: 48 * time.Hour}, strings.NewReader("long"))
 	require.NoError(t, err)
-	forever, err := svc.Put(ctx, Descriptor{Kind: KindImage, Source: SourceAudit, ContentType: "image/png"}, strings.NewReader("forever"))
+	forever, err := svc.Put(ctx, Descriptor{Kind: KindImage, Source: SourceRequestLog, ContentType: "image/png"}, strings.NewReader("forever"))
 	require.NoError(t, err)
 	require.Equal(t, 3, blobs.Len())
 
@@ -144,7 +144,7 @@ func TestService_SweepWorksThroughBatches(t *testing.T) {
 	svc, blobs, now := newTestService(t)
 	ctx := context.Background()
 	for range sweepBatch + 3 {
-		_, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav", TTL: time.Minute}, strings.NewReader("x"))
+		_, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceRequestLog, ContentType: "audio/wav", TTL: time.Minute}, strings.NewReader("x"))
 		require.NoError(t, err)
 	}
 	*now = now.Add(time.Hour)
@@ -157,7 +157,7 @@ func TestService_SweepWorksThroughBatches(t *testing.T) {
 func TestService_Delete(t *testing.T) {
 	svc, blobs, _ := newTestService(t)
 	ctx := context.Background()
-	object, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav"}, strings.NewReader("x"))
+	object, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceRequestLog, ContentType: "audio/wav"}, strings.NewReader("x"))
 	require.NoError(t, err)
 	require.NoError(t, svc.Delete(ctx, object.ID))
 	assert.Equal(t, 0, blobs.Len())
@@ -167,7 +167,7 @@ func TestService_Delete(t *testing.T) {
 func TestService_MissingBlobReadsAsMissing(t *testing.T) {
 	svc, blobs, _ := newTestService(t)
 	ctx := context.Background()
-	object, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav"}, strings.NewReader("x"))
+	object, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceRequestLog, ContentType: "audio/wav"}, strings.NewReader("x"))
 	require.NoError(t, err)
 	require.NoError(t, blobs.Delete(ctx, object.StorageKey))
 	_, _, err = svc.Open(ctx, object.ID)
@@ -222,7 +222,7 @@ func (failingStore) Close() error { return nil }
 
 func TestValidID(t *testing.T) {
 	svc, _, _ := newTestService(t)
-	object, err := svc.Put(context.Background(), Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav"}, strings.NewReader("x"))
+	object, err := svc.Put(context.Background(), Descriptor{Kind: KindAudio, Source: SourceRequestLog, ContentType: "audio/wav"}, strings.NewReader("x"))
 	require.NoError(t, err)
 	assert.True(t, ValidID(object.ID), "issued id %q must validate", object.ID)
 
@@ -256,10 +256,10 @@ func TestService_SweepContinuesPastAFailedObject(t *testing.T) {
 	t.Cleanup(func() { _ = svc.Close() })
 	ctx := context.Background()
 
-	oldest, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav", TTL: time.Minute}, strings.NewReader("oldest"))
+	oldest, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceRequestLog, ContentType: "audio/wav", TTL: time.Minute}, strings.NewReader("oldest"))
 	require.NoError(t, err)
 	sticky.stuck = oldest.StorageKey
-	later, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav", TTL: 2 * time.Minute}, strings.NewReader("later"))
+	later, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceRequestLog, ContentType: "audio/wav", TTL: 2 * time.Minute}, strings.NewReader("later"))
 	require.NoError(t, err)
 
 	now = now.Add(time.Hour)
@@ -307,7 +307,7 @@ func TestSafeContentTypeAndInline(t *testing.T) {
 
 func TestService_StoresOnlySafeContentTypes(t *testing.T) {
 	svc, _, _ := newTestService(t)
-	object, err := svc.Put(context.Background(), Descriptor{Kind: KindImage, Source: SourceAudit, ContentType: "text/html; charset=utf-8"}, strings.NewReader("<script>"))
+	object, err := svc.Put(context.Background(), Descriptor{Kind: KindImage, Source: SourceRequestLog, ContentType: "text/html; charset=utf-8"}, strings.NewReader("<script>"))
 	require.NoError(t, err)
 	assert.Equal(t, "application/octet-stream", object.ContentType)
 	assert.True(t, strings.HasSuffix(object.StorageKey, ".bin"), "key = %q", object.StorageKey)
@@ -339,7 +339,7 @@ func TestService_FailedCommitLeavesNoBlobBehind(t *testing.T) {
 	svc := newService(NewMemoryStore(), publishThenFailBlobs{blobs}, time.Now, false)
 	t.Cleanup(func() { _ = svc.Close() })
 
-	_, err := svc.Put(context.Background(), Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav"}, strings.NewReader("x"))
+	_, err := svc.Put(context.Background(), Descriptor{Kind: KindAudio, Source: SourceRequestLog, ContentType: "audio/wav"}, strings.NewReader("x"))
 	require.ErrorIs(t, err, assert.AnError)
 	assert.Equal(t, 0, blobs.Len(), "a blob the failed commit published is removed, since nothing records it")
 }
@@ -367,7 +367,7 @@ func TestService_FailedCleanupIsRetriedByTheSweep(t *testing.T) {
 	t.Cleanup(func() { _ = svc.Close() })
 	ctx := context.Background()
 
-	_, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav"}, strings.NewReader("x"))
+	_, err := svc.Put(ctx, Descriptor{Kind: KindAudio, Source: SourceRequestLog, ContentType: "audio/wav"}, strings.NewReader("x"))
 	require.ErrorIs(t, err, assert.AnError)
 	require.Equal(t, 1, blobs.Len(), "the blob the failed commit published is still there")
 
@@ -393,7 +393,7 @@ func TestService_RecordFailureReportsEveryCleanupFailure(t *testing.T) {
 	svc := newService(failingStore{}, stuckDeleteBlobs{blobs}, time.Now, false)
 	t.Cleanup(func() { _ = svc.Close() })
 
-	_, err := svc.Put(context.Background(), Descriptor{Kind: KindAudio, Source: SourceAudit, ContentType: "audio/wav"}, strings.NewReader("x"))
+	_, err := svc.Put(context.Background(), Descriptor{Kind: KindAudio, Source: SourceRequestLog, ContentType: "audio/wav"}, strings.NewReader("x"))
 	require.Error(t, err)
 	require.ErrorContains(t, err, "record media object")
 	require.ErrorContains(t, err, "remove media blob")

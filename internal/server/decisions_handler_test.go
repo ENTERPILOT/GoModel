@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -259,8 +259,8 @@ func TestDecisions_FailsOverToTheNextDecisionsTarget(t *testing.T) {
 		{Provider: "openai", Model: "gpt-6-luna"},
 	}}, nil)
 
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c, rec := echotest.Post(t, "/v1/decisions", decisionBody("kev/kev-latest"), echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c, rec := echotest.Post(t, "/v1/decisions", decisionBody("kev/kev-latest"), echotest.WithValue(string(requestlog.LogEntryKey), entry))
 	require.NoError(t, handler.Decisions(c))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
@@ -270,7 +270,7 @@ func TestDecisions_FailsOverToTheNextDecisionsTarget(t *testing.T) {
 }
 
 // Through the full middleware stack an unavailable endpoint answers 404
-// before the model is resolved, and a served call is audited and its usage
+// before the model is resolved, and a served call is logged and its usage
 // recorded under /v1/decisions.
 func TestDecisions_ThroughServer(t *testing.T) {
 	t.Run("unavailable", func(t *testing.T) {
@@ -285,15 +285,15 @@ func TestDecisions_ThroughServer(t *testing.T) {
 
 	t.Run("served", func(t *testing.T) {
 		provider := newDecisionsTestProvider()
-		auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: true}}
+		requestLogger := &capturingRequestLogger{config: requestlog.Config{Enabled: true, LogBodies: true}}
 		usageLogger := &collectingUsageLogger{config: usage.Config{Enabled: true}}
-		srv := New(provider, &Config{AuditLogger: auditLogger, UsageLogger: usageLogger, ModelResolver: decisionAliases})
+		srv := New(provider, &Config{RequestLogger: requestLogger, UsageLogger: usageLogger, ModelResolver: decisionAliases})
 
 		rec := postJSON(t, srv, "/v1/decisions", decisionBody("classifier"))
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-		require.Len(t, auditLogger.entries, 1)
-		entry := auditLogger.entries[0]
+		require.Len(t, requestLogger.entries, 1)
+		entry := requestLogger.entries[0]
 		assert.Equal(t, "/v1/decisions", entry.Path)
 		assert.Equal(t, "classifier", entry.RequestedModel)
 		assert.Equal(t, "openai/gpt-6-luna", entry.ResolvedModel)
@@ -371,14 +371,14 @@ func TestDecisions_FailoverSkipsTargetsThatCannotReadImages(t *testing.T) {
 
 // A chain whose first target reads text only still serves images: the
 // request starts at the first failover target that reads them, while text
-// requests keep the first target. The promoted target is the one audited.
+// requests keep the first target. The promoted target is the one logged.
 func TestDecisions_ImagesStartAtTheFirstTargetThatReadsThem(t *testing.T) {
 	failovers := failoverResolverStub{selectors: []core.ModelSelector{{Provider: "openai", Model: "gpt-6-luna"}}}
 
 	provider := newVisionDecisionsProvider()
 	handler := newHandler(provider, nil, nil, nil, nil, nil, failovers, nil)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"), echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "kev/kev-latest"), echotest.WithValue(string(requestlog.LogEntryKey), entry))
 	require.NoError(t, handler.Decisions(c))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, []string{"openai openai gpt-6-luna"}, provider.calls)
