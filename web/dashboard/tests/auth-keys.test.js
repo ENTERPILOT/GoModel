@@ -10,6 +10,7 @@ import {
   buildCreateAuthKeyPayload,
   countInactiveAuthKeys,
   defaultAuthKeyForm,
+  duplicateNameWarning,
   filterAuthKeys,
   labelChipStyle,
   lastUsedCellState,
@@ -130,6 +131,34 @@ test("buildCreateAuthKeyPayload rejects a missing name", () => {
   });
   assert.equal(payload, undefined);
   assert.equal(error, "Name is required.");
+});
+
+test("duplicateNameWarning says when the name is taken and whether that key is active", () => {
+  const live = authKey({ id: "live", name: "ci-deploy" });
+  const retired = authKey({ id: "old", name: "batch", enabled: false, active: false, deactivated_at: "2026-07-01T00:00:00Z" });
+  const expired = authKey({ id: "exp", name: "nightly", expires_at: "2026-07-01T00:00:00Z" });
+  const keys = [live, retired, expired];
+
+  assert.equal(duplicateNameWarning(keys, "fresh", "", NOW), "");
+  assert.equal(duplicateNameWarning(keys, "   ", "", NOW), "");
+  // Case is not folded, matching the backend.
+  assert.equal(duplicateNameWarning(keys, "CI-deploy", "", NOW), "");
+  assert.match(duplicateNameWarning(keys, "  ci-deploy ", "", NOW), /^An active API key is already named "ci-deploy"\./);
+  assert.match(duplicateNameWarning(keys, "batch", "", NOW), /^An inactive API key is already named "batch"\./);
+  assert.match(duplicateNameWarning(keys, "nightly", "", NOW), /^An inactive API key/);
+  // An active match wins over an inactive one.
+  assert.match(
+    duplicateNameWarning([...keys, authKey({ id: "live2", name: "batch" })], "batch", "", NOW),
+    /^An active API key/,
+  );
+  // Renaming a key to its own name is not a collision.
+  assert.equal(duplicateNameWarning(keys, "ci-deploy", "live", NOW), "");
+});
+
+test("buildCreateAuthKeyPayload still builds a payload for a name already in use", () => {
+  const { payload, error } = buildCreateAuthKeyPayload({ ...defaultAuthKeyForm(), name: "ci-deploy" });
+  assert.equal(error, undefined);
+  assert.equal(payload.name, "ci-deploy");
 });
 
 test("buildCreateAuthKeyPayload rejects invalid user paths before sending the request", () => {
@@ -318,7 +347,7 @@ test("filterAuthKeys userPath keeps the path and its subtree on segment boundari
   assert.equal(authKeyUnderPath(authKey({ user_path: "" }), "/acme"), false);
 });
 
-test("lastUsedCellState shows the timestamp whenever an audit entry exists", () => {
+test("lastUsedCellState shows the timestamp whenever a request log entry exists", () => {
   assert.equal(lastUsedCellState("2026-08-26T23:39:51Z", null, true), "used");
   assert.equal(lastUsedCellState("2026-08-26T23:39:51Z", 0, true), "used");
   assert.equal(lastUsedCellState("2026-08-26T23:39:51Z", 30, true), "used");

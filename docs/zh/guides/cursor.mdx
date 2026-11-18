@@ -149,10 +149,10 @@ Reply with exactly ok and no punctuation.
 Create a file named gomodel-cursor-test.txt containing exactly tool-ok
 ```
 
-在接受编辑之前先确认其内容。使用主密钥或已启用控制台访问的托管密钥单独登录 GoModel 控制台。打开 **Audit Logs**，检查 Cursor 是否请求了 `POST /v1/chat/completions` 并使用了预期的模型。
+在接受编辑之前先确认其内容。使用主密钥或已启用控制台访问的托管密钥单独登录 GoModel 控制台。打开**请求**页面，检查 Cursor 是否请求了 `POST /v1/chat/completions` 并使用了预期的模型。
 
 <Warning>
-  文本提示词成功并不能证明所选模型可以支持所有 Agent 工具。Cursor 此前曾在部分较新的 GPT 模型的 Chat Completions 请求中混入 Responses 风格的自定义工具。如果 Agent 模式失败但文本聊天成功，请先尝试标准的非推理聊天模型，并在修改网关之前检查 GoModel 审计日志中的响应。
+  文本提示词成功并不能证明所选模型可以支持所有 Agent 工具。Cursor 此前曾在部分较新的 GPT 模型的 Chat Completions 请求中混入 Responses 风格的自定义工具。如果 Agent 模式失败但文本聊天成功，请先尝试标准的非推理聊天模型，并在修改网关之前检查 GoModel 请求日志中的响应。
 </Warning>
 
 ## 故障排查
@@ -175,7 +175,7 @@ OpenAI 覆盖可能会影响其他 OpenAI 系列以及部分 Cursor 托管的模
 
 ### 文本正常，但 Agent 或工具调用失败
 
-升级 Cursor，使用标准的 OpenAI 聊天模型重试，并在 GoModel 审计日志中检查上游响应。自定义端点支持曾出现过与特定版本相关的请求体问题，尤其是在较新 GPT 模型的自定义工具方面。
+升级 Cursor，使用标准的 OpenAI 聊天模型重试，并在 GoModel 请求日志中检查上游响应。自定义端点支持曾出现过与特定版本相关的请求体问题，尤其是在较新 GPT 模型的自定义工具方面。
 
 ### 图片未到达 GoModel
 

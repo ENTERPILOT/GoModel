@@ -82,13 +82,13 @@ Every hook returns a `pluginapi.Decision`:
 | `allow` | continue with the edits already made to the exchange | zero value of `Decision` |
 | `block` | reject with `Status`, `Code`, and `Message` in the endpoint's native error format | `Status` 400 in the prompt phase, 502 in the response and stream phases; `Code` `guardrail_blocked` |
 | `respond` | answer the request with `Response` as an ordinary assistant turn, HTTP 200 (a synthesized one-turn stream for streaming requests); in the response and stream phases the provider's `usage` is kept on the reply, since the inference was already performed | `pluginapi.Respond(text)` builds a one-choice completion |
-| `warn` | continue; record `Code`, `Message`, and `Detail` in the audit trail and add `X-GoModel-Guardrail: warn; code=<code>` to the client response | `Code` `guardrail_warning` |
+| `warn` | continue; record `Code`, `Message`, and `Detail` in the request log and add `X-GoModel-Guardrail: warn; code=<code>` to the client response | `Code` `guardrail_warning` |
 
 `respond` is the "block with a safe message" most guardrail products offer:
 agent loops keep running instead of surfacing a 4xx. Use `block` when the
 caller should see an error.
 
-`Detail` is stored in the audit record and must not contain secrets.
+`Detail` is stored in the request log entry and must not contain secrets.
 
 `NoStore` on any decision keeps the response out of the
 [response cache](/features/cache), exact and semantic, so the next request
@@ -99,9 +99,9 @@ PII back into the assistant text: a cached copy would hand that text to
 whoever sends a matching prompt next. It is honoured from any phase and any
 instance of the request, whatever the merged decision was.
 
-### Audit trail
+### Request log
 
-Every instance that ran leaves an outcome in the audit entry's
+Every instance that ran leaves an outcome in the request log entry's
 `data.guardrails` list, in execution order across the prompt, response and
 stream phases, silent allows included:
 
@@ -117,7 +117,7 @@ stream phases, silent allows included:
 
 A configured step without an outcome did not run: an earlier block or answer
 ended the request, or a cache hit skipped the model call. The dashboard
-colors the workflow chart of an audit entry from this list, and its
+colors the workflow chart of a request log entry from this list, and its
 "Guardrails" tab lists the outcomes. The list is the decision trail; the
 request revisions below are the body trail.
 
@@ -145,8 +145,8 @@ Each instance has a `fail_mode` and a `timeout_ms`:
 | `fail_mode` | `closed`: an error, panic, or timeout rejects the request with HTTP 500 and code `plugin_failure`; `open`: log and continue as if the instance allowed | `closed` for `prompt`, `response`, and `stream` |
 | `timeout_ms` | upper bound for every hook call of the instance | `0` (no per-instance timeout) |
 
-The instance name of a fail-closed failure goes to the logs and the audit
-record, never to the client. Panics inside a plugin are recovered and
+The instance name of a fail-closed failure goes to the logs and the request
+log entry, never to the client. Panics inside a plugin are recovered and
 treated as errors.
 
 **Timeouts are enforced at the deadline.** A hook receives a context that
@@ -270,7 +270,7 @@ the HTTP headers with the first bytes of the body rather than up front, so a
 `X-GoModel-Guardrail` header as long as buffering finished before the first
 keep-alive comment (15 s). A warn decided later (in `OnStreamEnd` of a
 `transform` stream, or after a keep-alive went out) cannot change headers
-already sent; it is still recorded in the audit trail and the logs.
+already sent; it is still recorded in the request log and the logs.
 
 **Cutting a stream**: a `terminate` decision in `transform` mode, or a
 `block`/`respond` from `OnStreamEnd`, ends the stream with
@@ -599,7 +599,7 @@ func (p *wordBlock) Manifest() pluginapi.Manifest {
 				Help: "Block rejects, respond answers with the message, warn records the match.",
 				Options: []pluginapi.Option{{Value: "block", Label: "Block"}, {Value: "respond", Label: "Respond"}, {Value: "warn", Label: "Warn"}},
 			},
-			{Key: "message", Label: "Message", Input: pluginapi.InputText, Default: "request blocked by policy", Help: "Error, reply, or audit note."},
+			{Key: "message", Label: "Message", Input: pluginapi.InputText, Default: "request blocked by policy", Help: "Error, reply, or request log note."},
 			pluginapi.BlockStatusField(),
 		},
 	}
@@ -681,7 +681,7 @@ Notes for authors:
 - The `Host` passed to `Init` offers `Logger()` (pre-tagged with plugin and
   instance), `Inference().Complete(...)` (a chat completion through the
   gateway with origin `plugin`, scoped to `<user path>/guardrails/<instance>`
-  for budgets and audit), `Metrics()` (names prefixed `plugin_<name>_`), and
+  for budgets and request logs), `Metrics()` (names prefixed `plugin_<name>_`), and
   `HTTPClient()` for calls to external services such as a classifier or a
   PII detector. The client is shared by every instance, uses the gateway's
   proxy environment and connection pool, and has a 60 s timeout as a

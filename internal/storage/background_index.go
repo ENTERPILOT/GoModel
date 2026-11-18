@@ -3,12 +3,15 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 // BackgroundIndex is a PostgreSQL index added to a table that may already
@@ -26,6 +29,10 @@ type BackgroundIndex struct {
 // BackgroundIndexRetry is how often a builder checks again while another
 // replica holds its lock, or after a build failed.
 const BackgroundIndexRetry = time.Minute
+
+// backgroundIndexLockPoll is how often WithLock checks again while another
+// session holds the lock.
+const backgroundIndexLockPoll = 100 * time.Millisecond
 
 // BackgroundIndexBuilder builds BackgroundIndexes one at a time, and only
 // while it holds a session advisory lock, so of all the replicas sharing a
@@ -108,16 +115,7 @@ func (b BackgroundIndexBuilder) TryBuild(ctx context.Context, index BackgroundIn
 	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, b.LockKey).Scan(&locked); err != nil || !locked {
 		return false
 	}
-	defer func() {
-		// A pooled connection must not keep the session lock; drop it when
-		// the unlock cannot be confirmed. Bounded so a broken connection
-		// cannot stall shutdown, which waits for this goroutine.
-		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock($1)`, b.LockKey); err != nil {
-			_ = conn.Conn().Close(unlockCtx)
-		}
-	}()
+	defer b.unlock(conn)
 
 	// Checked again under the lock: another replica may have finished the
 	// build between the first check and taking the lock.
@@ -145,6 +143,52 @@ func (b BackgroundIndexBuilder) TryBuild(ctx context.Context, index BackgroundIn
 	}
 	slog.Info(index.Label+" index ready", "duration", time.Since(started).Round(time.Millisecond))
 	return true
+}
+
+// WithLock waits for the builder's lock and runs fn on the session that holds
+// it. It is for every other schema change to the builder's table, such as the
+// migrations a store applies at startup: a statement that waits for the table
+// while another replica builds an index on it holds a snapshot the build
+// waits out, deadlocking the two. The wait for the lock polls, so it holds no
+// snapshot either, and fn needs no second connection.
+func (b BackgroundIndexBuilder) WithLock(ctx context.Context, fn func(sqlx.DB) error) error {
+	conn, err := b.Pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire index build lock: %w", err)
+	}
+	defer conn.Release()
+	for {
+		var locked bool
+		if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, b.LockKey).Scan(&locked); err != nil {
+			return fmt.Errorf("acquire index build lock: %w", err)
+		}
+		if locked {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("acquire index build lock: %w", ctx.Err())
+		case <-time.After(backgroundIndexLockPoll):
+		}
+	}
+	defer b.unlock(conn)
+
+	db, err := sqlx.NewPostgreSQLConn(conn)
+	if err != nil {
+		return err
+	}
+	return fn(db)
+}
+
+// unlock returns the session lock. A pooled connection must not keep it, so
+// the connection is dropped when the unlock cannot be confirmed. Bounded so a
+// broken connection cannot stall shutdown, which waits for a build.
+func (b BackgroundIndexBuilder) unlock(conn *pgxpool.Conn) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_unlock($1)`, b.LockKey); err != nil {
+		_ = conn.Conn().Close(ctx)
+	}
 }
 
 type pgQueryRower interface {

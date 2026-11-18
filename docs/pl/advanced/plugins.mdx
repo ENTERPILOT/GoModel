@@ -82,13 +82,13 @@ Każdy hook zwraca `pluginapi.Decision`:
 | `allow` | kontynuuj z edycjami już wprowadzonymi do wymiany | zerowa wartość `Decision` |
 | `block` | odrzuć z `Status`, `Code` i `Message` w natywnym formacie błędu endpointu | `Status` 400 w fazie prompt, 502 w fazach response i stream; `Code` `guardrail_blocked` |
 | `respond` | odpowiedz na request treścią `Response` jako zwykłą turą asystenta, HTTP 200 (dla requestów ze streamingiem – syntetyczny stream z jedną turą); w fazach response i stream `usage` providera zostaje zachowane w odpowiedzi, bo inferencja już się odbyła | `pluginapi.Respond(text)` buduje completion z jednym choice |
-| `warn` | kontynuuj; zapisz `Code`, `Message` i `Detail` w ścieżce audytu i dodaj `X-GoModel-Guardrail: warn; code=<code>` do odpowiedzi dla klienta | `Code` `guardrail_warning` |
+| `warn` | kontynuuj; zapisz `Code`, `Message` i `Detail` w logu requestów i dodaj `X-GoModel-Guardrail: warn; code=<code>` do odpowiedzi dla klienta | `Code` `guardrail_warning` |
 
 `respond` to „blokada z bezpiecznym komunikatem”, którą oferuje większość produktów
 typu guardrail: pętle agentów działają dalej, zamiast zwracać 4xx. Użyj `block`, gdy
 wywołujący powinien zobaczyć błąd.
 
-`Detail` jest zapisywane w rekordzie audytu i nie może zawierać sekretów.
+`Detail` jest zapisywane we wpisie logu requestów i nie może zawierać sekretów.
 
 `NoStore` w dowolnej decyzji wyłącza odpowiedź z
 [cache'u odpowiedzi](/pl/features/cache), dokładnego i semantycznego, więc następny request
@@ -99,10 +99,10 @@ wywołującego z powrotem do tekstu asystenta: kopia w cache przekazałaby ten t
 każdemu, kto wyśle następnym razem pasujący prompt. Flaga jest respektowana w każdej fazie
 i z każdej instancji requestu, niezależnie od scalonej decyzji.
 
-### Ścieżka audytu
+### Log requestów
 
 Każda instancja, która się wykonała, zostawia wynik na liście `data.guardrails`
-wpisu audytowego, w kolejności wykonania w fazach prompt, response i
+wpisu logu requestów, w kolejności wykonania w fazach prompt, response i
 stream, łącznie z cichymi decyzjami allow:
 
 | Pole | Znaczenie |
@@ -117,7 +117,7 @@ stream, łącznie z cichymi decyzjami allow:
 
 Skonfigurowany krok bez wyniku się nie wykonał: wcześniejsza blokada lub odpowiedź
 zakończyła request albo cache hit pominął wywołanie modelu. Dashboard
-koloruje wykres workflow wpisu audytowego na podstawie tej listy, a jego
+koloruje wykres workflow wpisu logu requestów na podstawie tej listy, a jego
 zakładka „Guardrails” wyświetla wyniki. Lista to ścieżka decyzji; opisane niżej
 rewizje requestu to ścieżka treści.
 
@@ -145,8 +145,8 @@ Każda instancja ma `fail_mode` i `timeout_ms`:
 | `fail_mode` | `closed`: błąd, panic lub timeout odrzuca request z HTTP 500 i kodem `plugin_failure`; `open`: zaloguj i kontynuuj tak, jakby instancja zwróciła allow | `closed` dla `prompt`, `response` i `stream` |
 | `timeout_ms` | górny limit dla każdego wywołania hooka instancji | `0` (brak timeoutu dla instancji) |
 
-Nazwa instancji przy błędzie fail-closed trafia do logów i rekordu
-audytu, nigdy do klienta. Panic wewnątrz pluginu jest przechwytywany i
+Nazwa instancji przy błędzie fail-closed trafia do logów i wpisu
+logu requestów, nigdy do klienta. Panic wewnątrz pluginu jest przechwytywany i
 traktowany jako błąd.
 
 **Timeouty są egzekwowane w momencie upływu terminu.** Hook dostaje kontekst, który
@@ -271,7 +271,7 @@ nagłówki HTTP razem z pierwszymi bajtami treści, a nie z góry, więc
 nagłówek `X-GoModel-Guardrail`, o ile buforowanie zakończyło się przed pierwszym
 komentarzem keep-alive (15 s). Ostrzeżenie podjęte później (w `OnStreamEnd` streamu
 `transform` albo po wysłaniu keep-alive) nie może zmienić już wysłanych nagłówków;
-nadal jest zapisywane w ścieżce audytu i logach.
+nadal jest zapisywane w logu requestów i logach.
 
 **Przerwanie streamu**: decyzja `terminate` w trybie `transform` albo
 `block`/`respond` z `OnStreamEnd` kończy stream z
@@ -597,7 +597,7 @@ func (p *wordBlock) Manifest() pluginapi.Manifest {
 				Help: "Block rejects, respond answers with the message, warn records the match.",
 				Options: []pluginapi.Option{{Value: "block", Label: "Block"}, {Value: "respond", Label: "Respond"}, {Value: "warn", Label: "Warn"}},
 			},
-			{Key: "message", Label: "Message", Input: pluginapi.InputText, Default: "request blocked by policy", Help: "Error, reply, or audit note."},
+			{Key: "message", Label: "Message", Input: pluginapi.InputText, Default: "request blocked by policy", Help: "Error, reply, or request log note."},
 			pluginapi.BlockStatusField(),
 		},
 	}
@@ -679,7 +679,7 @@ Uwagi dla autorów:
 - `Host` przekazany do `Init` oferuje `Logger()` (wstępnie oznaczony pluginem i
   instancją), `Inference().Complete(...)` (chat completion przez
   gateway z originem `plugin`, w scope `<user path>/guardrails/<instance>`
-  na potrzeby budżetów i audytu), `Metrics()` (nazwy z prefiksem `plugin_<name>_`) oraz
+  na potrzeby budżetów i logu requestów), `Metrics()` (nazwy z prefiksem `plugin_<name>_`) oraz
   `HTTPClient()` do wywołań usług zewnętrznych, takich jak klasyfikator lub
   detektor PII. Klient jest współdzielony przez wszystkie instancje, korzysta ze
   zmiennych środowiskowych proxy i puli połączeń gatewaya i ma timeout 60 s jako

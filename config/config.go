@@ -17,6 +17,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/storage"
 )
 
@@ -143,6 +144,7 @@ func buildDefaultConfig() *Config {
 			AllowPassthroughV1Alias: true,
 			RealtimeEnabled:         true,
 			AuthVerifyEnabled:       false,
+			AuthKeyPrefix:           authkeys.DefaultTokenPrefix,
 			StreamStallTimeout:      DefaultStreamStallTimeoutSeconds,
 			EnabledPassthroughProviders: []string{
 				"openai",
@@ -155,6 +157,7 @@ func buildDefaultConfig() *Config {
 				"llamacpp",
 				"llmd",
 				"deepseek",
+				"hetzner",
 				"edenai",
 				"jev",
 			},
@@ -228,11 +231,16 @@ func buildDefaultConfig() *Config {
 		},
 		Metrics: MetricsConfig{
 			Endpoint: "/metrics",
+			CallerDimensions: MetricsCallerDimensionsConfig{
+				UserPathDepth: DefaultMetricsUserPathDepth,
+				MaxValues:     DefaultMetricsCallerMaxValues,
+			},
 		},
 		HTTP: HTTPConfig{
 			Timeout:               600,
 			ResponseHeaderTimeout: 600,
 			StreamIdleTimeout:     300,
+			MaxIdleConnsPerHost:   512,
 		},
 		Failover: FailoverConfig{
 			Enabled:     true,
@@ -371,6 +379,10 @@ func Load() (*LoadResult, error) {
 	cfg.Server.UserPathHeader, err = NormalizeHeaderName(cfg.Server.UserPathHeader, "X-GoModel-User-Path")
 	if err != nil {
 		return nil, fmt.Errorf("invalid server.user_path_header: %w", err)
+	}
+	cfg.Server.AuthKeyPrefix, err = authkeys.NormalizeTokenPrefix(cfg.Server.AuthKeyPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("invalid server.auth_key_prefix (AUTH_KEY_PREFIX): %w", err)
 	}
 	cfg.Models.ConfiguredProviderModelsMode = ResolveConfiguredProviderModelsMode(cfg.Models.ConfiguredProviderModelsMode)
 	if !cfg.Models.ConfiguredProviderModelsMode.Valid() {

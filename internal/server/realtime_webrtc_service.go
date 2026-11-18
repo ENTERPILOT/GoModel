@@ -262,8 +262,10 @@ func relayRealtimeHTTPResponse(c *echo.Context, resp *http.Response, contentType
 	c.Response().Header().Set("Content-Type", contentType)
 	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	c.Response().WriteHeader(resp.StatusCode)
-	_, err := io.Copy(c.Response(), resp.Body)
-	return err
+	if _, err := io.Copy(c.Response(), resp.Body); err != nil {
+		recordResponseFailure(c, err)
+	}
+	return nil
 }
 
 // realtimeCallIDFromLocation extracts the call id from the Location header of a

@@ -1,6 +1,6 @@
 ---
 title: "System One API"
-description: "Senden Sie Entscheidungs-Requests an TypeSafe System One (Jev, Kev) über GoModel – nativ weitergeleitet, mit virtuellen Modellen, Guardrails, Caching, Failover, Audit und Nutzungserfassung."
+description: "Senden Sie Entscheidungs-Requests an TypeSafe System One (Jev, Kev) über GoModel – nativ weitergeleitet, mit virtuellen Modellen, Guardrails, Caching, Failover, Request-Logging und Nutzungserfassung."
 icon: "scale"
 keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "Entscheidungsmodell", "decision model", "noul", "choice", "score", "OpenRouter", "Azure", "Microsoft-Decision-1"]
 ---
@@ -90,7 +90,7 @@ TypeSafe-`jev`-Provider liefert für sie sein eigenes `404`.
 4. Leitet den Body weiter, wobei nur `model` (der aufgelöste Name) und `state`
    (falls ein Guardrail ihn bearbeitet hat) geändert werden. Fragen, Kriterien
    und alle anderen Felder erreichen den Provider Byte für Byte.
-5. Gibt die Antwort unverändert weiter und erfasst sie im Audit-Log
+5. Gibt die Antwort unverändert weiter und erfasst sie im Request-Log
    (Request-Typ **Decisions**) und in der Nutzung.
 
 ## Bilder
@@ -180,7 +180,7 @@ virtual_models:
       - { model: openrouter/typesafe/jev-1.13 }  # gehostetes Jev, wenn Kev ausgefallen ist
 ```
 
-Das Audit-Log zeigt jeden Versuch, die Nutzung wird unter dem Ziel erfasst, das
+Das Request-Log zeigt jeden Versuch, die Nutzung wird unter dem Ziel erfasst, das
 geantwortet hat, und eine Failover-Antwort wird nicht gecacht.
 
 ## Guardrails
@@ -219,11 +219,11 @@ kann:
 | Ein System-One-Modell, das an `/v1/chat/completions`, `/v1/responses` oder `/v1/embeddings` gesendet wird | `400 invalid_request_error` mit Verweis auf `/v1/decisions` und `/v1/systemone` |
 | Upstream-Fehler, etwa eine fehlerhafte Frage | Der Status des Providers mit dessen Meldung |
 
-## Audit, Nutzung und Kosten
+## Request-Log, Nutzung und Kosten
 
-Jeder Aufruf ist ein Audit-Eintrag unter seiner Route, mit angefordertem und
+Jeder Aufruf ist ein Request-Log-Eintrag unter seiner Route, mit angefordertem und
 aufgelöstem Modell, Provider, Request- und Response-Body, Guardrail-Ergebnissen
-und Failover-Versuchen; filtern Sie das Audit-Log nach dem Request-Typ
+und Failover-Versuchen; filtern Sie das Request-Log nach dem Request-Typ
 **Decisions**. Die Nutzung erfasst `input_tokens` und `output_tokens` der
 Antwort unter dem Modell, das geantwortet hat. OpenRouter meldet seine eigenen
 `usage.cost`, die als Kosten des Requests erfasst werden; für gehostetes Jev

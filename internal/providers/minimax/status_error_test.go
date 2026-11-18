@@ -47,7 +47,7 @@ func TestCreateImageBoundsNativeMessage(t *testing.T) {
 	var gatewayErr *core.GatewayError
 	require.ErrorAs(t, err, &gatewayErr)
 	assertBoundedDiagnostic(t, gatewayErr, diagnostic)
-	// The full diagnostic stays available for auditing.
+	// The full diagnostic stays available for the request log.
 	assert.JSONEq(t, body, string(gatewayErr.ResponseBody))
 }
 

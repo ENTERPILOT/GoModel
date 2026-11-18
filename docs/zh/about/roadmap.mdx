@@ -29,7 +29,7 @@ keywords: ["路线图", "里程碑", "即将推出的功能", "版本发布", "r
 - [ ] 支持 Gemini 原生 API，以及将 Gemini 原生 API 调用转换为其他方言
 - [ ] 提升默认价格的准确性
   - [ ] 部署 AI 管理员/智能体，监控各提供商网站上的价格
-- [ ] 提升 UI 和审计日志视图的性能
+- [ ] 提升 UI 和“请求”视图的性能
 - [ ] 改进弹性与容错功能（针对 vLLM 在流式传输中途停止等情况，显式报错并进行故障转移）
 - [ ] 简化从 LiteLLM 到 GoModel 的迁移
   - [x] `gomodel migrate litellm` config.yaml 转换器和[迁移指南](/zh/guides/migrate-from-litellm)
@@ -57,10 +57,11 @@ keywords: ["路线图", "里程碑", "即将推出的功能", "版本发布", "r
 - [ ] 集群模式
 - [ ] LDAP 集成
 - [ ] 控制台和 Admin API 的基于角色的访问控制（RBAC）
-- [ ] 将审计日志导出/流式传输到对象存储和数据湖
+- [ ] 将请求日志导出/流式传输到对象存储和数据湖
 - [ ] IP / CIDR 允许列表
 - [ ] LTS 渠道，提供签名产物、SBOM 和 CVE 预先通知
-- [ ] SAML 2.0 + SCIM 目录同步
+- [ ] 将 SSO 组映射到用户路径（已实现，尚未包含在任何发布版本中；参见 [GoModel Pro](/zh/pro/sso#组映射)）
+- [ ] SAML 2.0 + SCIM 目录同步（SAML 2.0 登录已实现，尚未包含在任何发布版本中；参见 [GoModel Pro](/zh/pro/saml)。SCIM 尚未实现。）
 
 ## 有什么建议？
 

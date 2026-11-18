@@ -68,21 +68,21 @@ Anthropic 请求会在任何 Hook 运行之前被转换为 chat 格式，因此�
 | `allow` | 带着已对交互所做的修改继续执行 | `Decision` 的零值 |
 | `block` | 以端点原生的错误格式返回 `Status`、`Code` 和 `Message` 并拒绝请求 | `Status` 在 prompt 阶段为 400，在 response 和 stream 阶段为 502；`Code` 为 `guardrail_blocked` |
 | `respond` | 以 `Response` 作为普通的助手回复来响应请求，返回 HTTP 200（流式请求会合成一个单轮的流）；在 response 和 stream 阶段，由于推理已经执行，回复中会保留提供商的 `usage` | `pluginapi.Respond(text)` 会构建一个单选项的补全结果 |
-| `warn` | 继续执行；在审计记录中记录 `Code`、`Message` 和 `Detail`，并在客户端响应中添加 `X-GoModel-Guardrail: warn; code=<code>` | `Code` 为 `guardrail_warning` |
+| `warn` | 继续执行；在请求日志中记录 `Code`、`Message` 和 `Detail`，并在客户端响应中添加 `X-GoModel-Guardrail: warn; code=<code>` | `Code` 为 `guardrail_warning` |
 
 `respond` 就是大多数护栏产品提供的“用安全消息代替阻断”：
 Agent 循环可以继续运行，而不会收到 4xx 错误。如果调用方应当看到错误，请使用 `block`。
 
-`Detail` 会存储在审计记录中，不得包含 Secret。
+`Detail` 会存储在请求日志条目中，不得包含 Secret。
 
 任何决策上设置 `NoStore` 都会使响应不进入
 [响应缓存](/zh/features/cache)（包括精确缓存和语义缓存），因此下一个具有相同或相似请求体的请求会重新运行插件，而不是重放已存储的回答。
 当回复中包含插件在输出时还原的请求特定数据时，请设置该标志，例如将调用方的 PII 放回助手文本的去匿名化插件：
 缓存的副本会把这些文本交给下一个发送匹配提示词的人。无论合并后的决策是什么，只要请求的任一阶段、任一实例设置了该标志，都会生效。
 
-### 审计记录
+### 请求日志
 
-每个运行过的实例都会在审计条目的
+每个运行过的实例都会在请求日志条目的
 `data.guardrails` 列表中留下一条结果，按 prompt、response 和
 stream 各阶段的执行顺序排列，静默放行的结果也包含在内：
 
@@ -96,7 +96,7 @@ stream 各阶段的执行顺序排列，静默放行的结果也包含在内：
 | `replaced_events`、`dropped_events` | 对于流式过程中的实例，表示其改写或扣留了多少个事件。 |
 | `duration_ns` | Hook 的运行时长。 |
 
-已配置但没有结果的步骤表示它没有运行：之前的阻断或回答已结束请求，或者缓存命中跳过了模型调用。控制台会根据此列表为审计条目的工作流图着色，
+已配置但没有结果的步骤表示它没有运行：之前的阻断或回答已结束请求，或者缓存命中跳过了模型调用。控制台会根据此列表为请求日志条目的工作流图着色，
 其 "Guardrails" 标签页会列出这些结果。该列表记录的是决策轨迹；下文的请求修订记录的是请求体轨迹。
 
 prompt 阶段的决策还会追加到请求的修订链中（与记录请求改写的位置相同），按步骤顺序每个实例一条。
@@ -116,7 +116,7 @@ stream 阶段的决策仅记录在 `data.guardrails` 中，其中的异议（obj
 | `fail_mode` | `closed`：出错、panic 或超时时以 HTTP 500 和错误码 `plugin_failure` 拒绝请求；`open`：记录日志并按该实例放行的情况继续执行 | `prompt`、`response` 和 `stream` 均为 `closed` |
 | `timeout_ms` | 该实例每次 Hook 调用的上限 | `0`（不设实例级超时） |
 
-失败即拒绝（fail closed）时，出错实例的名称只会写入日志和审计记录，绝不会返回给客户端。插件内部的 panic 会被恢复并视为错误。
+失败即拒绝（fail closed）时，出错实例的名称只会写入日志和请求日志条目，绝不会返回给客户端。插件内部的 panic 会被恢复并视为错误。
 
 **超时在截止时刻强制执行。** Hook 收到的 context 会在 `timeout_ms` 到期时（以及客户端断开连接时）结束；无论 Hook 是否已返回，
 GoModel 都会在此时停止等待。忽略其 context 的 Hook 会在后台继续运行，但不会影响请求，因此请在所有可能阻塞的操作中遵循 `ctx.Done()`。
@@ -190,7 +190,7 @@ GoModel 为每个护栏定义构建一个插件值，并调用一次 `Init`。�
 **流上的警告**：当 response 或 stream 插件运行时，GoModel 会在发送响应体的第一批字节时才提交 HTTP 头，而不是提前提交，因此只要缓冲在第一个
 keep-alive 注释（15 s）之前完成，针对缓冲响应做出的 `warn` 就会以
 `X-GoModel-Guardrail` 响应头的形式到达客户端。之后做出的警告（在
-`transform` 流的 `OnStreamEnd` 中，或在发出 keep-alive 之后）无法更改已发送的响应头；但它仍会记录在审计记录和日志中。
+`transform` 流的 `OnStreamEnd` 中，或在发出 keep-alive 之后）无法更改已发送的响应头；但它仍会记录在请求日志和日志中。
 
 **截断流**：`transform` 模式下的 `terminate` 决策，或 `OnStreamEnd` 返回的
 `block`/`respond`，会以
@@ -434,7 +434,7 @@ func (p *wordBlock) Manifest() pluginapi.Manifest {
 				Help: "Block rejects, respond answers with the message, warn records the match.",
 				Options: []pluginapi.Option{{Value: "block", Label: "Block"}, {Value: "respond", Label: "Respond"}, {Value: "warn", Label: "Warn"}},
 			},
-			{Key: "message", Label: "Message", Input: pluginapi.InputText, Default: "request blocked by policy", Help: "Error, reply, or audit note."},
+			{Key: "message", Label: "Message", Input: pluginapi.InputText, Default: "request blocked by policy", Help: "Error, reply, or request log note."},
 			pluginapi.BlockStatusField(),
 		},
 	}
@@ -500,7 +500,7 @@ func main() {}
   `llm_based_altering`）；
   像 `cheapest_healthy` 这样的路由策略从不接触流量，因此保持为 false。运行时会忽略该标志；控制台会用盾牌标识护栏插件及其实例，并将其排在最前面。
 - 传给 `Init` 的 `Host` 提供 `Logger()`（已预先标记插件和实例）、`Inference().Complete(...)`（通过网关进行的聊天补全，来源为 `plugin`，
-  在预算和审计中归属于 `<user path>/guardrails/<instance>`）、`Metrics()`（名称以 `plugin_<name>_` 为前缀），以及
+  在预算和请求日志中归属于 `<user path>/guardrails/<instance>`）、`Metrics()`（名称以 `plugin_<name>_` 为前缀），以及
   `HTTPClient()`，用于调用分类器或 PII 检测器等外部服务。该客户端由所有实例共享，使用网关的代理环境和连接池，并以 60 s 超时作为兜底；
   请使用 `http.NewRequestWithContext` 构建请求，以便实例的 `timeout_ms` 限制每次调用。在当前版本中，`History()` 会返回错误。
 - 宿主还实现了可选的 `pluginapi.DecisionsHost`。请在 `Host` 上对其进行类型断言，然后调用 `Decisions().Decide(ctx, req)`，

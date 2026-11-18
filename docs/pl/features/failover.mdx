@@ -65,6 +65,10 @@ virtual_models:
       - { model: gemini/gemini-2.5-pro }
 ```
 
+Każdy cel może wymuszać własny reasoning effort, dzięki czemu model zapasowy
+działa na odpowiednim dla siebie poziomie: zobacz
+[Ustawianie effort dla każdego celu](/pl/features/virtual-models#ustawianie-effort-dla-każdego-celu).
+
 Cel może też wskazywać inny model wirtualny
 ([łączenie w łańcuch](/pl/features/virtual-models#łączenie-modeli-wirtualnych-w-łańcuchy)); wtedy przebieg
 próbuje każdego konkretnego modelu, który się za nim kryje. Jeden wyjątek umożliwia
@@ -98,7 +102,7 @@ Failover jest podejmowany tylko wtedy, gdy próba zwróci:
 
 Dotyczy requestów `/v1/chat/completions`, `/v1/responses`, `/v1/messages`
 i `/v1/embeddings` z translacją. Log requestów pokazuje każdą próbę, więc
-obsłużony failover jest widoczny w ścieżce audytu i wyceniany według modelu,
+obsłużony failover jest w nim widoczny i wyceniany według modelu,
 który odpowiedział.
 
 Requesty embeddingów używają tego samego skonfigurowanego łańcucha failoveru oraz

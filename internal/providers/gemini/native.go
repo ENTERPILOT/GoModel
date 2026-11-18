@@ -1056,17 +1056,22 @@ func thinkingConfigForEffort(model, effort string) map[string]any {
 			return map[string]any{"thinkingBudget": 1024}
 		case "medium":
 			return map[string]any{"thinkingBudget": 8192}
-		case "high":
+		case "high", "xhigh":
 			return map[string]any{"thinkingBudget": 24576}
 		default:
 			return nil
 		}
 	}
-	if effort == "none" || effort == "minimal" {
+	switch effort {
+	case "none", "minimal":
 		if supportsMinimalThinking(model) {
 			effort = "minimal"
 		} else {
 			effort = "low"
+		}
+	case "xhigh":
+		if !supportsXHighThinking(model) {
+			effort = "high"
 		}
 	}
 	return map[string]any{"thinkingLevel": effort}
@@ -1098,6 +1103,9 @@ func supportsMinimalThinking(model string) bool {
 	if major, _, ok := geminiGeneration(model); ok && major >= 4 {
 		return false
 	}
+	if isLatestAlias(model) {
+		return false
+	}
 	model = strings.ToLower(strings.TrimSpace(model))
 	if idx := strings.LastIndex(model, "/"); idx >= 0 {
 		model = model[idx+1:]
@@ -1108,6 +1116,37 @@ func supportsMinimalThinking(model string) bool {
 		}
 	}
 	return true
+}
+
+// isLatestAlias reports whether model is one of Google's moving aliases such
+// as "gemini-pro-latest" or "gemini-flash-latest". They carry no generation to
+// read a thinking-level set from and point at whatever is current, so they get
+// the levels every thinking-level model accepts: both aliases answer HTTP 400
+// to "minimal" and "xhigh" (verified November 2026).
+func isLatestAlias(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+	return strings.HasPrefix(model, "gemini-") && strings.HasSuffix(model, "-latest")
+}
+
+// supportsXHighThinking reports whether the model accepts the "xhigh"
+// thinkingLevel. Only Gemini 4 Hydrogen does: Gemini 4 Argon and Carbon, the
+// Gemini 3 Pro and Flash models and gemini-pro-latest answer HTTP 400
+// "Thinking level XHIGH is not supported for this model" (verified November
+// 2026), so "high" is sent instead. A model not known to accept it is clamped
+// too, because every thinking-level model accepts "high". The family matches
+// only as a whole dash-delimited prefix of the model ID (after any
+// "publisher/" prefix), so "gemini-4-hydrogen-preview" matches while
+// "gemini-4-hydrogenx" does not.
+func supportsXHighThinking(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+	rest, ok := strings.CutPrefix(model, "gemini-4-hydrogen")
+	return ok && (rest == "" || rest[0] == '-')
 }
 
 func geminiSafetySettings(req *core.ChatRequest) []map[string]any {

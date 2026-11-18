@@ -9,13 +9,15 @@ import (
 
 // AudioSpeechRequest is an OpenAI-compatible POST /v1/audio/speech
 // (text-to-speech) request. Only the fields the gateway needs to route,
-// validate, and audit are typed; every other member (stream_format,
+// validate, and log are typed; every other member (stream_format,
 // model-specific extras, ...) is preserved verbatim in ExtraFields and
 // forwarded upstream so new provider parameters work without a gateway change
 // (ADR-0011 rule 1).
 type AudioSpeechRequest struct {
-	Model          string  `json:"model"`
-	Input          string  `json:"input"`
+	Model string `json:"model"`
+	Input string `json:"input"`
+	// Voice is a voice name or ID. It may be sent as a string ("alloy") or as
+	// an OpenAI custom-voice object ({"id": "voice_1234"}).
 	Voice          string  `json:"voice,omitempty"`
 	Instructions   string  `json:"instructions,omitempty"`
 	ResponseFormat string  `json:"response_format,omitempty"`
@@ -25,6 +27,11 @@ type AudioSpeechRequest struct {
 	Provider string `json:"provider,omitempty"`
 
 	ExtraFields UnknownJSONFields `json:"-" swaggerignore:"true"`
+
+	// customVoice is set when the client sent voice as an object. Voice then
+	// holds its id for providers with their own wire format, and the object is
+	// marshaled back unchanged for OpenAI-compatible upstreams.
+	customVoice *speechVoiceObject
 }
 
 // audioSpeechRequestFields are the typed members of AudioSpeechRequest, derived
@@ -33,24 +40,43 @@ var audioSpeechRequestFields = jsonFieldSetOf(AudioSpeechRequest{})
 
 func (r *AudioSpeechRequest) UnmarshalJSON(data []byte) error {
 	// alias drops UnmarshalJSON so json.Unmarshal does not recurse; ExtraFields
-	// is json:"-" and captured separately.
+	// is json:"-" and captured separately. The shallower Voice shadows the
+	// alias's string field so the object form decodes too.
 	type alias AudioSpeechRequest
-	var raw alias
+	var raw struct {
+		alias
+		Voice json.RawMessage `json:"voice"`
+	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
+	}
+	voice, customVoice, err := decodeSpeechVoice(raw.Voice)
+	if err != nil {
+		return wrapJSONMemberDecodeError("voice", err)
 	}
 	extraFields, err := extractUnknownJSONFieldsSet(data, audioSpeechRequestFields)
 	if err != nil {
 		return err
 	}
-	*r = AudioSpeechRequest(raw)
+	*r = AudioSpeechRequest(raw.alias)
+	r.Voice = voice
+	r.customVoice = customVoice
 	r.ExtraFields = extraFields
 	return nil
 }
 
+// MarshalJSON emits voice in the form the client sent it. The object is sent
+// only while Voice still names its id, so code that replaces Voice sends the
+// replacement.
 func (r AudioSpeechRequest) MarshalJSON() ([]byte, error) {
 	type alias AudioSpeechRequest
-	return marshalWithUnknownJSONFields(alias(r), r.ExtraFields)
+	if r.customVoice == nil || r.customVoice.id != r.Voice {
+		return marshalWithUnknownJSONFields(alias(r), r.ExtraFields)
+	}
+	return marshalWithUnknownJSONFields(struct {
+		alias
+		Voice json.RawMessage `json:"voice"`
+	}{alias: alias(r), Voice: r.customVoice.raw}, r.ExtraFields)
 }
 
 // AudioTranscriptionRequest is an OpenAI-compatible POST /v1/audio/transcriptions
