@@ -100,7 +100,7 @@ func TestNewMongoDBStoreFinishesAnInterruptedAbsorb(t *testing.T) {
 		require.NoError(t, err)
 
 		writeLegacyDocument(t, db, "staged", 200)
-		require.NoError(t, renameCollection(ctx, db, legacyCollectionName, legacyStagingCollection))
+		require.NoError(t, renameCollection(ctx, db, legacyCollectionName, legacyStagingPrefix+"interrupted"))
 		writeLegacyDocument(t, db, "written-since", 200)
 
 		_, err = NewMongoDBStore(db, 0)
@@ -133,5 +133,29 @@ func TestRenameCollectionReportsRaces(t *testing.T) {
 		require.NoError(t, err)
 		err = renameCollection(ctx, db, legacyCollectionName, requestLogCollectionName)
 		assert.True(t, isMongoError(err, mongoNamespaceExists), "existing target: %v", err)
+	})
+}
+
+// Replicas starting together each set the legacy collection aside under a
+// name of their own, so one finishing late cannot drop what another staged.
+func TestAdoptLegacyCollectionStagesUnderAUniqueName(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		_, err := NewMongoDBStore(db, 0)
+		require.NoError(t, err)
+
+		// Another replica has set a batch aside and is still merging it.
+		writeLegacyDocument(t, db, "staged-by-another-replica", 200)
+		other := legacyStagingPrefix + "other"
+		require.NoError(t, renameCollection(ctx, db, legacyCollectionName, other))
+		writeLegacyDocument(t, db, "written-since", 200)
+
+		require.NoError(t, adoptLegacyCollection(ctx, db))
+		// That replica's drop arrives late, after this one has moved on.
+		require.NoError(t, absorbStagedCollection(ctx, db, other))
+
+		assert.Equal(t, []string{requestLogCollectionName}, collectionNames(t, db))
+		require.NotNil(t, mongoEntry(t, db, "staged-by-another-replica"))
+		require.NotNil(t, mongoEntry(t, db, "written-since"))
 	})
 }
