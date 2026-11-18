@@ -1,12 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -76,6 +79,39 @@ func TestProxyPassthroughNonStreamingLogsUsage(t *testing.T) {
 	assert.Equal(t, 42, entry.InputTokens)
 	assert.Equal(t, 6, entry.OutputTokens)
 	assert.Equal(t, "msg_p", entry.ProviderID)
+}
+
+// A stream the client abandons is recorded once, as a client disconnect. The
+// error must not escape to the central error handler, which would log the
+// same request again as a gateway 500.
+func TestProxyPassthroughStreamClientDisconnectIsNotReturned(t *testing.T) {
+	var logs bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() {
+		slog.SetDefault(original)
+	})
+
+	chunk := "event: ping\ndata: {\"type\":\"ping\"}\n\n"
+	resp := &core.PassthroughResponse{
+		StatusCode: http.StatusOK,
+		Headers:    map[string][]string{"Content-Type": {"text/event-stream"}},
+		Body:       io.NopCloser(io.MultiReader(strings.NewReader(chunk), iotest.ErrReader(context.Canceled))),
+	}
+
+	c, rec := echotest.Post(t, "/v1/messages", `{}`)
+	ctx, cancel := context.WithCancel(c.Request().Context())
+	cancel()
+	c.SetRequest(c.Request().WithContext(ctx))
+
+	info := &core.PassthroughRouteInfo{Provider: "anthropic", RawEndpoint: "messages", Model: "claude-fable-5"}
+	require.NoError(t, proxyPassthroughResponse(c, nil, nil, nil, "anthropic", "anthropic", "messages", info, resp))
+	assert.Equal(t, chunk, rec.Body.String())
+
+	logOutput := logs.String()
+	assert.Contains(t, logOutput, `"msg":"stream terminated abnormally"`)
+	assert.Contains(t, logOutput, `"error_type":"client_disconnected"`)
+	assert.NotContains(t, logOutput, `"level":"ERROR"`)
 }
 
 // Any complete-body success status must be accounted, not only 200: /p/ is

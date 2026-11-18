@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -27,6 +28,9 @@ type providerCredentialsAdminFake struct {
 	configured []providers.SanitizedProviderConfig
 	upsertErr  error
 	deleteErr  error
+	// upsertCtx is the context of the last Upsert, which carries the secrets
+	// the handler kept from the stored row.
+	upsertCtx context.Context
 }
 
 func (f *providerCredentialsAdminFake) ConfiguredProviders() []providers.SanitizedProviderConfig {
@@ -67,7 +71,8 @@ func (f *providerCredentialsAdminFake) Get(_ context.Context, name string) (*pro
 	return &clone, nil
 }
 
-func (f *providerCredentialsAdminFake) Upsert(_ context.Context, cred providers.ManagedProviderCredential) error {
+func (f *providerCredentialsAdminFake) Upsert(ctx context.Context, cred providers.ManagedProviderCredential) error {
+	f.upsertCtx = ctx
 	if f.upsertErr != nil {
 		return f.upsertErr
 	}
@@ -624,6 +629,131 @@ func TestUpsertProviderCredential_ProxyURL(t *testing.T) {
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			assert.NotContains(t, rec.Body.String(), "proxy-s3cret")
 			assert.Equal(t, tt.want, fake.rows["proxied"].ProxyURL)
+		})
+	}
+}
+
+func TestUpsertProviderCredential_ProxyURLKeepsPasswordAcrossEdits(t *testing.T) {
+	const stored = "https://egress:pw-9f3a1c@10.0.0.1:1080"
+	tests := []struct {
+		name string
+		// stored overrides the stored proxy URL of the case.
+		stored string
+		body   string
+		want   string
+		// kept reports whether the saved URL holds a password the caller did
+		// not supply, which only the master key may send somewhere else.
+		kept bool
+	}{
+		{
+			name: "scheme change keeps the stored password",
+			body: `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"http://egress:xxxxx@10.0.0.1:1080"}`,
+			want: "http://egress:pw-9f3a1c@10.0.0.1:1080",
+			kept: true,
+		},
+		{
+			name: "host and port change keep the stored password",
+			body: `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"https://egress:xxxxx@10.0.0.2:3128"}`,
+			want: "https://egress:pw-9f3a1c@10.0.0.2:3128",
+			kept: true,
+		},
+		{
+			name: "username change keeps the stored password",
+			body: `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"https://other:xxxxx@10.0.0.1:1080"}`,
+			want: "https://other:pw-9f3a1c@10.0.0.1:1080",
+			kept: true,
+		},
+		{
+			name: "removed username stays removed",
+			body: `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"https://:xxxxx@10.0.0.1:1080"}`,
+			want: "https://:pw-9f3a1c@10.0.0.1:1080",
+			kept: true,
+		},
+		{
+			name: "legacy asterisk mask keeps the stored password",
+			body: `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"http://egress:***@10.0.0.1:1080"}`,
+			want: "http://egress:pw-9f3a1c@10.0.0.1:1080",
+			kept: true,
+		},
+		{
+			name:   "stored password is escaped again",
+			stored: "https://egress:p%40ss%3Aw0rd@10.0.0.1:1080",
+			body:   `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"http://egress:xxxxx@10.0.0.1:1080"}`,
+			want:   "http://egress:p%40ss%3Aw0rd@10.0.0.1:1080",
+			kept:   true,
+		},
+		{
+			name:   "empty stored password stays empty",
+			stored: "https://egress:@10.0.0.1:1080",
+			body:   `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"http://egress:xxxxx@10.0.0.1:1080"}`,
+			want:   "http://egress:@10.0.0.1:1080",
+			kept:   true,
+		},
+		{
+			name: "a new password replaces the stored one",
+			body: `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"http://egress:new-pw-77aa@10.0.0.1:1080"}`,
+			want: "http://egress:new-pw-77aa@10.0.0.1:1080",
+		},
+		{
+			name: "a URL without a password drops the stored one",
+			body: `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"http://egress@10.0.0.1:1080"}`,
+			want: "http://egress@10.0.0.1:1080",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := stored
+			if tt.stored != "" {
+				before = tt.stored
+			}
+			fake := newProviderCredentialsAdminFake()
+			fake.rows["proxied"] = providers.ManagedProviderCredential{Name: "proxied", Type: "openai", APIKeys: []string{"sk-one"}, ProxyURL: before, Enabled: true}
+			h := newProviderCredentialsHandler(fake)
+
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", tt.body)
+			require.NoError(t, h.UpsertProviderCredential(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.NotContains(t, rec.Body.String(), "pw-9f3a1c")
+			saved := fake.rows["proxied"].ProxyURL
+			assert.Equal(t, tt.want, saved)
+
+			// The edit repoints the proxy, so a kept password must reach the
+			// store marked as kept: that is what refuses the repoint to a
+			// credential other than the master key.
+			err := config.CheckSecretDestinations(config.RestrictSecretReferences(fake.upsertCtx), providers.CredentialSecretEntity, "proxied",
+				[]config.SecretDestination{{Field: providers.CredentialFieldProxyURL, Stored: before, Saved: saved}}, []string{saved})
+			if tt.kept {
+				assert.ErrorIs(t, err, config.ErrSecretDestinationRestricted)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestUpsertProviderCredential_MaskedProxyPasswordWithoutStoredOneIs400(t *testing.T) {
+	tests := []struct {
+		name     string
+		stored   string
+		proxyURL string
+	}{
+		{name: "no stored proxy", proxyURL: "http://egress:xxxxx@10.0.0.1:1080"},
+		{name: "stored proxy without a password", stored: "http://egress@10.0.0.1:3128", proxyURL: "http://egress:xxxxx@10.0.0.1:1080"},
+		{name: "stored password is a reference", stored: "http://egress:${env:PROXY_PASS}@10.0.0.1:3128", proxyURL: "http://egress:xxxxx@10.0.0.1:1080"},
+		{name: "legacy asterisk mask", proxyURL: "http://egress:***@10.0.0.1:1080"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newProviderCredentialsAdminFake()
+			fake.rows["proxied"] = providers.ManagedProviderCredential{Name: "proxied", Type: "openai", APIKeys: []string{"sk-one"}, ProxyURL: tt.stored, Enabled: true}
+			h := newProviderCredentialsHandler(fake)
+
+			body := `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"` + tt.proxyURL + `"}`
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", body)
+			require.NoError(t, h.UpsertProviderCredential(c))
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			assert.Equal(t, providers.CredentialFieldProxyURL, errorParam(t, rec))
+			assert.Equal(t, tt.stored, fake.rows["proxied"].ProxyURL)
 		})
 	}
 }
