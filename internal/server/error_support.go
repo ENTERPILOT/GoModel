@@ -102,7 +102,7 @@ func gatewayErrorHandler(c *echo.Context, err error) {
 	// echo's default request logger hands an error here and then returns it,
 	// so the server delivers the same error a second time. A different error
 	// later on the same request, such as a panic, is still handled.
-	if handled, ok := c.Get(escapedErrorHandledKey).(error); ok && errors.Is(err, handled) {
+	if handled, ok := c.Get(escapedErrorHandledKey).(error); ok && isSameError(err, handled) {
 		return
 	}
 	c.Set(escapedErrorHandledKey, err)
@@ -139,6 +139,17 @@ func gatewayErrorHandler(c *echo.Context, err error) {
 	if writeErr := writeGatewayError(c, gatewayErr); writeErr != nil {
 		slog.Error("failed to send error response", "error", writeErr)
 	}
+}
+
+// isSameError reports whether err is, or wraps, handled. Comparing two error
+// values of an uncomparable type panics; those count as different errors.
+func isSameError(err, handled error) (same bool) {
+	defer func() {
+		if recover() != nil {
+			same = false
+		}
+	}()
+	return errors.Is(err, handled)
 }
 
 // responseCommitted reports whether the status line is already on the wire.

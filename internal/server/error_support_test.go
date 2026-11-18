@@ -488,6 +488,23 @@ func TestGatewayErrorHandler_HandlesARepeatedErrorOnce(t *testing.T) {
 	assert.Equal(t, "partial", rec.Body.String())
 }
 
+// uncomparableError is an error value Go cannot compare with ==.
+type uncomparableError []string
+
+func (e uncomparableError) Error() string { return strings.Join(e, "; ") }
+
+// An extension may return an error value that cannot be compared; telling it
+// apart from the previous error must not panic.
+func TestGatewayErrorHandler_ToleratesUncomparableErrors(t *testing.T) {
+	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
+	err := struct{ error }{uncomparableError{"first", "second"}}
+
+	gatewayErrorHandler(c, err)
+	require.NotPanics(t, func() { gatewayErrorHandler(c, err) })
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
 func TestGatewayErrorHandler_UnencodableResponseThroughRealServer(t *testing.T) {
 	logs := &bytes.Buffer{}
 	original := slog.Default()
