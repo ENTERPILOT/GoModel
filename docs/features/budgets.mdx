@@ -521,7 +521,8 @@ answer was lost on the way back, with the same `id`, so deduplicate on `id`.
 Replicas on SQLite, each with its own database, each raise the alert, usually
 under a different `id`, because each database gives the budget its own
 `revision` (replicas started from copies of one database can share it, and
-with it the `id`, until the budget changes on one of them). To collapse those too, deduplicate on `budget.scope`,
+with it the `id`, until the budget's amount or cost basis changes on one of
+them). To collapse those too, deduplicate on `budget.scope`,
 `budget.subject`, `budget.effective_subject`, `budget.period_seconds`,
 `period_start`, and `threshold_percent`. That key also drops the alert raised
 again after the budget's amount or cost basis changes within the period, since

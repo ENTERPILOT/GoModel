@@ -559,7 +559,8 @@ derselben `id`; deduplizieren Sie also auf `id`. Replikate mit SQLite, jedes
 mit eigener Datenbank, lösen die Warnung jeweils aus, meist mit einer anderen
 `id`, weil jede Datenbank dem Budget eine eigene `revision` gibt (Replikate, die
 aus Kopien derselben Datenbank gestartet wurden, können sie und damit die `id`
-teilen, bis sich das Budget auf einem von ihnen ändert).
+teilen, bis sich Betrag oder Kostenbasis des Budgets auf einem von ihnen
+ändert).
 Um auch diese zusammenzuführen, deduplizieren Sie auf `budget.scope`,
 `budget.subject`, `budget.effective_subject`, `budget.period_seconds`,
 `period_start` und `threshold_percent`. Dieser Schlüssel verwirft auch die
