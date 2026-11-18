@@ -168,7 +168,7 @@ ma kształt OpenAI; modele upstreamu wylistujesz pod `/p/jev/v1/models`.
 ## System One API
 
 `POST /v1/systemone` to endpoint gatewaya, a nie surowe proxy: stosuje
-modele wirtualne, guardrails na `state`, cache odpowiedzi, failover, audyt
+modele wirtualne, guardrails na `state`, cache odpowiedzi, failover, logowanie requestów
 i śledzenie użycia, a request przekazuje natywnie, bez tłumaczenia. Ścieżki Kev
 `/v1/systemone/permute` i `/v1/systemone/separate` działają tak samo. Pełne
 zachowanie, w tym OpenRouter, który również natywnie serwuje Jev, opisuje strona

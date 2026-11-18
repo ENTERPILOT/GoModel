@@ -28,7 +28,7 @@ func (s RequestedModelSelector) Normalize() (ModelSelector, error) {
 }
 
 // RequestedQualifiedModel returns the canonical requested selector string used
-// for audit and workflow reporting.
+// for request log and workflow reporting.
 func (s RequestedModelSelector) RequestedQualifiedModel() string {
 	if !s.ExplicitProvider {
 		return s.Model

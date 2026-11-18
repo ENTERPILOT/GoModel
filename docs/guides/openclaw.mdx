@@ -157,4 +157,4 @@ If you get `401 Unauthorized`, verify OpenClaw is sending the same value as `GOM
 - If GoModel is running in Docker and OpenClaw is not, `http://localhost:8080` is usually correct.
 - If both run in different containers, use a shared Docker network and container hostname instead of `localhost`.
 - You can expose multiple GoModel-backed models by adding more entries under `models.providers.gomodel.models`.
-- GoModel as an AI gateway also gives you centralized auth, audit logs, usage analytics, and provider abstraction with one OpenAI-compatible endpoint.
+- GoModel as an AI gateway also gives you centralized auth, request logs, usage analytics, and provider abstraction with one OpenAI-compatible endpoint.

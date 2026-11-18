@@ -1,0 +1,23 @@
+{
+  "created_at": 0,
+  "id": "resp_\u003cgenerated\u003e",
+  "model": "gpt-4o-mini-2024-07-18",
+  "object": "response",
+  "output": [
+    {
+      "content": [
+        {
+          "annotations": [],
+          "logprobs": [],
+          "text": "Hello, World!",
+          "type": "output_text"
+        }
+      ],
+      "id": "msg_\u003cgenerated\u003e",
+      "role": "assistant",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "status": "completed"
+}

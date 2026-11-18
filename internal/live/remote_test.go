@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -27,7 +27,7 @@ const (
 
 var testT0 = time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 
-// fakeRow is one stamped row of a fake audit or usage table.
+// fakeRow is one stamped row of a fake request log or usage table.
 type fakeRow struct {
 	id        string
 	writer    string
@@ -35,7 +35,7 @@ type fakeRow struct {
 	timestamp time.Time
 }
 
-// fakeTable stands in for the audit and usage tables: RecentWrites filters
+// fakeTable stands in for the request log and usage tables: RecentWrites filters
 // and orders like the stores do.
 type fakeTable struct {
 	mu          sync.Mutex
@@ -110,21 +110,21 @@ func (f *fakeTable) load(ids []string) ([]fakeRow, error) {
 	return rows, nil
 }
 
-type fakeAuditTable struct{ fakeTable }
+type fakeRequestLogTable struct{ fakeTable }
 
-func (f *fakeAuditTable) PreviewsByID(_ context.Context, ids []string) ([]auditlog.EntryPreview, error) {
+func (f *fakeRequestLogTable) PreviewsByID(_ context.Context, ids []string) ([]requestlog.EntryPreview, error) {
 	rows, err := f.load(ids)
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]auditlog.EntryPreview, len(rows))
+	entries := make([]requestlog.EntryPreview, len(rows))
 	for i, row := range rows {
-		entries[i] = auditlog.EntryPreview{
+		entries[i] = requestlog.EntryPreview{
 			ID:                  row.id,
 			RequestID:           "req-" + row.id,
 			Timestamp:           row.timestamp,
 			StatusCode:          200,
-			Data:                &auditlog.LogData{UserAgent: "test-agent"},
+			Data:                &requestlog.LogData{UserAgent: "test-agent"},
 			RequestBodyCaptured: true,
 		}
 	}
@@ -181,7 +181,7 @@ type testHarness struct {
 	polls   chan struct{}
 }
 
-func newTestHarness(t *testing.T, writer string, audit auditlog.RecentWriteReader, usageReader usage.RecentWriteReader, clock *testClock) *testHarness {
+func newTestHarness(t *testing.T, writer string, requestLog requestlog.RecentWriteReader, usageReader usage.RecentWriteReader, clock *testClock) *testHarness {
 	t.Helper()
 	h := &testHarness{
 		broker:  NewBroker(Config{Enabled: true}),
@@ -190,7 +190,7 @@ func newTestHarness(t *testing.T, writer string, audit auditlog.RecentWriteReade
 		stopped: make(chan struct{}, 16),
 		polls:   make(chan struct{}, 1024),
 	}
-	h.feed = newRemoteFeed(h.broker, RemoteConfig{Writer: writer, Audit: audit, Usage: usageReader})
+	h.feed = newRemoteFeed(h.broker, RemoteConfig{Writer: writer, RequestLog: requestLog, Usage: usageReader})
 	h.feed.now = clock.Now
 	h.feed.newTicker = func(time.Duration) (<-chan time.Time, func()) {
 		h.created <- struct{}{}
@@ -267,15 +267,15 @@ func eventIDs(t *testing.T, events []Event) []string {
 }
 
 func TestRemoteFeedPollsOnlyWhileSubscribed(t *testing.T) {
-	audit := &fakeAuditTable{}
-	h := newTestHarness(t, testSelf, audit, nil, &testClock{now: testT0})
+	requestLog := &fakeRequestLogTable{}
+	h := newTestHarness(t, testSelf, requestLog, nil, &testClock{now: testT0})
 
-	assert.Zero(t, audit.calls(), "nothing is read before a dashboard connects")
+	assert.Zero(t, requestLog.calls(), "nothing is read before a dashboard connects")
 
 	sub := h.subscribe(t)
-	assert.Equal(t, 1, audit.calls(), "a new subscriber is caught up at once")
+	assert.Equal(t, 1, requestLog.calls(), "a new subscriber is caught up at once")
 	h.tick(t)
-	assert.Equal(t, 2, audit.calls())
+	assert.Equal(t, 2, requestLog.calls())
 
 	h.unsubscribe(t, sub)
 	select {
@@ -283,12 +283,12 @@ func TestRemoteFeedPollsOnlyWhileSubscribed(t *testing.T) {
 		require.FailNow(t, "the feed still polls without a subscriber")
 	default:
 	}
-	assert.Equal(t, 2, audit.calls(), "no query once the last subscriber left")
+	assert.Equal(t, 2, requestLog.calls(), "no query once the last subscriber left")
 
 	sub = h.subscribe(t)
-	assert.Equal(t, 3, audit.calls(), "polling resumes with the next subscriber")
+	assert.Equal(t, 3, requestLog.calls(), "polling resumes with the next subscriber")
 	h.tick(t)
-	assert.Equal(t, 4, audit.calls())
+	assert.Equal(t, 4, requestLog.calls())
 
 	h.broker.Close()
 	waitSignal(t, h.stopped, "Close to stop the feed")
@@ -297,15 +297,15 @@ func TestRemoteFeedPollsOnlyWhileSubscribed(t *testing.T) {
 }
 
 func TestRemoteFeedPublishesEachRemoteEntryOnce(t *testing.T) {
-	audit := &fakeAuditTable{}
+	requestLog := &fakeRequestLogTable{}
 	clock := &testClock{now: testT0}
-	audit.add("remote-1", testPeer, testT0.Add(-time.Second))
-	audit.add("local-1", testSelf, testT0.Add(-time.Second))
-	h := newTestHarness(t, testSelf, audit, nil, clock)
+	requestLog.add("remote-1", testPeer, testT0.Add(-time.Second))
+	requestLog.add("local-1", testSelf, testT0.Add(-time.Second))
+	h := newTestHarness(t, testSelf, requestLog, nil, clock)
 
 	sub := h.subscribe(t)
 	events := pendingEvents(sub)
-	require.Equal(t, []string{EventAuditFlushed + ":remote-1"}, eventIDs(t, events),
+	require.Equal(t, []string{EventRequestLogFlushed + ":remote-1"}, eventIDs(t, events),
 		"the peer's entry is published, this replica's own is not")
 	assert.Equal(t, "req-remote-1", events[0].RequestID)
 
@@ -313,14 +313,14 @@ func TestRemoteFeedPublishesEachRemoteEntryOnce(t *testing.T) {
 	assert.Empty(t, pendingEvents(sub), "a later poll does not publish it again")
 
 	clock.Advance(time.Second)
-	audit.add("remote-2", "replica-c", clock.Now())
+	requestLog.add("remote-2", "replica-c", clock.Now())
 	h.tick(t)
-	assert.Equal(t, []string{EventAuditFlushed + ":remote-2"}, eventIDs(t, pendingEvents(sub)))
+	assert.Equal(t, []string{EventRequestLogFlushed + ":remote-2"}, eventIDs(t, pendingEvents(sub)))
 
 	// A batch stamped before the one already read, but visible only now.
-	audit.add("remote-late", testPeer, clock.Now().Add(-5*time.Second))
+	requestLog.add("remote-late", testPeer, clock.Now().Add(-5*time.Second))
 	h.tick(t)
-	assert.Equal(t, []string{EventAuditFlushed + ":remote-late"}, eventIDs(t, pendingEvents(sub)),
+	assert.Equal(t, []string{EventRequestLogFlushed + ":remote-late"}, eventIDs(t, pendingEvents(sub)),
 		"an entry that becomes visible late is still published")
 
 	// The first poll past the window still reads from where the last one
@@ -329,90 +329,90 @@ func TestRemoteFeedPublishesEachRemoteEntryOnce(t *testing.T) {
 	h.tick(t)
 	h.tick(t)
 	assert.Empty(t, pendingEvents(sub))
-	assert.Empty(t, h.feed.auditSeen.ids, "entries that left the window are forgotten")
+	assert.Empty(t, h.feed.requestLogSeen.ids, "entries that left the window are forgotten")
 }
 
 func TestRemoteFeedStartsAtWindowAndRemembersAcrossIdle(t *testing.T) {
-	audit := &fakeAuditTable{}
+	requestLog := &fakeRequestLogTable{}
 	clock := &testClock{now: testT0}
-	audit.add("too-old", testPeer, testT0.Add(-remoteWindow-time.Second))
-	audit.add("recent", testPeer, testT0.Add(-time.Second))
-	h := newTestHarness(t, testSelf, audit, nil, clock)
+	requestLog.add("too-old", testPeer, testT0.Add(-remoteWindow-time.Second))
+	requestLog.add("recent", testPeer, testT0.Add(-time.Second))
+	h := newTestHarness(t, testSelf, requestLog, nil, clock)
 
 	sub := h.subscribe(t)
-	assert.Equal(t, []string{EventAuditFlushed + ":recent"}, eventIDs(t, pendingEvents(sub)),
+	assert.Equal(t, []string{EventRequestLogFlushed + ":recent"}, eventIDs(t, pendingEvents(sub)),
 		"a new subscriber gets only the window; older entries are history")
 	h.unsubscribe(t, sub)
 
 	clock.Advance(3 * time.Second)
-	audit.add("while-idle", testPeer, clock.Now().Add(-time.Second))
+	requestLog.add("while-idle", testPeer, clock.Now().Add(-time.Second))
 	sub = h.subscribe(t)
-	assert.Equal(t, []string{EventAuditFlushed + ":while-idle"}, eventIDs(t, pendingEvents(sub)),
+	assert.Equal(t, []string{EventRequestLogFlushed + ":while-idle"}, eventIDs(t, pendingEvents(sub)),
 		"after an idle spell only what is new is published")
 	h.unsubscribe(t, sub)
 
 	// A restarted replica starts a new stream, which dashboards reset to,
 	// and catches it up on the window once.
-	restarted := newTestHarness(t, testSelf, audit, nil, clock)
+	restarted := newTestHarness(t, testSelf, requestLog, nil, clock)
 	sub = restarted.subscribe(t)
-	assert.Equal(t, []string{EventAuditFlushed + ":recent", EventAuditFlushed + ":while-idle"},
+	assert.Equal(t, []string{EventRequestLogFlushed + ":recent", EventRequestLogFlushed + ":while-idle"},
 		eventIDs(t, pendingEvents(sub)), "oldest first")
 	restarted.tick(t)
 	assert.Empty(t, pendingEvents(sub))
 }
 
 func TestRemoteFeedRetriesAFailedLoad(t *testing.T) {
-	audit := &fakeAuditTable{}
-	audit.failLoads = 1
-	audit.add("remote-1", testPeer, testT0.Add(-time.Second))
-	h := newTestHarness(t, testSelf, audit, nil, &testClock{now: testT0})
+	requestLog := &fakeRequestLogTable{}
+	requestLog.failLoads = 1
+	requestLog.add("remote-1", testPeer, testT0.Add(-time.Second))
+	h := newTestHarness(t, testSelf, requestLog, nil, &testClock{now: testT0})
 
 	sub := h.subscribe(t)
 	assert.Empty(t, pendingEvents(sub))
 	h.tick(t)
-	assert.Equal(t, []string{EventAuditFlushed + ":remote-1"}, eventIDs(t, pendingEvents(sub)))
+	assert.Equal(t, []string{EventRequestLogFlushed + ":remote-1"}, eventIDs(t, pendingEvents(sub)))
 }
 
 func TestRemoteFeedCapsEntriesPerPoll(t *testing.T) {
-	audit := &fakeAuditTable{}
+	requestLog := &fakeRequestLogTable{}
 	const extra = 5
 	for i := range remoteEntryLimit + extra {
-		audit.add(fmt.Sprintf("remote-%03d", i), testPeer, testT0.Add(-time.Second+time.Duration(i)*time.Microsecond))
+		requestLog.add(fmt.Sprintf("remote-%03d", i), testPeer, testT0.Add(-time.Second+time.Duration(i)*time.Microsecond))
 	}
-	h := newTestHarness(t, testSelf, audit, nil, &testClock{now: testT0})
+	h := newTestHarness(t, testSelf, requestLog, nil, &testClock{now: testT0})
 
 	sub := h.subscribe(t)
 	events := pendingEvents(sub)
 	require.Len(t, events, remoteEntryLimit)
 	ids := eventIDs(t, events)
-	assert.Equal(t, fmt.Sprintf("%s:remote-%03d", EventAuditFlushed, extra), ids[0], "the oldest are skipped")
-	assert.Equal(t, fmt.Sprintf("%s:remote-%03d", EventAuditFlushed, remoteEntryLimit+extra-1), ids[len(ids)-1])
+	assert.Equal(t, fmt.Sprintf("%s:remote-%03d", EventRequestLogFlushed, extra), ids[0], "the oldest are skipped")
+	assert.Equal(t, fmt.Sprintf("%s:remote-%03d", EventRequestLogFlushed, remoteEntryLimit+extra-1), ids[len(ids)-1])
 
 	h.tick(t)
 	assert.Empty(t, pendingEvents(sub), "skipped entries are not published late")
 }
 
-func TestRemoteFeedPublishesAuditThenUsage(t *testing.T) {
-	audit := &fakeAuditTable{}
+func TestRemoteFeedPublishesRequestLogThenUsage(t *testing.T) {
+	requestLog := &fakeRequestLogTable{}
 	usageTable := &fakeUsageTable{}
-	audit.add("audit-1", testPeer, testT0.Add(-time.Second))
+	requestLog.add("request-log-1", testPeer, testT0.Add(-time.Second))
 	usageTable.add("usage-1", testPeer, testT0.Add(-time.Second))
-	h := newTestHarness(t, testSelf, audit, usageTable, &testClock{now: testT0})
+	h := newTestHarness(t, testSelf, requestLog, usageTable, &testClock{now: testT0})
 
 	sub := h.subscribe(t)
 	events := pendingEvents(sub)
-	require.Equal(t, []string{EventAuditFlushed + ":audit-1", EventUsageFlushed + ":usage-1"}, eventIDs(t, events))
+	require.Equal(t, []string{EventRequestLogFlushed + ":request-log-1", EventUsageFlushed + ":usage-1"}, eventIDs(t, events))
 
-	var auditData map[string]any
-	require.NoError(t, json.Unmarshal(events[0].Data, &auditData))
-	assert.Equal(t, EventAuditFlushed, auditData["_live_state"])
-	data, ok := auditData["data"].(map[string]any)
+	var requestLogData map[string]any
+	require.NoError(t, json.Unmarshal(events[0].Data, &requestLogData))
+	assert.Equal(t, EventRequestLogFlushed, requestLogData["_live_state"])
+	data, ok := requestLogData["data"].(map[string]any)
 	require.True(t, ok)
 	assert.NotContains(t, data, "request_body", "remote bodies stay in the database")
 	assert.Equal(t, true, data["request_body_captured"])
 	assert.NotContains(t, data, "response_body_captured", "no response body was stored")
 	assert.Equal(t, "test-agent", data["user_agent"])
-	assert.InDelta(t, testT0.Add(-time.Second).UnixMicro(), auditData["_remote_written_at"], 0,
+	assert.InDelta(t, testT0.Add(-time.Second).UnixMicro(), requestLogData["_remote_written_at"], 0,
 		"marked as another replica's, with its write stamp")
 
 	var usageData map[string]any
@@ -426,19 +426,19 @@ func TestRemoteFeedPublishesAuditThenUsage(t *testing.T) {
 // Entries go out by request time, whatever the order they were written in,
 // their ids, or the store returns them in.
 func TestRemoteFeedPublishesByRequestTime(t *testing.T) {
-	audit := &fakeAuditTable{}
+	requestLog := &fakeRequestLogTable{}
 	usageTable := &fakeUsageTable{}
-	for _, table := range []*fakeTable{&audit.fakeTable, &usageTable.fakeTable} {
+	for _, table := range []*fakeTable{&requestLog.fakeTable, &usageTable.fakeTable} {
 		// Request order: c, a, b. Write order: a, b, c. Stored order: b, c, a.
 		table.addRequest("b-third", testPeer, testT0.Add(-2*time.Second), testT0.Add(-10*time.Second))
 		table.addRequest("c-first", testPeer, testT0.Add(-1*time.Second), testT0.Add(-30*time.Second))
 		table.addRequest("a-second", testPeer, testT0.Add(-3*time.Second), testT0.Add(-20*time.Second))
 	}
-	h := newTestHarness(t, testSelf, audit, usageTable, &testClock{now: testT0})
+	h := newTestHarness(t, testSelf, requestLog, usageTable, &testClock{now: testT0})
 
 	sub := h.subscribe(t)
 	assert.Equal(t, []string{
-		EventAuditFlushed + ":c-first", EventAuditFlushed + ":a-second", EventAuditFlushed + ":b-third",
+		EventRequestLogFlushed + ":c-first", EventRequestLogFlushed + ":a-second", EventRequestLogFlushed + ":b-third",
 		EventUsageFlushed + ":c-first", EventUsageFlushed + ":a-second", EventUsageFlushed + ":b-third",
 	}, eventIDs(t, pendingEvents(sub)))
 }
@@ -447,9 +447,9 @@ func TestRemoteFeedPublishesByRequestTime(t *testing.T) {
 // without subscribers nor failed reads leave a gap a reconnecting dashboard
 // would miss; the resume limit bounds how far back it reaches.
 func TestRemoteFeedResumesWhereTheLastPollLeftOff(t *testing.T) {
-	audit := &fakeAuditTable{}
+	requestLog := &fakeRequestLogTable{}
 	clock := &testClock{now: testT0}
-	h := newTestHarness(t, testSelf, audit, nil, clock)
+	h := newTestHarness(t, testSelf, requestLog, nil, clock)
 
 	sub := h.subscribe(t)
 	assert.Empty(t, pendingEvents(sub))
@@ -457,27 +457,27 @@ func TestRemoteFeedResumesWhereTheLastPollLeftOff(t *testing.T) {
 
 	// Persisted while no dashboard watched, and out of the window by the
 	// time one reconnects.
-	audit.add("during-idle", testPeer, testT0.Add(time.Second))
+	requestLog.add("during-idle", testPeer, testT0.Add(time.Second))
 	clock.Advance(2 * remoteWindow)
 	sub = h.subscribe(t)
-	assert.Equal(t, []string{EventAuditFlushed + ":during-idle"}, eventIDs(t, pendingEvents(sub)))
+	assert.Equal(t, []string{EventRequestLogFlushed + ":during-idle"}, eventIDs(t, pendingEvents(sub)))
 
 	// Reads fail for longer than the window, then recover.
-	audit.failLoads = 1
-	audit.add("during-failure", testPeer, clock.Now().Add(time.Second))
+	requestLog.failLoads = 1
+	requestLog.add("during-failure", testPeer, clock.Now().Add(time.Second))
 	clock.Advance(2 * time.Second)
 	h.tick(t)
 	assert.Empty(t, pendingEvents(sub))
 	clock.Advance(2 * remoteWindow)
 	h.tick(t)
-	assert.Equal(t, []string{EventAuditFlushed + ":during-failure"}, eventIDs(t, pendingEvents(sub)))
+	assert.Equal(t, []string{EventRequestLogFlushed + ":during-failure"}, eventIDs(t, pendingEvents(sub)))
 	h.unsubscribe(t, sub)
 
-	audit.add("too-long-ago", testPeer, clock.Now().Add(time.Second))
-	audit.add("recent", testPeer, clock.Now().Add(remoteResumeLimit+time.Second))
+	requestLog.add("too-long-ago", testPeer, clock.Now().Add(time.Second))
+	requestLog.add("recent", testPeer, clock.Now().Add(remoteResumeLimit+time.Second))
 	clock.Advance(remoteResumeLimit + 2*time.Second)
 	sub = h.subscribe(t)
-	assert.Equal(t, []string{EventAuditFlushed + ":recent"}, eventIDs(t, pendingEvents(sub)),
+	assert.Equal(t, []string{EventRequestLogFlushed + ":recent"}, eventIDs(t, pendingEvents(sub)),
 		"nothing older than the resume limit")
 }
 
@@ -488,17 +488,17 @@ func TestStartRemoteNeedsAReader(t *testing.T) {
 	assert.Nil(t, broker.remote)
 
 	disabled := NewBroker(Config{})
-	disabled.StartRemote(RemoteConfig{Writer: testSelf, Audit: &fakeAuditTable{}})
+	disabled.StartRemote(RemoteConfig{Writer: testSelf, RequestLog: &fakeRequestLogTable{}})
 	assert.Nil(t, disabled.remote)
 }
 
-// A stuck audit read uses up only its own budget: usage still publishes.
+// A stuck request log read uses up only its own budget: usage still publishes.
 func TestRemoteFeedTimesOutEachTableOnItsOwn(t *testing.T) {
-	audit := &fakeAuditTable{}
-	audit.stall = true
+	requestLog := &fakeRequestLogTable{}
+	requestLog.stall = true
 	usageTable := &fakeUsageTable{}
 	usageTable.add("usage-1", testPeer, testT0.Add(-time.Second))
-	h := newTestHarness(t, testSelf, audit, usageTable, &testClock{now: testT0})
+	h := newTestHarness(t, testSelf, requestLog, usageTable, &testClock{now: testT0})
 	h.feed.timeout = 50 * time.Millisecond
 
 	sub := h.subscribe(t)
@@ -509,43 +509,43 @@ func TestRemoteFeedTimesOutEachTableOnItsOwn(t *testing.T) {
 // so recovery still publishes what was persisted from there on, within the
 // resume limit.
 func TestRemoteFeedFirstPollFailureKeepsItsWindow(t *testing.T) {
-	audit := &fakeAuditTable{}
-	audit.failLoads = 1000
+	requestLog := &fakeRequestLogTable{}
+	requestLog.failLoads = 1000
 	clock := &testClock{now: testT0}
-	audit.add("before-first-poll", testPeer, testT0.Add(-time.Second))
-	h := newTestHarness(t, testSelf, audit, nil, clock)
+	requestLog.add("before-first-poll", testPeer, testT0.Add(-time.Second))
+	h := newTestHarness(t, testSelf, requestLog, nil, clock)
 
 	sub := h.subscribe(t)
 	assert.Empty(t, pendingEvents(sub))
 	clock.Advance(2 * remoteWindow)
-	audit.add("during-failure", testPeer, clock.Now().Add(-remoteWindow-time.Second))
+	requestLog.add("during-failure", testPeer, clock.Now().Add(-remoteWindow-time.Second))
 	h.tick(t)
 	assert.Empty(t, pendingEvents(sub))
 
-	audit.mu.Lock()
-	audit.failLoads = 0
-	audit.mu.Unlock()
+	requestLog.mu.Lock()
+	requestLog.failLoads = 0
+	requestLog.mu.Unlock()
 	clock.Advance(time.Second)
 	h.tick(t)
-	assert.ElementsMatch(t, []string{EventAuditFlushed + ":before-first-poll", EventAuditFlushed + ":during-failure"},
+	assert.ElementsMatch(t, []string{EventRequestLogFlushed + ":before-first-poll", EventRequestLogFlushed + ":during-failure"},
 		eventIDs(t, pendingEvents(sub)), "nothing persisted since the first attempt is lost")
 }
 
 // The first attempt's window is still bounded by the resume limit.
 func TestRemoteFeedFirstPollFailureStaysWithinTheResumeLimit(t *testing.T) {
-	audit := &fakeAuditTable{}
-	audit.failLoads = 1000
+	requestLog := &fakeRequestLogTable{}
+	requestLog.failLoads = 1000
 	clock := &testClock{now: testT0}
-	audit.add("too-long-ago", testPeer, testT0.Add(-time.Second))
-	h := newTestHarness(t, testSelf, audit, nil, clock)
+	requestLog.add("too-long-ago", testPeer, testT0.Add(-time.Second))
+	h := newTestHarness(t, testSelf, requestLog, nil, clock)
 
 	sub := h.subscribe(t)
 	assert.Empty(t, pendingEvents(sub))
 	clock.Advance(remoteResumeLimit + time.Minute)
-	audit.add("recent", testPeer, clock.Now().Add(-time.Second))
-	audit.mu.Lock()
-	audit.failLoads = 0
-	audit.mu.Unlock()
+	requestLog.add("recent", testPeer, clock.Now().Add(-time.Second))
+	requestLog.mu.Lock()
+	requestLog.failLoads = 0
+	requestLog.mu.Unlock()
 	h.tick(t)
-	assert.Equal(t, []string{EventAuditFlushed + ":recent"}, eventIDs(t, pendingEvents(sub)))
+	assert.Equal(t, []string{EventRequestLogFlushed + ":recent"}, eventIDs(t, pendingEvents(sub)))
 }

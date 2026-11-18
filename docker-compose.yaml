@@ -22,11 +22,11 @@ services:
       - REDIS_URL=redis://redis:6379
       # Metrics
       - METRICS_ENABLED=true
-      # Storage configuration (PostgreSQL for audit logs)
+      # Storage configuration (PostgreSQL for request logs)
       - POSTGRES_URL=postgres://gomodel:gomodel@postgres:5432/gomodel
       # MongoDB configuration (uncomment to use MongoDB instead)
       - MONGODB_URL=mongodb://mongodb:27017/gomodel
-      # Audit logging is enabled by default; pick its storage backend below
+      # Request logging is enabled by default; pick its storage backend below
       # - STORAGE_TYPE=postgresql
       - STORAGE_TYPE=mongodb
     volumes:

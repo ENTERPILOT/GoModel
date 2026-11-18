@@ -26,7 +26,7 @@ func storeTestMedia(t *testing.T, store *mediastore.Service, userPath, data stri
 	t.Helper()
 	object, err := store.Put(context.Background(), mediastore.Descriptor{
 		Kind:        mediastore.KindAudio,
-		Source:      mediastore.SourceAudit,
+		Source:      mediastore.SourceRequestLog,
 		ContentType: "audio/mpeg",
 		UserPath:    userPath,
 	}, strings.NewReader(data))
@@ -129,7 +129,7 @@ func TestMedia_NoBrowserCacheAndAttachmentForUntrustedTypes(t *testing.T) {
 	audio := storeTestMedia(t, store, "/team/a", "synthetic-audio")
 	html, err := store.Put(context.Background(), mediastore.Descriptor{
 		Kind:        mediastore.KindImage,
-		Source:      mediastore.SourceAudit,
+		Source:      mediastore.SourceRequestLog,
 		ContentType: "text/html",
 	}, strings.NewReader("<script>alert(1)</script>"))
 	require.NoError(t, err)
