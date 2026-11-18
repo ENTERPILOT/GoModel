@@ -166,7 +166,7 @@ z requestów passthrough przed przekazaniem ich do upstreamu.
 
 Passthrough jest celowo wąski, dopóki API jest w wersji beta.
 
-- `openai`, `anthropic`, `openrouter`, `kilo`, `zai`, `sglang`, `vllm`, `llamacpp`, `llmd`, `deepseek`, `edenai` i `jev`
+- `openai`, `anthropic`, `openrouter`, `kilo`, `zai`, `sglang`, `vllm`, `llamacpp`, `llmd`, `deepseek`, `hetzner`, `edenai` i `jev`
   są włączone domyślnie.
 - Chutes obsługuje passthrough, ale wymaga jawnego włączenia przez operatora, ponieważ
   passthrough może przekazywać natywne ścieżki providera, które nie identyfikują modelu.
@@ -197,7 +197,7 @@ Passthrough jest celowo wąski, dopóki API jest w wersji beta.
 ```env
 ENABLE_PASSTHROUGH_ROUTES=true
 ALLOW_PASSTHROUGH_V1_ALIAS=true
-ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,sglang,vllm,llamacpp,llmd,deepseek,edenai,jev
+ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,sglang,vllm,llamacpp,llmd,deepseek,hetzner,edenai,jev
 ```
 
 Ustaw `ENABLED_PASSTHROUGH_PROVIDERS` na typy providerów, które chcesz udostępnić.

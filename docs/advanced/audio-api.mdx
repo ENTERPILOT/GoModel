@@ -29,6 +29,7 @@ doesn't support audio returns a clear error rather than mis-routing.
 | `POST /v1/audio/speech` | Text-to-speech. Accepts a JSON body and returns **binary audio** in the requested `response_format`. |
 | `POST /v1/audio/transcriptions` | Speech-to-text. Accepts a `multipart/form-data` upload and returns JSON or plain text per `response_format`. |
 | `POST /v1/audio/translations` | Speech-to-English-text. Same upload shape as transcriptions, without `language` and `timestamp_granularities[]`. |
+| `GET /v1/audio/voices?model=` | GoModel extension: the voices a TTS model offers — see [Voice discovery](/advanced/api-endpoints#voice-discovery). |
 
 JSON transcription and translation bodies are normalized to the OpenAI shape:
 Groq's vendor `x_groq` member is removed from `json` and `verbose_json`
@@ -100,6 +101,19 @@ plus `opus`, `aac`, `flac`, `wav`, `pcm`), and `speed` — are forwarded to the
 provider. The response `Content-Type` is the one
 the upstream returns, falling back to the type implied by `response_format` (for
 example `wav` → `audio/wav`).
+
+`voice` may also be an object with an `id`, the form OpenAI uses for
+[custom voices](https://developers.openai.com/api/docs/guides/custom-voices):
+`"voice": {"id": "voice_1234"}`. OpenAI-compatible providers receive the object
+unchanged; ElevenLabs, MiniMax, Xiaomi and audio.cpp use its `id` as the voice.
+An object without a non-blank string `id` returns `400`. A compatible provider
+that does not support custom voices may reject the object.
+
+OpenAI accepts a custom voice only in the object form. For OpenAI
+(`api.openai.com` and its regional hosts) GoModel therefore sends a string
+that starts with `voice_` as `{"id": "voice_…"}`, so an `id` from
+[voice discovery](/advanced/api-endpoints#voice-discovery) also works as a
+plain string.
 
 Synthesized audio is **relayed as the provider produces it** — see
 [Streaming](#streaming).

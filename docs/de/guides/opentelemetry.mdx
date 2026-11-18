@@ -201,6 +201,74 @@ Streams aus Sicht des Clients ab. Ein Stream, der sich nicht aufbauen lässt
 oder vor seinem ersten Chunk endet, erhält immer einen Fehler-Span, sodass
 Fehler im Trace erscheinen.
 
+### Metriken für Token-Nutzung und Kosten
+
+GoModel exportiert die Token und die Kosten jedes Requests, für den es
+Nutzung aufzeichnet. Die Metriken werden aktualisiert, wenn die Response
+endet; ein Streaming-Request wird einmal exportiert, wenn sein Stream
+schließt.
+
+| Metrik | Typ | Einheit | Erfasst |
+| --- | --- | --- | --- |
+| `gen_ai.client.token.usage` | Histogramm | `{token}` | Input- und Output-Token pro Aufruf, aufgeteilt nach `gen_ai.token.type` (`input` oder `output`), wie es die GenAI Semantic Conventions definieren. |
+| `gomodel.client.token.usage.details` | Counter | `{token}` | Teile dieser Token, aufgeteilt nach `gomodel.token.type`: `input_cached`, `input_cache_write`, `output_reasoning`. |
+| `gomodel.client.provider_cost` | Counter | `{USD}` | Was Provider berechnen. |
+| `gomodel.client.billed_cost` | Counter | `{USD}` | Was Aufrufern berechnet wird: Provider-Kosten plus Aufschlag. |
+
+`input` umfasst jedes Prompt-Token (ungecacht, gecacht und Cache-Write) und
+`output` jedes Completion-Token (einschließlich Reasoning), und zwar für jeden
+Provider. Die Details sind **Teile** dieser Summen und deshalb eine eigene
+Metrik: Keine Summe über eine einzelne Metrik zählt ein Token oder einen
+Dollar doppelt. Die Semantic Conventions definieren keine Metrik für die
+Details oder für Kosten, daher die `gomodel.*`-Namen.
+
+Alle vier tragen `gen_ai.provider.name`, `gomodel.provider.name`,
+`gen_ai.request.model` (sofern bekannt), `gen_ai.response.model` und
+`gen_ai.operation.name`: die Operation des Provider-Aufrufs, derselbe Wert wie
+bei `gen_ai.client.operation.duration` (`generate_content` bei nativen
+Gemini-Aufrufen, `text_completion` für `/v1/completions`). Endpunkte ohne
+GenAI-Operation (Audio, Bilder, Realtime) haben keine.
+
+- **Die Nutzungserfassung muss aktiv sein** (`USAGE_ENABLED=true`, der
+  Standard).
+- **Kosten brauchen Preise.** Ein Modell ohne bekannten Preis fügt Token
+  hinzu, aber keine Kosten. `gomodel.client.billed_cost` wird nur exportiert,
+  wenn [Preisaufschläge](/de/features/cost-tracking) aktiviert sind.
+- **Response-Cache-Treffer** erreichen nie einen Provider: Sie fügen weder
+  Token noch Provider-Kosten hinzu, nur ihre berechneten Kosten, wenn
+  Cache-Treffer berechnet werden.
+- **MCP-Tool-Aufrufe** zeichnen weder Token noch Kosten auf und fügen daher
+  nichts hinzu.
+- `OTEL_METRICS_EXPORTER=none` schaltet diese Metriken zusammen mit den
+  übrigen ab.
+
+#### Aufrufer-Attribute
+
+Drei optionale Einstellungen ergänzen diese vier Metriken darum, wer den
+Request gestellt hat. Sie gelten auch für die
+[Prometheus-Metriken](/de/guides/prometheus-metrics#aufrufer-dimensionen);
+dort sind die Kardinalitätsgrenzen im Detail beschrieben.
+
+| Einstellung | Attribut | Wert |
+| --- | --- | --- |
+| `METRICS_CALLER_USER_PATH` | `gomodel.user_path` | Der [User Path](/de/features/user-path), gekürzt auf `METRICS_CALLER_USER_PATH_DEPTH` (Standard 2) Segmente; `/` bei einem Request ohne User Path. |
+| `METRICS_CALLER_AUTH_KEY` | `gomodel.auth_key.name` | Der Name des verwalteten API-Keys; fehlt beim Master-Key, `{unknown}` bei einem Key, der nicht mehr existiert. Nie das Secret oder die Key-ID. |
+| `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | Die Labels des Requests, sortiert und durch Kommas getrennt (`prod,team-a`). Ein Komma innerhalb eines Labels wird als `%2C` geschrieben, ein Prozentzeichen als `%25`. |
+
+Jede Dimension behält die ersten `METRICS_CALLER_MAX_VALUES` (Standard 100)
+unterschiedlichen Werte; spätere Werte, Werte über 256 Bytes, Werte, die
+kein gültiges UTF-8 sind, und Werte, die wie `{other}` oder `{unknown}`
+lauten, werden als `{other}` exportiert (`/{other}` bei User Paths). Die
+Dauer-Histogramme und die Spans tragen nie Aufrufer-Attribute.
+
+`gen_ai.client.token.usage` ist kein Aufrufzähler. Ein Aufruf zeichnet je
+Token-Typ einen Messpunkt auf, eine Seite ohne Token keinen und ein
+Response-Cache-Treffer gar keinen; der Count des Histogramms liegt also bei
+etwa zwei pro Aufruf. Zählt man nur die Messpunkte mit
+`gen_ai.token.type=input`, erhält man die Aufrufe, die Input-Token gemeldet
+haben. Request-Zahlen pro Aufrufer liefert in Prometheus
+[`gomodel_caller_requests_total`](/de/guides/prometheus-metrics#aufrufer-dimensionen).
+
 ### Erfassung von Prompts und Completions
 
 Die Inhaltserfassung ist **standardmäßig deaktiviert**. Schalten Sie sie ein,
@@ -264,6 +332,10 @@ Drittanbieters gehen kann, ohne preiszugeben, was durch das Gateway fließt:
   abgeleitete Dimensionen sind von HTTP-Metriken ausgeschlossen, damit ein
   Client die Kardinalität der Metriken nicht über den `Host`-Header aufblähen
   kann.
+- User Paths, API-Key-Namen und Request-Labels werden nur auf den Token- und
+  Kostenmetriken exportiert, und nur, wenn Sie das passende
+  [Aufrufer-Attribut](/de/guides/opentelemetry#aufrufer-attribute)
+  einschalten. Secrets und IDs von API-Keys werden nie exportiert.
 
 ## Neu laden
 

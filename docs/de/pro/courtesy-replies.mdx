@@ -1,0 +1,119 @@
+---
+title: "Höflichkeitsantworten"
+description: "Beantworten Sie Dankes- und Abschiedsnachrichten im Gateway, statt eine lange Unterhaltung zum vollen Preis erneut an das Modell zu senden."
+icon: "hand-heart"
+tag: "Pro"
+keywords: ["GoModel Pro", "Höflichkeitsantworten", "courtesy replies", "courtesy_reply", "Guardrail", "Prompt-Cache", "prompt cache", "Token-Einsparungen"]
+---
+
+## Was es tut
+
+Wenn ein Nutzer eine lange Unterhaltung mit „Danke!“ oder „Tschüss“ beendet,
+sendet der Client die gesamte Unterhaltung an das Modell, nur um „Gern
+geschehen!“ zurückzubekommen. Ist der Prompt-Cache des Providers bis dahin
+abgelaufen, wird diese Ein-Wort-Nachricht als voller Kontext zum vollen Preis
+abgerechnet.
+
+Die Guardrail `courtesy_reply` erkennt solche Nachrichten und beantwortet sie
+im Gateway, sodass die Unterhaltung nicht erneut gesendet wird. Standardmäßig
+ist die Antwort ein fester Text und nichts erreicht einen Provider; mit
+`reply: model` gehen nur die letzten Nachrichten an ein kleines `reply_model`.
+Sie funktioniert
+mit `/v1/chat/completions`, `/v1/responses` und `/v1/messages` und erkennt
+Dank und Abschied auf Englisch, Polnisch, Deutsch, Spanisch, Französisch,
+Portugiesisch und Italienisch.
+
+## Wann sie antwortet
+
+Standardmäßig antwortet sie nur, wenn das Überspringen des Modells echtes
+Geld spart:
+
+- **Der Cache ist kalt.** Das Gateway merkt sich, wann jede Unterhaltung
+  zuletzt ihren Provider und ihr Modell erreicht hat. Eine
+  Höflichkeitsnachricht wird nur beantwortet, wenn der Prompt-Cache
+  wahrscheinlich abgelaufen ist (standardmäßig nach fünf Minuten, länger,
+  wenn der Request einen längeren Cache anfordert) oder der Provider gar
+  nicht cacht. Solange der Cache warm ist, kostet die Nachricht vor allem
+  günstige Cache-Lesezugriffe und geht wie gewohnt an das Modell.
+- **Die Unterhaltung ist groß genug.** Unterhaltungen unter 2.000 Tokens
+  gehen an das Modell; die Einsparung lohnt es nicht, seine Antwort zu
+  ersetzen.
+- **Die Nachricht ist reine Höflichkeit.** Kurze Nachrichten, die nur aus
+  Dankes- oder Abschiedsfloskeln bestehen. Alles mit einer Frage, einer Bitte
+  oder neuen Informationen geht an das Modell.
+
+Das Cache-Tracking braucht eine Session-ID, die GoModel für die meisten
+Clients automatisch erkennt; siehe
+[Session Keeping](/de/features/session-keeping). Eine Unterhaltung, die das
+Gateway nicht beobachtet hat, etwa eine neue Session oder eine von einer
+anderen Replika bediente, gilt als kalt, sofern `unknown_cache` nicht auf
+`warm` steht.
+
+## Was immer das Modell erreicht
+
+Die Guardrail hält sich heraus, wann immer eine vorgefertigte Antwort falsch
+sein könnte:
+
+- ausstehende Tool- oder Funktionsergebnisse sowie Nicht-Text-Inhalte in der Nachricht
+- eine Nachricht direkt nach einer Frage des Assistenten, bei der „Danke“
+  „Ja, mach weiter“ bedeuten kann
+- erzwungene Tool-Aufrufe und strukturierte Ausgaben
+- providerseitig zustandsbehaftete Responses-Requests; eine Responses-Nachricht
+  wird nur mit `"store": false` beantwortet
+
+Bestätigungen wie „ok“, „perfekt“ oder „verstanden“ werden standardmäßig
+nicht beantwortet, weil sie oft „mach weiter“ mit dem Vorschlag des
+Assistenten bedeuten. Aktivieren Sie sie mit `reply_to_acknowledgments`.
+
+## Aktivieren
+
+Fügen Sie dem Abschnitt `guardrails` in `config/config.yaml` eine Regel hinzu:
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "courtesy"
+      type: "courtesy_reply"
+      fail_mode: "open"
+```
+
+Dank und Abschied, die die obigen Bedingungen erfüllen, erhalten nun eine
+vorgefertigte Antwort ohne Inferenzkosten. Regeln aus `config.yaml` gehören
+zum Standard-Workflow; ein eigener [Workflow](/de/advanced/workflows#guardrail-steps)
+führt die Regel nur aus, wenn einer seiner Prompt-Schritte auf sie verweist.
+Sie können die Regel auch unter
+**Plugins & Guardrails** im Dashboard anlegen, das jede Einstellung mit
+Hilfetext zeigt.
+
+## Wichtigste Einstellungen
+
+Einstellungen gehören unter den Schlüssel `config:` der Regel:
+
+```yaml
+- name: "courtesy"
+  type: "courtesy_reply"
+  fail_mode: "open"
+  config:
+    reply: "model"
+    reply_model: "openai/gpt-4o-mini"
+    reply_to_acknowledgments: true
+```
+
+| Einstellung | Standard | Zweck |
+| --- | --- | --- |
+| `reply` | `canned` | `canned` antwortet mit festem Text; `model` bittet `reply_model` um einen kurzen Satz und sendet nur die letzten Nachrichten. |
+| `reply_model` | — | Ein günstiges Chat-Modell für `reply: model`, etwa `openai/gpt-4o-mini`. |
+| `cache_policy` | `cold_only` | `always` antwortet auch bei warmem Cache. Die übrigen Bedingungen gelten weiterhin. |
+| `cache_ttl` | `auto` | Wie lange der Provider den Cache hält, etwa `5m` oder `1h`. `auto` liest es aus dem Request. |
+| `unknown_cache` | `cold` | Wie Unterhaltungen behandelt werden, die das Gateway nicht beobachtet hat. |
+| `min_context_tokens` | `2000` | Kleinere Unterhaltungen gehen immer an das Modell. |
+| `reply_to_acknowledgments` | `false` | Auch „ok“, „verstanden“ und Ähnliches beantworten. |
+
+Die vollständige Liste, einschließlich eigener Antworttexte, zusätzlicher
+Phrasen und eines optionalen Entscheidungsmodells für Formulierungen, die die
+eingebaute Liste nicht kennt, liefert `GET /admin/guardrails/types`; das
+Dashboard zeigt sie ebenfalls.
+
+Höflichkeitsantworten gehören zur Compression-Berechtigung. Ohne sie wird
+eine konfigurierte Regel trotzdem geladen und lässt jeden Request durch.
