@@ -66,6 +66,8 @@ func ensureModelIndexesConcurrently(ctx context.Context, db sqlx.DB) {
 // buildIndexConcurrently creates a PostgreSQL index with CREATE INDEX
 // CONCURRENTLY, which keeps the table writable while it builds. A build
 // interrupted midway leaves an invalid index behind; it is dropped and rebuilt.
+// The drop is CONCURRENTLY too: a plain one waits for every open transaction
+// that has touched audit_logs, and every write to the table queues behind it.
 func buildIndexConcurrently(ctx context.Context, db sqlx.DB, index auditIndex) error {
 	var valid *bool
 	err := db.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass(?)`, index.name).Scan(&valid)
@@ -74,7 +76,7 @@ func buildIndexConcurrently(ctx context.Context, db sqlx.DB, index auditIndex) e
 		return nil
 	case err == nil && valid != nil:
 		slog.Warn("auditlog: rebuilding interrupted index", "index", index.name)
-		if _, err := db.Exec(ctx, "DROP INDEX "+index.name); err != nil {
+		if _, err := db.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+index.name); err != nil {
 			return err
 		}
 	}
