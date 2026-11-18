@@ -397,7 +397,8 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	if len(observers) == 0 || !isJSONContentType(resp.Headers) {
 		c.Response().WriteHeader(resp.StatusCode)
 		if _, err := io.Copy(c.Response(), resp.Body); err != nil {
-			return err
+			recordResponseFailure(c, err)
+			return nil
 		}
 		if f, ok := c.Response().(http.Flusher); ok {
 			f.Flush()
@@ -409,7 +410,8 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	c.Response().WriteHeader(resp.StatusCode)
 	if _, err := io.Copy(c.Response(), io.TeeReader(resp.Body, capture)); err != nil {
 		// The client received an incomplete body; do not account for it.
-		return err
+		recordResponseFailure(c, err)
+		return nil
 	}
 	if f, ok := c.Response().(http.Flusher); ok {
 		f.Flush()
@@ -469,7 +471,8 @@ func relayPassthroughError(c *echo.Context, providerType string, resp *core.Pass
 	c.Response().Header().Set("Content-Type", passthroughErrorContentType(resp.Headers))
 	c.Response().WriteHeader(resp.StatusCode)
 	if _, err := c.Response().Write(body); err != nil {
-		return err
+		recordResponseFailure(c, err)
+		return nil
 	}
 	if f, ok := c.Response().(http.Flusher); ok {
 		f.Flush()

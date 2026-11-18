@@ -108,13 +108,13 @@ func gatewayErrorHandler(c *echo.Context, err error) {
 	c.Set(escapedErrorHandledKey, err)
 	// Once the response has started it cannot become an error response, so a
 	// failure while writing it is a broken relay (most often the client hanging
-	// up), not a gateway 500. A panic is still reported as one.
+	// up), not a gateway 500. A panic is still reported as one. Only the log is
+	// written: the audit middleware has already queued the request's entry, so
+	// a relay that wants the failure on the audit row records it before
+	// returning (recordResponseFailure).
 	committed := responseCommitted(c)
 	if _, panicked := errors.AsType[*middleware.PanicStackError](err); committed && !panicked {
-		if !auditlog.HasRecordedError(c) {
-			enrichAuditEntryWithProviderAttempts(c)
-		}
-		recordStreamFailure(c, nil, "response terminated abnormally", err)
+		logStreamFailure(c, responseTerminatedMessage, classifyStreamError(c.Request().Context(), err), err)
 		return
 	}
 	gatewayErr := escapedGatewayError(err)
@@ -139,6 +139,18 @@ func gatewayErrorHandler(c *echo.Context, err error) {
 	if writeErr := writeGatewayError(c, gatewayErr); writeErr != nil {
 		slog.Error("failed to send error response", "error", writeErr)
 	}
+}
+
+const responseTerminatedMessage = "response terminated abnormally"
+
+// recordResponseFailure records a response body that broke after the status
+// line was sent, on the audit entry and in the log. Nothing can be rendered
+// any more, so the caller returns nil.
+func recordResponseFailure(c *echo.Context, err error) {
+	if !auditlog.HasRecordedError(c) {
+		enrichAuditEntryWithProviderAttempts(c)
+	}
+	recordStreamFailure(c, nil, responseTerminatedMessage, err)
 }
 
 // isSameError reports whether err is, or wraps, handled. Comparing two error

@@ -806,19 +806,18 @@ func isNetworkReadError(err error) bool {
 // recordStreamFailure records a response that broke after it had started, so
 // the audit row does not show a clean 200. The classified error lands on
 // streamEntry when the stream owns its audit row and on the request's entry
-// otherwise, where an error recorded earlier is kept as the real cause. It is
-// logged once: a client that hung up is routine and logged at debug, like a
-// request canceled before the response started.
+// otherwise, where an error recorded earlier is kept as the real cause. It
+// must run before the handler returns: the audit middleware queues the
+// request's entry for writing as soon as the handler is done.
 func recordStreamFailure(c *echo.Context, streamEntry *auditlog.LogEntry, msg string, err error, attrs ...any) {
-	req := c.Request()
 	if err == nil {
 		// A caller with only a canceled context to report.
-		err = req.Context().Err()
+		err = c.Request().Context().Err()
 	}
 	if err == nil {
 		return
 	}
-	errorType := classifyStreamError(req.Context(), err)
+	errorType := classifyStreamError(c.Request().Context(), err)
 
 	switch {
 	case streamEntry != nil:
@@ -830,7 +829,14 @@ func recordStreamFailure(c *echo.Context, streamEntry *auditlog.LogEntry, msg st
 	case !auditlog.HasRecordedError(c):
 		auditlog.EnrichEntryWithError(c, errorType, err.Error(), "")
 	}
+	logStreamFailure(c, msg, errorType, err, attrs...)
+}
 
+// logStreamFailure logs a response that broke after it had started. A client
+// that hung up is routine and logged at debug, like a request canceled before
+// the response started.
+func logStreamFailure(c *echo.Context, msg, errorType string, err error, attrs ...any) {
+	req := c.Request()
 	level := slog.LevelWarn
 	if errorType == "client_disconnected" {
 		level = slog.LevelDebug

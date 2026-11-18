@@ -387,45 +387,48 @@ func TestGatewayErrorHandler_LeavesCommittedResponseAlone(t *testing.T) {
 
 // A failure after the response started is a broken relay, not a gateway 500:
 // a client that hung up is routine, anything else is a warning, and only a
-// panic is still an error.
+// panic is still an error. The audit entry is already queued for writing by
+// then, so a relay failure is logged without touching it.
 func TestGatewayErrorHandler_ClassifiesFailuresOnCommittedResponses(t *testing.T) {
 	tests := []struct {
 		name          string
 		cancelRequest bool
 		err           error
 		wantLevel     string
-		wantErrorType string
+		wantLogType   string
+		wantAuditType string
 	}{
 		{
 			name:          "client hung up",
 			cancelRequest: true,
 			err:           context.Canceled,
 			wantLevel:     "DEBUG",
-			wantErrorType: "client_disconnected",
+			wantLogType:   "client_disconnected",
 		},
 		{
-			name:          "client connection broke on a write",
-			err:           &net.OpError{Op: "write", Net: "tcp", Err: syscall.EPIPE},
-			wantLevel:     "DEBUG",
-			wantErrorType: "client_disconnected",
+			name:        "client connection broke on a write",
+			err:         &net.OpError{Op: "write", Net: "tcp", Err: syscall.EPIPE},
+			wantLevel:   "DEBUG",
+			wantLogType: "client_disconnected",
 		},
 		{
-			name:          "provider connection reset while reading",
-			err:           &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET},
-			wantLevel:     "WARN",
-			wantErrorType: "stream_error",
+			name:        "provider connection reset while reading",
+			err:         &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET},
+			wantLevel:   "WARN",
+			wantLogType: "stream_error",
 		},
 		{
-			name:          "provider body cut short",
-			err:           io.ErrUnexpectedEOF,
-			wantLevel:     "WARN",
-			wantErrorType: "stream_error",
+			name:        "provider body cut short",
+			err:         io.ErrUnexpectedEOF,
+			wantLevel:   "WARN",
+			wantLogType: "stream_error",
 		},
 		{
 			name:          "panic",
 			err:           &middleware.PanicStackError{Err: errors.New("relay blew up"), Stack: []byte("goroutine 1")},
 			wantLevel:     "ERROR",
-			wantErrorType: string(core.ErrorTypeInternal),
+			wantLogType:   string(core.ErrorTypeInternal),
+			wantAuditType: string(core.ErrorTypeInternal),
 		},
 	}
 	for _, tc := range tests {
@@ -449,9 +452,10 @@ func TestGatewayErrorHandler_ClassifiesFailuresOnCommittedResponses(t *testing.T
 
 			assert.Equal(t, http.StatusOK, rec.Code)
 			assert.Equal(t, "partial", rec.Body.String())
-			assert.Equal(t, tc.wantErrorType, entry.ErrorType)
+			assert.Equal(t, tc.wantAuditType, entry.ErrorType)
 			assert.Equal(t, 1, strings.Count(logs.String(), `"level":`), logs.String())
 			assert.Contains(t, logs.String(), `"level":"`+tc.wantLevel+`"`)
+			assert.Contains(t, logs.String(), `"`+tc.wantLogType+`"`)
 		})
 	}
 }

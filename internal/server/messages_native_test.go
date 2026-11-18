@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/ext"
+	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -144,14 +145,19 @@ func TestMessages_NativeNonStreamingBodyErrorSkipsUsage(t *testing.T) {
 
 	reqBody := `{"model":"claude-fable-5","max_tokens":64,"messages":[{"role":"user","content":"Hi"}]}`
 	c, _ := echotest.Post(t, "/v1/messages", reqBody)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
 
-	require.Error(t, handler.Messages(c))
+	// The response has started, so the failure is recorded on the audit entry
+	// before the handler returns rather than returned as an error.
+	require.NoError(t, handler.Messages(c))
 	require.Empty(t, usageLogger.entries)
+	assert.Equal(t, "stream_error", entry.ErrorType)
+	assert.Equal(t, io.ErrUnexpectedEOF.Error(), entry.Data.ErrorMessage)
 }
 
-// The same failure through the real server: the response has started, so the
-// central error handler reports a broken relay once and not a gateway 500,
-// under both request loggers (echo's default one hands the error over twice).
+// The same failure through the real server is logged once as a broken relay
+// and not as a gateway 500, under both request loggers.
 func TestMessages_NativeNonStreamingBodyErrorIsNotLoggedAsServerError(t *testing.T) {
 	tests := []struct {
 		name string
