@@ -34,10 +34,13 @@ func (s *staticRuleStore) DeleteRule(context.Context, ratelimit.RuleScope, strin
 func (s *staticRuleStore) ReplaceConfigRules(context.Context, []ratelimit.Rule) error {
 	return nil
 }
-func (s *staticRuleStore) LoadCounters(context.Context, int64) ([]ratelimit.WindowSnapshot, error) {
+func (s *staticRuleStore) LoadCounters(context.Context, int64, string) ([]ratelimit.WindowSnapshot, error) {
 	return nil, nil
 }
 func (s *staticRuleStore) SaveCounters(context.Context, []ratelimit.WindowSnapshot) error {
+	return nil
+}
+func (s *staticRuleStore) PruneCounters(context.Context) error {
 	return nil
 }
 func (s *staticRuleStore) ResetCounter(context.Context, ratelimit.RuleScope, string, int64) error {
