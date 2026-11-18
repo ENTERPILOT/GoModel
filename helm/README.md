@@ -180,7 +180,7 @@ serviceAccount:
 | `podDisruptionBudget.enabled` | `true` | Created only when more than one pod can run. |
 | `terminationGracePeriodSeconds` | `45` | Covers GoModel's 30s drain. |
 | `livenessProbe` / `readinessProbe` | `/health`, `/health/ready` | Readiness fails while storage is down. |
-| `podSecurityContext` / `securityContext` | non-root 65532, read-only FS | |
+| `podSecurityContext` / `securityContext` | non-root 65532, read-only FS | Writable: `/app/data`, `/app/.cache`, and `/tmp` (emptyDir, SQLite temp files). |
 | `extraVolumes` / `extraVolumeMounts` | `[]` | CA bundles, local model catalogs, … |
 | `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints`, `priorityClassName`, `podAnnotations`, `podLabels` | | Standard scheduling knobs. |
 

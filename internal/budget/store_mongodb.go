@@ -2,17 +2,16 @@ package budget
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 type MongoDBStore struct {
@@ -185,29 +184,9 @@ func (s *MongoDBStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budge
 	}
 	defer session.EndSession(ctx)
 
-	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
-		if err := s.replaceConfigBudgets(txCtx, budgets); err != nil {
-			if isMongoTransactionCapabilityError(err) {
-				return nil, &mongoTransactionFallbackError{err: err}
-			}
-			return nil, err
-		}
-		return nil, nil
+	return storage.MongoTransaction(ctx, session, "replace config budgets", func(ctx context.Context) error {
+		return s.replaceConfigBudgets(ctx, budgets)
 	})
-	if err != nil {
-		if fallbackErr := mongoTransactionFallbackCause(err); fallbackErr != nil || isMongoTransactionCapabilityError(err) {
-			if fallbackErr == nil {
-				fallbackErr = err
-			}
-			slog.Warn("MongoDB transactions unavailable for budget config replacement; falling back to non-transactional update", "error", fallbackErr)
-			if err := s.replaceConfigBudgets(ctx, budgets); err != nil {
-				return fmt.Errorf("replace config budgets without transaction: %w", errors.Join(fallbackErr, err))
-			}
-			return nil
-		}
-		return fmt.Errorf("replace config budgets transaction: %w", err)
-	}
-	return nil
 }
 
 func (s *MongoDBStore) replaceConfigBudgets(ctx context.Context, budgets []Budget) error {
@@ -311,67 +290,12 @@ func (s *MongoDBStore) SaveSettings(ctx context.Context, settings Settings) (Set
 	}
 	defer session.EndSession(ctx)
 
-	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
-		if err := s.saveSettingsValues(txCtx, settings); err != nil {
-			if isMongoTransactionCapabilityError(err) {
-				return nil, &mongoTransactionFallbackError{err: err}
-			}
-			return nil, err
-		}
-		return nil, nil
-	})
-	if err != nil {
-		if fallbackErr := mongoTransactionFallbackCause(err); fallbackErr != nil || isMongoTransactionCapabilityError(err) {
-			if fallbackErr == nil {
-				fallbackErr = err
-			}
-			slog.Warn("MongoDB transactions unavailable for budget settings save; falling back to non-transactional update", "error", fallbackErr)
-			if err := s.saveSettingsValues(ctx, settings); err != nil {
-				return Settings{}, fmt.Errorf("save budget settings without transaction: %w", errors.Join(fallbackErr, err))
-			}
-			return settings, nil
-		}
-		return Settings{}, fmt.Errorf("save budget settings transaction: %w", err)
+	if err := storage.MongoTransaction(ctx, session, "save budget settings", func(ctx context.Context) error {
+		return s.saveSettingsValues(ctx, settings)
+	}); err != nil {
+		return Settings{}, err
 	}
 	return settings, nil
-}
-
-type mongoTransactionFallbackError struct {
-	err error
-}
-
-func (e *mongoTransactionFallbackError) Error() string {
-	if e == nil || e.err == nil {
-		return ""
-	}
-	return e.err.Error()
-}
-
-func mongoTransactionFallbackCause(err error) error {
-	if fallbackErr, ok := errors.AsType[*mongoTransactionFallbackError](err); ok {
-		return fallbackErr.err
-	}
-	return nil
-}
-
-func isMongoTransactionCapabilityError(err error) bool {
-	if err == nil {
-		return false
-	}
-	var commandErr mongo.CommandError
-	if errors.As(err, &commandErr) && commandErr.HasErrorCode(20) {
-		return true
-	}
-	var labeled mongo.LabeledError
-	if errors.As(err, &labeled) && labeled.HasErrorLabel("TransientTransactionError") {
-		message := strings.ToLower(err.Error())
-		return strings.Contains(message, "transaction") &&
-			(strings.Contains(message, "not supported") ||
-				strings.Contains(message, "not allowed") ||
-				strings.Contains(message, "replica set"))
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "transaction numbers are only allowed on a replica set member or mongos")
 }
 
 func (s *MongoDBStore) saveSettingsValues(ctx context.Context, settings Settings) error {

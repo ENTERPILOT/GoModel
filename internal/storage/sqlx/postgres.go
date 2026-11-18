@@ -10,10 +10,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// postgresDB adapts a pgx connection pool to DB. Queries arrive with `?`
-// placeholders and are rebound to $1, $2, ... on the way through.
+// postgresDB adapts a pgx connection pool, or one connection of it, to DB.
+// Queries arrive with `?` placeholders and are rebound to $1, $2, ... on the
+// way through.
 type postgresDB struct {
-	pool *pgxpool.Pool
+	session pgSession
+}
+
+// pgSession is the part of *pgxpool.Pool and *pgxpool.Conn postgresDB uses.
+type pgSession interface {
+	pgExecutor
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
 // NewPostgreSQL wraps a pgx pool. The caller retains ownership of the pool.
@@ -21,7 +28,18 @@ func NewPostgreSQL(pool *pgxpool.Pool) (DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("connection pool is required")
 	}
-	return &postgresDB{pool: pool}, nil
+	return &postgresDB{session: pool}, nil
+}
+
+// NewPostgreSQLConn wraps one pooled connection, for store code that must
+// stay on a single session: schema changes made while that session holds an
+// advisory lock. Statements run one at a time, so a caller closes its Rows
+// before the next one. The caller retains ownership of the connection.
+func NewPostgreSQLConn(conn *pgxpool.Conn) (DB, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("connection is required")
+	}
+	return &postgresDB{session: conn}, nil
 }
 
 func (p *postgresDB) Dialect() Dialect { return PostgreSQL }
@@ -32,21 +50,22 @@ func (p *postgresDB) Dialect() Dialect { return PostgreSQL }
 // advisory lock while an index builds.
 func PostgreSQLPool(db DB) *pgxpool.Pool {
 	if p, ok := db.(*postgresDB); ok {
-		return p.pool
+		pool, _ := p.session.(*pgxpool.Pool)
+		return pool
 	}
 	return nil
 }
 
 func (p *postgresDB) Exec(ctx context.Context, query string, args ...any) (int64, error) {
-	return pgExec(ctx, p.pool, query, args...)
+	return pgExec(ctx, p.session, query, args...)
 }
 
 func (p *postgresDB) Query(ctx context.Context, query string, args ...any) (Rows, error) {
-	return pgQuery(ctx, p.pool, query, args...)
+	return pgQuery(ctx, p.session, query, args...)
 }
 
 func (p *postgresDB) QueryRow(ctx context.Context, query string, args ...any) Row {
-	return pgQueryRow(ctx, p.pool, query, args...)
+	return pgQueryRow(ctx, p.session, query, args...)
 }
 
 // postgresSchemaLockKey is the advisory lock every Schema call takes. One key
@@ -73,7 +92,7 @@ func (p *postgresDB) Schema(ctx context.Context, statements ...string) error {
 }
 
 func (p *postgresDB) InTx(ctx context.Context, fn func(Querier) error) error {
-	tx, err := p.pool.Begin(ctx)
+	tx, err := p.session.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
