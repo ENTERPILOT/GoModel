@@ -135,10 +135,12 @@ func TestLiveLogsNamesRequestLogEventsAsSubscribed(t *testing.T) {
 			broker := live.NewBroker(live.Config{Enabled: true})
 			h := NewHandler(nil, nil, WithLiveBroker(broker))
 			ctx, cancel := context.WithCancel(context.Background())
-			req := httptest.NewRequest(http.MethodGet, "/admin/live/logs"+tt.query, nil).WithContext(ctx)
 			rec := newLiveSSERecorder()
+			c, _ := echotest.Get(t, "/admin/live/logs"+tt.query,
+				echotest.WithResponseWriter(func(http.ResponseWriter) http.ResponseWriter { return rec }))
+			c.SetRequest(c.Request().WithContext(ctx))
 			errCh := make(chan error, 1)
-			go func() { errCh <- h.LiveLogs(echo.New().NewContext(req, rec)) }()
+			go func() { errCh <- h.LiveLogs(c) }()
 
 			waitForLiveOutput(t, rec, func(string) bool { return rec.statusCode() == http.StatusOK })
 			publish(broker)

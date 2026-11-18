@@ -1132,8 +1132,9 @@ removed; no removal date is set yet. Pass `types=request_log,usage` to move to
 the new names.
 
 With more than one replica on a shared database, the stream also carries the
-requests the other replicas served, as `request_log.flushed` and `usage.flushed`
-events once those replicas have persisted them, typically within 7 seconds.
+requests the other replicas served, as `request_log.flushed` (`audit.flushed` on
+a stream that still gets the old names) and `usage.flushed` events once those
+replicas have persisted them, typically within 7 seconds.
 Their payload carries `_remote_written_at`, the writing replica's stamp in unix
 microseconds. `GET /admin/request-logs`, `/admin/request-logs/sessions` and
 `/admin/usage/log` return `as_of`, when the server read the page on the same

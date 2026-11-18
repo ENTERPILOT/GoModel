@@ -127,8 +127,30 @@ test("legacy audit.* live events are handled as request_log.* events", () => {
   assert.equal(app.requestLog.entries.length, 1);
   assert.equal(app.requestLog.entries[0]._live_state, "request_log.started");
 
+  // A stream chunk keeps the row pending and shows the partial body.
   app.applyLiveLogEvent({
     seq: 2,
+    type: "audit.stream",
+    data: {
+      id: "request-log-1",
+      request_id: "req-1",
+      status_code: 200,
+      stream: true,
+      _live_state: "audit.stream",
+      data: {
+        response_body: { choices: [{ index: 0, message: { role: "assistant", content: "partial" } }] },
+        response_body_partial: true,
+      },
+    },
+  });
+  assert.equal(app.requestLog.entries.length, 1);
+  assert.equal(app.requestLog.entries[0]._live_state, "request_log.stream");
+  assert.equal(app.requestLog.entries[0]._live_pending, true);
+  assert.equal(app.requestLog.entries[0]._response_partial, true);
+  assert.equal(app.requestLog.entries[0].data.response_body.choices[0].message.content, "partial");
+
+  app.applyLiveLogEvent({
+    seq: 3,
     type: "audit.flushed",
     data: { id: "request-log-1", request_id: "req-1", status_code: 200, _live_state: "audit.flushed" },
   });
@@ -138,13 +160,13 @@ test("legacy audit.* live events are handled as request_log.* events", () => {
   assert.equal(app.requestLog.entries[0]._request_log_flushed, true);
 
   app.applyLiveLogEvent({
-    seq: 3,
+    seq: 4,
     type: "audit.started",
     data: { id: "request-log-2", request_id: "req-2", method: "POST" },
   });
-  app.applyLiveLogEvent({ seq: 4, type: "audit.removed", data: { id: "request-log-2", request_id: "req-2" } });
+  app.applyLiveLogEvent({ seq: 5, type: "audit.removed", data: { id: "request-log-2", request_id: "req-2" } });
   assert.deepEqual(app.requestLog.entries.map((entry) => entry.id), ["request-log-1"]);
-  assert.equal(app.liveLogsLastSeq, 4);
+  assert.equal(app.liveLogsLastSeq, 5);
 });
 
 test("normalizeLiveLogEvent renames only legacy request log names", () => {
