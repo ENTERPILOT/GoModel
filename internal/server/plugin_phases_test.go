@@ -363,6 +363,82 @@ func TestChatCompletion_BufferedStreamKeepsImages(t *testing.T) {
 	}
 }
 
+// truncatedChatStream is a provider stream cut off mid-answer: no
+// finish_reason and no [DONE].
+const truncatedChatStream = "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-nano\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"the \"}}]}\n\n" +
+	"data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-nano\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"secret answer\"}}]}\n\n"
+
+// A provider stream cut off mid-answer ends with the stream_incomplete error
+// event and is logged as a stream error. A guardrail that edits the buffered
+// text must not turn it into a finished answer.
+func TestChatCompletion_TruncatedStreamStaysIncompleteAfterEdit(t *testing.T) {
+	const body = `{"model":"gpt-5-nano","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"hi"}]}`
+	edit := map[string]string{"response": "edit", "text": "clean"}
+	tests := []struct {
+		name           string
+		stream         string
+		cfg            map[string]string
+		phase          pluginapi.Kind
+		wantContent    string
+		wantIncomplete bool
+	}{
+		{"truncated, unedited", truncatedChatStream, map[string]string{"response": "warn"}, pluginapi.KindResponse, "secret answer", true},
+		{"truncated, response phase edit", truncatedChatStream, edit, pluginapi.KindResponse, `"content":"clean"`, true},
+		{"truncated, buffered stream phase edit", truncatedChatStream, map[string]string{"stream": "buffer", "response": "edit", "text": "clean"}, pluginapi.KindStream, `"content":"clean"`, true},
+		// [DONE] without a finish_reason is a complete answer.
+		{"done without finish_reason, edited", truncatedChatStream + "data: [DONE]\n\n", edit, pluginapi.KindResponse, `"content":"clean"`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := phaseProvider()
+			p.streamData = tt.stream
+			chains := phaseChains(t, tt.cfg, guardrails.StepReference{Ref: "phase", Phase: tt.phase, Step: 1})
+			requestLogger := &capturingRequestLogger{config: requestlog.Config{Enabled: true}}
+			entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+			c, rec := chatContext(t, body, echotest.WithValue(string(requestlog.LogEntryKey), entry))
+			require.NoError(t, phaseHandlerWithLogger(t, p, requestLogger, chains).ChatCompletion(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Len(t, requestLogger.entries, 1)
+
+			got := rec.Body.String()
+			assert.Contains(t, got, tt.wantContent)
+			if !tt.wantIncomplete {
+				assert.Contains(t, got, `"finish_reason":"stop"`)
+				assert.True(t, strings.HasSuffix(got, "data: [DONE]\n\n"), "body = %s", got)
+				assert.Empty(t, requestLogger.entries[0].ErrorType)
+				return
+			}
+			assert.Contains(t, got, `"code":"stream_incomplete"`)
+			assert.NotContains(t, got, `"finish_reason":"`)
+			assert.NotContains(t, got, "[DONE]")
+			// The provider never reported usage, so none is made up.
+			assert.NotContains(t, got, `"usage"`)
+			assert.Equal(t, "stream_error", requestLogger.entries[0].ErrorType)
+		})
+	}
+}
+
+// /v1/messages is converted from the same chat stream, so an edited answer
+// that was cut off ends with the converter's error event, not message_stop.
+func TestMessages_TruncatedStreamStaysIncompleteAfterEdit(t *testing.T) {
+	p := phaseProvider()
+	p.streamData = truncatedChatStream
+	chains := phaseChains(t, map[string]string{"response": "edit", "text": "clean"}, guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindResponse, Step: 1})
+	requestLogger := &capturingRequestLogger{config: requestlog.Config{Enabled: true}}
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c, rec := echotest.Post(t, "/v1/messages", `{"model":"gpt-5-nano","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hi"}]}`,
+		echotest.WithValue(string(requestlog.LogEntryKey), entry))
+	require.NoError(t, phaseHandlerWithLogger(t, p, requestLogger, chains).Messages(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, requestLogger.entries, 1)
+
+	got := rec.Body.String()
+	assert.Contains(t, got, `"text":"clean"`)
+	assert.Contains(t, got, "event: error\ndata: {\"error\":{\"message\":\"provider stream ended before completion\"")
+	assert.NotContains(t, got, "message_stop")
+	assert.Equal(t, "stream_error", requestLogger.entries[0].ErrorType)
+}
+
 func TestChatCompletion_TwoBufferedMutatingInstances(t *testing.T) {
 	first, _ := json.Marshal(map[string]string{"stream": "buffer", "response": "edit", "text": "first"})
 	second, _ := json.Marshal(map[string]string{"stream": "buffer", "response": "edit", "text": "second"})
