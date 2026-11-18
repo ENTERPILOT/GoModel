@@ -48,6 +48,7 @@ type Store interface {
 	// key.ID: name, description, user path, labels, allowed models, redacted
 	// value, and expiry.
 	UpdateImported(ctx context.Context, key AuthKey) error
+	UpdateName(ctx context.Context, id, name string, now time.Time) error
 	UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error
 	UpdateAllowedModels(ctx context.Context, id string, allowedModels []string, now time.Time) error
 	UpdateDashboardAccess(ctx context.Context, id string, allowed bool, now time.Time) error
@@ -66,12 +67,23 @@ type authKeyRows interface {
 	Err() error
 }
 
-func normalizeCreateInput(input CreateInput) (CreateInput, error) {
-	input.Name = strings.TrimSpace(input.Name)
-	input.Description = strings.TrimSpace(input.Description)
-	if input.Name == "" {
-		return CreateInput{}, newValidationError("name is required", nil)
+// normalizeName trims a key name and rejects an empty one. Names need not be
+// unique: only the secret hash is.
+func normalizeName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", newValidationError("name is required", nil)
 	}
+	return name, nil
+}
+
+func normalizeCreateInput(input CreateInput) (CreateInput, error) {
+	name, err := normalizeName(input.Name)
+	if err != nil {
+		return CreateInput{}, err
+	}
+	input.Name = name
+	input.Description = strings.TrimSpace(input.Description)
 	userPath, err := core.NormalizeUserPath(input.UserPath)
 	if err != nil {
 		return CreateInput{}, newValidationError("invalid user_path", err)

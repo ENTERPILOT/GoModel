@@ -5,18 +5,29 @@ import (
 	"strings"
 )
 
+// sensitiveURLQueryKeys are matched case-insensitively against query keys.
 var sensitiveURLQueryKeys = map[string]struct{}{
 	"access_token":      {},
+	"api-key":           {},
+	"api_key":           {},
+	"apikey":            {},
 	"client_secret":     {},
 	"code":              {},
 	"code_challenge":    {},
 	"code_verifier":     {},
 	"error_description": {},
 	"id_token":          {},
+	"key":               {}, // Google API key
 	"nonce":             {},
 	"refresh_token":     {},
+	"sig":               {}, // Azure SAS signature
+	"signature":         {},
 	"state":             {},
 	"token":             {},
+	// AWS Signature Version 4 presigned URLs.
+	"x-amz-credential":     {},
+	"x-amz-security-token": {},
+	"x-amz-signature":      {},
 }
 
 // RedactSensitiveURLQuery removes credential and authentication-transaction
