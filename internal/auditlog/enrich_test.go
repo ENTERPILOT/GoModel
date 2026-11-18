@@ -32,7 +32,7 @@ func TestEnrichEntryWithSessionID(t *testing.T) {
 		{name: "empty id", context: true, entry: &LogEntry{}, sessionID: "  "},
 		{name: "missing entry", context: true, sessionID: "session-1"},
 		{name: "unchanged", context: true, entry: &LogEntry{SessionID: "session-1"}, sessionID: "session-1", wantSession: "session-1"},
-		{name: "trim and publish", context: true, entry: &LogEntry{}, sessionID: " session-1 ", wantSession: "session-1", wantEvents: 1},
+		{name: "trim and publish on flush", context: true, entry: &LogEntry{}, sessionID: " session-1 ", wantSession: "session-1", wantEvents: 1},
 	}
 
 	for _, tc := range tests {
@@ -48,6 +48,8 @@ func TestEnrichEntryWithSessionID(t *testing.T) {
 			}
 
 			EnrichEntryWithSessionID(c, tc.sessionID)
+			require.Empty(t, publisher.events)
+			FlushLiveUpdate(c)
 			if tc.entry != nil {
 				require.Equal(t, tc.wantSession, tc.entry.SessionID)
 			}

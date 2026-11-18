@@ -121,7 +121,7 @@ func TestSessionCaptureStampsContext(t *testing.T) {
 	require.Equal(t, "11111111-2222-3333-4444-555555555555", got)
 }
 
-func TestSessionCapturePublishesSessionBeforeDownstreamHandler(t *testing.T) {
+func TestSessionCaptureShowsSessionAtNextLiveFlush(t *testing.T) {
 	detector := session.NewDetector(session.BuiltinRules(), true)
 	c := sessionTestContext(t, "/v1/chat/completions", map[string]string{
 		"X-Session-Id": "session-live",
@@ -132,6 +132,8 @@ func TestSessionCapturePublishesSessionBeforeDownstreamHandler(t *testing.T) {
 	c.Set(string(auditlog.LogEntryLivePublisherKey), publisher)
 
 	handler := sessionCapture(detector, nil, false)(func(c *echo.Context) error {
+		require.Empty(t, publisher.events)
+		auditlog.FlushLiveUpdate(c)
 		require.Len(t, publisher.events, 1)
 		got := publisher.events[0]
 		require.Equal(t, auditlog.LiveEventAuditUpdated, got.eventType)

@@ -86,6 +86,7 @@ func (s *nativeFileService) fileByID(
 
 	if providerType := fileReq.Provider; providerType != "" {
 		auditlog.EnrichEntry(c, "file", providerType)
+		auditlog.FlushLiveUpdate(c)
 		result, err := callFn(nativeRouter, providerType, id)
 		if err != nil {
 			return handleError(c, err)
@@ -127,6 +128,7 @@ func (s *nativeFileService) fileByID(
 		return handleError(c, err)
 	}
 	auditlog.EnrichEntry(c, "file", "")
+	auditlog.FlushLiveUpdate(c)
 
 	var firstErr error
 	for _, candidate := range providers {
@@ -179,6 +181,7 @@ func (s *nativeFileService) CreateFile(c *echo.Context) error {
 		}
 	}
 	auditlog.EnrichEntry(c, "file", providerType)
+	auditlog.FlushLiveUpdate(c)
 
 	purpose := strings.TrimSpace(fileReq.Purpose)
 	if purpose == "" {
@@ -261,6 +264,7 @@ func (s *nativeFileService) ListFiles(c *echo.Context) error {
 
 	if providerType != "" {
 		auditlog.EnrichEntry(c, "file", providerType)
+		auditlog.FlushLiveUpdate(c)
 		resp, err := nativeRouter.ListFiles(ctx, providerType, purpose, limit, after)
 		if err != nil {
 			return handleError(c, err)
@@ -279,6 +283,7 @@ func (s *nativeFileService) ListFiles(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	auditlog.EnrichEntry(c, "file", "")
+	auditlog.FlushLiveUpdate(c)
 	resp, err := s.listMergedFiles(ctx, nativeRouter, providers, purpose, limit, after)
 	if err != nil {
 		return handleError(c, err)

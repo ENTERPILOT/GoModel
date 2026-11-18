@@ -340,6 +340,7 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		if streamEntry != nil {
 			streamEntry.StatusCode = resp.StatusCode
 		}
+		auditlog.FlushLiveUpdate(c)
 		if auditEnabled && streamEntry != nil && logger.Config().LogHeaders {
 			auditlog.PopulateResponseHeaders(streamEntry, c.Response().Header())
 		}

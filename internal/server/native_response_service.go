@@ -754,4 +754,5 @@ func auditResponseEntry(c *echo.Context, providerType string) {
 		return
 	}
 	auditlog.EnrichEntry(c, "response", providerType)
+	auditlog.FlushLiveUpdate(c)
 }
