@@ -174,9 +174,10 @@ takes no table locks, so starting or restarting a replica does not stall the
 others. A migration that does add a table, column, or index waits for its table
 half a second at a time, for about a minute per statement. If a long-running
 statement holds the table for that whole minute, a table or column migration
-fails the start instead of queueing traffic behind it. An audit log index that
-cannot get its table is skipped with a logged warning, along with the audit
-indexes after it, and the start continues; the next start creates them.
+fails the start instead of queueing traffic behind it. A request log index
+that cannot get its table is skipped with a logged warning, along with the
+request log indexes after it, and the start continues; the next start creates
+them.
 
 ## Pinning a version
 

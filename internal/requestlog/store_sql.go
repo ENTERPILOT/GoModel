@@ -235,7 +235,7 @@ func ensureSQLSchema(ctx context.Context, db sqlx.DB) error {
 	for _, statement := range indexes {
 		err := db.Schema(ctx, statement)
 		if errors.Is(err, sqlx.ErrTableLocked) {
-			slog.Warn("audit log table is locked; the remaining indexes are left for the next start", "error", err)
+			slog.Warn("request log table is locked; the remaining indexes are left for the next start", "error", err)
 			break
 		}
 		if err != nil {
