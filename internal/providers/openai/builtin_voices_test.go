@@ -123,11 +123,9 @@ func TestListVoices_NativeOpenAIAppendsCustomVoices(t *testing.T) {
 
 func TestListVoices_NativeOpenAIFollowsCustomVoicePages(t *testing.T) {
 	pages := map[string]string{
-		"":         `{"data":[{"id":"voice_a","name":"A"}],"last_id":"voice_a","has_more":true}`,
-		"voice_a":  `{"data":[{"id":"voice_b","name":"B"}],"last_id":"voice_b","has_more":true}`,
-		"voice_b":  `{"data":[{"id":"voice_c","name":"C"}],"last_id":"voice_c","has_more":false}`,
-		"voice_c":  `{"data":[{"id":"voice_unreachable","name":"X"}],"has_more":false}`,
-		"voice_zz": `{"data":[]}`,
+		"":        `{"data":[{"id":"voice_a","name":"A"}],"last_id":"voice_a","has_more":true}`,
+		"voice_a": `{"data":[{"id":"voice_b","name":"B"}],"last_id":"voice_b","has_more":true}`,
+		"voice_b": `{"data":[{"id":"voice_c","name":"C"}],"last_id":"voice_c","has_more":false}`,
 	}
 	provider, capture := newNativeVoicesProvider(t, "", func(w http.ResponseWriter, r *http.Request) {
 		voicesHandler(http.StatusOK, pages[r.URL.Query().Get("after")])(w, r)
@@ -152,6 +150,22 @@ func TestListVoices_NativeOpenAIStopsAtCustomVoicePageCap(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, resp.Voices, len(legacyBuiltinVoices)+maxCustomVoicePages)
 	assert.Equal(t, maxCustomVoicePages, capture.Count())
+
+	custom, err := provider.customVoices(context.Background(), "tts-1")
+	require.ErrorContains(t, err, "more than 5 pages")
+	assert.Len(t, custom, maxCustomVoicePages)
+}
+
+// A page that announces more voices without a cursor cannot be followed; it is
+// reported instead of passing for the end of the list.
+func TestCustomVoices_MorePagesWithoutCursorIsAnError(t *testing.T) {
+	provider, capture := newNativeVoicesProvider(t, "", voicesHandler(http.StatusOK,
+		`{"data":[{"id":"voice_a","name":"A"}],"last_id":null,"has_more":true}`))
+
+	custom, err := provider.customVoices(context.Background(), "tts-1")
+	require.ErrorIs(t, err, core.ErrUnrecognizedVoices)
+	assert.Equal(t, []core.AudioVoice{{ID: "voice_a", Name: "A"}}, custom)
+	assert.Equal(t, 1, capture.Count())
 }
 
 // The built-in voices do not depend on the custom voice lookup succeeding.

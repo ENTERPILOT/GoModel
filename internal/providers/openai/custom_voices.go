@@ -2,6 +2,8 @@ package openai
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -38,8 +40,8 @@ type customVoicesPage struct {
 }
 
 // customVoices lists the organization's custom voices usable for speech
-// through GET /audio/voices, following its cursor. On an error it returns the
-// voices read so far. With several API keys configured, each page may go out
+// through GET /audio/voices, following its cursor. On an error, which includes
+// a listing it could not read to the end, it returns the voices read so far. With several API keys configured, each page may go out
 // under a different key; keys of one organization share the same voices.
 func (p *Provider) customVoices(ctx context.Context, model string) ([]core.AudioVoice, error) {
 	var voices []core.AudioVoice
@@ -71,12 +73,14 @@ func (p *Provider) customVoices(ctx context.Context, model string) ([]core.Audio
 			}
 			voices = append(voices, core.AudioVoice{ID: id, Name: name})
 		}
-		after = strings.TrimSpace(page.LastID)
-		if !page.HasMore || after == "" {
-			break
+		if !page.HasMore {
+			return voices, nil
+		}
+		if after = strings.TrimSpace(page.LastID); after == "" {
+			return voices, errors.Join(core.ErrUnrecognizedVoices, errors.New("has_more without last_id"))
 		}
 	}
-	return voices, nil
+	return voices, fmt.Errorf("more than %d pages of custom voices", maxCustomVoicePages)
 }
 
 // withCustomVoiceObject returns req, or a copy that sends a custom voice ID
