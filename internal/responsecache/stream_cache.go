@@ -5,15 +5,17 @@ import (
 	stdjson "encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-json"
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
@@ -29,11 +31,18 @@ func cacheKeyRequestBody(path string, body []byte) []byte {
 		return body
 	}
 	switch path {
-	case "/v1/chat/completions":
+	// /v1/messages reaches the cache as the chat translation of the Anthropic
+	// request, with metadata.user_id carried in user.
+	case "/v1/chat/completions", messagesPath:
 		req, err := core.DecodeChatRequest(body, nil)
 		if err != nil || req == nil {
 			return body
 		}
+		// Caller fields never change the answer, and clients such as Claude
+		// Code put a per-session id in them, so keying on them would make
+		// every session miss. user is a typed field; the rest are unknown ones.
+		req.User = ""
+		req.ExtraFields = req.ExtraFields.Without(callerFieldNames...)
 		if req.Stream {
 			req.StreamOptions = normalizeStreamOptionsForCache(req.StreamOptions)
 		} else {
@@ -63,6 +72,9 @@ func cacheKeyRequestBody(path string, body []byte) []byte {
 		return canonicalJSONForCache(body)
 	}
 }
+
+// callerFieldNames lists paramsHashCallerFields for UnknownJSONFields.Without.
+var callerFieldNames = slices.Sorted(maps.Keys(paramsHashCallerFields))
 
 func hasDuplicateJSONMemberNames(body []byte) bool {
 	decoder := stdjson.NewDecoder(bytes.NewReader(body))
@@ -167,8 +179,8 @@ func replayCommitted(err error) bool {
 func writeCachedResponse(c *echo.Context, path string, requestBody, cached []byte, cacheType string) error {
 	cacheHeader := cacheHeaderValue(cacheType)
 	if isStreamingRequest(path, requestBody) {
-		auditlog.EnrichEntryWithStream(c, true)
-		auditlog.EnrichEntryWithCachedStreamResponse(c, path, cached)
+		requestlog.EnrichEntryWithStream(c, true)
+		requestlog.EnrichEntryWithCachedStreamResponse(c, path, cached)
 		c.Response().Header().Set("Content-Type", "text/event-stream")
 		c.Response().Header().Set("Cache-Control", "no-cache")
 		c.Response().Header().Set("Connection", "keep-alive")

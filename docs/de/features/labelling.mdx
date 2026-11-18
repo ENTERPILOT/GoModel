@@ -1,6 +1,6 @@
 ---
 title: "Labeling"
-description: "Versehen Sie Requests über HTTP-Header oder API-Keys mit Labels und schlüsseln Sie Nutzung und Audit-Logs nach Label auf."
+description: "Versehen Sie Requests über HTTP-Header oder API-Keys mit Labels und schlüsseln Sie Nutzung und Request-Logs nach Label auf."
 icon: "tags"
 keywords: ["Labels", "labels", "Tagging", "Request-Labels", "Header-Tagging", "Kostenzuordnung", "cost attribution"]
 ---
@@ -16,7 +16,7 @@ gelten:
 - **API-Key-Labels** – Labels, die an einen verwalteten API-Key gebunden sind und für jeden damit authentifizierten Request gelten.
 
 Labels aus beiden Quellen werden zusammengeführt und dedupliziert. Sie werden
-in Nutzungs- und Audit-Log-Einträgen erfasst und speisen die Aufschlüsselung
+in Nutzungs- und Request-Log-Einträgen erfasst und speisen die Aufschlüsselung
 der Nutzung nach Label im Dashboard.
 
 ## API-Key-Labels
@@ -216,7 +216,7 @@ GoModel entfernt sie, bevor der Request den Provider erreicht, der sie sonst
 ablehnen würde: OpenAI kennt keinen Parameter `tags`, und die Werte in
 `metadata` müssen Strings sein. Andere `metadata`-Keys werden durchgereicht,
 und ein String in `metadata.tags` bleibt als gewöhnliche OpenAI-Metadaten
-unverändert. Audit-Logs speichern den Body so, wie der Client ihn gesendet hat.
+unverändert. Request-Logs speichern den Body so, wie der Client ihn gesendet hat.
 
 Ein Request steuert höchstens **32** unterschiedliche Tags bei, gezählt über
 den Header und beide Body-Felder in dieser Reihenfolge; der Rest wird
@@ -252,15 +252,91 @@ Provider, der `tags` ablehnt, gibt seinen Fehler zurück.
 - **Nutzungs-Dashboard** – die Nutzungsseite zeigt eine Aufschlüsselung nach
   Label (`GET /admin/usage/labels`). Ein Request mit mehreren Labels zählt
   einmal unter jedem davon.
-- **Request-Log** – Label-Chips pro Request, filterbar mit dem Query-Parameter
+- **Nutzungs-Log** – Label-Chips pro Request auf der Nutzungsseite, filterbar mit dem
+  Query-Parameter
   `label` bei `GET /admin/usage/log`.
-- **Audit-Logs** – erfasst unter `data.labels` in jedem Eintrag (Audit-Logging
+- **Request-Logs** – erfasst unter `data.labels` in jedem Eintrag (Request-Logging
   ist standardmäßig aktiviert).
 - **Seite API Keys** – die Labels jedes Keys werden neben seinem User Path
   aufgeführt.
 - **Budgets** – ein Budget kann auf ein Label beschränkt werden und begrenzt
   dann die Ausgaben aller Requests mit diesem Label. Siehe
   [Budgets](/de/features/budgets).
+
+## Kosten pro Pull Request
+
+Um zu sehen, was die CI eines Pull Requests für Modelle ausgibt, versehen Sie
+jeden Request ihrer Jobs mit einem Label, das den PR nennt, etwa `pr-1234`. Der
+Header `x-litellm-tags` funktioniert ohne Konfiguration, solange
+[LiteLLM-Tags](#litellm-tags) aktiviert sind (Standard); sind sie aus,
+konfigurieren Sie einen [Tagging-Header](#tagging-header) und senden Sie
+stattdessen diesen. In GitHub Actions setzen Sie das Label einmal für den Job.
+Lassen Sie den Workflow bei `pull_request` laufen: Andere Events wie `push`
+haben keine PR-Nummer, das Label wäre dann nur `pr-`. GitHub gibt
+Repository-Secrets nicht an Pull Requests aus Forks weiter, der Job hätte dort
+also keinen Key: Das `if` lässt ihn nur für Branches im Repository laufen.
+
+```yaml .github/workflows/ci.yml
+on: pull_request
+
+jobs:
+  review:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}
+      GOMODEL_API_KEY: ${{ secrets.GOMODEL_API_KEY }}
+    steps:
+      - run: |
+          curl https://gomodel.example.com/v1/chat/completions \
+            -H "Authorization: Bearer $GOMODEL_API_KEY" \
+            -H "Content-Type: application/json" \
+            -H "x-litellm-tags: $GOMODEL_LABEL" \
+            -d '{"model": "gpt-5", "messages": [{"role": "user", "content": "Review this diff"}]}'
+```
+
+Senden Sie es dann bei jedem Request mit:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "x-litellm-tags: $GOMODEL_LABEL" \
+  -d '{"model": "gpt-5", "messages": [{"role": "user", "content": "Review this diff"}]}'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+    default_headers={"x-litellm-tags": os.environ["GOMODEL_LABEL"]},
+)
+```
+
+</CodeGroup>
+
+Lesen Sie die Kosten auf der Nutzungsseite ab: Setzen Sie in
+**Aufschlüsselung** die Zeilen auf **Label** und die Spalten auf **Modell**
+oder **Zeitraum**. Oder filtern Sie einen beliebigen Nutzungsendpunkt nach dem
+Label, um einen exakten Wert zu erhalten:
+
+```bash
+curl "http://localhost:8080/admin/usage/summary?label=pr-1234&days=30" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+- Ein Request mit mehreren Labels zählt unter jedem davon einmal, Label-Zeilen
+  überschneiden sich also und können zusammen mehr als die Gesamtsumme ergeben.
+- Die Aufschlüsselung behält die obersten Zeilen (`limit`, höchstens 50) und
+  fasst den Rest unter **Sonstige** zusammen. Bei vielen PRs filtern Sie nach
+  `label`, um die Kosten eines PRs zu erhalten, statt sie aus der Pivot-Tabelle
+  abzulesen.
 
 ## Standardwerte
 

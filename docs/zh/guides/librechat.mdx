@@ -1,6 +1,6 @@
 ---
 title: "GoModel & LibreChat"
-description: "通过 GoModel 为 LibreChat 提供一个连接所有提供商的自定义端点，并为每次对话获得审计日志、按用户的成本追踪和指标。"
+description: "通过 GoModel 为 LibreChat 提供一个连接所有提供商的自定义端点，并为每次对话获得请求日志、按用户的成本追踪和指标。"
 icon: "message-circle"
 keywords: ["LibreChat", "librechat.yaml", "自定义端点", "自托管聊天", "按用户成本", "LLM 可观测性", "配置指南", "custom endpoint", "self-hosted chat", "per-user costs", "LLM observability", "setup guide"]
 ---
@@ -16,7 +16,7 @@ LibreChat 是一个自托管的聊天界面，通过自定义端点与兼容 Ope
 
 您将获得：
 
-- GoModel 审计日志中每次对话的完整请求体和响应体。
+- GoModel 请求日志中每次对话的完整请求体和响应体。
 - 通过请求头模板和
   [标签](/zh/features/labelling) 实现按 LibreChat 用户统计成本。
 - 所有提供商都位于同一个自定义端点之后；无需在 LibreChat 中为每个提供商单独配置。
@@ -119,7 +119,7 @@ volumes:
 
 选择任意模型（`openai/gpt-5-mini`、`anthropic/claude-haiku-4-5-20251001`、
 `gemini/gemini-2.5-flash`）即可开始聊天。流式响应以及 LibreChat 在首次交互后执行的标题生成都会经过 GoModel。
-每次调用都会出现在审计日志中，包含完整的提示词、响应、Token 数、成本以及标识用户的请求头。
+每次调用都会出现在请求日志中，包含完整的提示词、响应、Token 数、成本以及标识用户的请求头。
 
 <Note>
   已在 LibreChat v0.8.7 上验证：针对 OpenAI、Anthropic 和 Gemini 模型的模型获取、聊天和标题生成、按用户标签，以及 RAG

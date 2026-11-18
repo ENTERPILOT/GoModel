@@ -2,9 +2,9 @@ package config
 
 import "strings"
 
-// LogConfig holds audit logging configuration
+// LogConfig holds request logging configuration
 type LogConfig struct {
-	// Enabled controls whether audit logging is active
+	// Enabled controls whether request logging is active
 	// Default: false
 	Enabled bool `yaml:"enabled" env:"LOGGING_ENABLED"`
 
@@ -19,7 +19,7 @@ type LogConfig struct {
 	// metadata is recorded. Requires LogBodies (the master body-logging switch);
 	// when LogBodies is on but this is off, audio responses are recorded as a
 	// lightweight placeholder instead of the full bytes.
-	// WARNING: stores full audio in the audit log; grows storage quickly.
+	// WARNING: stores full audio in the request log; grows storage quickly.
 	// Default: false
 	LogAudioBodies bool `yaml:"log_audio_bodies" env:"LOGGING_LOG_AUDIO_BODIES"`
 
@@ -29,7 +29,7 @@ type LogConfig struct {
 	// base64 so the dashboard can display them. Requires LogBodies; when
 	// LogBodies is on but this is off, image bodies keep their metadata
 	// (prompt, parameters, sizes, usage) and URLs but drop the pixels.
-	// WARNING: stores full images in the audit log; grows storage quickly.
+	// WARNING: stores full images in the request log; grows storage quickly.
 	// Default: false
 	LogImageBodies bool `yaml:"log_image_bodies" env:"LOGGING_LOG_IMAGE_BODIES"`
 
@@ -46,7 +46,7 @@ type LogConfig struct {
 	// LogBodies is on but this is off, embedding entries keep their metadata
 	// (model, provider, status, timing, usage) but drop both bodies. Embedding
 	// inputs can be large documents or base64 images and the responses are
-	// float vectors, so bulk indexing jobs grow the audit store quickly.
+	// float vectors, so bulk indexing jobs grow the request log store quickly.
 	// Requires LogBodies.
 	// Default: true
 	LogEmbeddingBodies bool `yaml:"log_embedding_bodies" env:"LOGGING_LOG_EMBEDDING_BODIES"`
@@ -55,15 +55,15 @@ type LogConfig struct {
 	// when both are enabled, every request rewriter that changed the body
 	// (for example GoModel Pro token compression) and every prompt guardrail
 	// that edited the prompt store the request as they left it alongside the
-	// original in the audit entry. Requires LogBodies.
+	// original in the request log entry. Requires LogBodies.
 	// Disabling it keeps the revision metadata (rewriter name, sizes, tokens
 	// saved, change detail) but drops the rewritten body copy — roughly
-	// halving audit storage per compressed request.
+	// halving request log storage per compressed request.
 	// Default: true
 	LogRevisionBodies bool `yaml:"log_revision_bodies" env:"LOGGING_LOG_REVISION_BODIES"`
 
 	// LogGuardrailSteps records every prompt guardrail that edited the
-	// request as its own revision in the audit entry, carrying the request
+	// request as its own revision in the request log entry, carrying the request
 	// as that step left it, so a chain of edits reads step by step. Each
 	// step leaves a copy of the prompt behind; building and encoding the
 	// requests from those copies runs off the request path. Disabling it
@@ -90,14 +90,14 @@ type LogConfig struct {
 	// Default: 30
 	RetentionDays int `yaml:"retention_days" env:"LOGGING_RETENTION_DAYS"`
 
-	// OnlyModelInteractions limits audit logging to AI model endpoints only
+	// OnlyModelInteractions limits request logging to AI model endpoints only
 	// When true, only /v1/chat/completions, /v1/responses, /v1/embeddings, /v1/files, and /v1/batches are logged
 	// Endpoints like /health, /metrics, /admin, /v1/models are skipped
 	// Default: true
 	OnlyModelInteractions bool `yaml:"only_model_interactions" env:"LOGGING_ONLY_MODEL_INTERACTIONS"`
 }
 
-// ImageBodyScope selects which image bytes the audit log embeds when
+// ImageBodyScope selects which image bytes the request log embeds when
 // LogImageBodies is enabled.
 type ImageBodyScope string
 

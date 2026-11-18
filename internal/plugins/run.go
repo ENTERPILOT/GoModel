@@ -14,7 +14,7 @@ import (
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
-// Record is one instance's contribution to a chain run, kept for audit.
+// Record is one instance's contribution to a chain run, kept for the request log.
 type Record struct {
 	Instance string
 	// Type is the plugin type of the instance.
@@ -132,7 +132,7 @@ func (c *Chain) run(ctx context.Context, x *pluginapi.Exchange, observe EditObse
 			outcome.absorb([]Record{record})
 			// A mutator that edited and then failed closed still hands its
 			// edit to the observer: the hook has returned (Edited is never
-			// set for an abandoned one), so x is quiet and the audit trail
+			// set for an abandoned one), so x is quiet and the request log
 			// can show the request the failure was about.
 			if record.Edited && observe != nil {
 				observe(mutator.Name, x)

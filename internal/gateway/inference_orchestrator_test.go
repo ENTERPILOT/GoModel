@@ -112,7 +112,7 @@ func TestExecuteChatCompletionPricesRequestedModelWhenResponseModelIsVersioned(t
 
 // The response's provider field names the configured instance that served the
 // request, while the execution metadata keeps the provider type that drives
-// routing and audit filters.
+// routing and request log filters.
 func TestExecuteChatCompletionNamesTheProviderInstance(t *testing.T) {
 	tests := []struct {
 		name         string

@@ -117,8 +117,11 @@ func (c *dockerContainer) ip(ctx context.Context) (string, error) {
 	return out, nil
 }
 
+// terminate removes the container together with its anonymous volumes. An
+// explicit `docker rm` without -v keeps them even on a --rm container, so
+// every run would leave the images' data volumes behind.
 func (c *dockerContainer) terminate(ctx context.Context) error {
-	_, err := runDocker(ctx, "rm", "-f", c.id)
+	_, err := runDocker(ctx, "rm", "-f", "-v", c.id)
 	return err
 }
 

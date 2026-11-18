@@ -1,6 +1,6 @@
 ---
 title: "System One API"
-description: "Send TypeSafe System One decision requests (Jev, Kev) through GoModel, forwarded natively with virtual models, guardrails, caching, failover, audit, and usage."
+description: "Send TypeSafe System One decision requests (Jev, Kev) through GoModel, forwarded natively with virtual models, guardrails, caching, failover, request logging, and usage."
 icon: "scale"
 keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "decision model", "noul", "choice", "score", "OpenRouter", "Azure", "Microsoft-Decision-1"]
 ---
@@ -83,7 +83,7 @@ returns its own `404` for them.
 4. Forwards the body with only `model` (the resolved name) and `state` (if a
    guardrail edited it) changed. Questions, criteria, and every other field
    reach the provider byte for byte.
-5. Relays the answer unchanged and records it in the audit log (request type
+5. Relays the answer unchanged and records it in the request log (request type
    **Decisions**) and in usage.
 
 ## Images
@@ -168,7 +168,7 @@ virtual_models:
       - { model: openrouter/typesafe/jev-1.13 }  # hosted Jev when Kev is down
 ```
 
-The audit log shows each attempt, usage is recorded under the target that
+The request log shows each attempt, usage is recorded under the target that
 answered, and a failover answer is not cached.
 
 ## Guardrails
@@ -203,11 +203,11 @@ The endpoint never translates, and it says so when a request cannot work:
 | A System One model sent to `/v1/chat/completions`, `/v1/responses`, or `/v1/embeddings` | `400 invalid_request_error` pointing at `/v1/decisions` and `/v1/systemone` |
 | Upstream error, such as a malformed question | The provider's status, with its message |
 
-## Audit, usage, and cost
+## Request log, usage, and cost
 
-Each call is an audit entry under its route, with the requested and resolved
+Each call is a request log entry under its route, with the requested and resolved
 model, provider, request and response bodies, guardrail outcomes, and failover
-attempts; filter the audit log by the **Decisions** request type. Usage
+attempts; filter the request log by the **Decisions** request type. Usage
 records the answer's `input_tokens` and `output_tokens` under the model that
 answered. OpenRouter reports its own `usage.cost`, which is recorded as the
 request's cost; for hosted Jev, declare pricing on the provider (see

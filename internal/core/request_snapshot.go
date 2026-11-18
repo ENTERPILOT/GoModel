@@ -32,7 +32,7 @@ type RequestSnapshot struct {
 	// so CapturedBody is omitted and the live body stream remains on the request.
 	BodyNotCaptured bool
 	// RequestID is the canonical request id propagated through context, headers,
-	// providers, and audit records for this request.
+	// providers, and request log records for this request.
 	RequestID string
 	// TraceMetadata contains tracing-related key/value pairs such as trace/span
 	// ids or baggage/sampling metadata derived from tracing headers.

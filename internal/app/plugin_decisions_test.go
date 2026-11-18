@@ -29,8 +29,8 @@ func (r virtualModelRows) Get(_ context.Context, source string) (*virtualmodels.
 }
 
 func (virtualModelRows) Upsert(context.Context, virtualmodels.VirtualModel) error { return nil }
-func (virtualModelRows) Delete(context.Context, string) error                    { return nil }
-func (virtualModelRows) Close() error                                            { return nil }
+func (virtualModelRows) Delete(context.Context, string) error                     { return nil }
+func (virtualModelRows) Close() error                                             { return nil }
 
 func catalogProvider(models ...core.Model) *runtimeRefreshMockProvider {
 	return &runtimeRefreshMockProvider{models: &core.ModelsResponse{Object: "list", Data: models}}

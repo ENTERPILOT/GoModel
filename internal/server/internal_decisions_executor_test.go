@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -24,16 +24,16 @@ func pluginContext() context.Context {
 }
 
 // A virtual model resolves to its target, the body reaches the provider
-// under the concrete model name, and the call is accounted and audited under
+// under the concrete model name, and the call is accounted and logged under
 // /v1/decisions with the plugin's origin and user path.
-func TestInternalDecisions_ResolvesAccountsAndAudits(t *testing.T) {
+func TestInternalDecisions_ResolvesAccountsAndLogs(t *testing.T) {
 	provider := newDecisionsTestProvider()
 	usageLogger := &collectingUsageLogger{config: usage.Config{Enabled: true}}
-	auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true}}
+	requestLogger := &capturingRequestLogger{config: requestlog.Config{Enabled: true}}
 	executor := NewInternalDecisionsExecutor(provider, InternalChatCompletionExecutorConfig{
 		ModelResolver: decisionAliases,
 		UsageLogger:   usageLogger,
-		AuditLogger:   auditLogger,
+		RequestLogger: requestLogger,
 	})
 
 	answer, err := executor.Decide(pluginContext(), []byte(decisionBody("classifier")))
@@ -49,12 +49,12 @@ func TestInternalDecisions_ResolvesAccountsAndAudits(t *testing.T) {
 	assert.Equal(t, "openai", usageEntry.Provider)
 	assert.Equal(t, "/team/guardrails/policy", usageEntry.UserPath)
 
-	require.Len(t, auditLogger.entries, 1)
-	auditEntry := auditLogger.entries[0]
-	assert.Equal(t, "/v1/decisions", auditEntry.Path)
-	assert.Equal(t, "/team/guardrails/policy", auditEntry.UserPath)
-	assert.Equal(t, "classifier", auditEntry.RequestedModel)
-	assert.Equal(t, http.StatusOK, auditEntry.StatusCode)
+	require.Len(t, requestLogger.entries, 1)
+	requestLogEntry := requestLogger.entries[0]
+	assert.Equal(t, "/v1/decisions", requestLogEntry.Path)
+	assert.Equal(t, "/team/guardrails/policy", requestLogEntry.UserPath)
+	assert.Equal(t, "classifier", requestLogEntry.RequestedModel)
+	assert.Equal(t, http.StatusOK, requestLogEntry.StatusCode)
 }
 
 // A model without a Decisions API, or a gateway without a Decisions
