@@ -1,12 +1,5 @@
 package usage
 
-// Buffer and batch limits for usage tracking.
-const (
-	// BatchFlushThreshold is the number of entries that triggers an immediate flush.
-	// When the batch reaches this size, it's written to storage without waiting for the timer.
-	BatchFlushThreshold = 100
-)
-
 // Context keys for storing usage data in request context.
 type contextKey string
 
