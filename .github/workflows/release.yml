@@ -68,8 +68,8 @@ jobs:
           path: internal/admin/dashboard/static/dist
           if-no-files-found: error
           # The publishing jobs download this after the release environment is
-          # approved, so it has to outlive the wait for a reviewer.
-          retention-days: 7
+          # approved, so it has to outlive the wait for a reviewer (up to 30 days).
+          retention-days: 30
 
   docker:
     name: Build and push Docker image by digest
