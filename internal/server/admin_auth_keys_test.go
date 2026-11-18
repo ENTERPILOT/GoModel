@@ -57,6 +57,7 @@ func TestManagedDashboardKeyCannotWidenItsOwnAccess(t *testing.T) {
 	}{
 		{name: "clear its own allowlist", method: http.MethodPut, path: "/admin/auth-keys/" + lead.ID + "/allowed-models", body: `{"allowed_models":[]}`, want: http.StatusForbidden, code: "auth_key_self_update"},
 		{name: "drop its own labels", method: http.MethodPut, path: "/admin/auth-keys/" + lead.ID + "/labels", body: `{"labels":[]}`, want: http.StatusForbidden, code: "auth_key_self_update"},
+		{name: "rename itself", method: http.MethodPut, path: "/admin/auth-keys/" + lead.ID + "/name", body: `{"name":"renamed"}`, want: http.StatusForbidden, code: "auth_key_self_update"},
 		{name: "issue an unrestricted key", method: http.MethodPost, path: "/admin/auth-keys", body: `{"name":"child","user_path":"/team/a/svc"}`, want: http.StatusForbidden, code: "allowed_models_out_of_scope"},
 		{name: "issue a key for another model", method: http.MethodPost, path: "/admin/auth-keys", body: `{"name":"child","user_path":"/team/a/svc","allowed_models":["openai/gpt-4o"]}`, want: http.StatusForbidden, code: "allowed_models_out_of_scope"},
 		{name: "issue a key within its own models", method: http.MethodPost, path: "/admin/auth-keys", body: `{"name":"child","user_path":"/team/a/svc","allowed_models":["openai/gpt-4o-mini"]}`, want: http.StatusCreated},

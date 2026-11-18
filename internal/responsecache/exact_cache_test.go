@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/anthropicapi"
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
@@ -422,6 +423,74 @@ func TestHashRequest_DuplicateNamesDoNotCollideAfterTypedDecoding(t *testing.T) 
 			require.NotEqual(t, second, first)
 		})
 	}
+}
+
+// Caller fields identify who asked, not what was asked, so they stay out of
+// the key wherever the response does not echo them back.
+func TestHashRequest_CallerFields(t *testing.T) {
+	plan := resolvedWorkflow("openai", "gpt-4")
+	const chatBase = `{"model":"m","messages":[{"role":"user","content":"hi"}]}`
+	for _, tt := range []struct {
+		name  string
+		path  string
+		first string
+		other string
+		equal bool
+	}{
+		{name: "chat user", path: "/v1/chat/completions", first: chatBase, other: `{"model":"m","user":"u1","messages":[{"role":"user","content":"hi"}]}`, equal: true},
+		{name: "chat users differ", path: "/v1/chat/completions", first: `{"model":"m","user":"u1","messages":[{"role":"user","content":"hi"}]}`, other: `{"model":"m","user":"u2","messages":[{"role":"user","content":"hi"}]}`, equal: true},
+		{name: "chat identity and prompt cache hints", path: "/v1/chat/completions", first: chatBase, other: `{"model":"m","safety_identifier":"s1","metadata":{"team":"a"},"prompt_cache_key":"k","prompt_cache_retention":"24h","messages":[{"role":"user","content":"hi"}]}`, equal: true},
+		{name: "chat streamed user", path: "/v1/chat/completions", first: `{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`, other: `{"model":"m","stream":true,"user":"u1","messages":[{"role":"user","content":"hi"}]}`, equal: true},
+		{name: "chat unknown field still counts", path: "/v1/chat/completions", first: chatBase, other: `{"model":"m","seed":7,"messages":[{"role":"user","content":"hi"}]}`},
+		{name: "chat prompt still counts", path: "/v1/chat/completions", first: chatBase, other: `{"model":"m","user":"u1","messages":[{"role":"user","content":"bye"}]}`},
+		{name: "messages user", path: "/v1/messages", first: chatBase, other: `{"model":"m","user":"u1","messages":[{"role":"user","content":"hi"}]}`, equal: true},
+		{name: "responses echo caller fields", path: "/v1/responses", first: `{"model":"m","input":"hi"}`, other: `{"model":"m","user":"u1","input":"hi"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			first := hashRequest(tt.path, []byte(tt.first), plan, "")
+			other := hashRequest(tt.path, []byte(tt.other), plan, "")
+			assert.Equal(t, tt.equal, first == other)
+		})
+	}
+}
+
+// Claude Code sends a new session id in metadata.user_id for every session.
+// A repeated request from a fresh session has to hit the entry an earlier
+// session stored.
+func TestHandleRequest_MessagesHitAcrossMetadataUserIDs(t *testing.T) {
+	translated := func(t *testing.T, sessionID string) []byte {
+		t.Helper()
+		userID, err := json.Marshal(`{"device_id":"d1","account_uuid":"","session_id":"` + sessionID + `"}`)
+		require.NoError(t, err)
+		decoded, err := anthropicapi.DecodeMessagesRequest([]byte(`{"model":"claude-test","max_tokens":64,"metadata":{"user_id":` + string(userID) + `},"messages":[{"role":"user","content":"ping"}]}`))
+		require.NoError(t, err)
+		req, err := anthropicapi.ToChatRequest(decoded)
+		require.NoError(t, err)
+		require.Contains(t, req.User, sessionID)
+		body, err := json.Marshal(req)
+		require.NoError(t, err)
+		return body
+	}
+
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	workflow := resolvedWorkflow("anthropic", "claude-test")
+	calls := 0
+	serve := func(body []byte) string {
+		c, rec := postWithWorkflow(t, "/v1/messages", body, workflow)
+		require.NoError(t, mw.HandleRequest(c, body, func() error {
+			calls++
+			return c.JSON(http.StatusOK, map[string]string{"type": "message"})
+		}))
+		return rec.Header().Get("X-Cache")
+	}
+
+	require.Empty(t, serve(translated(t, "session-1")))
+	mw.simple.wg.Wait()
+
+	assert.Equal(t, "HIT (exact)", serve(translated(t, "session-2")))
+	assert.Equal(t, 1, calls)
 }
 
 func TestHashRequest_ResolvedModelChangesKey(t *testing.T) {

@@ -40,7 +40,7 @@ var sleepBudget = map[string]int{
 	"internal/server/version_handler_test.go":         1,
 	"internal/streaming/slowdown_stream_test.go":      1,
 	"internal/virtualmodels/plugin_strategy_test.go":  1,
-	"tests/e2e/auditlog_test.go":                      6,
+	"tests/e2e/requestlog_test.go":                    6,
 	"tests/e2e/main_test.go":                          1,
 	"tests/e2e/opentelemetry_test.go":                 2,
 	"tests/e2e/otlp_collector_test.go":                1,

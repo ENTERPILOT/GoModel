@@ -20,7 +20,7 @@ dwa uzupełniające się sposoby:
 - **Trace’y aplikacji.** Wrapper Langfuse SDK zastępujący klienta OpenAI,
   skierowany na GoModel jako base URL. Langfuse zapisuje pełne prompty,
   odpowiedzi i użycie tokenów; GoModel zapewnia pod spodem routing, failover,
-  cache oraz własny [log audytowy](/pl/advanced/configuration#logowanie-audytowe) i
+  cache oraz własny [log requestów](/pl/advanced/configuration#logowanie-requestów) i
   śledzenie kosztów.
 
 Używaj jednego z nich albo obu naraz – dzięki propagacji kontekstu W3C trace
@@ -124,7 +124,7 @@ pokazywane tylko jako typ, a bardzo długi tekst jest obcinany; zobacz
 <Warning>
   Przechwytywanie treści wysyła do Langfuse każdy próbkowany prompt i każdą
   odpowiedź. Pozostaw je wyłączone, gdy te dane nie mogą opuścić gatewaya;
-  [log audytowy](/pl/advanced/configuration#logowanie-audytowe) zapisuje je wtedy w Twoim
+  [log requestów](/pl/advanced/configuration#logowanie-requestów) zapisuje je wtedy w Twoim
   własnym storage’u.
 </Warning>
 
@@ -158,7 +158,7 @@ Ponieważ base URL wskazuje na GoModel, jeden klient dociera do każdego
 skonfigurowanego providera przez ID modeli z prefiksem providera
 (`openai/gpt-5-mini`, `gemini/gemini-2.5-flash`,
 [modele wirtualne](/pl/features/virtual-models)), a każde wywołanie nadal korzysta z
-failoveru, cache’u, budżetów i ścieżki audytu GoModel.
+failoveru, cache’u, budżetów i logu requestów GoModel.
 [Wrapper JS/TS](https://langfuse.com/integrations/model-providers/openai-js)
 działa tak samo.
 

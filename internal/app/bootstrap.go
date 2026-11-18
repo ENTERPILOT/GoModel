@@ -17,6 +17,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/usagemetrics"
 )
 
 // bootstrap carries the state New threads through its initialization phases:
@@ -25,7 +26,7 @@ import (
 // only cross-phase intermediates are held here.
 //
 // Phases run in the order phases() lists them. Several depend on that order
-// (hooks before providers, audit before workflows, every fallible step before
+// (hooks before providers, request log before workflows, every fallible step before
 // the server binds); the comment on each phase says why.
 type bootstrap struct {
 	ctx    context.Context
@@ -46,6 +47,10 @@ type bootstrap struct {
 	pricingResolver      usage.PricingResolver
 	seedGuardrails       []guardrails.Definition
 	featureCaps          core.WorkflowFeatures
+	// requestCallers is the caller resolver of gomodel_caller_requests_total,
+	// installed process-wide only once the generation is sure to serve.
+	requestCallers        *usagemetrics.Callers
+	installRequestCallers bool
 
 	// Produced by the server phases.
 	provider                 core.RoutableProvider
@@ -72,6 +77,7 @@ func newBootstrap(ctx context.Context, cfg Config) *bootstrap {
 	// transport; env vars still take precedence inside httpclient.
 	httpclient.SetConfiguredTimeouts(appCfg.HTTP.Timeout, appCfg.HTTP.ResponseHeaderTimeout)
 	httpclient.SetConfiguredStreamIdleTimeout(appCfg.HTTP.StreamIdleTimeout)
+	httpclient.SetConfiguredMaxIdleConnsPerHost(appCfg.HTTP.MaxIdleConnsPerHost)
 	if appCfg.Offline {
 		catalog := "disabled"
 		if appCfg.Cache.Model.ModelList.URL != "" {

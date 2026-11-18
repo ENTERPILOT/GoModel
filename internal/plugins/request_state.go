@@ -35,7 +35,7 @@ type RequestState struct {
 	upstreamHeaders http.Header
 }
 
-// PromptEdit is one instance's edit of the prompt, kept for the audit
+// PromptEdit is one instance's edit of the prompt, kept for the request log
 // revision chain. Apply builds the request as it stood right after that
 // step, from the phase's original request and a snapshot of the prompt taken
 // when the step completed; it is safe to call off the request path.
@@ -48,7 +48,7 @@ type promptEditCaptureKey struct{}
 
 // WithPromptEditCapture marks ctx as wanting a PromptEdit kept for every
 // prompt edit (see RequestState.PromptEdits). Off by default, so batch items
-// and requests without audit capture pay nothing for it.
+// and requests without request log capture pay nothing for it.
 func WithPromptEditCapture(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()

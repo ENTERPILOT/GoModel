@@ -817,7 +817,7 @@ session_turns AS (
 -- Outcomes follow the request pipeline. Prompt guardrails run before the
 -- response cache is consulted and the budget is enforced on dispatch, so a
 -- locally cached answer can never be blocked or fail upstream; requests a
--- guardrail or a budget stopped are audited without a usage row, the way the
+-- guardrail or a budget stopped are logged without a usage row, the way the
 -- gateway records a request that produced no usage.
 outcomes AS (
   SELECT
@@ -1017,7 +1017,7 @@ SELECT
     ELSE 'demo_model_pricing'
   END AS cost_source,
   '',
-  -- Same key attribution as the audit rows below.
+  -- Same key attribution as the request log rows below.
   CASE
     WHEN user_path GLOB '/agents/team1*' THEN '${prefix}-key-team1'
     WHEN user_path GLOB '/engineering/ai*' THEN '${prefix}-key-engineering'
@@ -1025,11 +1025,11 @@ SELECT
     ELSE NULL
   END
 -- Requests stopped by a budget or a prompt guardrail never reach a provider,
--- so they are audited without a usage row.
+-- so they are logged without a usage row.
 FROM demo_generated
 WHERE usage_recorded = 1;
 
--- The audit request-revision chain, one row per step that changed the
+-- The request-revision chain, one row per step that changed the
 -- request or objected to it: first the ingress rewriters, then the prompt
 -- guardrails in the step order of the matched workflow, exactly as the
 -- gateway records them. Steps that allowed a request without touching it
@@ -1308,8 +1308,8 @@ SELECT
             THEN 'This request mentions material that may not leave the tenant. Remove it and try again.'
           ELSE 'This prompt was rejected as a prompt-injection attempt.'
         END
-      WHEN 'rate_limited' THEN 'Synthetic rate limit for demo audit inspection. Retry after a moment.'
-      WHEN 'provider_error' THEN 'Synthetic upstream provider error for demo audit inspection.'
+      WHEN 'rate_limited' THEN 'Synthetic rate limit for demo request log inspection. Retry after a moment.'
+      WHEN 'provider_error' THEN 'Synthetic upstream provider error for demo request log inspection.'
       ELSE NULL
     END,
     -- Gateway-raised errors name no provider; a budget stop names the budget
@@ -1449,7 +1449,7 @@ SELECT
       )
       WHEN request_outcome = 'provider_error' THEN json_object(
         'error', json_object(
-          'message', 'Synthetic upstream provider error for demo audit inspection.',
+          'message', 'Synthetic upstream provider error for demo request log inspection.',
           'type', 'provider_error',
           'code', 'demo_provider_error',
           'param', 'model'
@@ -1457,7 +1457,7 @@ SELECT
       )
       WHEN request_outcome = 'rate_limited' THEN json_object(
         'error', json_object(
-          'message', 'Synthetic rate limit for demo audit inspection. Retry after a moment.',
+          'message', 'Synthetic rate limit for demo request log inspection. Retry after a moment.',
           'type', 'rate_limit_error',
           'code', 'demo_rate_limit',
           'param', NULL
@@ -1696,7 +1696,7 @@ INSERT INTO workflow_versions (
 SELECT '${prefix}-wf-global-v1', NULL, NULL, NULL, 'global',
   (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'global') + 1,
   FALSE, FALSE, 'Gateway baseline',
-  'Superseded: cache, audit, usage, budgets, and failover without guardrails',
+  'Superseded: cache, request logging, usage, budgets, and failover without guardrails',
   '${workflow_payload_baseline_v1}', '${workflow_hash_baseline_v1}', ${seed_utc_epoch} - 5184000;
 
 INSERT INTO workflow_versions (
@@ -2211,14 +2211,14 @@ Open the dashboard and use a recent 90-day date range. To replace this generated
 dataset, rerun the script with the same DEMO_SEED_PREFIX. To keep multiple
 datasets side by side, use a different DEMO_SEED_PREFIX.
 
-Audit entries carry session ids, so the Audit Logs page groups them into
+Request log entries carry session ids, so the Requests page groups them into
 threads by default ("Group by session"); failed and retried requests carry
 attempt trails visible in the request drawer.
 
 Every request resolves to one of the seeded workflows, so the request drawer
 renders its pipeline. Guardrails cover all built-in plugin types and are
 attached across the prompt and response phases; requests a prompt guardrail
-blocked, and requests a budget stopped, are audited without a usage row, the
+blocked, and requests a budget stopped, are logged without a usage row, the
 way the gateway records a request that never reached a provider. Start the
 gateway with GUARDRAILS_ENABLED=true (make demo does) to see the Guardrails
 and Plugins pages live; the two model-backed guardrails fail open, so a
