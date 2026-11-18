@@ -22,6 +22,7 @@ type StreamUsageObserver struct {
 	sessionID       string
 	authKeyID       string
 	labels          []string
+	operation       *core.GenAIOperation
 	rewriteSaved    int
 	closed          bool
 }
@@ -81,6 +82,15 @@ func (o *StreamUsageObserver) SetLabels(labels []string) {
 		return
 	}
 	o.labels = labels
+}
+
+// SetGenAIOperation attaches the request's operation record, read when the
+// stream's usage arrives, after the provider call recorded its operation.
+func (o *StreamUsageObserver) SetGenAIOperation(operation *core.GenAIOperation) {
+	if o == nil {
+		return
+	}
+	o.operation = operation
 }
 
 // SetRewriteTokensSaved attaches the request's rewrite savings estimate so
@@ -290,6 +300,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 	if entry != nil {
 		entry.ProviderName = o.providerName
 		entry.RoutedModel = strings.TrimSpace(o.model)
+		entry.Operation = o.operation.Name()
 		entry.UserPath = o.userPath
 		entry.SessionID = o.sessionID
 		entry.AuthKeyID = o.authKeyID
