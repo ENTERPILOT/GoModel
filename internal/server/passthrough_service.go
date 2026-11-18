@@ -48,10 +48,11 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	if !isEnabledPassthroughProvider(providerType, s.enabledPassthroughProviders) {
 		return handleError(c, s.unsupportedPassthroughProviderError(providerType))
 	}
-	// The body is forwarded unchanged, so a repeated model field would let the
-	// upstream's parser pick a value the gateway never checked.
-	if info.ModelAmbiguous {
-		return handleError(c, core.NewInvalidRequestError("passthrough request body must name the model once; the model field is repeated", nil))
+	// The body is forwarded byte-for-byte, so it must not carry a repeated
+	// selector field that the upstream parser could resolve differently from
+	// the selector authorized below.
+	if err := duplicateSelectorError(c); err != nil {
+		return handleError(c, err)
 	}
 	if err := s.validatePassthroughAccess(c.Request().Context(), info); err != nil {
 		return handleError(c, err)

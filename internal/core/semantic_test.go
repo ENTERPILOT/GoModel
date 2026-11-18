@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -243,18 +244,22 @@ func TestDeriveWhiteBoxPrompt_BatchResultsMetadata(t *testing.T) {
 
 func TestDeriveSnapshotSelectorHintsGJSON_MatchesStdlibSemantics(t *testing.T) {
 	tests := []struct {
-		name         string
-		body         string
-		wantModel    string
-		wantProvider string
-		wantStream   bool
-		wantParsed   bool
+		name          string
+		body          string
+		wantModel     string
+		wantProvider  string
+		wantStream    bool
+		wantParsed    bool
+		wantDuplicate string
 	}{
 		{name: "valid selector fields", body: `{"provider":"openai","model":"gpt-5-mini","stream":true}`, wantModel: "gpt-5-mini", wantProvider: "openai", wantStream: true, wantParsed: true},
-		{name: "duplicate selector fields use first occurrence", body: `{"model":"blocked","model":"gpt-5-mini","provider":"x","provider":"openai","stream":false,"stream":true}`, wantModel: "blocked", wantProvider: "x", wantStream: false, wantParsed: true},
-		{name: "duplicate null string keeps first value and null stream keeps first bool", body: `{"model":"gpt-5-mini","model":null,"provider":"openai","provider":null,"stream":true,"stream":null}`, wantModel: "gpt-5-mini", wantProvider: "openai", wantStream: true, wantParsed: true},
-		{name: "duplicate invalid selector field keeps first value", body: `{"model":"gpt-5-mini","model":123}`, wantModel: "gpt-5-mini", wantParsed: true},
-		{name: "duplicate invalid stream field keeps first value", body: `{"stream":true,"stream":"yes"}`, wantStream: true, wantParsed: true},
+		{name: "duplicate model is reported instead of picking an occurrence", body: `{"model":"blocked","model":"gpt-5-mini","provider":"x","provider":"openai","stream":false,"stream":true}`, wantDuplicate: "model"},
+		{name: "duplicate provider is reported", body: `{"model":"gpt-5-mini","provider":"x","provider":"openai"}`, wantDuplicate: "provider"},
+		{name: "duplicate stream is reported", body: `{"model":"gpt-5-mini","stream":false,"stream":true}`, wantDuplicate: "stream"},
+		{name: "duplicate null selector is still a duplicate", body: `{"model":"gpt-5-mini","model":null}`, wantDuplicate: "model"},
+		{name: "duplicate invalid selector is still a duplicate", body: `{"model":"gpt-5-mini","model":123}`, wantDuplicate: "model"},
+		{name: "nested duplicate selectors are not top-level", body: `{"model":"gpt-5-mini","messages":[{"model":"a","model":"b"}],"metadata":{"stream":true,"stream":false}}`, wantModel: "gpt-5-mini", wantParsed: true},
+		{name: "duplicate non-selector fields are tolerated", body: `{"model":"gpt-5-mini","n":1,"n":2}`, wantModel: "gpt-5-mini", wantParsed: true},
 		{name: "missing selector fields", body: `{"messages":[{"role":"user","content":"hi"}]}`, wantParsed: true},
 		{name: "null selector fields", body: `{"provider":null,"model":null,"stream":null}`, wantParsed: true},
 		{name: "invalid json", body: `not json`, wantParsed: false},
@@ -267,21 +272,56 @@ func TestDeriveSnapshotSelectorHintsGJSON_MatchesStdlibSemantics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotModel, gotProvider, gotStream, gotParsed := deriveSnapshotSelectorHintsGJSON([]byte(tt.body))
-			require.Equal(t, tt.wantModel, gotModel)
-			require.Equal(t, tt.wantProvider, gotProvider)
-			require.Equal(t, tt.wantStream, gotStream)
-			require.Equal(t, tt.wantParsed, gotParsed)
+			got := deriveSnapshotSelectorHintsGJSON([]byte(tt.body))
+			want := snapshotSelectorHints{model: tt.wantModel, provider: tt.wantProvider, stream: tt.wantStream, parsed: tt.wantParsed, duplicate: tt.wantDuplicate}
+			require.Equal(t, want, got)
 		})
 	}
+}
+
+func TestDeriveWhiteBoxPrompt_FlagsDuplicateSelectorFields(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		body string
+		want string
+	}{
+		{name: "chat duplicate model", path: "/v1/chat/completions", body: `{"model":"allowed","model":"blocked","messages":[]}`, want: "model"},
+		{name: "responses duplicate provider", path: "/v1/responses", body: `{"model":"gpt-5-mini","provider":"a","provider":"b","input":"hi"}`, want: "provider"},
+		{name: "passthrough duplicate stream", path: "/p/openai/chat/completions", body: `{"model":"gpt-5-mini","stream":true,"stream":false}`, want: "stream"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot := NewRequestSnapshot(http.MethodPost, tt.path, nil, nil, nil, "application/json", []byte(tt.body), false, "", nil)
+			env := DeriveWhiteBoxPrompt(snapshot)
+			require.NotNil(t, env)
+			assert.Equal(t, tt.want, env.DuplicateSelectorField)
+			assert.False(t, env.JSONBodyParsed, "a duplicate body yields no selector hints")
+			assert.Empty(t, env.RouteHints.Model)
+
+			err := env.DuplicateSelectorError()
+			require.Error(t, err)
+			var gatewayErr *GatewayError
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, http.StatusBadRequest, gatewayErr.StatusCode)
+			assert.Contains(t, err.Error(), `"`+tt.want+`"`)
+		})
+	}
+}
+
+func TestWhiteBoxPrompt_DuplicateSelectorErrorNilWhenUnique(t *testing.T) {
+	var env *WhiteBoxPrompt
+	assert.NoError(t, env.DuplicateSelectorError())
+	assert.NoError(t, (&WhiteBoxPrompt{}).DuplicateSelectorError())
 }
 
 func BenchmarkDeriveSnapshotSelectorHintsGJSON(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		model, provider, stream, parsed := deriveSnapshotSelectorHintsGJSON(benchmarkSemanticSelectorBody)
-		if !parsed || model != "gpt-5-mini" || provider != "openai" || !stream {
-			b.Fatalf("unexpected selector hints: parsed=%v model=%q provider=%q stream=%v", parsed, model, provider, stream)
+		hints := deriveSnapshotSelectorHintsGJSON(benchmarkSemanticSelectorBody)
+		if !hints.parsed || hints.model != "gpt-5-mini" || hints.provider != "openai" || !hints.stream {
+			b.Fatalf("unexpected selector hints: %+v", hints)
 		}
 	}
 }
@@ -312,27 +352,17 @@ func TestDeriveBatchRouteInfoFromTransport_MessagesBatches(t *testing.T) {
 	}
 }
 
-// A repeated model field leaves no value the gateway can authorize, so the
-// marker drops the first-match hint along with recording the ambiguity, and
-// a later body refresh keeps the ambiguity on the merged route info.
-func TestMarkPassthroughModelAmbiguous_DropsModelAndSurvivesRefresh(t *testing.T) {
+// A deferred body read refreshes the envelope from the complete body, so a
+// repeated selector past the ingress peek is still flagged on the passthrough
+// route.
+func TestRefreshWhiteBoxPrompt_FlagsDuplicateSelectorField(t *testing.T) {
 	env := &WhiteBoxPrompt{}
 	CachePassthroughRouteInfo(env, &PassthroughRouteInfo{Provider: "jev"})
 	ApplyBodySelectorHints(env, "jev-latest", "", false)
-	require.Equal(t, "jev-latest", env.RouteHints.Model)
-
-	MarkPassthroughModelAmbiguous(env)
-
-	require.Empty(t, env.RouteHints.Model)
-	info := env.CachedPassthroughRouteInfo()
-	require.NotNil(t, info)
-	require.True(t, info.ModelAmbiguous)
-	require.Empty(t, info.Model)
 
 	snapshot := NewRequestSnapshot(http.MethodPost, "/p/jev/systemone", map[string]string{"provider": "jev", "endpoint": "systemone"}, nil, nil, "application/json", []byte(`{"model":"jev-latest","model":"jev-preview"}`), false, "", nil)
 	refreshed := RefreshWhiteBoxPrompt(snapshot, env)
 	require.NotNil(t, refreshed)
-	require.True(t, refreshed.CachedPassthroughRouteInfo().ModelAmbiguous)
-
-	MarkPassthroughModelAmbiguous(nil) // a missing envelope is ignored
+	assert.Equal(t, "model", refreshed.DuplicateSelectorField)
+	assert.Error(t, refreshed.DuplicateSelectorError())
 }
