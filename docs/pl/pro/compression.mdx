@@ -33,7 +33,7 @@ agentowym kodowaniu, czacie i obciążeniach intensywnie korzystających z narz�
 - **Pełna kontrola.** Wybieraj poziom per gateway lub per request, wykluczaj
   modele wzorcami glob, chroń istniejącą historię przez `new_messages_only`, zachowuj
   kod źródłowy dosłownie i sprawdzaj każde przepisanie przez nagłówki odpowiedzi,
-  rewizje audytu i metryki.
+  rewizje requestów i metryki.
 
 ## Przegląd
 
@@ -100,7 +100,7 @@ X-GoModel-Pro-Tokens-Saved: 1843
 X-GoModel-Pro-Compression-Blocks: 12
 ```
 
-Logi audytowe zachowują oryginalny request i rewizję dla każdego mechanizmu przepisującego.
+Logi requestów zachowują oryginalny request i rewizję dla każdego mechanizmu przepisującego.
 Rewizja zapisuje rozmiary w bajtach i szczegóły kompresji; przepisane body jest
 również zachowywane, gdy `LOGGING_LOG_BODIES=true`. Metryki Prometheus używają
 prefiksu `gomodel_pro_compression_`, a strona Usage w dashboardzie raportuje oszczędności Pro

@@ -13,38 +13,38 @@ var passthroughSemanticEnricher = providers.NewSemanticEnricher("audiocpp", map[
 	"/audio/speech": {
 		Operation:      "audiocpp.audio_speech",
 		GenAIOperation: string(core.OperationAudioSpeech),
-		AuditPath:      "/v1/audio/speech",
+		RequestLogPath: "/v1/audio/speech",
 	},
 	"/audio/speech/live": {
 		Operation:      "audiocpp.audio_speech_live",
 		GenAIOperation: string(core.OperationAudioSpeech),
-		AuditPath:      "/v1/audio/speech/live",
+		RequestLogPath: "/v1/audio/speech/live",
 	},
 	"/audio/transcriptions": {
 		Operation:      "audiocpp.audio_transcriptions",
 		GenAIOperation: string(core.OperationAudioTranscriptions),
-		AuditPath:      "/v1/audio/transcriptions",
+		RequestLogPath: "/v1/audio/transcriptions",
 	},
 	"/audio/transcriptions/details": {
 		Operation:      "audiocpp.audio_transcriptions_details",
 		GenAIOperation: string(core.OperationAudioTranscriptions),
-		AuditPath:      "/v1/audio/transcriptions/details",
+		RequestLogPath: "/v1/audio/transcriptions/details",
 	},
 	"/audio/transcriptions/live": {
 		Operation:      "audiocpp.audio_transcriptions_live",
 		GenAIOperation: string(core.OperationAudioTranscriptions),
-		AuditPath:      "/v1/audio/transcriptions/live",
+		RequestLogPath: "/v1/audio/transcriptions/live",
 	},
 	"/audio/alignments": {
-		Operation: "audiocpp.audio_alignments",
-		AuditPath: "/v1/audio/alignments",
+		Operation:      "audiocpp.audio_alignments",
+		RequestLogPath: "/v1/audio/alignments",
 	},
 	"/tasks/run": {
-		Operation: "audiocpp.tasks_run",
-		AuditPath: "/v1/tasks/run",
+		Operation:      "audiocpp.tasks_run",
+		RequestLogPath: "/v1/tasks/run",
 	},
 	"/tasks/stream": {
-		Operation: "audiocpp.tasks_stream",
-		AuditPath: "/v1/tasks/stream",
+		Operation:      "audiocpp.tasks_stream",
+		RequestLogPath: "/v1/tasks/stream",
 	},
 })

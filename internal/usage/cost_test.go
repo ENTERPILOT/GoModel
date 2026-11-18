@@ -471,31 +471,54 @@ func TestCalculateGranularCost_XAI_PrefixedKeys(t *testing.T) {
 
 	// Input: 500k * 2.0/1M + 200k * (0.50-2.0)/1M = 1.0 - 0.30 = 0.70
 	assertCostNear(t, "InputCost", result.InputCost, 0.70)
-	// xAI reports reasoning tokens separately from completion_tokens, so they are charged in addition.
-	// Output: 300k * 10.0/1M + 100k * 15.0/1M = 3.0 + 1.5 = 4.5
-	assertCostNear(t, "OutputCost", result.OutputCost, 4.5)
+	// The output count passed in is complete, so reasoning is part of it.
+	// Output: 300k * 10.0/1M + 100k * (15.0-10.0)/1M = 3.0 + 0.5 = 3.5
+	assertCostNear(t, "OutputCost", result.OutputCost, 3.5)
 	require.Empty(t, result.Caveat)
 }
 
-func TestCalculateGranularCost_XAI_ReasoningTokensAreAdditionalOutput(t *testing.T) {
-	pricing := &core.ModelPricing{
-		InputPerMtok:           new(0.3),
-		OutputPerMtok:          new(0.5),
-		CachedInputPerMtok:     new(0.075),
-		ReasoningOutputPerMtok: new(1.5),
-	}
-	rawData := map[string]any{
-		"prompt_cached_tokens":        4,
-		"completion_reasoning_tokens": 270,
-	}
-	result := CalculateGranularCost(12, 1, rawData, "xai", pricing)
+// xAI's chat completions report reasoning tokens beside completion_tokens,
+// its Responses API inside output_tokens. The first four usage objects are
+// the recorded ones (tests/contract/testdata/xai), priced at the rates their
+// cost_in_usd_ticks were charged at, so the cost from token rates must equal
+// the cost xAI reported, when the row is written and when it is repriced.
+func TestXAIReasoningCostFollowsUsageShape(t *testing.T) {
+	rates := core.ModelPricing{InputPerMtok: new(0.3), OutputPerMtok: new(0.5), CachedInputPerMtok: new(0.075)}
+	reasoningRate := rates
+	reasoningRate.ReasoningOutputPerMtok = new(1.5)
 
-	// Mirrors the live xAI chat shape: reasoning tokens are separate from completion_tokens.
-	// Input: 12 * 0.3/1M + 4 * (0.075-0.3)/1M = 0.0000036 - 0.0000009 = 0.0000027
-	assertCostNear(t, "InputCost", result.InputCost, 0.0000027)
-	// Output: 1 * 0.5/1M + 270 * 1.5/1M = 0.0000005 + 0.000405 = 0.0004055
-	assertCostNear(t, "OutputCost", result.OutputCost, 0.0004055)
-	assertCostNear(t, "TotalCost", result.TotalCost, 0.0004082)
+	tests := []struct {
+		name                                    string
+		endpoint                                string
+		pricing                                 *core.ModelPricing
+		input, output, total, cached, reasoning int
+		want                                    float64
+	}{
+		{name: "chat completions", endpoint: "/v1/chat/completions", pricing: &rates, input: 10, output: 35, total: 420, cached: 3, reasoning: 375, want: 2_073_250.0 / xaiUSDTicksPerUSD},
+		{name: "chat completions with parameters", endpoint: "/v1/chat/completions", pricing: &rates, input: 19, output: 6, total: 198, cached: 4, reasoning: 173, want: 943_000.0 / xaiUSDTicksPerUSD},
+		{name: "responses", endpoint: "/v1/responses", pricing: &rates, input: 17, output: 276, total: 293, cached: 3, reasoning: 272, want: 1_424_250.0 / xaiUSDTicksPerUSD},
+		{name: "streamed responses", endpoint: "/v1/responses", pricing: &rates, input: 17, output: 185, total: 202, cached: 3, reasoning: 181, want: 969_250.0 / xaiUSDTicksPerUSD},
+		// Input: 8 * 0.3 + 4 * 0.075 = 2.7; output: 1 * 0.5 + 270 * 1.5 = 405.5 (per 1M)
+		{name: "chat completions with a reasoning rate", endpoint: "/v1/chat/completions", pricing: &reasoningRate, input: 12, output: 1, total: 283, cached: 4, reasoning: 270, want: 0.0004082},
+		// Input: 14 * 0.3 + 3 * 0.075 = 4.425; output: 4 * 0.5 + 272 * 1.5 = 410 (per 1M)
+		{name: "responses with a reasoning rate", endpoint: "/v1/responses", pricing: &reasoningRate, input: 17, output: 276, total: 293, cached: 3, reasoning: 272, want: 0.000414425},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rawData := map[string]any{"prompt_cached_tokens": tt.cached, "completion_reasoning_tokens": tt.reasoning}
+
+			entry := ExtractFromSSEUsage("id", tt.input, tt.output, tt.total, rawData, "req", "grok-3-mini", "xai", tt.endpoint, tt.pricing)
+			require.NotNil(t, entry)
+			assertCostNear(t, "TotalCost", entry.TotalCost, tt.want)
+			require.Equal(t, tt.output, entry.OutputTokens, "the usage log keeps the count the provider reported")
+
+			repriced := recalculateEntryCosts(recalculationEntry{
+				Model: "grok-3-mini", Provider: "xai", Endpoint: tt.endpoint,
+				InputTokens: tt.input, OutputTokens: tt.output, TotalTokens: tt.total, RawData: rawData,
+			}, &recordingPricingResolver{pricing: tt.pricing})
+			assertCostNear(t, "repriced TotalCost", repriced.TotalCost, tt.want)
+		})
+	}
 }
 
 func TestCalculateGranularCost_Groq_PromptCachedTokensAndReasoningBreakdown(t *testing.T) {

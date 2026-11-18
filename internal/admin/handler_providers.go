@@ -23,6 +23,11 @@ func (h *Handler) RefreshRuntime(c *echo.Context) error {
 		return handleError(c, featureUnavailableError("runtime refresh is unavailable"))
 	}
 
+	// The refresh downloads the model catalog and lists every provider's
+	// models; each step is bounded on its own, but together they can outlast
+	// the server-wide write timeout, and the report is the point of the call.
+	clearWriteDeadline(c)
+
 	report, err := h.runtimeRefresher.RefreshRuntime(c.Request().Context())
 	if err != nil {
 		if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {

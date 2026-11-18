@@ -1,6 +1,6 @@
 ---
 title: "GoModel i LibreChat"
-description: "Daj LibreChat jeden własny endpoint do wszystkich providerów przez GoModel i uzyskaj logi audytowe, śledzenie kosztów per użytkownik oraz metryki dla każdego czatu."
+description: "Daj LibreChat jeden własny endpoint do wszystkich providerów przez GoModel i uzyskaj logi requestów, śledzenie kosztów per użytkownik oraz metryki dla każdego czatu."
 icon: "message-circle"
 keywords: ["LibreChat", "librechat.yaml", "własny endpoint", "custom endpoint", "czat self-hosted", "self-hosted chat", "koszty per użytkownik", "per-user costs", "obserwowalność LLM", "LLM observability", "przewodnik konfiguracji", "setup guide"]
 ---
@@ -18,7 +18,7 @@ Przepływ:
 
 Co zyskujesz:
 
-- Pełne treści requestów i odpowiedzi każdego czatu w logu audytowym GoModel.
+- Pełne treści requestów i odpowiedzi każdego czatu w logu requestów GoModel.
 - Koszt per użytkownik LibreChat dzięki szablonom nagłówków i
   [etykietom](/pl/features/labelling).
 - Wszystkich providerów za jednym własnym endpointem, bez konfiguracji poszczególnych providerów
@@ -130,7 +130,7 @@ administratorem LibreChat), a endpoint `GoModel` pojawi się w selektorze modeli
 Wybierz dowolny model – `openai/gpt-5-mini`, `anthropic/claude-haiku-4-5-20251001`,
 `gemini/gemini-2.5-flash` – i czatuj. Odpowiedzi streamowane oraz generowanie tytułu,
 które LibreChat uruchamia po pierwszej wymianie, przechodzą przez GoModel.
-Każde wywołanie pojawia się w logu audytowym z pełnym promptem, odpowiedzią, tokenami,
+Każde wywołanie pojawia się w logu requestów z pełnym promptem, odpowiedzią, tokenami,
 kosztem i nagłówkiem identyfikującym użytkownika.
 
 <Note>

@@ -47,7 +47,7 @@ repos:
         entry: make perf-check
         language: system
         pass_filenames: false
-        files: '^(internal/(auditlog|core|providers|server|usage)/.*\.go|tests/perf/.*\.go|Makefile|\.github/workflows/test\.yml)$'
+        files: '^(internal/(requestlog|core|providers|server|usage)/.*\.go|tests/perf/.*\.go|Makefile|\.github/workflows/test\.yml)$'
       # Reports Go modernizations (maps.Copy, slices.Contains, min/max, new(expr),
       # range-over-int, ...) that `go fix` would apply. Check-only, by design:
       # `go fix` rewrites source in place, and when it marks a helper

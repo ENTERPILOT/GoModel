@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 func gzipBytes(t testing.TB, body string) []byte {
@@ -312,10 +312,10 @@ func TestRequestBody_PassthroughModelBeyondThePeek(t *testing.T) {
 	}
 }
 
-// The audit entry records the decoded body of an authenticated request, says
+// The request log entry records the decoded body of an authenticated request, says
 // why a body too large to capture is missing, and holds no body for a
 // request rejected before its body was read.
-func TestRequestBody_Audit(t *testing.T) {
+func TestRequestBody_RequestLog(t *testing.T) {
 	small := `{"model":"gpt-4o-mini","messages":[]}`
 	large := `{"model":"gpt-4o-mini","padding":"` + strings.Repeat("a", 2<<20) + `"}`
 	tests := []struct {
@@ -328,14 +328,14 @@ func TestRequestBody_Audit(t *testing.T) {
 		wantTooLong bool
 	}{
 		{name: "compressed", body: small, encoding: "gzip", token: "master", wantStatus: http.StatusOK, wantBody: true},
-		{name: "compressed over the audit capture", body: large, encoding: "gzip", token: "master", wantStatus: http.StatusOK, wantTooLong: true},
-		{name: "uncompressed over the audit capture", body: large, token: "master", wantStatus: http.StatusOK, wantTooLong: true},
+		{name: "compressed over the request log capture", body: large, encoding: "gzip", token: "master", wantStatus: http.StatusOK, wantTooLong: true},
+		{name: "uncompressed over the request log capture", body: large, token: "master", wantStatus: http.StatusOK, wantTooLong: true},
 		{name: "unauthenticated", body: small, wantStatus: http.StatusUnauthorized},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: true}}
-			srv := New(&mockProvider{passthroughResponse: okPassthroughResponse()}, &Config{MasterKey: "master", AuditLogger: auditLogger})
+			requestLogger := &capturingRequestLogger{config: requestlog.Config{Enabled: true, LogBodies: true}}
+			srv := New(&mockProvider{passthroughResponse: okPassthroughResponse()}, &Config{MasterKey: "master", RequestLogger: requestLogger})
 			body := []byte(tt.body)
 			if tt.encoding != "" {
 				body = gzipBytes(t, tt.body)
@@ -344,8 +344,8 @@ func TestRequestBody_Audit(t *testing.T) {
 			rec := postWithCredential(t, srv, "/p/openai/chat/completions", tt.token, bytes.NewReader(body), tt.encoding)
 
 			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
-			require.Len(t, auditLogger.entries, 1)
-			data := auditLogger.entries[0].Data
+			require.Len(t, requestLogger.entries, 1)
+			data := requestLogger.entries[0].Data
 			require.NotNil(t, data)
 			assert.Equal(t, tt.wantBody, data.RequestBody != nil)
 			assert.Equal(t, tt.wantTooLong, data.RequestBodyTooBigToHandle)

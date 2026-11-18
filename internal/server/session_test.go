@@ -12,9 +12,9 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/session"
 )
 
@@ -43,18 +43,18 @@ type sessionLivePublisher struct {
 }
 
 type sessionParentLookup struct {
-	auditlog.Reader
-	entry *auditlog.InteractionParent
+	requestlog.Reader
+	entry *requestlog.InteractionParent
 	err   error
 	calls int
 }
 
-func (l *sessionParentLookup) GetInteractionParent(_ context.Context, _ string) (*auditlog.InteractionParent, error) {
+func (l *sessionParentLookup) GetInteractionParent(_ context.Context, _ string) (*requestlog.InteractionParent, error) {
 	l.calls++
 	return l.entry, l.err
 }
 
-func (p *sessionLivePublisher) PublishLiveEvent(eventType string, entry *auditlog.LogEntry) {
+func (p *sessionLivePublisher) PublishLiveEvent(eventType string, entry *requestlog.LogEntry) {
 	p.events = append(p.events, sessionLiveEvent{eventType: eventType, sessionID: entry.SessionID})
 }
 
@@ -126,15 +126,15 @@ func TestSessionCapturePublishesSessionBeforeDownstreamHandler(t *testing.T) {
 	c := sessionTestContext(t, "/v1/chat/completions", map[string]string{
 		"X-Session-Id": "session-live",
 	})
-	entry := &auditlog.LogEntry{ID: "audit-live"}
+	entry := &requestlog.LogEntry{ID: "request-log-live"}
 	publisher := &sessionLivePublisher{}
-	c.Set(string(auditlog.LogEntryKey), entry)
-	c.Set(string(auditlog.LogEntryLivePublisherKey), publisher)
+	c.Set(string(requestlog.LogEntryKey), entry)
+	c.Set(string(requestlog.LogEntryLivePublisherKey), publisher)
 
 	handler := sessionCapture(detector, nil, false)(func(c *echo.Context) error {
 		require.Len(t, publisher.events, 1)
 		got := publisher.events[0]
-		require.Equal(t, auditlog.LiveEventAuditUpdated, got.eventType)
+		require.Equal(t, requestlog.LiveEventRequestLogUpdated, got.eventType)
 		require.Equal(t, "session-live", got.sessionID, "live event = %#v, want audit.updated with detected session", got)
 		require.Equal(t, "session-live", entry.SessionID)
 
@@ -151,7 +151,7 @@ func TestSessionCaptureInheritsTrustedInteractionParent(t *testing.T) {
 		"X-Session-Id":          "raw-session-that-must-not-win",
 	})
 	setInteractionContinuationAllowed(c, true)
-	lookup := &sessionParentLookup{entry: &auditlog.InteractionParent{
+	lookup := &sessionParentLookup{entry: &requestlog.InteractionParent{
 		SessionID: "auto-resolved-session", UserPath: "/",
 	}}
 
@@ -171,7 +171,7 @@ func TestSessionCaptureAllowsParentWhenAuthenticationIsDisabled(t *testing.T) {
 	c := sessionTestContext(t, "/v1/responses", map[string]string{
 		interactionParentHeader: "parent-log",
 	})
-	lookup := &sessionParentLookup{entry: &auditlog.InteractionParent{
+	lookup := &sessionParentLookup{entry: &requestlog.InteractionParent{
 		SessionID: "parent-session", UserPath: "/",
 	}}
 
@@ -187,7 +187,7 @@ func TestSessionCaptureAllowsParentWhenAuthenticationIsDisabled(t *testing.T) {
 
 func TestSessionCaptureUsesLiveAuthenticationDecision(t *testing.T) {
 	detector := session.NewDetector(session.BuiltinRules(), true)
-	lookup := &sessionParentLookup{entry: &auditlog.InteractionParent{
+	lookup := &sessionParentLookup{entry: &requestlog.InteractionParent{
 		SessionID: "parent-session", UserPath: "/",
 	}}
 	authenticator := &mockAuthenticator{
@@ -202,9 +202,9 @@ func TestSessionCaptureUsesLiveAuthenticationDecision(t *testing.T) {
 		},
 	}
 	srv := New(provider, &Config{
-		Authenticator:   authenticator,
-		SessionDetector: detector,
-		AuditReader:     lookup,
+		Authenticator:    authenticator,
+		SessionDetector:  detector,
+		RequestLogReader: lookup,
 	})
 	send := func(token string) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
@@ -234,19 +234,19 @@ func TestSessionCaptureRejectsUntrustedOrCrossPathParent(t *testing.T) {
 		name            string
 		trusted         bool
 		parentID        string
-		parent          *auditlog.InteractionParent
+		parent          *requestlog.InteractionParent
 		lookupErr       error
 		requestUserPath string
 		wantCalls       int
 	}{
-		{name: "untrusted", parentID: "parent-log", parent: &auditlog.InteractionParent{SessionID: "parent-session"}},
+		{name: "untrusted", parentID: "parent-log", parent: &requestlog.InteractionParent{SessionID: "parent-session"}},
 		{name: "comma in parent id", trusted: true, parentID: "parent,log", wantCalls: 0},
 		{name: "oversized parent id", trusted: true, parentID: strings.Repeat("x", 201), wantCalls: 0},
 		{name: "lookup error", trusted: true, parentID: "parent-log", lookupErr: errors.New("lookup failed"), wantCalls: 1},
 		{name: "missing parent", trusted: true, parentID: "parent-log", wantCalls: 1},
-		{name: "blank parent session", trusted: true, parentID: "parent-log", parent: &auditlog.InteractionParent{}, wantCalls: 1},
-		{name: "different user path", trusted: true, parentID: "parent-log", parent: &auditlog.InteractionParent{SessionID: "parent-session", UserPath: "/team"}, wantCalls: 1},
-		{name: "legacy root parent from user path", trusted: true, parentID: "parent-log", parent: &auditlog.InteractionParent{SessionID: "parent-session"}, requestUserPath: "/team", wantCalls: 1},
+		{name: "blank parent session", trusted: true, parentID: "parent-log", parent: &requestlog.InteractionParent{}, wantCalls: 1},
+		{name: "different user path", trusted: true, parentID: "parent-log", parent: &requestlog.InteractionParent{SessionID: "parent-session", UserPath: "/team"}, wantCalls: 1},
+		{name: "legacy root parent from user path", trusted: true, parentID: "parent-log", parent: &requestlog.InteractionParent{SessionID: "parent-session"}, requestUserPath: "/team", wantCalls: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := sessionTestContext(t, "/v1/chat/completions", map[string]string{
@@ -370,12 +370,12 @@ func TestSessionCaptureMaterializesChunkedBody(t *testing.T) {
 	require.Equal(t, "chunked-session", got)
 }
 
-// JSON bodies past the audit capture limit still carry session signals: the
+// JSON bodies past the request log capture limit still carry session signals: the
 // handler decodes the whole body anyway, so detection reads it once and the
-// handler reuses the same buffer. Only the audit capture stays bounded.
-func TestSessionCaptureDetectsBodySignalPastAuditCaptureLimit(t *testing.T) {
+// handler reuses the same buffer. Only the request log capture stays bounded.
+func TestSessionCaptureDetectsBodySignalPastRequestLogCaptureLimit(t *testing.T) {
 	detector := session.NewDetector(session.BuiltinRules(), true)
-	padding := strings.Repeat("x", int(auditlog.MaxBodyCapture))
+	padding := strings.Repeat("x", int(requestlog.MaxBodyCapture))
 	bodyText := `{"model":"gpt-4o","messages":[{"role":"user","content":"` + padding + `"}],"session_id":"huge-body-session"}`
 	body := &countingReadCloser{reader: strings.NewReader(bodyText)}
 
@@ -413,9 +413,9 @@ func TestSessionCaptureDetectsBodySignalPastAuditCaptureLimit(t *testing.T) {
 	require.Equal(t, "huge-body-session", got)
 }
 
-func TestSessionCaptureAutoDetectsChunkedBodyPastAuditCaptureLimit(t *testing.T) {
+func TestSessionCaptureAutoDetectsChunkedBodyPastRequestLogCaptureLimit(t *testing.T) {
 	detector := session.NewDetector(session.BuiltinRules(), true)
-	padding := strings.Repeat("x", int(auditlog.MaxBodyCapture))
+	padding := strings.Repeat("x", int(requestlog.MaxBodyCapture))
 	bodyText := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"` + padding + `"}]}`
 	body := &countingReadCloser{reader: strings.NewReader(bodyText)}
 
@@ -440,7 +440,7 @@ func TestSessionCaptureAutoDetectsChunkedBodyPastAuditCaptureLimit(t *testing.T)
 // unknown-length one is bounded and replayed intact.
 func TestSessionCaptureDoesNotPreReadKnownOversizedOpaqueBody(t *testing.T) {
 	detector := session.NewDetector(session.BuiltinRules(), true)
-	bodyText := strings.Repeat("x", int(auditlog.MaxBodyCapture)+1)
+	bodyText := strings.Repeat("x", int(requestlog.MaxBodyCapture)+1)
 	body := &countingReadCloser{reader: strings.NewReader(bodyText)}
 
 	c, _ := sessionBodyTestContext(
@@ -466,7 +466,7 @@ func TestSessionCaptureDoesNotPreReadKnownOversizedOpaqueBody(t *testing.T) {
 
 func TestSessionCaptureBoundsUnknownOversizedOpaqueBodyAndReplaysIt(t *testing.T) {
 	detector := session.NewDetector(session.BuiltinRules(), true)
-	bodyText := strings.Repeat("x", int(auditlog.MaxBodyCapture)+128)
+	bodyText := strings.Repeat("x", int(requestlog.MaxBodyCapture)+128)
 	body := &countingReadCloser{reader: strings.NewReader(bodyText)}
 
 	c, _ := sessionBodyTestContext(
@@ -478,7 +478,7 @@ func TestSessionCaptureBoundsUnknownOversizedOpaqueBodyAndReplaysIt(t *testing.T
 	)
 
 	handler := sessionCapture(detector, nil, false)(func(c *echo.Context) error {
-		require.Equal(t, int64(auditlog.MaxBodyCapture+1), body.read)
+		require.Equal(t, int64(requestlog.MaxBodyCapture+1), body.read)
 
 		remaining, err := io.ReadAll(c.Request().Body)
 		require.NoError(t, err)

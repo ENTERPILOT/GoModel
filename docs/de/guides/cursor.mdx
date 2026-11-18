@@ -186,7 +186,7 @@ Create a file named gomodel-cursor-test.txt containing exactly tool-ok
 
 Prüfen Sie die Änderung, bevor Sie sie akzeptieren. Melden Sie sich separat mit dem Master-Key
 oder einem verwalteten Key mit Dashboard-Zugriff im GoModel-Dashboard an. Öffnen Sie
-**Audit Logs** und prüfen Sie, ob Cursor `POST /v1/chat/completions` erreicht und das erwartete
+**Anfragen** und prüfen Sie, ob Cursor `POST /v1/chat/completions` erreicht und das erwartete
 Modell verwendet hat.
 
 <Warning>
@@ -194,7 +194,7 @@ Modell verwendet hat.
   funktioniert. Cursor hat bei einigen neueren GPT-Modellen bereits Custom Tools im Responses-Stil in
   Chat-Completions-Requests gemischt. Wenn der Agent-Modus fehlschlägt, der Text-Chat aber
   funktioniert, probieren Sie zuerst ein Standard-Chat-Modell ohne Reasoning und prüfen Sie die
-  Response im GoModel-Audit-Log, bevor Sie das Gateway ändern.
+  Response im GoModel-Request-Log, bevor Sie das Gateway ändern.
 </Warning>
 
 ## Fehlerbehebung
@@ -225,7 +225,7 @@ bevor Sie zu diesen Modellen zurückwechseln, und starten Sie dann einen neuen C
 ### Agent oder Tool Calls schlagen fehl, Text funktioniert
 
 Aktualisieren Sie Cursor, versuchen Sie es erneut mit einem Standard-Chat-Modell von OpenAI und
-prüfen Sie das Audit-Log von GoModel auf die Upstream-Response. Die Unterstützung eigener Endpunkte
+prüfen Sie das Request-Log von GoModel auf die Upstream-Response. Die Unterstützung eigener Endpunkte
 hatte Release-spezifische Payload-Fehler, besonders bei Custom Tools auf neueren GPT-Modellen.
 
 ### Bilder erreichen GoModel nicht

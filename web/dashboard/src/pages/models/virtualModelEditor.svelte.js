@@ -71,7 +71,12 @@ class VirtualModelEditorStore {
     if (!Array.isArray(this.vmForm.targets)) {
       this.vmForm.targets = [];
     }
-    this.vmForm.targets.push({ provider: "", model: "", weight: 1 });
+    this.vmForm.targets.push({
+      provider: "",
+      model: "",
+      weight: 1,
+      reasoning_effort: "",
+    });
   }
 
   removeVmTarget(index) {
@@ -290,13 +295,19 @@ class VirtualModelEditorStore {
     );
     this.vmFormEffectiveEnabled = alias.enabled !== false;
 
-    const { primaryProvider, primaryModel, primaryWeight, extraTargets } =
-      aliasFormTargets(alias);
+    const {
+      primaryProvider,
+      primaryModel,
+      primaryWeight,
+      primaryReasoningEffort,
+      extraTargets,
+    } = aliasFormTargets(alias);
     this.vmForm = {
       source: alias.name || "",
       target_provider: primaryProvider,
       target_model: primaryModel,
       target_weight: primaryWeight,
+      target_reasoning_effort: primaryReasoningEffort,
       targets: extraTargets,
       strategy: alias.strategy || "round_robin",
       strategy_plugin: String(alias.strategy_plugin || "").trim(),
@@ -353,15 +364,21 @@ class VirtualModelEditorStore {
     // strategy, so adding a target makes a fallback for this model rather than
     // silently replacing it. An existing redirect over the model is shown as
     // saved.
-    const { primaryModel, primaryWeight, extraTargets } =
+    const { primaryModel, primaryWeight, primaryReasoningEffort, extraTargets } =
       override && Array.isArray(override.targets) && override.targets.length > 0
         ? aliasFormTargets(override)
-        : { primaryModel: selector, primaryWeight: 1, extraTargets: [] };
+        : {
+            primaryModel: selector,
+            primaryWeight: 1,
+            primaryReasoningEffort: "",
+            extraTargets: [],
+          };
     this.vmForm = {
       ...defaultVirtualModelForm(),
       source: selector,
       target_model: primaryModel,
       target_weight: primaryWeight,
+      target_reasoning_effort: primaryReasoningEffort,
       targets: extraTargets,
       strategy: (override && override.strategy) || "failover",
       strategy_plugin: String((override && override.strategy_plugin) || "").trim(),

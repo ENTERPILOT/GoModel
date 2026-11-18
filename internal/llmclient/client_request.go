@@ -21,7 +21,7 @@ import (
 )
 
 // maxErrorBodyBytes caps how much of an upstream error body is read into
-// memory. It matches core's audit capture cap; a misbehaving upstream that
+// memory. It matches core's request log capture cap; a misbehaving upstream that
 // answers an error status with an endless body must not be buffered whole.
 const maxErrorBodyBytes = 64 * 1024
 
@@ -204,7 +204,7 @@ func (c *Client) doRequest(ctx context.Context, req Request) (*Response, error) 
 	}()
 
 	// Successful responses are read whole (large results are legitimate);
-	// error bodies are bounded — they only feed error parsing and audit
+	// error bodies are bounded — they only feed error parsing and request log
 	// capture, both of which cap at the same size.
 	reader := io.Reader(resp.Body)
 	if resp.StatusCode >= http.StatusBadRequest {

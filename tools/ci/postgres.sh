@@ -10,7 +10,7 @@
 #
 # The container is not started with --rm, so a server that dies during startup
 # keeps its logs for `wait` to print. Locally, remove it with
-# `docker rm -f gomodel-postgres`.
+# `docker rm -f -v gomodel-postgres`; -v also removes its data volume.
 #
 # `wait` checks over TCP on purpose: during initdb the image runs a temporary
 # server on the Unix socket only, which a socket check would report as ready.
@@ -36,7 +36,7 @@ deadline_seconds=${POSTGRES_WAIT_SECONDS:-120}
 case "${1:-}" in
 start)
 	ref=$(sh "$(dirname "$0")/pull-image.sh" "$image")
-	docker rm -f "$name" >/dev/null 2>&1 || true
+	docker rm -f -v "$name" >/dev/null 2>&1 || true
 	docker run -d --name "$name" -p "127.0.0.1:$port:5432" \
 		-e POSTGRES_USER="$user" -e POSTGRES_PASSWORD="$password" -e POSTGRES_DB="$db" \
 		"$ref" >/dev/null

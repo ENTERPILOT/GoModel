@@ -22,7 +22,7 @@ const maxInternalDecisionBytes = 4 << 20
 // InternalDecisionsExecutor answers gateway-internal Decisions requests,
 // such as an llm_judge plugin asking a decision model, without an HTTP
 // request or Echo context. It resolves the model, skips targets that cannot
-// answer, fails over, caches, accounts usage, and audits as POST
+// answer, fails over, caches, accounts usage, and logs the request as POST
 // /v1/decisions does. No guardrail runs on the input: the caller is a
 // guardrail, and its own question is not judged again.
 type InternalDecisionsExecutor struct {
@@ -39,7 +39,7 @@ func NewInternalDecisionsExecutor(provider core.RoutableProvider, cfg InternalCh
 		workflowPolicyResolver: cfg.WorkflowPolicyResolver,
 		failoverResolver:       cfg.FailoverResolver,
 		failoverPolicy:         cfg.FailoverPolicy,
-		logger:                 cfg.AuditLogger,
+		logger:                 cfg.RequestLogger,
 		usageLogger:            cfg.UsageLogger,
 		pricingResolver:        cfg.PricingResolver,
 		responseCache:          cfg.ResponseCache,
@@ -75,7 +75,7 @@ func (e *InternalDecisionsExecutor) Decide(ctx context.Context, body []byte) (an
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
 	requested := core.NewRequestedModelSelector(req.Model, "")
 	start := time.Now()
-	entry := newInternalAuditEntry(s.logger, ctx, requestID, requested, decisionsRoute.path)
+	entry := newInternalRequestLogEntry(s.logger, ctx, requestID, requested, decisionsRoute.path)
 	var (
 		workflow  *core.Workflow
 		executed  core.ModelSelector
@@ -83,7 +83,7 @@ func (e *InternalDecisionsExecutor) Decide(ctx context.Context, body []byte) (an
 		cacheType string
 	)
 	defer func() {
-		finishInternalAuditEntry(s.logger, ctx, entry, internalExchange{
+		finishInternalRequestLogEntry(s.logger, ctx, entry, internalExchange{
 			path: decisionsRoute.path, start: start, workflow: workflow,
 			request: json.RawMessage(body), response: rawJSONOrNil(answer),
 			model: executed.Model, err: err, cacheType: cacheType, meta: meta,
@@ -233,7 +233,7 @@ func internalDecisionHeaders(ctx context.Context) http.Header {
 	return headers
 }
 
-// rawJSONOrNil returns body as raw JSON for the audit entry, or nil when
+// rawJSONOrNil returns body as raw JSON for the request log entry, or nil when
 // there is none.
 func rawJSONOrNil(body []byte) any {
 	if len(body) == 0 {

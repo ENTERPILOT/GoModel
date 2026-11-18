@@ -20,9 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Helm
-        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
 
       - name: Install kubeconform
         env:
@@ -66,6 +68,8 @@ jobs:
           helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt -s templates/tests/test-connection.yaml | grep -q -- '- --insecure'
           test "$(helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt -s templates/deployment.yaml | grep -c 'scheme: HTTPS')" = 2
           ! helm template gomodel helm -s templates/deployment.yaml | grep -q 'scheme:'
+          test "$(helm template gomodel helm -s templates/deployment.yaml | grep -c 'mountPath: /tmp$')" = 1
+          test "$(helm template gomodel helm -s templates/deployment.yaml --set 'extraVolumes[0].name=scratch' --set 'extraVolumeMounts[0].name=scratch' --set 'extraVolumeMounts[0].mountPath=/tmp' | grep -c -e 'mountPath: /tmp$' -e 'name: tmp$')" = 1
           test "$(helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt --set env.BASE_PATH=/g -s templates/deployment.yaml | grep -c -e 'path: /g/health' -e 'scheme: HTTPS')" = 4
           helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt --set readinessProbe.httpGet.scheme=HTTP -s templates/deployment.yaml | grep -q 'scheme: HTTP$'
           helm template gomodel helm --set replicaCount=2 --set storage.type=postgresql --set storage.url=postgres://x \
@@ -77,9 +81,11 @@ jobs:
     needs: lint
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Helm
-        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
 
       - name: Create kind cluster
         uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2

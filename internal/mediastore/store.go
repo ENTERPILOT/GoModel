@@ -38,9 +38,9 @@ const (
 // how it is retained.
 type Source string
 
-// SourceAudit marks media captured for the audit log: the payload of an
+// SourceRequestLog marks media captured for the request log: the payload of an
 // audio or image request whose body logging is enabled.
-const SourceAudit Source = "audit"
+const SourceRequestLog Source = "audit"
 
 // Object is one stored media payload.
 type Object struct {

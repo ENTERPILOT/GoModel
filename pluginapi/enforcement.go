@@ -9,7 +9,7 @@ type Enforcement struct {
 	// with actions of its own (replace, anonymize) handles those itself and
 	// leaves the rest to Enforce.
 	Action Action
-	// Message is the error message for block, the audit note for warn, and
+	// Message is the error message for block, the request log note for warn, and
 	// the assistant reply for respond when RespondText is empty.
 	Message string
 	// BlockStatus is the HTTP status for block; 0 is the phase default.
