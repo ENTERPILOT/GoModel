@@ -257,3 +257,174 @@ func TestAudioVoices_RouteIsRegisteredBehindAuth(t *testing.T) {
 		})
 	}
 }
+
+// customVoicesMockProvider adds OpenAI's own voice list to the voices fake.
+type customVoicesMockProvider struct {
+	*voicesMockProvider
+	types          []string
+	custom         *core.AudioCustomVoicesResponse
+	customErr      error
+	calledProvider string
+	calledParams   *core.AudioCustomVoicesParams
+}
+
+func (m *customVoicesMockProvider) AudioCustomVoiceProviderTypes() []string { return m.types }
+
+func (m *customVoicesMockProvider) ListCustomVoices(_ context.Context, provider string, params core.AudioCustomVoicesParams) (*core.AudioCustomVoicesResponse, error) {
+	m.calledProvider = provider
+	m.calledParams = &params
+	if m.customErr != nil {
+		return nil, m.customErr
+	}
+	return m.custom, nil
+}
+
+func newCustomVoicesMock() *customVoicesMockProvider {
+	last := "voice_1"
+	mock := &customVoicesMockProvider{
+		voicesMockProvider: newVoicesMock(),
+		types:              []string{"openai"},
+		custom: &core.AudioCustomVoicesResponse{
+			Object:  "list",
+			Data:    []core.AudioCustomVoice{{ID: "voice_1", Object: "audio.voice", Name: "Narrator", CreatedAt: 1734220800, Type: "audio_sample"}},
+			FirstID: &last,
+			LastID:  &last,
+			HasMore: true,
+		},
+	}
+	mock.providerTypes = map[string]string{"openai-main/tts-1": "openai", "kokoro-local/kokoro": "openai-compatible"}
+	mock.providerNames = map[string]string{"openai-main/tts-1": "openai-main", "kokoro-local/kokoro": "kokoro-local"}
+	return mock
+}
+
+// Without a model the endpoint is OpenAI's own voice list, in OpenAI's shape.
+func TestAudioVoices_WithoutModelServesOpenAIVoiceList(t *testing.T) {
+	mock := newCustomVoicesMock()
+	authorizer := &recordingModelAuthorizer{}
+	svc := &audioService{provider: mock, modelAuthorizer: authorizer}
+	entry := &requestlog.LogEntry{}
+
+	c, rec := echotest.Get(t, "/v1/audio/voices?limit=1&after=voice_0", echotest.WithValue(string(requestlog.LogEntryKey), entry))
+	require.NoError(t, svc.ListVoices(c))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `{"object":"list","data":[{"id":"voice_1","object":"audio.voice","name":"Narrator","created_at":1734220800,"type":"audio_sample"}],"first_id":"voice_1","last_id":"voice_1","has_more":true}`, rec.Body.String())
+	assert.Equal(t, "openai-main", mock.calledProvider)
+	assert.Equal(t, &core.AudioCustomVoicesParams{Limit: "1", After: "voice_0"}, mock.calledParams)
+	assert.Equal(t, "openai-main", authorizer.lastProvider, "a model-less call needs the whole provider")
+	assert.Nil(t, mock.captured, "the per-model listing is not used")
+	assert.Equal(t, "openai", entry.Provider)
+	assert.Equal(t, "openai-main", entry.ProviderName)
+}
+
+func TestAudioVoices_WithoutModelEmptyListKeepsOpenAIShape(t *testing.T) {
+	mock := newCustomVoicesMock()
+	mock.custom = nil
+	svc := &audioService{provider: mock}
+
+	c, rec := echotest.Get(t, "/v1/audio/voices")
+	require.NoError(t, svc.ListVoices(c))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `{"object":"list","data":[],"first_id":null,"last_id":null,"has_more":false}`, rec.Body.String())
+}
+
+func TestAudioVoices_WithoutModelHonorsProviderParameter(t *testing.T) {
+	mock := newCustomVoicesMock()
+	mock.types = nil
+	authorizer := &recordingModelAuthorizer{}
+	svc := &audioService{provider: mock, modelAuthorizer: authorizer}
+
+	c, rec := echotest.Get(t, "/v1/audio/voices?provider=openai-main")
+	require.NoError(t, svc.ListVoices(c))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "openai-main", mock.calledProvider)
+	assert.Equal(t, "openai-main", authorizer.lastProvider)
+}
+
+func TestAudioVoices_WithoutModelErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     string
+		mutate     func(*customVoicesMockProvider)
+		authorizer *recordingModelAuthorizer
+		limiter    bool
+		wantStatus int
+		wantMsg    string
+		wantCalled bool
+	}{
+		{
+			name:       "no provider serves the list",
+			target:     "/v1/audio/voices",
+			mutate:     func(m *customVoicesMockProvider) { m.types = nil },
+			wantStatus: http.StatusBadRequest,
+			wantMsg:    "model is required",
+		},
+		{
+			name:   "the default provider turns out not to serve it",
+			target: "/v1/audio/voices",
+			mutate: func(m *customVoicesMockProvider) {
+				m.customErr = core.NewAudioCustomVoicesUnsupportedError("openai-main")
+			},
+			wantStatus: http.StatusBadRequest,
+			wantMsg:    "model is required",
+			wantCalled: true,
+		},
+		{
+			name:   "a named provider that does not serve it",
+			target: "/v1/audio/voices?provider=kokoro-local",
+			mutate: func(m *customVoicesMockProvider) {
+				m.customErr = core.NewAudioCustomVoicesUnsupportedError("kokoro-local")
+			},
+			wantStatus: http.StatusBadRequest,
+			wantMsg:    `provider "kokoro-local" does not support listing custom voices`,
+			wantCalled: true,
+		},
+		{
+			name:       "key not granted the whole provider",
+			target:     "/v1/audio/voices",
+			authorizer: &recordingModelAuthorizer{err: core.NewPermissionError("provider not allowed for this key")},
+			wantStatus: http.StatusForbidden,
+			wantMsg:    "provider not allowed",
+		},
+		{
+			name:       "rate limit breach",
+			target:     "/v1/audio/voices",
+			limiter:    true,
+			wantStatus: http.StatusTooManyRequests,
+		},
+		{
+			name:   "upstream rejects the cursor",
+			target: "/v1/audio/voices?after=voice_missing",
+			mutate: func(m *customVoicesMockProvider) {
+				m.customErr = core.NewNotFoundError("No voice found with id 'voice_missing'")
+			},
+			wantStatus: http.StatusNotFound,
+			wantMsg:    "No voice found",
+			wantCalled: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newCustomVoicesMock()
+			if tt.mutate != nil {
+				tt.mutate(mock)
+			}
+			svc := &audioService{provider: mock}
+			if tt.authorizer != nil {
+				svc.modelAuthorizer = tt.authorizer
+			}
+			if tt.limiter {
+				svc.rateLimiter = rejectingRateLimiter{}
+			}
+
+			c, rec := echotest.Get(t, tt.target)
+			require.NoError(t, svc.ListVoices(c))
+
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			assert.Contains(t, echotest.Decode[core.OpenAIErrorEnvelope](t, rec).Error.Message, tt.wantMsg)
+			assert.Equal(t, tt.wantCalled, mock.calledParams != nil)
+		})
+	}
+}

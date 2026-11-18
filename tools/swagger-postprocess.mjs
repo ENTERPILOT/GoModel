@@ -221,9 +221,52 @@ function applyRetrieveModelDialects() {
   }
 }
 
+// Swagger 2 mirror of applyVoiceListShapes in openapi-postprocess.mjs:
+// GET /v1/audio/voices answers a request without model with OpenAI's own
+// voice list instead of the per-model list.
+function applyVoiceListShapes() {
+  if (!spec.definitions) {
+    throw new Error("missing Swagger definitions");
+  }
+  spec.definitions["core.AudioCustomVoice"] = {
+    description: "One custom voice in OpenAI's own voice list.",
+    type: "object",
+    required: ["created_at", "id", "name", "object"],
+    properties: {
+      id: { type: "string", example: "voice_1234" },
+      object: { type: "string", example: "audio.voice" },
+      name: { type: "string", example: "Narrator" },
+      created_at: { type: "integer", example: 1734220800 },
+      type: { type: "string", description: "How the voice was created: audio_sample or prompt.", example: "audio_sample" },
+      prompt: { type: "string" },
+    },
+  };
+  spec.definitions["core.AudioCustomVoicesResponse"] = {
+    description: "OpenAI's own voice list: one cursor page of an account's custom voices, returned when the request names no model.",
+    type: "object",
+    required: ["data", "has_more", "object"],
+    properties: {
+      object: { type: "string", example: "list" },
+      data: { type: "array", items: { $ref: "#/definitions/core.AudioCustomVoice" } },
+      first_id: { type: "string", "x-nullable": true },
+      last_id: { type: "string", "x-nullable": true },
+      has_more: { type: "boolean" },
+    },
+  };
+  const response = spec.paths?.["/v1/audio/voices"]?.get?.responses?.["200"];
+  if (!response?.schema) {
+    throw new Error("missing response schema 200 on GET /v1/audio/voices");
+  }
+  response.schema = {
+    description: "The per-model voice list with model; OpenAI's own voice list without it.",
+    oneOf: ["core.AudioVoicesResponse", "core.AudioCustomVoicesResponse"].map((name) => ({ $ref: `#/definitions/${name}` })),
+  };
+}
+
 applyAnthropicMessageSchemas();
 applyResponsesReplayStateSchema();
 applyRetrieveModelDialects();
+applyVoiceListShapes();
 applySpeechVoiceOneOf();
 ensureRequiredProperty("core.ResponsesConversationRef", "id");
 

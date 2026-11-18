@@ -1,7 +1,9 @@
 package server
 
 import (
+	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -12,13 +14,15 @@ import (
 
 // AudioVoices handles GET /v1/audio/voices.
 //
-// @Summary      List voices for a text-to-speech model
-// @Description  GoModel extension, not part of the OpenAI API. Returns the voices the provider behind model offers; each id is a valid voice for POST /v1/audio/speech.
+// @Summary      List voices
+// @Description  With model, a GoModel extension: the voices the provider behind model offers, each id a valid voice for POST /v1/audio/speech. Without model, OpenAI's own voice list: one cursor page of the custom voices of the OpenAI account.
 // @Tags         audio
 // @Produce      json
 // @Security     BearerAuth
-// @Param        model     query     string  true   "Model ID"
+// @Param        model     query     string  false  "Model ID. Omit for OpenAI's own list of custom voices."
 // @Param        provider  query     string  false  "Provider routing hint"
+// @Param        limit     query     int     false  "Page size, without model only"
+// @Param        after     query     string  false  "Voice ID to list after, without model only"
 // @Success      200       {object}  core.AudioVoicesResponse
 // @Failure      400       {object}  core.OpenAIErrorEnvelope
 // @Failure      401       {object}  core.OpenAIErrorEnvelope
@@ -29,7 +33,8 @@ func (h *Handler) AudioVoices(c *echo.Context) error {
 	return h.audio().ListVoices(c)
 }
 
-// ListVoices handles GET /v1/audio/voices?model=..., a GoModel extension that
+// ListVoices handles GET /v1/audio/voices. Without a model it is OpenAI's own
+// voice list (see listCustomVoices). With one it is a GoModel extension that
 // self-hosted TTS servers also serve. The model resolves and is authorized
 // exactly as on /v1/audio/speech, so a caller only sees the voices of a model
 // it may synthesize with. It is an unbilled read: no budget or usage entry
@@ -50,7 +55,7 @@ func (s *audioService) ListVoices(c *echo.Context) error {
 	query := c.Request().URL.Query()
 	model := strings.TrimSpace(query.Get("model"))
 	if model == "" {
-		return handleError(c, core.NewInvalidRequestError("model is required", nil).WithParam("model"))
+		return s.listCustomVoices(c, query)
 	}
 	selector, err := s.authorizedSelector(c, model, strings.TrimSpace(query.Get("provider")))
 	if err != nil {
@@ -74,6 +79,70 @@ func (s *audioService) ListVoices(c *echo.Context) error {
 	}
 	if resp == nil || resp.Voices == nil {
 		resp = &core.AudioVoicesResponse{Voices: []core.AudioVoice{}}
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+// listCustomVoices handles GET /v1/audio/voices without a model, which is
+// OpenAI's own voice list: one cursor page of an account's custom voices. It
+// goes to the provider named by the provider parameter, or to the first one
+// that serves the list. The request acts on the whole provider account, so the
+// caller must be granted the whole provider, as on a model-less passthrough
+// call. Without a provider that serves the list, a model is what the request
+// lacks.
+func (s *audioService) listCustomVoices(c *echo.Context, query url.Values) error {
+	modelRequired := core.NewInvalidRequestError("model is required", nil).WithParam("model")
+	router, ok := s.provider.(core.AudioCustomVoicesRoutableProvider)
+	if !ok {
+		return handleError(c, modelRequired)
+	}
+	requested := strings.TrimSpace(query.Get("provider"))
+	target := requested
+	if target == "" {
+		types := router.AudioCustomVoiceProviderTypes()
+		if len(types) == 0 {
+			return handleError(c, modelRequired)
+		}
+		target = types[0]
+	}
+	resolved := resolvePassthroughProvider(s.provider, target)
+	providerType, providerName := resolved.ProviderType, resolved.ProviderName
+	if providerName == "" {
+		providerName = target
+	}
+
+	ctx, _ := requestContextWithRequestID(c.Request())
+	c.SetRequest(c.Request().WithContext(ctx))
+	requestlog.EnrichEntryWithResolvedRoute(c, "", providerType, providerName)
+	if s.modelAuthorizer != nil {
+		if err := s.modelAuthorizer.ValidateProviderAccess(ctx, providerName); err != nil {
+			return handleError(c, err)
+		}
+	}
+	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRoute{provider: providerName})
+	if err != nil {
+		return handleError(c, err)
+	}
+	defer release()
+
+	resp, err := router.ListCustomVoices(ctx, providerName, core.AudioCustomVoicesParams{
+		Limit: strings.TrimSpace(query.Get("limit")),
+		After: strings.TrimSpace(query.Get("after")),
+	})
+	if err != nil {
+		if requested == "" && errors.Is(err, core.ErrAudioCustomVoicesUnsupported) {
+			return handleError(c, modelRequired)
+		}
+		return handleError(c, err)
+	}
+	if resp == nil {
+		resp = &core.AudioCustomVoicesResponse{}
+	}
+	if resp.Object == "" {
+		resp.Object = "list"
+	}
+	if resp.Data == nil {
+		resp.Data = []core.AudioCustomVoice{}
 	}
 	return c.JSON(http.StatusOK, resp)
 }

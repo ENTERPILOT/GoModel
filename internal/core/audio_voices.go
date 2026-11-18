@@ -33,6 +33,45 @@ type AudioVoicesResponse struct {
 	Voices []AudioVoice `json:"voices"`
 }
 
+// AudioCustomVoicesParams are the cursor parameters of OpenAI's own voice list
+// (GET /v1/audio/voices without a model). They are forwarded as sent, so the
+// upstream is what validates them.
+type AudioCustomVoicesParams struct {
+	Limit string
+	After string
+}
+
+// AudioCustomVoice is one custom voice in OpenAI's own voice list.
+type AudioCustomVoice struct {
+	ID        string `json:"id" example:"voice_1234"`
+	Object    string `json:"object" example:"audio.voice"`
+	Name      string `json:"name" example:"Narrator"`
+	CreatedAt int64  `json:"created_at" example:"1734220800"`
+	// Type is how the voice was created: "audio_sample" or "prompt".
+	Type   string `json:"type,omitempty" example:"audio_sample"`
+	Prompt string `json:"prompt,omitempty"`
+}
+
+// AudioCustomVoicesResponse is OpenAI's own voice list: one cursor page of an
+// organization's custom voices.
+type AudioCustomVoicesResponse struct {
+	Object  string             `json:"object" example:"list"`
+	Data    []AudioCustomVoice `json:"data"`
+	FirstID *string            `json:"first_id"`
+	LastID  *string            `json:"last_id"`
+	HasMore bool               `json:"has_more"`
+}
+
+// ErrAudioCustomVoicesUnsupported marks a provider that does not serve
+// OpenAI's own voice list.
+var ErrAudioCustomVoicesUnsupported = errors.New("custom voice listing is not supported")
+
+// NewAudioCustomVoicesUnsupportedError reports that provider does not serve
+// OpenAI's own voice list.
+func NewAudioCustomVoicesUnsupportedError(provider string) *GatewayError {
+	return NewInvalidRequestError(fmt.Sprintf("provider %q does not support listing custom voices", provider), ErrAudioCustomVoicesUnsupported).WithParam("provider")
+}
+
 // NewAudioVoicesUnsupportedError reports that the provider behind model cannot
 // list voices: it has no voice-listing capability, or its upstream has no
 // such endpoint. It is the same invalid_request_error a provider without any

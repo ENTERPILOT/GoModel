@@ -6427,26 +6427,37 @@ const docTemplate = `{
         },
         "/v1/audio/voices": {
             "get": {
-                "description": "GoModel extension, not part of the OpenAI API. Returns the voices the provider behind model offers; each id is a valid voice for POST /v1/audio/speech.",
+                "description": "With model, a GoModel extension: the voices the provider behind model offers, each id a valid voice for POST /v1/audio/speech. Without model, OpenAI's own voice list: one cursor page of the custom voices of the OpenAI account.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "audio"
                 ],
-                "summary": "List voices for a text-to-speech model",
+                "summary": "List voices",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Model ID",
+                        "description": "Model ID. Omit for OpenAI's own list of custom voices.",
                         "name": "model",
-                        "in": "query",
-                        "required": true
+                        "in": "query"
                     },
                     {
                         "type": "string",
                         "description": "Provider routing hint",
                         "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size, without model only",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Voice ID to list after, without model only",
+                        "name": "after",
                         "in": "query"
                     }
                 ],
@@ -6454,7 +6465,15 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/core.AudioVoicesResponse"
+                            "description": "The per-model voice list with model; OpenAI's own voice list without it.",
+                            "oneOf": [
+                                {
+                                    "$ref": "#/definitions/core.AudioVoicesResponse"
+                                },
+                                {
+                                    "$ref": "#/definitions/core.AudioCustomVoicesResponse"
+                                }
+                            ]
                         }
                     },
                     "400": {
@@ -15838,6 +15857,74 @@ const docTemplate = `{
                 },
                 "created_at": {
                     "type": "string"
+                }
+            }
+        },
+        "core.AudioCustomVoice": {
+            "description": "One custom voice in OpenAI's own voice list.",
+            "type": "object",
+            "required": [
+                "created_at",
+                "id",
+                "name",
+                "object"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "example": "voice_1234"
+                },
+                "object": {
+                    "type": "string",
+                    "example": "audio.voice"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Narrator"
+                },
+                "created_at": {
+                    "type": "integer",
+                    "example": 1734220800
+                },
+                "type": {
+                    "type": "string",
+                    "description": "How the voice was created: audio_sample or prompt.",
+                    "example": "audio_sample"
+                },
+                "prompt": {
+                    "type": "string"
+                }
+            }
+        },
+        "core.AudioCustomVoicesResponse": {
+            "description": "OpenAI's own voice list: one cursor page of an account's custom voices, returned when the request names no model.",
+            "type": "object",
+            "required": [
+                "data",
+                "has_more",
+                "object"
+            ],
+            "properties": {
+                "object": {
+                    "type": "string",
+                    "example": "list"
+                },
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.AudioCustomVoice"
+                    }
+                },
+                "first_id": {
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "last_id": {
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "has_more": {
+                    "type": "boolean"
                 }
             }
         }

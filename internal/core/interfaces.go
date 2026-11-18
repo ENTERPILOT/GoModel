@@ -53,6 +53,20 @@ type AudioVoicesProvider interface {
 	ListVoices(ctx context.Context, req *AudioVoicesRequest) (*AudioVoicesResponse, error)
 }
 
+// AudioCustomVoicesProvider is implemented by providers that serve OpenAI's own
+// voice list: the account's custom voices, with no model named.
+type AudioCustomVoicesProvider interface {
+	ListCustomVoices(ctx context.Context, params AudioCustomVoicesParams) (*AudioCustomVoicesResponse, error)
+}
+
+// AudioCustomVoicesRoutableProvider routes OpenAI's own voice list to a
+// provider, named by its type or its configured instance name, and reports the
+// provider types that can serve it.
+type AudioCustomVoicesRoutableProvider interface {
+	ListCustomVoices(ctx context.Context, provider string, params AudioCustomVoicesParams) (*AudioCustomVoicesResponse, error)
+	AudioCustomVoiceProviderTypes() []string
+}
+
 // ImageProvider is implemented by providers that support the OpenAI-compatible
 // image generation endpoint (POST /v1/images/generations). It is optional so
 // providers without image models can omit it; the router discovers support by

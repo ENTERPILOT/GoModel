@@ -126,7 +126,7 @@ WebRTC 翻译通话除外：其媒体流不经过网关，因此不会被计量�
 | ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `/v1/usage` | GET    | 自助查询调用方有效用户路径的用量、预算和速率限制状态，请参阅 [Usage API](/zh/advanced/usage-api) |
 | `/v1/auth/verify` | GET | 报告请求所携带的 API 密钥是否有效（需启用 `AUTH_VERIFY_ENABLED`） |
-| `/v1/audio/voices` | GET | 列出文本转语音模型提供的音色（`?model=`），请参阅[音色发现](#音色发现) |
+| `/v1/audio/voices` | GET | 列出文本转语音模型提供的音色（`?model=`）；不带 `model` 时列出 OpenAI 账户的自定义音色，请参阅[音色发现](#音色发现) |
 
 ### 音色发现
 
@@ -151,11 +151,36 @@ curl "http://localhost:8080/v1/audio/voices?model=kokoro" \
 | OpenAI（`api.openai.com` 及其区域主机，如 `eu.api.openai.com`） | 先是静态列表中的内置音色，随后是通过 `GET /v1/audio/voices` 获取的组织自定义音色。内置：`alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`, `marin`, `cedar`；`tts-1` 系列（`tts-1`、`tts-1-hd` 及其快照版本）仅返回其支持的九种（不含 `ballad`、`verse`、`marin`、`cedar`）。自定义：由录音创建的音色；由提示词生成的音色不会列出，因为语音端点不接受它们。如果上游调用失败（例如 API 密钥没有 `api.voices.read` 权限），仍会返回内置音色。仅列出文本转语音模型；实时和聊天模型使用不同的音色集，返回下文所述的 `400` |
 | 使用自定义 `base_url` 的 `openai` 类型提供商 | `GET {base_url}/audio/voices?model=`，适用于 Kokoro-FastAPI、Speaches、LocalAI 或 xn-ptts 等自托管服务器 |
 
-没有音色列表的提供商（包括 `/audio/voices` 返回 404 或 405 的托管 OpenAI 兼容 API）返回 `400` `invalid_request_error`（`model "…" does not support listing voices`）。缺少 `model` 同样返回 `400`；未知模型返回 `404`。
+没有音色列表的提供商（包括 `/audio/voices` 返回 404 或 405 的托管 OpenAI 兼容 API）返回 `400` `invalid_request_error`（`model "…" does not support listing voices`）。未知模型返回 `404`。
 
 <Note>
   Open WebUI 的 OpenAI TTS 引擎请求 `{base_url}/audio/voices` 时既不带 `model` 也不带 API 密钥，因此对接 GoModel 时会回退到其内置的 OpenAI 音色列表。请改为在其设置中直接填写音色 ID。
 </Note>
+
+#### OpenAI 自己的音色列表
+
+不带 `model` 时，该端点的行为与 OpenAI 自己的 `GET /v1/audio/voices` 相同：以 OpenAI 的格式返回 OpenAI 账户自定义音色的一页。
+
+```bash
+curl "http://localhost:8080/v1/audio/voices?limit=20" \
+  -H "Authorization: Bearer $GOMODEL_API_KEY"
+```
+
+```json
+{
+  "object": "list",
+  "data": [{ "id": "voice_1234", "object": "audio.voice", "name": "Narrator", "created_at": 1734220800, "type": "audio_sample" }],
+  "first_id": "voice_1234",
+  "last_id": "voice_1234",
+  "has_more": false
+}
+```
+
+- `limit` 和 `after` 会原样转发给 OpenAI，由 OpenAI 校验。
+- 列表来自指向 OpenAI 官方 API 的 `openai` 提供商。配置了多个时，用 `provider=<名称>` 选择其中一个。
+- 请求没有指定模型，因此 API 密钥必须被授予整个提供商的访问权限，与不指定模型的透传调用相同。
+- 列表包含由提示词生成的音色，而 `/v1/audio/speech` 不接受它们。`?model=` 只列出语音模型可以使用的音色。
+- 没有这样的提供商时，不带 `model` 的请求返回 `400`（`model is required`）。
 
 ### 密钥验证
 

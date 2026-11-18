@@ -29,7 +29,7 @@ doesn't support audio returns a clear error rather than mis-routing.
 | `POST /v1/audio/speech` | Text-to-speech. Accepts a JSON body and returns **binary audio** in the requested `response_format`. |
 | `POST /v1/audio/transcriptions` | Speech-to-text. Accepts a `multipart/form-data` upload and returns JSON or plain text per `response_format`. |
 | `POST /v1/audio/translations` | Speech-to-English-text. Same upload shape as transcriptions, without `language` and `timestamp_granularities[]`. |
-| `GET /v1/audio/voices?model=` | GoModel extension: the voices a TTS model offers — see [Voice discovery](/advanced/api-endpoints#voice-discovery). |
+| `GET /v1/audio/voices?model=` | GoModel extension: the voices a TTS model offers. Without `model`, OpenAI's own list of custom voices. See [Voice discovery](/advanced/api-endpoints#voice-discovery). |
 
 JSON transcription and translation bodies are normalized to the OpenAI shape:
 Groq's vendor `x_groq` member is removed from `json` and `verbose_json`

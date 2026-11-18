@@ -8803,7 +8803,8 @@ Checks `GET /v1/audio/voices`: OpenAI's own listing covers custom voices only,
 so the gateway answers for an OpenAI model from its static list of built-in
 voices, followed by the organization's custom voices (ids starting with
 `voice_`, none in most accounts), normalized to `id` and `name`. A request
-without `model` is rejected before any provider is asked.
+without `model` is OpenAI's own voice list: one page of the account's custom
+voices in OpenAI's shape.
 
 ```bash
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s270.headers.XXXXXX")
@@ -8819,7 +8820,12 @@ curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices?model=tts
 grep -Eiq '^HTTP/.* 200 ' "$HEADERS_FILE"
 jq -e '([.voices[:9][].id] | sort) == (["alloy","ash","coral","echo","fable","nova","onyx","sage","shimmer"] | sort) and all(.voices[9:][]; .id | startswith("voice_"))' "$BODY_FILE" >/dev/null
 
-curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices"
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices?limit=5"
+grep -Eiq '^HTTP/.* 200 ' "$HEADERS_FILE"
+jq -e '.object == "list" and (.data | type == "array" and length <= 5) and (.has_more | type == "boolean") and all(.data[]; .id | startswith("voice_"))' "$BODY_FILE" >/dev/null
+
+# OpenAI validates the cursor parameters.
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices?limit=101"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
-jq -e '.error.type == "invalid_request_error" and .error.param == "model"' "$BODY_FILE" >/dev/null
+jq -e '.error.type == "invalid_request_error" and .error.param == "limit"' "$BODY_FILE" >/dev/null
 ```

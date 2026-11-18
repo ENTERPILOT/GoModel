@@ -137,3 +137,86 @@ func TestRouterListVoices_Errors(t *testing.T) {
 		})
 	}
 }
+
+type mockCustomVoicesProvider struct {
+	*mockProvider
+	resp       *core.AudioCustomVoicesResponse
+	lastParams *core.AudioCustomVoicesParams
+	// call, when set, runs with the context the router dispatched with.
+	call func(ctx context.Context) error
+}
+
+func (m *mockCustomVoicesProvider) ListCustomVoices(ctx context.Context, params core.AudioCustomVoicesParams) (*core.AudioCustomVoicesResponse, error) {
+	m.lastParams = &params
+	if m.call != nil {
+		if err := m.call(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return m.resp, m.err
+}
+
+func TestRouterListCustomVoices(t *testing.T) {
+	openAI := &mockCustomVoicesProvider{
+		mockProvider: &mockProvider{name: "openai"},
+		resp:         &core.AudioCustomVoicesResponse{Object: "list", Data: []core.AudioCustomVoice{{ID: "voice_1", Name: "Narrator"}}},
+	}
+	lookup := newMockLookup()
+	lookup.addModel("openai/tts-1", openAI, "openai")
+	lookup.addModel("groq/whisper", &mockProvider{name: "groq"}, "groq")
+	router, err := NewRouter(lookup)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"openai"}, router.AudioCustomVoiceProviderTypes())
+
+	params := core.AudioCustomVoicesParams{Limit: "5", After: "voice_0"}
+	for _, provider := range []string{"openai", " openai "} {
+		openAI.lastParams = nil
+		resp, err := router.ListCustomVoices(context.Background(), provider, params)
+		require.NoError(t, err)
+		assert.Same(t, openAI.resp, resp)
+		assert.Equal(t, &params, openAI.lastParams)
+	}
+
+	for _, provider := range []string{"groq", "missing", ""} {
+		_, err := router.ListCustomVoices(context.Background(), provider, params)
+		require.ErrorIs(t, err, core.ErrAudioCustomVoicesUnsupported, "provider %q", provider)
+	}
+}
+
+// OpenAI's own voice list is a control-plane read like the per-model listing,
+// so its failures must not open the breaker inference shares with it.
+func TestRouterListCustomVoices_BypassesCircuitBreaker(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(server.Close)
+	cfg := llmclient.DefaultConfig("openai", server.URL)
+	cfg.Retry.MaxRetries = 0
+	cfg.CircuitBreaker.FailureThreshold = 1
+	cfg.CircuitBreaker.Timeout = time.Hour
+	client := llmclient.New(cfg, nil)
+	request := llmclient.Request{Method: http.MethodGet, Endpoint: "/audio/voices"}
+
+	lister := &mockCustomVoicesProvider{
+		mockProvider: &mockProvider{name: "openai"},
+		call: func(ctx context.Context) error {
+			_, err := client.DoRaw(ctx, request)
+			return err
+		},
+	}
+	lookup := newMockLookup()
+	lookup.addModel("openai/tts-1", lister, "openai")
+	router, err := NewRouter(lookup)
+	require.NoError(t, err)
+
+	for range 3 {
+		_, err = router.ListCustomVoices(context.Background(), "openai", core.AudioCustomVoicesParams{})
+		require.Error(t, err)
+	}
+
+	_, err = client.DoRaw(context.Background(), request)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, llmclient.ErrCircuitOpen)
+}

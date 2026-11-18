@@ -138,7 +138,7 @@ Dostępne, gdy skonfigurowany jest provider `jev` lub `openrouter`; zobacz
 | ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `/v1/usage` | GET    | Samoobsługowy status użycia, budżetu i limitów żądań dla efektywnej ścieżki użytkownika wywołującego – zobacz [Usage API](/pl/advanced/usage-api) |
 | `/v1/auth/verify` | GET | Informuje, czy klucz API przesłany w requeście jest prawidłowy (gdy `AUTH_VERIFY_ENABLED`) |
-| `/v1/audio/voices` | GET | Lista głosów oferowanych przez model text-to-speech (`?model=`) – zobacz [Wykrywanie głosów](#wykrywanie-głosów) |
+| `/v1/audio/voices` | GET | Lista głosów oferowanych przez model text-to-speech (`?model=`) albo, bez `model`, własnych głosów konta OpenAI – zobacz [Wykrywanie głosów](#wykrywanie-głosów) |
 
 ### Wykrywanie głosów
 
@@ -172,14 +172,42 @@ obowiązują tak jak w `/v1/audio/speech`.
 | Providery typu `openai` z własnym `base_url` | `GET {base_url}/audio/voices?model=` – self-hostowane serwery, takie jak Kokoro-FastAPI, Speaches, LocalAI czy xn-ptts |
 
 Provider bez listy głosów – w tym hostowane API zgodne z OpenAI, których `/audio/voices` odpowiada 404 lub 405 – zwraca `400` `invalid_request_error`
-(`model "…" does not support listing voices`). Brak `model` to również `400`;
-nieznany model to `404`.
+(`model "…" does not support listing voices`). Nieznany model to `404`.
 
 <Note>
   Silnik OpenAI TTS w Open WebUI wywołuje `{base_url}/audio/voices` bez `model`
   i bez klucza API, więc przy GoModel wraca do wbudowanej listy głosów OpenAI.
   Zamiast tego wpisz ID głosu w jego ustawieniach.
 </Note>
+
+#### Własna lista głosów OpenAI
+
+Bez `model` endpoint odpowiada jak własne `GET /v1/audio/voices` OpenAI: jedna
+strona własnych głosów (custom voices) konta OpenAI, w formacie OpenAI.
+
+```bash
+curl "http://localhost:8080/v1/audio/voices?limit=20" \
+  -H "Authorization: Bearer $GOMODEL_API_KEY"
+```
+
+```json
+{
+  "object": "list",
+  "data": [{ "id": "voice_1234", "object": "audio.voice", "name": "Narrator", "created_at": 1734220800, "type": "audio_sample" }],
+  "first_id": "voice_1234",
+  "last_id": "voice_1234",
+  "has_more": false
+}
+```
+
+- `limit` i `after` są przekazywane do OpenAI, które je waliduje.
+- Lista pochodzi od providera `openai` wskazującego na własne API OpenAI.
+  Użyj `provider=<nazwa>`, aby wybrać jednego, gdy skonfigurowano kilku.
+- Żądanie nie wskazuje modelu, więc klucz API musi mieć dostęp do całego
+  providera, tak jak przy wywołaniu passthrough bez modelu.
+- Lista zawiera też głosy wygenerowane z promptu, których `/v1/audio/speech`
+  nie przyjmuje. `?model=` zwraca tylko głosy, których może użyć model speech.
+- Bez takiego providera żądanie bez `model` zwraca `400` (`model is required`).
 
 ### Weryfikacja klucza
 
