@@ -278,7 +278,7 @@ scrape_configs:
       credentials_file: /etc/prometheus/gomodel-token
 ```
 
-使用 Prometheus Operator 时，在 ServiceMonitor 端点上设置相同的凭据（`authorization.credentials` 引用 Secret 中的键）；Helm chart 通过 `metrics.serviceMonitor.bearerTokenSecret` 完成此配置。
+使用 Prometheus Operator 时，在 ServiceMonitor 端点上设置相同的凭据（`authorization.credentials` 引用 Secret 中的键）；Helm chart 通过 `metrics.serviceMonitor.bearerTokenSecret` 完成此配置。该 Secret 必须位于 ServiceMonitor 所在的命名空间。
 
 如果需要进一步保护指标端点：
 

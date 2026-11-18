@@ -542,22 +542,33 @@ func TestServerWithMasterKeyAndMetrics(t *testing.T) {
 	})
 }
 
-// METRICS_REQUIRE_AUTH keeps the metrics endpoint behind bearer auth; the
-// default leaves it public for unauthenticated scrapers.
+// METRICS_REQUIRE_AUTH keeps the metrics endpoint behind bearer auth, even
+// when another exemption covers its path; the default leaves it public for
+// unauthenticated scrapers. It does not turn authentication on by itself.
 func TestMetricsEndpointRequireAuth(t *testing.T) {
+	const masterKey = "test-secret-key"
+	managedKeys := mockAuthenticator{enabled: true, tokenToID: map[string]string{"managed-token": "key-prometheus"}}
 	tests := []struct {
-		name        string
-		requireAuth bool
-		endpoint    string
-		token       string
-		want        int
+		name          string
+		requireAuth   bool
+		noMasterKey   bool
+		authenticator BearerTokenAuthenticator
+		extraSkip     []string
+		endpoint      string
+		token         string
+		want          int
 	}{
 		{name: "default: public without a credential", want: http.StatusOK},
 		{name: "required: refused without a credential", requireAuth: true, want: http.StatusUnauthorized},
 		{name: "required: refused with a wrong credential", requireAuth: true, token: "wrong", want: http.StatusUnauthorized},
-		{name: "required: served with the master key", requireAuth: true, token: "test-secret-key", want: http.StatusOK},
+		{name: "required: served with the master key", requireAuth: true, token: masterKey, want: http.StatusOK},
+		{name: "required: served with a managed key", requireAuth: true, authenticator: managedKeys, token: "managed-token", want: http.StatusOK},
 		{name: "required: custom endpoint refused without a credential", requireAuth: true, endpoint: "/internal/prometheus", want: http.StatusUnauthorized},
-		{name: "required: custom endpoint served with the master key", requireAuth: true, endpoint: "/internal/prometheus", token: "test-secret-key", want: http.StatusOK},
+		{name: "required: custom endpoint served with the master key", requireAuth: true, endpoint: "/internal/prometheus", token: masterKey, want: http.StatusOK},
+		{name: "required: refused under another exempt prefix", requireAuth: true, extraSkip: []string{"/internal/*"}, endpoint: "/internal/prometheus", want: http.StatusUnauthorized},
+		{name: "required: refused when the path itself is exempt", requireAuth: true, extraSkip: []string{"/internal/prometheus"}, endpoint: "/internal/prometheus", want: http.StatusUnauthorized},
+		{name: "default: public under another exempt prefix", extraSkip: []string{"/internal/*"}, endpoint: "/internal/prometheus", want: http.StatusOK},
+		{name: "required: no effect on a gateway without authentication", requireAuth: true, noMasterKey: true, want: http.StatusOK},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -565,12 +576,18 @@ func TestMetricsEndpointRequireAuth(t *testing.T) {
 			if endpoint == "" {
 				endpoint = "/metrics"
 			}
-			srv := New(&mockProvider{}, &Config{
-				MasterKey:          "test-secret-key",
+			cfg := &Config{
+				MasterKey:          masterKey,
+				Authenticator:      tt.authenticator,
 				MetricsEnabled:     true,
 				MetricsEndpoint:    endpoint,
 				MetricsRequireAuth: tt.requireAuth,
-			})
+				ExtraAuthSkipPaths: tt.extraSkip,
+			}
+			if tt.noMasterKey {
+				cfg.MasterKey = ""
+			}
+			srv := New(&mockProvider{}, cfg)
 			req := httptest.NewRequest(http.MethodGet, endpoint, nil)
 			if tt.token != "" {
 				req.Header.Set("Authorization", "Bearer "+tt.token)

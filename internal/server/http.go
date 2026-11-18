@@ -76,7 +76,7 @@ type Config struct {
 	Authenticator                   BearerTokenAuthenticator               // Optional: managed API key authenticator
 	MetricsEnabled                  bool                                   // Whether to expose Prometheus metrics endpoint
 	MetricsEndpoint                 string                                 // HTTP path for metrics endpoint (default: /metrics)
-	MetricsRequireAuth              bool                                   // Keep the metrics endpoint behind bearer authentication
+	MetricsRequireAuth              bool                                   // Stop exempting the metrics endpoint from authentication; no effect when the gateway has none configured
 	BodySizeLimit                   string                                 // Max request body size (e.g., "10M", "1024K")
 	StreamStallTimeout              time.Duration                          // Max time one response write on a model route waits for the client to read; 0 disables
 	PprofEnabled                    bool                                   // Whether to expose debug profiling routes at /debug/pprof/*
@@ -283,6 +283,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// Build list of paths that skip authentication
 	authSkipPaths := []string{"/health", "/health/ready", "/version"}
+	var authRequiredPaths []string
 
 	// Determine metrics path
 	metricsPath := config.ResolveMetricsEndpoint("")
@@ -295,7 +296,11 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 				"configured", cfg.MetricsEndpoint,
 				"normalized", configuredPath)
 		}
-		if !cfg.MetricsRequireAuth {
+		if cfg.MetricsRequireAuth {
+			// Named explicitly so a custom path under another exemption, such
+			// as /swagger/* or an extension's public path, stays protected.
+			authRequiredPaths = append(authRequiredPaths, metricsPath)
+		} else {
 			authSkipPaths = append(authSkipPaths, metricsPath)
 		}
 	}
@@ -435,6 +440,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 			Authenticator:         cfg.Authenticator,
 			RequestAuthenticators: cfg.RequestAuthenticators,
 			SkipPaths:             authSkipPaths,
+			RequiredPaths:         authRequiredPaths,
 			UserPathHeader:        userPathHeaderName,
 			RequireCredential:     cfg.MasterKeyDisabled,
 		}))

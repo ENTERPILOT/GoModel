@@ -292,7 +292,8 @@ scrape_configs:
 
 With the Prometheus Operator, set the same credential on the ServiceMonitor
 endpoint (`authorization.credentials` referencing a Secret key); the Helm chart
-does this with `metrics.serviceMonitor.bearerTokenSecret`.
+does this with `metrics.serviceMonitor.bearerTokenSecret`. The Secret must be in
+the ServiceMonitor's namespace.
 
 If you need to protect the metrics endpoint further:
 

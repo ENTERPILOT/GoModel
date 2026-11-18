@@ -294,7 +294,8 @@ scrape_configs:
 
 Mit dem Prometheus Operator setzen Sie dasselbe Credential am ServiceMonitor-Endpunkt
 (`authorization.credentials` mit Verweis auf einen Secret-Key); das Helm-Chart
-erledigt das mit `metrics.serviceMonitor.bearerTokenSecret`.
+erledigt das mit `metrics.serviceMonitor.bearerTokenSecret`. Das Secret muss im
+Namespace des ServiceMonitors liegen.
 
 Wenn Sie den Metrik-Endpunkt zusätzlich schützen müssen:
 

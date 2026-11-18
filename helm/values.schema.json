@@ -60,7 +60,11 @@
               "properties": {
                 "name": { "type": "string", "minLength": 1 },
                 "key": { "type": "string", "minLength": 1 }
-              }
+              },
+              "anyOf": [
+                { "maxProperties": 0 },
+                { "required": ["name", "key"] }
+              ]
             },
             "labels": { "type": "object" }
           }

@@ -138,6 +138,8 @@ An ingress or HTTPRoute on `/` publishes it too. To keep it behind bearer auth,
 set `env.METRICS_REQUIRE_AUTH: "true"` and give the ServiceMonitor a gateway API
 key (preferably a dedicated managed key, not the master key) from a Secret with
 `metrics.serviceMonitor.bearerTokenSecret: {name: gomodel-metrics, key: token}`.
+The Secret must be in the ServiceMonitor's namespace, and the setting only takes
+effect when the gateway has a master key or managed keys.
 Otherwise exclude the path at the ingress or restrict who can reach the pods.
 With the Prometheus Operator, set `metrics.serviceMonitor.enabled: true` and add
 the labels your Prometheus selects on under `metrics.serviceMonitor.labels`.

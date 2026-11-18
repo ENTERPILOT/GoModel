@@ -296,7 +296,7 @@ server:
 | ------------------ | ---------------------------------------- | ---------- |
 | `METRICS_ENABLED`  | 启用 Prometheus 指标（实验性） | `false`    |
 | `METRICS_ENDPOINT` | 指标的 HTTP 路径                    | `/metrics` |
-| `METRICS_REQUIRE_AUTH` | 指标端点需要 Bearer 认证 | `false` |
+| `METRICS_REQUIRE_AUTH` | 指标端点需要 Bearer 认证；网关未配置认证时不起作用 | `false` |
 | `METRICS_CALLER_USER_PATH` | 将用户路径加入 Token 和成本指标（Prometheus 与 OpenTelemetry 均适用），以及 Prometheus 中按调用方统计的请求计数器（请参阅[调用方维度](/zh/guides/prometheus-metrics#调用方维度)） | `false` |
 | `METRICS_CALLER_USER_PATH_DEPTH` | 指标上保留的用户路径前几段；小于 1 的值使用默认值 | `2` |
 | `METRICS_CALLER_AUTH_KEY` | 为这些指标加入托管 API Key 的名称 | `false` |

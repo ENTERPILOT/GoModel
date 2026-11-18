@@ -16,7 +16,9 @@ type MetricsConfig struct {
 	Endpoint string `yaml:"endpoint" env:"METRICS_ENDPOINT"`
 
 	// RequireAuth keeps the metrics endpoint behind the gateway's normal
-	// bearer authentication instead of serving it without a credential.
+	// bearer authentication instead of serving it without a credential. It
+	// does not turn authentication on: a gateway with no master key and no
+	// managed keys still serves the endpoint openly.
 	// Default: false
 	RequireAuth bool `yaml:"require_auth" env:"METRICS_REQUIRE_AUTH"`
 

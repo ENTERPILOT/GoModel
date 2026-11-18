@@ -603,7 +603,8 @@ wykonuj na nim VACUUM osobno.
 
 - **Metryki są domyślnie wyłączone.** Ustaw `METRICS_ENABLED=true`, aby udostępnić
   metryki Prometheus pod `METRICS_ENDPOINT` (`/metrics`). Bez
-  `METRICS_REQUIRE_AUTH=true` endpoint nie wymaga uwierzytelnienia, więc trzymaj
+  `METRICS_REQUIRE_AUTH=true` (działa tylko przy skonfigurowanym
+  uwierzytelnianiu gatewaya) endpoint nie wymaga uwierzytelnienia, więc trzymaj
   go wewnątrz swojego perymetru albo wymagaj poświadczenia. Zobacz
   [przewodnik po Prometheusie](/pl/guides/prometheus-metrics).
 - **Eksport OpenTelemetry jest domyślnie wyłączony.** Ustaw `OTEL_ENABLED=true` i

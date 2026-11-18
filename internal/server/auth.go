@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -53,6 +54,7 @@ type AuthMiddlewareConfig struct {
 	Authenticator         BearerTokenAuthenticator   // Optional: managed API key authenticator
 	RequestAuthenticators []ext.RequestAuthenticator // Optional: extension authenticators such as OIDC sessions
 	SkipPaths             []string                   // Paths that bypass authentication; a "/*" suffix matches by prefix
+	RequiredPaths         []string                   // Paths that always need a credential, even when SkipPaths covers them
 	UserPathHeader        string                     // Header carrying the request user path
 	// RequireCredential rejects requests that carry no valid credential even
 	// when no auth mechanism is configured, instead of allowing them. It is
@@ -86,6 +88,7 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 	authenticator := cfg.Authenticator
 	requestAuthenticators := cfg.RequestAuthenticators
 	skipPaths := escapedSkipPaths(cfg.SkipPaths)
+	requiredPaths := escapedSkipPaths(cfg.RequiredPaths)
 	userPathHeaderName := configuredUserPathHeaderName(cfg.UserPathHeader)
 	hasRequestAuthenticator := hasRequestAuthenticators(requestAuthenticators)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -103,7 +106,11 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 			// path is the one the router matches, so /%68ealth cannot reach a
 			// catch-all route as /health.
 			requestPath := c.Request().URL.EscapedPath()
-			for _, skipPath := range skipPaths {
+			skippable := skipPaths
+			if slices.Contains(requiredPaths, requestPath) {
+				skippable = nil
+			}
+			for _, skipPath := range skippable {
 				if strings.HasSuffix(skipPath, "/*") {
 					prefix := strings.TrimSuffix(skipPath, "*")
 					if strings.HasPrefix(requestPath, prefix) {

@@ -294,7 +294,8 @@ scrape_configs:
 
 Z Prometheus Operatorem ustaw to samo poświadczenie na endpoincie ServiceMonitor
 (`authorization.credentials` wskazujące klucz w Secret); chart Helm robi to przez
-`metrics.serviceMonitor.bearerTokenSecret`.
+`metrics.serviceMonitor.bearerTokenSecret`. Secret musi znajdować się w namespace
+ServiceMonitora.
 
 Jeśli potrzebujesz dodatkowo zabezpieczyć endpoint metryk:
 
