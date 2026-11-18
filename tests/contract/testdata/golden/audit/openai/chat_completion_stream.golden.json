@@ -1,0 +1,17 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Hello, World!",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 0,
+  "id": "chatcmpl-Ee0mRWqTwqiPsCUvyVepB88kmXYhR",
+  "model": "gpt-4o-mini-2024-07-18",
+  "object": "chat.completion",
+  "system_fingerprint": "fp_c5012d6921"
+}
