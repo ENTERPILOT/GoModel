@@ -84,8 +84,8 @@ func writeGatewayError(c *echo.Context, gatewayErr *core.GatewayError) error {
 	return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 }
 
-// escapedErrorHandledKey marks a request whose escaped error the central
-// handler has already dealt with.
+// escapedErrorHandledKey holds the escaped error the central handler last
+// dealt with on a request.
 const escapedErrorHandledKey = "gomodel.escaped-error-handled"
 
 // gatewayErrorHandler renders every error that escapes a handler — a recovered
@@ -99,22 +99,18 @@ func gatewayErrorHandler(c *echo.Context, err error) {
 	if err == nil {
 		return
 	}
-	_, panicked := errors.AsType[*middleware.PanicStackError](err)
 	// echo's default request logger hands an error here and then returns it,
-	// so the server delivers the same error a second time. A panic arrives
-	// once, from the recovery middleware outside that logger, and is always
-	// reported, even after an earlier error on the same request.
-	if !panicked {
-		if handled, _ := c.Get(escapedErrorHandledKey).(bool); handled {
-			return
-		}
-		c.Set(escapedErrorHandledKey, true)
+	// so the server delivers the same error a second time. A different error
+	// later on the same request, such as a panic, is still handled.
+	if handled, ok := c.Get(escapedErrorHandledKey).(error); ok && errors.Is(err, handled) {
+		return
 	}
+	c.Set(escapedErrorHandledKey, err)
 	// Once the response has started it cannot become an error response, so a
 	// failure while writing it is a broken relay (most often the client hanging
 	// up), not a gateway 500. A panic is still reported as one.
 	committed := responseCommitted(c)
-	if committed && !panicked {
+	if _, panicked := errors.AsType[*middleware.PanicStackError](err); committed && !panicked {
 		if !auditlog.HasRecordedError(c) {
 			enrichAuditEntryWithProviderAttempts(c)
 		}

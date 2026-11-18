@@ -460,8 +460,9 @@ func TestGatewayErrorHandler_ClassifiesFailuresOnCommittedResponses(t *testing.T
 // server so the goccy serializer, echo's dispatch and the handler are all in
 // the path — the shape that produced the opaque 500 in #881.
 // echo's default request logger delivers an escaped error twice; it is handled
-// once. A panic that follows on the same request is still reported in full.
-func TestGatewayErrorHandler_HandlesARepeatedErrorOnceButAlwaysReportsAPanic(t *testing.T) {
+// once. A different error or a panic that follows on the same request is still
+// reported, and a panic delivered twice is reported once.
+func TestGatewayErrorHandler_HandlesARepeatedErrorOnce(t *testing.T) {
 	var logs bytes.Buffer
 	original := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
@@ -475,9 +476,14 @@ func TestGatewayErrorHandler_HandlesARepeatedErrorOnceButAlwaysReportsAPanic(t *
 	gatewayErrorHandler(c, relayErr)
 	assert.Equal(t, 1, strings.Count(logs.String(), `"msg":"response terminated abnormally"`), logs.String())
 
-	gatewayErrorHandler(c, &middleware.PanicStackError{Err: errors.New("middleware blew up"), Stack: []byte("goroutine 1")})
+	gatewayErrorHandler(c, errors.New("cleanup failed"))
+	assert.Contains(t, logs.String(), `"error":"cleanup failed"`)
 
-	assert.Contains(t, logs.String(), `"panic":"middleware blew up"`)
+	panicErr := &middleware.PanicStackError{Err: errors.New("middleware blew up"), Stack: []byte("goroutine 1")}
+	gatewayErrorHandler(c, panicErr)
+	gatewayErrorHandler(c, panicErr)
+
+	assert.Equal(t, 1, strings.Count(logs.String(), `"panic":"middleware blew up"`), logs.String())
 	assert.Contains(t, logs.String(), `"stack":"goroutine 1"`)
 	assert.Equal(t, "partial", rec.Body.String())
 }
