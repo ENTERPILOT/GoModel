@@ -18,6 +18,13 @@ type ProviderConfig struct {
 	// direct constructor calls.
 	Name string
 	Type string
+	// Managed is true for a provider saved through the admin API and false
+	// for one declared in config.yaml or the environment. Whoever declares a
+	// provider also controls the gateway's host; an identity saving one from
+	// the dashboard may not, so an adapter must not send a credential it takes
+	// from the host (rather than from this configuration) to an endpoint a
+	// managed provider names.
+	Managed bool
 	// APIKey is the provider's primary credential: the first entry of APIKeys,
 	// or "" for keyless providers. Prefer APIKeys for anything that
 	// authenticates a request, so rotation is honoured.

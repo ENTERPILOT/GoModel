@@ -46,16 +46,9 @@ type modelCallRoute struct {
 // Authorization runs on the fully resolved selector so model-override and
 // user-path rules see the same concrete provider name as the inference orchestrator.
 func (s *modelCallService) prepare(c *echo.Context, model, providerHint string) (context.Context, modelCallRoute, error) {
-	// Surface resolution failures (unknown alias, registry not ready, malformed
-	// selector) instead of authorizing an unresolved selector.
-	selector, err := resolveServiceModel(c.Request().Context(), s.provider, s.modelResolver, model, providerHint)
+	selector, err := s.authorizedSelector(c, model, providerHint)
 	if err != nil {
 		return nil, modelCallRoute{}, err
-	}
-	if s.modelAuthorizer != nil {
-		if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {
-			return nil, modelCallRoute{}, err
-		}
 	}
 	if err := enforceBudget(c, s.budgetChecker, rateLimitRoute{provider: selectorProviderName(s.provider, selector)}); err != nil {
 		return nil, modelCallRoute{}, err
@@ -76,6 +69,23 @@ func (s *modelCallService) prepare(c *echo.Context, model, providerHint string) 
 		selector,
 	)
 	return ctx, route, nil
+}
+
+// authorizedSelector resolves the requested model (aliases, virtual models)
+// and checks the caller may use the resolved selector. Resolution failures
+// (unknown alias, registry not ready, malformed selector) surface instead of
+// authorizing an unresolved selector.
+func (s *modelCallService) authorizedSelector(c *echo.Context, model, providerHint string) (core.ModelSelector, error) {
+	selector, err := resolveServiceModel(c.Request().Context(), s.provider, s.modelResolver, model, providerHint)
+	if err != nil {
+		return core.ModelSelector{}, err
+	}
+	if s.modelAuthorizer != nil {
+		if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {
+			return core.ModelSelector{}, err
+		}
+	}
+	return selector, nil
 }
 
 // routeFor maps a resolved selector to its canonical provider type and concrete
@@ -126,6 +136,7 @@ func (s *modelCallService) logUsage(ctx context.Context, route modelCallRoute, e
 	}
 	entry.ProviderName = strings.TrimSpace(route.providerName)
 	entry.RoutedModel = strings.TrimSpace(route.model)
+	entry.Operation = core.GenAIOperationFromContext(ctx).Name()
 	entry.UserPath = core.UserPathFromContext(ctx)
 	entry.SessionID = core.SessionIDFromContext(ctx)
 	entry.AuthKeyID = core.GetAuthKeyID(ctx)
