@@ -1,0 +1,21 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Hello, World!",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 0,
+  "id": "66b5arLCB5rd7M8PiqWx-QQ",
+  "model": "gemini-2.5-flash",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 4,
+    "prompt_tokens": 11,
+    "total_tokens": 36
+  }
+}

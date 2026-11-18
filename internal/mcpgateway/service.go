@@ -1047,12 +1047,11 @@ func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapsho
 		if prefix {
 			exposed = NamespacedName(upstreamName, tool.Name)
 		}
-		if owner, taken := owners[exposed]; taken {
+		if owner, claimed := claimToolName(owners, exposed, upstreamName); !claimed {
 			slog.Warn("mcp tool name collision; keeping first server",
 				"tool", exposed, "kept", owner, "skipped", upstreamName)
 			continue
 		}
-		owners[exposed] = upstreamName
 		if index != nil {
 			index.add(exposed, upstreamName, tool)
 			continue
