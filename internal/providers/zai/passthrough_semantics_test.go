@@ -19,5 +19,5 @@ func TestPassthroughSemanticEnricherUsesZAIType(t *testing.T) {
 	require.NotNil(t, info)
 	require.Equal(t, "embeddings", info.GenAIOperation)
 	require.Equal(t, "zai.embeddings", info.SemanticOperation)
-	require.Equal(t, "/v1/embeddings", info.AuditPath)
+	require.Equal(t, "/v1/embeddings", info.RequestLogPath)
 }

@@ -13,7 +13,7 @@ const (
 	VerdictUnclear = "unclear"
 )
 
-// maxReason bounds the reason stored in the audit detail.
+// maxReason bounds the reason stored in the request log detail.
 const maxReason = 200
 
 // verdict is the parsed judge reply.

@@ -51,24 +51,13 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	}, &upstream); err != nil {
 		return nil, err
 	}
-	result := &core.ModelsResponse{Object: "list", Data: make([]core.Model, 0, len(upstream.Data))}
-	for _, model := range upstream.Data {
-		if strings.TrimSpace(model.ID) == "" {
-			continue
-		}
-		result.Data = append(result.Data, model.toCore())
-	}
-	return result, nil
+	return providers.ModelList(upstream.Data, modelInfo.toCore), nil
 }
 
 func (m modelInfo) toCore() core.Model {
-	object := strings.TrimSpace(m.Object)
-	if object == "" {
-		object = "model"
-	}
 	return core.Model{
 		ID:       strings.TrimSpace(m.ID),
-		Object:   object,
+		Object:   providers.ModelObject(m.Object),
 		OwnedBy:  strings.TrimSpace(m.OwnedBy),
 		Created:  m.Created,
 		Metadata: m.metadata(),

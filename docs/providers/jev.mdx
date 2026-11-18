@@ -168,7 +168,7 @@ The SDKs' model listing expects TypeSafe's shape, while the gateway's
 ## System One API
 
 `POST /v1/systemone` is a gateway endpoint, not a raw proxy: it applies
-virtual models, guardrails on `state`, the response cache, failover, audit,
+virtual models, guardrails on `state`, the response cache, failover, request logging,
 and usage, and it forwards the request natively without translating it. Kev's
 `/v1/systemone/permute` and `/v1/systemone/separate` work the same way. See
 [System One API](/advanced/systemone-api) for the full behavior, including

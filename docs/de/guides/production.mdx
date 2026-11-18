@@ -45,7 +45,7 @@ eigenen Node-Pool.
 
 ## Ein Storage-Backend wählen
 
-GoModel speichert Audit-Logs, Nutzungsdaten, Budgets, virtuelle Modelle,
+GoModel speichert Request-Logs, Nutzungsdaten, Budgets, virtuelle Modelle,
 verwaltete API-Keys und weiteren Admin-Zustand über `STORAGE_TYPE`.
 
 | Backend | `STORAGE_TYPE` | Verwenden, wenn |
@@ -53,6 +53,18 @@ verwaltete API-Keys und weiteren Admin-Zustand über `STORAGE_TYPE`.
 | SQLite (Standard) | `sqlite` | Eine einzelne Instanz mit dauerhafter lokaler Festplatte oder einem eingebundenen Volume. |
 | PostgreSQL | `postgresql` | Mehr als ein Replikat, oder Sie betreiben bereits Postgres. Die übliche Wahl für die Produktion. |
 | MongoDB | `mongodb` | Sie betreiben bereits MongoDB und ziehen es Postgres vor. |
+
+Verwenden Sie bei MongoDB bevorzugt ein Replica Set, auch ein einzelner Knoten
+genügt, wie ihn die `docker-compose.yaml` des Repositorys startet. Ein
+eigenständiger `mongod` funktioniert ebenfalls, kennt aber keine Transaktionen:
+GoModel protokolliert eine Warnung und führt Änderungen über mehrere Dokumente
+(Budget- und Rate-Limit-Konfiguration, Guardrails, Workflow-Versionen,
+Neuberechnung der Nutzungspreise) als einzelne Schreibvorgänge aus. Eine
+unterbrochene Änderung kann daher nur teilweise wirksam werden; führen Sie sie
+erneut aus, um sie abzuschließen. Wird das Speichern eines Workflows unterbrochen,
+während die neue Version aktiviert wird, kann der Scope ohne aktiven Workflow
+bleiben (beim globalen Scope schlägt das Neuladen der Workflows fehl), bis Sie
+diesen Workflow erneut speichern.
 
 SQLite ist der Standardwert, damit GoModel ohne jede Konfiguration
 funktioniert, und für eine einzelne Instanz mit persistentem Volume eine echte
@@ -67,7 +79,7 @@ Ein auf einem Pod erstellter Key existiert auf dem anderen nicht.
 
 SQLite läuft außerdem bewusst mit einer einzigen offenen Verbindung, um einen
 einzigen Schreiber zu haben und Lock-Konflikte zu vermeiden. Jeder Flush von
-Audit- und Nutzungsdaten und jede Budget-Prüfung wird darüber serialisiert, was
+Request-Log- und Nutzungsdaten und jede Budget-Prüfung wird darüber serialisiert, was
 unter Dauerlast eine Obergrenze für den Durchsatz darstellt.
 
 Für Postgres ist `POSTGRES_MAX_CONNS` standardmäßig `10`. Erhöhen Sie diesen
@@ -77,7 +89,7 @@ Rate-Limits betreiben.
 <Warning>
   **Das Docker-Image deklariert kein Volume.** Der Standardpfad der Datenbank
   wird im Image zu `/app/data/gomodel.db` aufgelöst, einem Verzeichnis in einem
-  Image-Layer. Ohne explizit eingebundenes Volume gehen alle Audit-Logs,
+  Image-Layer. Ohne explizit eingebundenes Volume gehen alle Request-Logs,
   Nutzungsdaten, Budgets, verwalteten API-Keys und gespeicherten Zugangsdaten
   verloren, wenn der Container ersetzt wird. Binden Sie immer ein Volume unter
   `/app/data` ein oder wechseln Sie zu Postgres/MongoDB. Das Gateway
@@ -190,7 +202,11 @@ Volume, beschränken Sie den Zugriff und stufen Sie Backups entsprechend ein.
 - **Header mit Client-Zugangsdaten werden vor dem Persistieren geschwärzt.**
   Mit `LOGGING_LOG_HEADERS=true` werden `Authorization`, `x-api-key`, `Cookie`
   und die übrigen Header mit Zugangsdaten beim Schreiben durch `[REDACTED]`
-  ersetzt, sodass der Audit-Speicher sie nie erhält.
+  ersetzt, sodass der Request-Log-Speicher sie nie erhält. Dasselbe gilt für jeden
+  Header, dessen Name nach Zugangsdaten aussieht: wenn er auf `token`, `-key`
+  oder `-auth` endet oder `authorization`, `api-key`, `apikey`, `secret`,
+  `password`, `signature` oder `jwt` enthält. `Idempotency-Key` und
+  `Sec-WebSocket-Key` bleiben erhalten.
 - **Setzen Sie `GOMODEL_MASTER_KEY`.** Ist er leer und gibt es keine
   verwalteten Keys, wird jeder Request ohne Authentifizierung zugelassen, und
   `/admin/*` wird als Wiederherstellungspfad bei Aussperrung in die Liste der
@@ -236,6 +252,10 @@ SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
 - Sobald TLS aktiv ist, beantwortet der Port kein einfaches HTTP mehr.
   `gomodel --health` und `gomodel --ready`, die der Docker-`HEALTHCHECK`
   ausführt, wechseln automatisch zu HTTPS.
+- Antworten enthalten `Strict-Transport-Security: max-age=15552000` (180 Tage,
+  ohne `includeSubDomains` oder `preload`), damit Browser für diesen Host bei
+  HTTPS bleiben. Einfaches HTTP hinter einem TLS-terminierenden Proxy sendet
+  keinen HSTS-Header; setzen Sie ihn am Proxy.
 
 **Kubernetes mit cert-manager.** Stellen Sie das Zertifikat in ein Secret aus und
 mounten Sie es als Volume. Verwenden Sie kein `subPath`: Das Kubelet aktualisiert
@@ -457,7 +477,7 @@ Prozessspeicher und stimmen sich nicht zwischen Instanzen ab.
 | --- | --- | --- |
 | Durchsetzung von [Budgets](/de/features/budgets) | Dauerhaft (Datenbank) | Korrekt über alle Replikate. Ausgaben werden aus der gemeinsamen Nutzungstabelle gelesen. |
 | [Nutzungs- und Kostendaten](/de/features/cost-tracking) | Dauerhaft (Datenbank) | Korrekt aggregiert. |
-| Audit-Logs | Dauerhaft (Datenbank) | Vollständig über alle Replikate. |
+| Request-Logs | Dauerhaft (Datenbank) | Vollständig über alle Replikate. |
 | [SSO](/de/pro/sso)-Abmeldung (Pro) | Dauerhaft (Datenbank) | Eine abgemeldete Session wird innerhalb von etwa 2 Sekunden auf jedem Replikat abgelehnt. |
 | [Rate-Limits](/de/features/rate-limits) | In-Memory, über die Datenbank geteilt | Replikate setzen ein Limit gemeinsam durch, näherungsweise: Jedes sieht die Zählerstände der anderen innerhalb von etwa zwei Flush-Intervallen. Ein Neustart stellt die zuletzt gespeicherten Request- und Token-Zähler einmal wieder her; ein Absturz kann die Zählungen seit dem letzten Flush verlieren. Ein Reset leert diese Fenster auf allen Replikaten; belegte Concurrency-Slots bleiben belegt, bis ihre Requests abgeschlossen sind. |
 | Circuit Breaker | In-Memory, pro Prozess | Jedes Replikat erkennt einen Ausfall separat, sodass der Upstream bis zu `N x failure_threshold` Fehler sieht, bevor sich ein Breaker öffnet. |
@@ -488,7 +508,7 @@ zulassen.
 Ein Dashboard streamt Live-Logs von dem Replikat, mit dem es verbunden ist.
 Dieses Replikat zeigt seine eigenen Requests sofort beim Start, mit Vorschauen
 für laufende und streamende Requests. Solange mindestens ein Dashboard verbunden
-ist, liest es außerdem alle 2 Sekunden die Audit- und Nutzungszeilen, die die
+ist, liest es außerdem alle 2 Sekunden die Request-Log- und Nutzungszeilen, die die
 anderen Replikate gespeichert haben, und streamt sie in dieselbe Ansicht. Dabei
 entstehen keine zusätzlichen Datenbank-Schreibvorgänge: Jedes Replikat versieht
 die Batches, die es ohnehin schreibt, mit seiner eigenen ID, und ohne offenes
@@ -504,16 +524,16 @@ Requests, die ein anderes Replikat bedient hat:
   Nutzung und Kosten, aber ohne Vorschau für laufende Requests oder einzelne
   Stream-Chunks; Bodies werden aus der Datenbank geladen, wenn Sie den Eintrag
   aufklappen;
-- erscheinen nur, wenn sie gespeichert wurden. Audit- und Nutzungseinträge
-  stammen aus getrennten Features: Ein Replikat mit deaktiviertem Audit-Logging
-  liefert keine Audit-Einträge, eines mit deaktiviertem Usage-Tracking keine
+- erscheinen nur, wenn sie gespeichert wurden. Request-Log- und Nutzungseinträge
+  stammen aus getrennten Features: Ein Replikat mit deaktiviertem Request-Logging
+  liefert keine Request-Log-Einträge, eines mit deaktiviertem Usage-Tracking keine
   Nutzungseinträge. Das Replikat, mit dem Ihr Dashboard verbunden ist, zeigt die
-  Audit-Einträge eines anderen Replikats nur, wenn bei ihm selbst Audit-Logging
+  Request-Log-Einträge eines anderen Replikats nur, wenn bei ihm selbst Request-Logging
   aktiv ist, und dessen Nutzungseinträge nur mit aktivem Usage-Tracking;
 - werden nach Request-Zeit in die Liste einsortiert, unterhalb von allem
   Neueren.
 
-Bei hohem Traffic werden pro Poll höchstens 200 Audit- und 200 Nutzungseinträge
+Bei hohem Traffic werden pro Poll höchstens 200 Request-Log- und 200 Nutzungseinträge
 anderer Replikate gestreamt; gibt es mehr, werden die neuesten 200 ausgewählt.
 Die übrigen stehen nach einem Neuladen trotzdem in der Liste. Ein Dashboard, das sich neu verbindet, oder ein
 Replikat, dessen Lesezugriffe eine Weile fehlgeschlagen sind, holt nach, was die
@@ -595,7 +615,7 @@ oder `mongodb` umstellen. Die Werte finden Sie in `helm/README.md`.
 
 Bei `SIGTERM` lässt das Gateway laufende HTTP-Arbeit 10 Sekunden lang
 auslaufen und schließt den Abbau dann innerhalb von 30 Sekunden ab, wobei
-gepufferte Nutzungs- und Audit-Einträge geschrieben werden. Keiner der beiden
+gepufferte Nutzungs- und Request-Log-Einträge geschrieben werden. Keiner der beiden
 Timeouts ist konfigurierbar. Laufende gestreamte Responses werden nach 10
 Sekunden abgebrochen, sodass eine lange Completion während eines Rolling
 Deployments abgeschnitten wird. Setzen Sie `terminationGracePeriodSeconds` auf
@@ -604,12 +624,12 @@ die Wette läuft.
 
 ## Datenaufbewahrung und Festplattenwachstum
 
-Audit-Logging und Nutzungserfassung schreiben pro Request eine Zeile, und
+Request-Logging und Nutzungserfassung schreiben pro Request eine Zeile, und
 beide bereinigen stündlich.
 
 | Einstellung | Standardwert | Hinweise |
 | --- | --- | --- |
-| `LOGGING_RETENTION_DAYS` | `30` | Ältere Audit-Einträge werden entfernt. |
+| `LOGGING_RETENTION_DAYS` | `30` | Ältere Request-Log-Einträge werden entfernt. |
 | `USAGE_RETENTION_DAYS` | `90` | Ältere Nutzungsdaten werden entfernt. |
 | `LOGGING_LOG_BODIES` | `true` | Erfasst vollständige Request- und Response-Bodys mit jeweils bis zu 1 MB. |
 
@@ -623,12 +643,12 @@ beide bereinigen stündlich.
 
   Setzen Sie in regulierten Umgebungen oder überall dort, wo Prompts
   personenbezogene Daten enthalten, `LOGGING_LOG_BODIES=false` und behalten Sie
-  den Audit-Trail nur mit Metadaten.
+  das Request-Log nur mit Metadaten.
 </Warning>
 
 Zwei weitere Punkte bei hohem Volumen:
 
-- **Nutzungs- und Audit-Schreibvorgänge werden gepuffert und bei vollem Puffer
+- **Nutzungs- und Request-Log-Schreibvorgänge werden gepuffert und bei vollem Puffer
   verworfen, nicht blockiert.** Ein Burst oder eine langsame Datenbank kann
   unbemerkt Nutzungseinträge verlieren, was zu verlorenen Kostendaten und zu
   gering belasteten Budgets führt. Richten Sie einen Alert auf
@@ -636,7 +656,7 @@ Zwei weitere Punkte bei hohem Volumen:
   [Alerts bei verlorener Nutzung](/de/guides/prometheus-metrics#alerts-bei-verlorener-nutzung))
   oder ohne Metriken auf die Log-Meldungen `usage log buffer full`,
   `usage logger closed` und `failed to write usage batch`. Ein verworfener
-  Audit-Eintrag protokolliert `audit log buffer full`.
+  Request-Log-Eintrag protokolliert `request log buffer full`.
 - **Budget-Prüfungen fragen bei jedem Request die Nutzungstabelle ab.** Halten
   Sie `USAGE_RETENTION_DAYS` knapp, wenn Budgets aktiviert sind, und ziehen Sie
   Postgres SQLite vor, bei dem die einzelne Verbindung dies zum dominierenden
