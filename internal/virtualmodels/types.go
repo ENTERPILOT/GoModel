@@ -31,10 +31,16 @@ import (
 // the share of a target with weight 1. A non-positive or unset weight is treated
 // as 1, so single-target and unweighted redirects behave identically to before.
 // Weight is ignored by the cost strategy, which always picks the cheapest target.
+//
+// ReasoningEffort, when set, replaces the reasoning effort of the requests the
+// redirect sends to this target, as the first attempt or as a failover leg. It
+// beats the redirect's own ReasoningEffort; whatever the target names (a
+// chained virtual model, a model policy) still beats it.
 type Target struct {
-	Provider string  `json:"provider,omitempty" bson:"provider,omitempty"`
-	Model    string  `json:"model" bson:"model"`
-	Weight   float64 `json:"weight,omitempty" bson:"weight,omitempty"`
+	Provider        string  `json:"provider,omitempty" bson:"provider,omitempty"`
+	Model           string  `json:"model" bson:"model"`
+	Weight          float64 `json:"weight,omitempty" bson:"weight,omitempty"`
+	ReasoningEffort string  `json:"reasoning_effort,omitempty" bson:"reasoning_effort,omitempty"`
 }
 
 // selector returns the concrete selector this target points to.
@@ -181,29 +187,8 @@ func cloneStrategyConfig(config map[string]any) map[string]any {
 	if config == nil {
 		return nil
 	}
-	cloned, _ := cloneConfigValue(config).(map[string]any)
+	cloned, _ := core.CloneJSONValue(config).(map[string]any)
 	return cloned
-}
-
-func cloneConfigValue(value any) any {
-	switch v := value.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(v))
-		for key, item := range v {
-			out[key] = cloneConfigValue(item)
-		}
-		return out
-	case []any:
-		out := make([]any, len(v))
-		for i, item := range v {
-			out[i] = cloneConfigValue(item)
-		}
-		return out
-	case []string:
-		return append([]string(nil), v...)
-	default:
-		return v
-	}
 }
 
 // Role kinds for the admin view.

@@ -14,7 +14,7 @@ format can point at GoModel unchanged.
 
 The request is translated to GoModel's canonical chat type at ingress and runs through
 the same pipeline as `/v1/chat/completions` — so virtual models, workflow policy,
-budgets, failover, the response cache, usage/cost tracking, and audit logging all
+budgets, failover, the response cache, usage/cost tracking, and request logging all
 apply. Because every provider implements chat completion, an Anthropic-format request
 can be routed to **any** configured provider (OpenAI, Gemini, Bedrock, and others),
 not only Anthropic.
@@ -32,7 +32,7 @@ different name), then relays the provider-native response or SSE stream
 unchanged. This preserves everything the canonical translation cannot —
 `cache_control` breakpoints, thinking-block signatures, `anthropic-beta`
 headers — which coding agents like Claude Code depend on. Rate limits,
-budgets, audit logging, and usage tracking still apply, for both streaming
+budgets, request logging, and usage tracking still apply, for both streaming
 and non-streaming responses.
 
 Native forwarding is automatic. Requests fall back to the translated pipeline
@@ -52,7 +52,7 @@ Anthropic unchanged.
 | Endpoint | Behavior |
 | --- | --- |
 | `POST /v1/messages` | Creates a message through translated model routing. Supports streaming (`stream: true`) with Anthropic-format SSE events. |
-| `POST /v1/messages/count_tokens` | Counts input tokens. Exact for models whose provider has a counting endpoint (Anthropic, OpenAI); a calibrated estimate otherwise. |
+| `POST /v1/messages/count_tokens` | Counts input tokens. Exact for models whose provider has a counting endpoint (Anthropic, OpenAI, Gemini in native AI Studio mode); a calibrated estimate otherwise. |
 | `GET /v1/models` | Returns the catalog in the Anthropic list shape (`type: "model"`, `display_name`, `created_at`) when the request carries the `anthropic-version` header the Anthropic SDKs always send; OpenAI shape otherwise. The whole catalog comes back in one page unless the client pages with `limit`, `after_id`, or `before_id` (Anthropic paging, `has_more` set accordingly); a cursor that names no listed model is a `400`, so restart from the first page. |
 | `GET /v1/models/{model}` | Retrieves one model, in the Anthropic model shape when the request carries `anthropic-version`; OpenAI shape otherwise. A bare ID that works for inference (`gpt-6-luna`) retrieves the listed model it resolves to. Failures (for example an unknown model) use the Anthropic error envelope (`{"type": "error", "error": {...}}`) on the same condition. |
 | `POST /v1/messages/batches` | Creates a Message Batch. Inline `requests[].params` are translated per item, so a batch can target any provider with native batch support (Anthropic, OpenAI, …), not only Anthropic. |
@@ -182,9 +182,9 @@ Streaming responses emit the Anthropic SSE event sequence (`message_start`,
 `content_block_start`/`content_block_delta`/`content_block_stop`, `message_delta`,
 `message_stop`).
 
-## Cost tracking and audit logs
+## Cost tracking and request logs
 
-`/v1/messages` requests are tracked and audited exactly like the OpenAI-compatible
+`/v1/messages` requests are tracked and logged exactly like the OpenAI-compatible
 routes. Cost is computed from the actual provider that served the request, and usage
 is recorded under the `/v1/messages` endpoint so it can be filtered in the dashboard.
 
@@ -309,7 +309,9 @@ features that have no canonical equivalent are not preserved end to end:
   it. On GPT-5 and later the count matches the billed input (within a token):
   for a request Chat Completions serves with tools, the fixed tools preamble it
   bills is added. On older model families such a request can count a few tokens
-  below the billed input (6 on `gpt-4o-mini`). Guardrails do not run for a
+  below the billed input (6 on `gpt-4o-mini`). Gemini models in native AI Studio mode are counted
+  by Gemini's `countTokens`; on Gemini 4 a request with a response schema or a
+  tool-call history can count below the billed input. Guardrails do not run for a
   count, so when the request's workflow has prompt guardrails the prompt is
   never sent to a provider for counting and the estimate answers (response- and
   stream-only guardrails keep exact counts). For every other provider, and whenever

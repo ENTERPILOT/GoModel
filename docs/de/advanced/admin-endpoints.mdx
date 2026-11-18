@@ -34,7 +34,7 @@ Variablen, Standardwerte und den entsprechenden YAML-Block `admin:`.
 Die Admin-REST-API-Endpunkte (`/admin/*`) akzeptieren zwei Arten von Zugangsdaten als Bearer-Token:
 
 - **`GOMODEL_MASTER_KEY`** – hat immer Admin-Zugriff.
-- **Ein verwalteter API-Key mit Dashboard-Zugriff** – verwaltete Keys werden standardmäßig *ohne* Dashboard-Zugriff erstellt, sodass ein für Modell-Traffic ausgegebener Key weder das Audit-Log lesen noch neue Keys ausstellen oder Gateway-Einstellungen ändern kann. Requests mit einem verwalteten Key ohne diesen Zugriff liefern `403` mit dem Fehlercode `dashboard_access_denied`.
+- **Ein verwalteter API-Key mit Dashboard-Zugriff** – verwaltete Keys werden standardmäßig *ohne* Dashboard-Zugriff erstellt, sodass ein für Modell-Traffic ausgegebener Key weder das Request-Log lesen noch neue Keys ausstellen oder Gateway-Einstellungen ändern kann. Requests mit einem verwalteten Key ohne diesen Zugriff liefern `403` mit dem Fehlercode `dashboard_access_denied`.
 
 <CodeGroup>
 
@@ -133,6 +133,18 @@ Benutzerebene verwalten Sie über die [Benutzer-Endpunkte](/de/advanced/admin-en
 
 Dashboard-Zugriff regelt nur `/admin/*`. Modell-Endpunkte und der Self-Service-Endpunkt [`GET /v1/usage`](/de/advanced/usage-api) bleiben für jeden verwalteten Key verfügbar, mit Ausnahme der Provider-Passthrough-Routen (`/p/{provider}/...`): Verwaltete Keys werden ohne Passthrough-Zugriff erstellt; Sie erteilen ihn mit `"passthrough_access": true` bei `POST /admin/auth-keys` oder mit `PUT /admin/auth-keys/<key-id>/passthrough-access` (siehe [Passthrough-Zugriffskontrolle](/de/features/passthrough-api#zugriffskontrolle)).
 
+Key-Namen müssen nicht eindeutig sein; eindeutig ist nur das Token. Benennen Sie
+einen Key mit `PUT /admin/auth-keys/<key-id>/name` (`{"name": "ci-deploy-old"}`)
+um; die Antwort enthält den aktualisierten Key. Der Name wird wie beim Erstellen
+getrimmt und darf nicht leer sein. Ein Key kann sich nicht selbst umbenennen
+(`403 auth_key_self_update`). Nutzungseinträge speichern die Key-ID, nicht den
+Namen, daher zeigt das Dashboard auch bisherige Nutzung unter dem neuen Namen;
+Request-Log-Einträge zeigen die Key-ID. Ein erneuter Import eines LiteLLM-Keys setzt
+seinen Namen wieder aus dem Import. Teilen sich zwei Keys einen Namen, zeigt
+das Dashboard neben jedem das maskierte Token und ergänzt eine kurze Key-ID, wo
+die Tokens übereinstimmen oder fehlen. Das Erstellformular und der
+Umbenennen-Dialog warnen, wenn ein Name bereits vergeben ist.
+
 ### Keys aus LiteLLM importieren
 
 `POST /admin/auth-keys/import` fügt einen virtuellen LiteLLM-Key über den SHA-256-Hash
@@ -167,9 +179,10 @@ Quelle gesperrt hat: Ein früherer Import wird deaktiviert und ansonsten nicht v
 und ein nie importierter Key wird nicht erstellt (`204`). Ein Hash, der zu einem von GoModel ausgestellten Key gehört, liefert `409`
 mit dem Code `auth_key_exists`.
 
-Tokens, die mit `sk-` beginnen, werden nur gegen importierte Keys geprüft und
-`sk_gom_`-Tokens nur gegen von GoModel ausgestellte Keys. Ohne importierte Keys
-werden `sk-`-Tokens wie bisher abgelehnt. Deaktivieren Sie einen importierten Key wie jeden
+Ein importierter Key passt nur zum vollständigen LiteLLM-Token `sk-...`, ein
+von GoModel ausgestellter Key wird über sein Secret (den Teil nach dem Präfix)
+erkannt, sodass keiner für den anderen einspringen kann. Das gilt auch für ein eigenes Key-Präfix, das mit
+`sk-` beginnt. Ohne importierte Keys werden LiteLLM-Tokens wie bisher abgelehnt. Deaktivieren Sie einen importierten Key wie jeden
 anderen. Der Import-Endpunkt erfordert globalen Admin-Zugriff.
 
 Ein importierter Key ist genau so stark wie der LiteLLM-Key. Bei LiteLLM können Sie
@@ -198,16 +211,16 @@ Mit `GET /admin/access` finden Sie heraus, um welche Art es sich bei Zugangsdate
 
 Für einen bereichsbeschränkten Admin gilt:
 
-- Endpunkte für Nutzung, Audit, API-Keys, Benutzer, Budgets und Rate-Limits werden
+- Endpunkte für Nutzung, Request-Logs, API-Keys, Benutzer, Budgets und Rate-Limits werden
   auf den Bereich gefiltert. Ein fehlender `user_path`-Filter bedeutet die Wurzel des Bereichs; ein
   `user_path` außerhalb des Bereichs liefert `403` mit dem Code
   `user_path_out_of_scope`.
-- Über eine ID adressierte Objekte, die zu einem anderen Teilbaum gehören (ein Audit-Eintrag, ein
+- Über eine ID adressierte Objekte, die zu einem anderen Teilbaum gehören (ein Request-Log-Eintrag, ein
   API-Key), liefern `404` – genau so, als gäbe es sie nicht.
 - Neue API-Keys und Benutzerrichtlinien verwenden standardmäßig die Wurzel des Bereichs und können nicht
   außerhalb davon erstellt werden. Auf diese Weise erstellte Keys mit Dashboard-Zugriff sind ihrerseits
   bereichsbeschränkte Admins dieses Teilbaums.
-- Ein Key kann seine eigenen Labels, erlaubten Modelle oder Zugriffs-Flags nicht ändern
+- Ein Key kann seinen eigenen Namen, seine Labels, erlaubten Modelle oder Zugriffs-Flags nicht ändern
   (`403 auth_key_self_update`); er kann sich aber weiterhin selbst deaktivieren. Ein Key mit
   erlaubten Modellen kann den Keys, die er erstellt oder bearbeitet, nur Modelle geben, die ihm selbst
   erlaubt sind: `openai/*` kann `openai/gpt-4o-mini` vergeben, aber weder
@@ -584,6 +597,87 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
   `effective_markup_percent` ist das Verhältnis von abgerechneten Kosten zu
   Provider-Kosten minus eins.
 
+### GET /admin/usage/benchmark
+
+Liefert die monatlichen Kosten pro aktivem Nutzer einer Gruppe: Jedes direkte
+Kind von `parent` ist ein Nutzer, dessen gesamter Teilbaum summiert wird, und
+jeder Kalendermonat meldet aktive Nutzer, Gesamtkosten sowie Mittelwert,
+Median (`p50`), `p90` und Maximum der Kosten pro aktivem Nutzer. Eine
+Pro-Lizenz ist nicht nötig. Siehe
+[Kosten pro aktivem Nutzer](/de/features/cost-tracking#kosten-pro-aktivem-nutzer-benchmark).
+
+| Parameter     | Typ    | Beschreibung                                                                 | Standard |
+| ------------- | ------ | ---------------------------------------------------------------------------- | -------- |
+| `parent`      | string | Gruppe, deren direkte Kinder die Nutzer sind; Nutzung auf dem Parent selbst wird als `unattributed_cost` gemeldet | Bereichswurzel der Zugangsdaten oder `/` |
+| `months`      | int    | Monate bis einschließlich `end_month`, `1` bis `12`; ignoriert und nicht geprüft, wenn `start_month` gesetzt ist | `7` |
+| `start_month` | string | Erster Monat, `YYYY-MM`; der Bereich umfasst höchstens 12 Monate             | Aus `months` |
+| `end_month`   | string | Letzter Monat, `YYYY-MM`; darf nicht nach dem aktuellen Monat liegen         | Aktueller Monat |
+| `cost_basis`  | string | `provider` oder `billed` (Provider-Kosten plus Aufschlag, einschließlich abgerechneter Cache-Treffer) | `provider` |
+| `top_users`   | int    | Die N teuersten Nutzer jedes Monats auflisten, `0` bis `50`; `0` liefert nur Aggregate | `0` |
+
+Der Endpunkt akzeptiert außerdem alle Datenfilter. `start_date`, `end_date`
+und `days` werden ignoriert und nicht geprüft. Auch `cache_mode` wird
+ignoriert: Requests und Provider-Kosten umfassen Requests an Provider,
+Cache-Treffer machen einen Nutzer aktiv und zählen zu den abgerechneten Kosten.
+
+```bash
+# Elf vollständige Monate plus der aktuelle, mit den fünf teuersten Nutzern pro Monat
+curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=12&top_users=5" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "parent": "/eng",
+  "time_zone": "UTC",
+  "currency": "USD",
+  "cost_basis": "provider",
+  "months": [
+    {
+      "month": "2026-11",
+      "partial": true,
+      "active_users": 38,
+      "unpriced_users": 1,
+      "partly_priced_users": 0,
+      "total_cost": 512.3,
+      "mean": 13.48,
+      "p50": 9.1,
+      "p90": 27.75,
+      "max": 64.2,
+      "mean_change_percent": null,
+      "p50_change_percent": null,
+      "unattributed_cost": 0,
+      "top_users": [{ "user": "/eng/alice", "requests": 1840, "cost": 64.2 }]
+    }
+  ]
+}
+```
+
+- `months` enthält jeden Monat des Bereichs, den ältesten zuerst, auch Monate
+  ohne Nutzung; der aktuelle Monat hat `"partial": true` und keine
+  Veränderungswerte.
+- Monate gelten in der Zeitzone des Headers `X-GoModel-Timezone`, ohne ihn in
+  UTC, und `time_zone` meldet sie.
+- `mean`, `p50`, `p90` und `max` sind ohne aktive Nutzer `null`. Die
+  Änderungsfelder sind `null` für den ersten Monat, den laufenden Monat, einen
+  Monat ohne aktive Nutzer oder einen nicht positiven Vormonatswert.
+- Die Kosten eines Nutzers entsprechen der Zwischensumme des Rechnungsexports
+  für diesen Kunden. `unpriced_users` zählt Nutzer, deren Kosten ganz
+  unbekannt sind (mit `0` gezählt), `partly_priced_users` Nutzer, die mit dem
+  bekannten Teil ihrer Kosten zählen.
+- `top_users` fehlt, wenn es nicht angefordert wurde; seine `requests` sind
+  Requests an Provider, wie auf der Rechnung.
+- Jeder Nutzer wird gezählt, nichts wird unter „other“ zusammengefasst. Ein
+  Benchmark enthält höchstens 100.000 Nutzermonate; darüber antwortet der
+  Endpunkt mit `400`. Wählen Sie einen tieferen `parent`, weniger Monate oder
+  engere Filter.
+
+| Status | Code | Wann |
+| ------ | ---- | ---- |
+| `400`  | —    | Ungültiger Monat, `cost_basis` oder `top_users`; `months` außerhalb von `1` bis `12` (auch `0`) oder keine ganze Zahl, außer wenn `start_month` gesetzt ist; ein Bereich über 12 Monate; `end_month` nach dem aktuellen Monat; ein wiederholter `parent`; mehr als 100.000 Nutzermonate |
+| `403`  | `user_path_out_of_scope` | Bereichsbeschränkte Zugangsdaten nennen einen `parent` oder `user_path` außerhalb ihres Teilbaums |
+| `409`  | `markups_disabled` | `cost_basis=billed`, während `PRICING_MARKUPS_ENABLED` aus ist |
+
 ### Cache-Modus
 
 Jeder Treffer im [Response-Cache](/de/features/cache) wird als Nutzungseintrag erfasst, mit
@@ -614,13 +708,15 @@ Zwei Endpunkte ignorieren den Parameter bewusst: `/admin/cache/overview` meldet 
 Cache-Treffer, und `/admin/usage/sessions` schließt sie immer ein (die Kostenfelder
 enthalten nur Provider-Kosten).
 
-### GET /admin/audit/stats
+### GET /admin/request-logs/stats
 
 Gibt in Zeitabschnitte eingeteilte Request-Zahlen zurück, gruppiert nach den Statusklassen
 `2xx`/`4xx`/`5xx`, dazu eine Zusammenfassung der Gesamterfolgsquote und die durchschnittliche Request-Dauer pro
 Provider. Darauf basieren die Diagramme „Requests by Status“ und „Provider Latency“ auf
-der Seite „Overview“ des Dashboards. Die Daten stammen aus dem Audit-Log (Audit-Logging ist standardmäßig aktiviert;
-`LOGGING_ENABLED`).
+der Seite „Overview“ des Dashboards. Die Daten stammen aus dem Request-Log (Request-Logging ist standardmäßig aktiviert;
+`LOGGING_ENABLED`). Die alten `/admin/audit/...`-Pfade sind veraltet: Sie funktionieren weiterhin, und ihre
+Antworten enthalten den Header `Deprecation: true` sowie einen `Link`-Header mit dem
+neuen Pfad. Ein Datum für die Entfernung steht nicht fest.
 
 **Query-Parameter:**
 
@@ -671,7 +767,7 @@ bis zum aktuellen Zeitpunkt mit Nullwerten aufgefüllt.
 Jede `provider_latency`-Reihe ist Index für Index an `buckets` ausgerichtet. Einträge sind
 `null` für Abschnitte, in denen der Provider keinen erfolgreichen Request bedient hat, und die
 Durchschnittswerte umfassen nur erfolgreiche (2xx) Requests, die den Provider erreicht haben – Treffer im lokalen
-Response-Cache und fehlgeschlagene Requests sind ausgenommen. Ist das Audit-Logging
+Response-Cache und fehlgeschlagene Requests sind ausgenommen. Ist das Request-Logging
 deaktiviert, werden leere Abschnitte zurückgegeben.
 
 ### Provider-Zugangsdaten
@@ -876,6 +972,85 @@ wird bei Bedarf aufgelöst.
 Gibt `400` zurück, wenn ein Parameter fehlt, und `404`, wenn das Modell nicht
 registriert ist.
 
+### GET /admin/mcp-servers/catalog
+
+Exportiert das Tool-Inventar des [MCP-Gateways](/de/features/mcp-gateway): alle
+Tools aller MCP-Server in einer Antwort, für Security-Reviews und Audits. Der
+Endpunkt ist gatewayweit und erfordert daher globale Admin-Zugangsdaten.
+
+| Parameter        | Typ    | Beschreibung                                                                    | Standard |
+| ---------------- | ------ | ------------------------------------------------------------------------------- | -------- |
+| `format`         | string | `json` oder `csv`; CSV wird als Anhang heruntergeladen                          | `json`   |
+| `server`         | string | Nur die Zeilen eines MCP-Servers behalten, per Slug                             | —        |
+| `virtual_server` | string | Nur die Mitglieder eines virtuellen Servers behalten                            | —        |
+| `user_path`      | string | Nur die Server behalten, die ein Aufrufer mit diesem User Path sieht, z. B. `/team/x` | —   |
+
+Die Filter schränken die Server ein und lassen sich kombinieren. Ein
+unbekannter `server` oder `virtual_server` liefert `404`.
+
+```bash
+curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "servers": [
+    { "server": "github", "server_name": "GitHub", "transport": "http", "enabled": true, "status": "connected", "user_paths": ["/team"], "disallowed_user_paths": [] },
+    { "server": "wiki", "server_name": "Wiki", "transport": "http", "enabled": true, "status": "degraded", "user_paths": [], "disallowed_user_paths": [] }
+  ],
+  "tools": [
+    {
+      "server": "github",
+      "server_name": "GitHub",
+      "transport": "http",
+      "enabled": true,
+      "status": "connected",
+      "user_paths": ["/team"],
+      "disallowed_user_paths": [],
+      "name": "github_create_issue",
+      "upstream_name": "create_issue",
+      "description": "Create an issue",
+      "read_only": false,
+      "destructive": false,
+      "exposed": true
+    }
+  ]
+}
+```
+
+- Jede Tool-Zeile wiederholt die Felder ihres Servers. `name` ist der Name, den
+  Clients auf `/mcp` aufrufen, mit `virtual_server` auf
+  `/mcp/{virtual_server}`; `upstream_name` ist der Name, den der Server selbst
+  dem Tool gibt, bereitgestellt unter `/mcp/{slug}`.
+- `exposed` ist `false` und `name` leer bei einem Tool, das `allowed_tools` /
+  `disallowed_tools` des Servers ausblenden. Clients können ein Tool nur
+  aufrufen, wenn es freigegeben und sein Server aktiviert ist.
+- `shadowed_by` ist gesetzt, wenn zwei Server denselben `/mcp`-Namen ergeben,
+  etwa Server `a` mit Tool `b_read` und Server `a_b` mit Tool `read`. Das
+  Gateway behält den ersten Server in Slug-Reihenfolge; die Zeile des anderen
+  Tools hat daher ein leeres `name` und nennt diesen Server in `shadowed_by`.
+  Ihr `exposed` bleibt `true`: Das Tool ist weiterhin unter `/mcp/{slug}` mit
+  `upstream_name` aufrufbar. Der Besitzer wird unter den Servern bestimmt, die
+  `virtual_server` und `user_path` übrig lassen, ohne diese Filter unter allen
+  Servern; `server` ändert ihn nicht. JSON lässt das Feld weg, wenn es leer ist.
+- `read_only` und `destructive` sind nur `true`, wenn der Server den Hinweis
+  gesetzt hat; `false` bedeutet, dass er nichts angegeben hat.
+- `user_path` filtert Server nur nach ihren `user_paths` und
+  `disallowed_user_paths`. Deaktivierte Server und ausgeblendete Tools bleiben
+  enthalten und sind an `enabled` und `exposed` erkennbar. Ein leerer
+  `user_path` filtert nicht.
+- Der Export liest die Kataloge, die das Gateway bereits hält, daher lässt ein
+  nicht erreichbarer Server ihn nie fehlschlagen. Ein deaktivierter oder noch
+  nie verbundener Server steht mit seinem Status und ohne Tools in `servers`;
+  ein Server im Status `degraded`, der zuvor verbunden war, behält seinen
+  letzten Katalog, seine Tools bleiben also im Export.
+- CSV enthält eine Zeile pro Tool mit denselben Feldern als Spalten; ein Server
+  ohne Tools ist eine Zeile mit leeren Tool-Spalten. User Paths sind durch
+  Zeilenumbrüche getrennt. Werte, die mit `=`, `+`, `-`, `@`, einem Tabulator
+  oder einem Wagenrücklauf beginnen, erhalten ein vorangestelltes `'`, damit
+  eine Tabellenkalkulation sie nicht als Formel ausführt.
+
 ### Plugin-, Guardrail- und Workflow-Endpunkte
 
 | Methode | Pfad | Beschreibung |
@@ -905,13 +1080,13 @@ http://localhost:8080/admin/dashboard
 Es bietet einen visuellen Überblick über Nutzungsstatistiken und registrierte Modelle und verwendet dieselben Daten wie die oben beschriebenen REST-API-Endpunkte.
 
 Bei `DASHBOARD_LIVE_LOGS_ENABLED=true` öffnet das Dashboard
-`GET /admin/live/logs` und streamt kompakte Vorschauen des Audit-/Nutzungs-Lebenszyklus. So
-können die Seiten „Audit Logs“ und „Usage“ einen Request anzeigen, während er den
+`GET /admin/live/logs` und streamt kompakte Vorschauen des Request-Log-/Nutzungs-Lebenszyklus. So
+können die Seiten „Anfragen“ und „Usage“ einen Request anzeigen, während er den
 Workflow durchläuft, noch bevor das asynchrone Schreiben in die Datenbank abgeschlossen ist. Der Stream verwendet Sequenz-Cursor,
 begrenzte Wiederholung und Heartbeat-Events, damit sich wieder verbindende Browser nach kurzen
 Netzwerkunterbrechungen aufholen können.
 
-Die persistierten Audit- und Nutzungstabellen bleiben die maßgebliche Datenquelle. Fällt der
+Die persistierten Request-Log- und Nutzungstabellen bleiben die maßgebliche Datenquelle. Fällt der
 Cursor des Browsers aus dem Wiederholungspuffer heraus, sendet der Stream ein Reset-Event,
 und das Dashboard lädt die Daten neu über die normalen REST-Endpunkte.
 

@@ -51,7 +51,7 @@
       .join("\n");
   }
 
-  // Close the panel when its phase drops out of the chart (audit rows swap
+  // Close the panel when its phase drops out of the chart (request rows swap
   // charts in place, editor previews re-render on each keystroke).
   $effect(() => {
     if (!openPhase) return;
@@ -291,15 +291,15 @@
           state: chart.usageNodeClass,
         })}
       {/if}
-      {#if chart.showUsage && chart.showAudit}
+      {#if chart.showUsage && chart.showRequestLog}
         <div class="workflow-conn workflow-conn-async"></div>
       {/if}
-      {#if chart.showAudit}
+      {#if chart.showRequestLog}
         {@render node({
           icon: FileText,
-          label: m.workflows_audit_log(),
+          label: m.workflows_request_log(),
           variant: "workflow-node-feature workflow-node-async",
-          state: chart.auditNodeClass,
+          state: chart.requestLogNodeClass,
         })}
       {/if}
       <div class="workflow-async-turn"></div>
@@ -468,13 +468,13 @@
   /*
    * Async nodes fire after the response is returned to the client.
    * They drop below the main row via an L-turn from Response, then
-   * flow right-to-left: Audit Log on the right, Usage on the left.
+   * flow right-to-left: Request Log on the right, Usage on the left.
    *
    * [Client] ──→ [Cache?] ──── [AI] ──────── [Response]
    *                                               │
    *                                               │ (dashed drop)
    *                                               │
-   *                         [Usage] ← ─ ─ [Audit Log]
+   *                       [Usage] ← ─ ─ [Request Log]
    */
   /* Right-align when the branch fits; auto margin collapses on overflow so
      the shared pipeline-row overflow-x can scroll. */
@@ -762,7 +762,7 @@
     font-weight: 500;
   }
 
-  /* Recorded outcome of the instance (audit charts only). These follow the
+  /* Recorded outcome of the instance (request log charts only). These follow the
      base and mutator rules so the tint wins at equal specificity. */
   .workflow-flow-ref-success {
     border-color: color-mix(in srgb, var(--success) 52%, var(--border));

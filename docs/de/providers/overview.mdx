@@ -270,7 +270,7 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   [audio.cpp](/de/providers/audiocpp).
 - **Jev / Kev** – die System One API von TypeSafe ist eine Decision-API (Zustand und typisierte
   Fragen hinein, kalibrierte Wahrscheinlichkeiten heraus). GoModel leitet sie nativ und
-  unübersetzt unter `POST /v1/systemone` weiter (mit virtuellen Modellen, Guardrails, Audit und
+  unübersetzt unter `POST /v1/systemone` weiter (mit virtuellen Modellen, Guardrails, Request-Logging und
   Nutzung) sowie über Passthrough unter `/p/jev/...`, und beantwortet damit OpenAIs
   [Decisions API](/de/advanced/decisions-api) unter `POST /v1/decisions`, indem es in beide
   Richtungen übersetzt. `/v1/decisions` ist verfügbar, sobald ein `openai`-, `jev`- oder

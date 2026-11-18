@@ -295,7 +295,7 @@ przez providera upstream.
 - **Jev / Kev** – System One API od TypeSafe to API decyzyjne (na wejściu stan i
   typowane pytania, na wyjściu skalibrowane prawdopodobieństwa). GoModel
   przekazuje je natywnie, bez tłumaczenia, pod `POST /v1/systemone` (z modelami
-  wirtualnymi, guardrails, audytem i użyciem) oraz przez passthrough pod
+  wirtualnymi, guardrails, logowaniem requestów i użyciem) oraz przez passthrough pod
   `/p/jev/...`, a także odpowiada nim na [Decisions API](/pl/advanced/decisions-api)
   OpenAI pod `POST /v1/decisions`, tłumacząc w obie strony. `/v1/decisions` jest
   dostępne po skonfigurowaniu providera `openai`, `jev` lub `openrouter`, a

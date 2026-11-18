@@ -13,14 +13,6 @@ const (
 	// maxStickySessions caps the pin map; at capacity the entry expiring
 	// soonest is evicted.
 	maxStickySessions = 10000
-	// maxExpiryReconciliations bounds how much index repair a single sweep
-	// does. A pin refreshed since it was tracked surfaces with a stale expiry
-	// and has to be re-tracked; a cache whose pins have all been refreshed
-	// would otherwise repair the entire heap while the lock is held, delaying
-	// every concurrent routing decision. Past the budget the index is rebuilt
-	// once instead, which costs less than the pops it replaces and leaves it
-	// exact, so the sweep cannot need a second rebuild.
-	maxExpiryReconciliations = 64
 )
 
 type stickyKey struct {
@@ -151,9 +143,9 @@ func (s *stickySessions) setLocked(key stickyKey, qualified string, now time.Tim
 	if s.entries == nil {
 		s.entries = make(map[stickyKey]stickyPin)
 	}
-	s.pruneLocked(now)
+	expiry.Prune(&s.expiries, s.entries, pinExpires, now)
 	if len(s.entries) >= s.limit() {
-		s.evictSoonestLocked()
+		expiry.EvictSoonest(&s.expiries, s.entries, pinExpires)
 	}
 	expires := now.Add(stickySessionTTL)
 	s.entries[key] = stickyPin{
@@ -182,73 +174,8 @@ func (s *stickySessions) prune(active map[string]*redirectEntry) {
 		}
 	}
 	if s.expiries.Stale(len(s.entries)) {
-		s.retrackLocked()
+		expiry.Retrack(&s.expiries, s.entries, pinExpires)
 	}
 }
 
-// pruneLocked drops expired pins, touching only the keys that are actually
-// due rather than sweeping every pin held.
-func (s *stickySessions) pruneLocked(now time.Time) {
-	reconciled := 0
-	for {
-		key, tracked, ok := s.expiries.Expired(now)
-		if !ok {
-			break
-		}
-		pin, live := s.entries[key]
-		switch {
-		case !live:
-			// Already dropped by a lookup, a re-pin, or an earlier sweep.
-		case pin.expires.After(tracked):
-			// Refreshed since: it lives longer than the index recorded.
-			reconciled++
-			if reconciled > maxExpiryReconciliations {
-				// The pin is still in the map, so the rebuild picks it up.
-				s.retrackLocked()
-				continue
-			}
-			s.expiries.Track(key, pin.expires)
-		default:
-			delete(s.entries, key)
-		}
-	}
-	if s.expiries.Stale(len(s.entries)) {
-		s.retrackLocked()
-	}
-}
-
-func (s *stickySessions) evictSoonestLocked() {
-	reconciled := 0
-	for {
-		key, tracked, ok := s.expiries.Soonest()
-		if !ok {
-			return
-		}
-		pin, live := s.entries[key]
-		switch {
-		case !live:
-			continue
-		case pin.expires.After(tracked):
-			reconciled++
-			if reconciled > maxExpiryReconciliations {
-				// The pin is still in the map, so the rebuild picks it up,
-				// and the next pop is the true soonest.
-				s.retrackLocked()
-				continue
-			}
-			s.expiries.Track(key, pin.expires)
-		default:
-			delete(s.entries, key)
-			return
-		}
-	}
-}
-
-// retrackLocked rebuilds the index from the pins still held, dropping the
-// keys removed without the index ever seeing them.
-func (s *stickySessions) retrackLocked() {
-	s.expiries.Reset()
-	for key, pin := range s.entries {
-		s.expiries.Track(key, pin.expires)
-	}
-}
+func pinExpires(pin stickyPin) time.Time { return pin.expires }

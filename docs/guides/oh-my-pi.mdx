@@ -51,13 +51,13 @@ and sign in with `GOMODEL_MASTER_KEY`. Go to
 3. Leave **Dashboard access** disabled.
 4. Create the key and copy the `sk_gom_...` value. It is shown only once.
 
-The bound user path gives omp its own usage and audit scope. If you use
+The bound user path gives omp its own usage and request log scope. If you use
 gateway-wide [model access policies](/features/user-path#model-access), allow
 the selectors omp needs for `/agents/omp`.
 
 <Warning>
   Use this managed key in omp, not `GOMODEL_MASTER_KEY`. A managed key without
-  dashboard access can call model endpoints but cannot read audit logs, create
+  dashboard access can call model endpoints but cannot read request logs, create
   keys, or change gateway settings.
 </Warning>
 
@@ -176,15 +176,15 @@ providers:
         maxTokens: 128000
 ```
 
-Both paths route through the same gateway key, budgets, and audit trail. The
+Both paths route through the same gateway key, budgets, and request log. The
 OpenAI-compatible path with discovery is the recommended default; use the
 Anthropic wire when you specifically want Messages API semantics end to end.
 
 ## 6. Check the traffic in GoModel
 
-Open the GoModel dashboard audit logs:
+Open the Requests page in the GoModel dashboard:
 
-[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+[http://localhost:8080/admin/dashboard/requests](http://localhost:8080/admin/dashboard/requests)
 
 Confirm omp's streaming requests to `POST /v1/chat/completions` under the
 `/agents/omp` user path, and that GoModel routes them to the intended

@@ -50,6 +50,7 @@ start_gw(){ # env overrides as name=value arguments
   ( cd "$WORK"
     nohup env PORT=$PORT BASE_PATH= STORAGE_TYPE=sqlite \
       SQLITE_PATH="$WORK/data/gomodel.db" LOGGING_ENABLED=true \
+      GOMODEL_CACHE_DIR="$WORK/cache" \
       RESPONSE_CACHE_SIMPLE_ENABLED=false SEMANTIC_CACHE_ENABLED=false REDIS_URL= \
       "$@" "$BIN" >"$WORK/server.log" 2>&1 < /dev/null &
     echo $! >"$PIDF" )

@@ -166,7 +166,7 @@ class LiveTokensState {
     // away and back): the fetch may have resolved before the abort landed, or
     // the read may end normally. Reconnecting from one of those would open a
     // second stream alongside the live one, so all three paths go through this
-    // guard. Mirrors the audit-log stream in liveLogs.svelte.js.
+    // guard. Mirrors the request-log stream in liveLogs.svelte.js.
     const reconnectIfCurrent = () => {
       if (controller.signal.aborted || this.#sseController !== controller) {
         return;

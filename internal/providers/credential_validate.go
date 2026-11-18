@@ -125,13 +125,19 @@ const backendVertex = "vertex"
 // key you do not have" and "finish choosing the backend".
 //
 // A row that does carry a key resolves and runs — the adapter's own inference
-// takes it from there — so it is left alone.
+// takes it from there — so only where it may send the host's Google
+// credentials is checked.
 func validateGoogleBackendIsExplicit(cred ManagedProviderCredential, schema CredentialSchema) error {
 	backend, offered := schema.Field(CredentialFieldBackend)
 	if !offered || !slices.Contains(backend.Options, backendVertex) {
 		return nil
 	}
 	if len(cred.APIKeys) > 0 {
+		// The adapter infers Vertex from either field being non-empty.
+		if strings.TrimSpace(cred.Backend) == "" &&
+			(strings.TrimSpace(cred.VertexProject) != "" || strings.TrimSpace(cred.VertexLocation) != "") {
+			return validateHostGoogleCredentialDestination(cred)
+		}
 		return nil
 	}
 	if !HasResolvedProviderValue(cred.VertexProject) && !HasResolvedProviderValue(cred.VertexLocation) {
@@ -158,17 +164,38 @@ func validateGoogleCredential(cred ManagedProviderCredential) error {
 	// code path.
 	switch strings.ToLower(strings.TrimSpace(cred.AuthType)) {
 	case "", "gcp_adc", "adc", "google_adc":
-		return nil
 	case "gcp_service_account", "service_account":
-		if HasResolvedProviderValue(cred.ServiceAccountFile) ||
-			HasResolvedProviderValue(cred.ServiceAccountJSON) ||
-			HasResolvedProviderValue(cred.ServiceAccountJSONBase64) {
-			return nil
+		if !HasResolvedProviderValue(cred.ServiceAccountFile) &&
+			!HasResolvedProviderValue(cred.ServiceAccountJSON) &&
+			!HasResolvedProviderValue(cred.ServiceAccountJSONBase64) {
+			return credentialFieldError(CredentialFieldServiceAccountJSON, "a service account file, JSON, or base64 JSON is required when auth_type is gcp_service_account")
 		}
-		return credentialFieldError(CredentialFieldServiceAccountJSON, "a service account file, JSON, or base64 JSON is required when auth_type is gcp_service_account")
 	default:
 		return credentialFieldError(CredentialFieldAuthType, "auth_type %q cannot authenticate against Vertex; use gcp_adc or gcp_service_account", cred.AuthType)
 	}
+	return validateHostGoogleCredentialDestination(cred)
+}
+
+// validateHostGoogleCredentialDestination rejects a row that would send the
+// host's Google credentials (ADC, or a key file on the host) to a base URL
+// other than Google's own Vertex AI endpoints; see ProviderConfig.Managed.
+// The adapters refuse the same rows, so one stored before this check never
+// sends them either.
+func validateHostGoogleCredentialDestination(cred ManagedProviderCredential) error {
+	if !HasResolvedProviderValue(cred.BaseURL) || IsVertexEndpoint(cred.BaseURL) {
+		return nil
+	}
+	ownJSON := HasResolvedProviderValue(cred.ServiceAccountJSON) || HasResolvedProviderValue(cred.ServiceAccountJSONBase64)
+	switch strings.ToLower(strings.TrimSpace(cred.AuthType)) {
+	case "gcp_adc", "adc", "google_adc":
+	case "", "gcp_service_account", "service_account":
+		if ownJSON {
+			return nil
+		}
+	default:
+		return nil
+	}
+	return credentialFieldError(CredentialFieldBaseURL, "a base URL that is not a Google Vertex AI endpoint needs auth_type gcp_service_account with service_account_json saved with the provider: the host's Google credentials are only sent to Google's Vertex AI endpoints")
 }
 
 // validateCredentialProxyURL rejects a malformed outbound proxy before the

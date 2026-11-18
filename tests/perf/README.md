@@ -40,7 +40,7 @@ guarded alongside the bare routed case, so a regression that only shows up
 when the model has to be rewritten cannot hide behind the bare benchmark.
 
 `BenchmarkSharedStreamingObserversDefaultConfig` covers streaming observation
-with audit body capture disabled, where the observed stream skips JSON
+with request log body capture disabled, where the observed stream skips JSON
 decoding for chunks no observer wants. Body capture is on by default, so this
 measures deployments that turned it off.
 `BenchmarkSharedStreamingObserversIncludeUsage` runs the same pipeline over the
@@ -50,7 +50,7 @@ chunk carries `"usage":null`.
 ## Production shape and ablation
 
 `BenchmarkGatewayHotPathProductionShape` runs the routed path with the
-default-deployment middleware chain fully wired: master-key auth, audit
+default-deployment middleware chain fully wired: master-key auth, request
 logging (bodies + headers), usage tracking, session keeping, and a configured
 rate limit. The guard enforces allocation ceilings on this case too, so
 regressions in any of those subsystems fail CI even though the bare cases

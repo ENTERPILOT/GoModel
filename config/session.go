@@ -12,7 +12,7 @@ import (
 )
 
 // SessionConfig controls session keeping: identifying which requests belong to
-// one client session for sticky load balancing and audit-log grouping.
+// one client session for sticky load balancing and request-log grouping.
 type SessionConfig struct {
 	// Enabled turns session identification on. Default: true.
 	Enabled bool `yaml:"enabled" env:"SESSION_KEEPING_ENABLED"`
@@ -98,7 +98,7 @@ func normalizeSessionConfig(cfg *SessionConfig) error {
 			return fmt.Errorf("session.headers[%d]: %w", i, err)
 		}
 		// Credential-bearing headers must never become session ids: the id is
-		// persisted on audit and usage records in plaintext.
+		// persisted on request log and usage records in plaintext.
 		if core.IsCredentialHeader(name) {
 			return fmt.Errorf("session.headers[%d]: header %q may carry credentials and cannot be used for session ids", i, name)
 		}
