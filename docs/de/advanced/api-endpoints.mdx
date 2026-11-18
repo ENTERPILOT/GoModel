@@ -159,7 +159,7 @@ curl "http://localhost:8080/v1/audio/voices?model=kokoro" \
 Anzeigebezeichnung und fällt auf `id` zurück. `model` wird genau wie bei
 `/v1/audio/speech` aufgelöst und autorisiert, Aliase und virtuelle Modelle
 eingeschlossen. Der Aufruf wird nicht abgerechnet und nicht auf Budgets
-angerechnet. Jeder Aufruf fragt den Provider ab (außer bei OpenAI), daher gelten
+angerechnet. Jeder Aufruf fragt den Provider ab, daher gelten
 Request-Rate-Limits wie bei `/v1/audio/speech`.
 
 | Provider | Upstream-Quelle |

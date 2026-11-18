@@ -141,7 +141,7 @@ curl "http://localhost:8080/v1/audio/voices?model=kokoro" \
 { "voices": [{ "id": "af_bella", "name": "af_bella" }, { "id": "am_adam", "name": "am_adam" }] }
 ```
 
-将 `id` 作为 `voice` 传给 `/v1/audio/speech`；`name` 是显示名称，缺省时等于 `id`。`model` 的解析与授权方式与 `/v1/audio/speech` 完全相同，包括别名和虚拟模型。该调用不计费，也不计入预算。每次调用都会请求上游提供商（OpenAI 除外），因此与 `/v1/audio/speech` 一样受请求速率限制。
+将 `id` 作为 `voice` 传给 `/v1/audio/speech`；`name` 是显示名称，缺省时等于 `id`。`model` 的解析与授权方式与 `/v1/audio/speech` 完全相同，包括别名和虚拟模型。该调用不计费，也不计入预算。每次调用都会请求上游提供商，因此与 `/v1/audio/speech` 一样受请求速率限制。
 
 | 提供商 | 上游来源 |
 | --- | --- |

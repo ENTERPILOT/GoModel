@@ -159,7 +159,7 @@ curl "http://localhost:8080/v1/audio/voices?model=kokoro" \
 Pass `id` as `voice` to `/v1/audio/speech`; `name` is a display label and
 falls back to `id`. `model` resolves and is authorized exactly as on
 `/v1/audio/speech`, aliases and virtual models included. The call is not billed or
-budgeted. Each call asks the provider (OpenAI excepted), so request rate
+budgeted. Each call asks the provider, so request rate
 limits apply as on `/v1/audio/speech`.
 
 | Provider | Upstream source |
