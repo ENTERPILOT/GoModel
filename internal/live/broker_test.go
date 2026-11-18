@@ -432,7 +432,7 @@ func TestBrokerAuditStartedPreviewIncludesRequestHeadersOnly(t *testing.T) {
 		},
 	})
 
-	payload := eventPayload(t, b.events[0])
+	payload := eventPayload(t, encoded(t, b.events[0]))
 	data, ok := payload["data"].(map[string]any)
 	require.True(t, ok, "preview data = %T, want object", payload["data"])
 
@@ -524,7 +524,7 @@ func TestBrokerAuditUpdatedPreviewIncludesRequestBodyOnly(t *testing.T) {
 	require.False(t, ok)
 
 	// The replay ring retains the preview without the body, flagged as captured.
-	retained := eventPayload(t, b.events[0])
+	retained := eventPayload(t, encoded(t, b.events[0]))
 	retainedData, ok := retained["data"].(map[string]any)
 	require.True(t, ok, "retained preview data = %T, want object", retained["data"])
 	_, ok = retainedData["request_body"]
@@ -587,7 +587,7 @@ func TestBrokerAuditCompletedPreviewIncludesCapturedDetailData(t *testing.T) {
 	require.Equal(t, float64(150), usage["total_tokens"], "response_body usage = %#v, want original usage", usage)
 
 	// The replay ring keeps the detail without bodies, flagged as captured.
-	retained := eventPayload(t, b.events[0])
+	retained := eventPayload(t, encoded(t, b.events[0]))
 	retainedData, ok := retained["data"].(map[string]any)
 	require.True(t, ok, "retained preview data = %T, want object", retained["data"])
 	_, ok = retainedData["request_body"]
@@ -618,7 +618,7 @@ func TestBrokerAuditPreviewIncludesCompactWorkflowData(t *testing.T) {
 		},
 	})
 
-	payload := eventPayload(t, b.events[0])
+	payload := eventPayload(t, encoded(t, b.events[0]))
 	data, ok := payload["data"].(map[string]any)
 	require.True(t, ok, "preview data = %T, want object", payload["data"])
 
@@ -648,7 +648,7 @@ func TestBrokerAuditPreviewIncludesCompactAttempts(t *testing.T) {
 		},
 	})
 
-	payload := eventPayload(t, b.events[0])
+	payload := eventPayload(t, encoded(t, b.events[0]))
 	data, ok := payload["data"].(map[string]any)
 	require.True(t, ok, "preview data = %T, want object", payload["data"])
 
@@ -680,7 +680,7 @@ func TestBrokerAuditPreviewIncludesGuardrailOutcomesWithoutDetail(t *testing.T) 
 		},
 	})
 
-	payload := eventPayload(t, b.events[0])
+	payload := eventPayload(t, encoded(t, b.events[0]))
 	data, ok := payload["data"].(map[string]any)
 	require.True(t, ok, "preview data = %T, want object", payload["data"])
 
@@ -800,7 +800,7 @@ func TestBrokerCompactsOversizedRetainedEvents(t *testing.T) {
 		},
 	})
 
-	retained := b.events[0]
+	retained := encoded(t, b.events[0])
 	require.LessOrEqual(t, len(retained.Data), maxRetainedEventBytes)
 
 	data, ok := eventPayload(t, retained)["data"].(map[string]any)
@@ -849,7 +849,7 @@ func TestBrokerAuditStreamPreviewCarriesPartialResponseBody(t *testing.T) {
 	// The replay ring drops the partial body without claiming it was captured
 	// (it is not in the persisted entry yet) and without the partial flag,
 	// which would go stale in merged active snapshots.
-	retained := eventPayload(t, b.events[0])
+	retained := eventPayload(t, encoded(t, b.events[0]))
 	retainedData, ok := retained["data"].(map[string]any)
 	require.True(t, ok, "retained preview data = %T, want object", retained["data"])
 	_, ok = retainedData["response_body"]
@@ -1231,7 +1231,7 @@ func TestBrokerCapsRetainedEventsWithOversizedErrorMessage(t *testing.T) {
 			require.Len(t, b.events, 1)
 			assert.LessOrEqual(t, len(b.events[0].Data), maxRetainedEventBytes, "retained event exceeds the cap")
 
-			message, ok := eventPayload(t, b.events[0])["error_message"].(string)
+			message, ok := eventPayload(t, encoded(t, b.events[0]))["error_message"].(string)
 			require.True(t, ok, "error_message missing from the retained event")
 			assert.True(t, strings.HasSuffix(message, retainedTextTruncationMarker), "a truncated message should say so, got %q", message[max(0, len(message)-40):])
 		})
