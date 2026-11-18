@@ -44,12 +44,47 @@ type LogQueryParams struct {
 	Offset            int
 	// OmitAttempts excludes provider attempts from returned entries. The default is false.
 	OmitAttempts bool
+	// OmitBodies leaves the request and response bodies and each provider
+	// attempt's response body in the database, for list views that show
+	// metadata only. Each body that was captured comes back as an
+	// OmittedBody. The default is false.
+	OmitBodies bool
 	// ExactUserPath matches only UserPath instead of its subtree. The default is false.
 	// An exact root path also matches legacy empty and null stored paths.
 	ExactUserPath bool
 	// Internal keyset cursor used while assembling multi-page conversations.
 	beforeTimestamp time.Time
 	beforeID        string
+}
+
+// OmittedBody stands in for a captured body that a query with
+// LogQueryParams.OmitBodies left in the database. Conversation reports that
+// the request or response body is shaped like a conversation (see
+// admin.hasConversationPayload, which the readers' queries mirror).
+type OmittedBody struct {
+	Conversation bool `json:"-"`
+}
+
+// omittedBodies records, for one row read with OmitBodies, which bodies the
+// query left out and whether each is shaped like a conversation.
+type omittedBodies struct {
+	Request              bool `bson:"_request_body_captured"`
+	Response             bool `bson:"_response_body_captured"`
+	RequestConversation  bool `bson:"_request_conversation"`
+	ResponseConversation bool `bson:"_response_conversation"`
+}
+
+// apply puts an OmittedBody where each left-out body was.
+func (o omittedBodies) apply(entry *LogEntry) {
+	if entry == nil || entry.Data == nil {
+		return
+	}
+	if o.Request {
+		entry.Data.RequestBody = OmittedBody{Conversation: o.RequestConversation}
+	}
+	if o.Response {
+		entry.Data.ResponseBody = OmittedBody{Conversation: o.ResponseConversation}
+	}
 }
 
 // LogListResult holds a paginated list of audit log entries.
