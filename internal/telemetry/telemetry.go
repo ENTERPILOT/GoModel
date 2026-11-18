@@ -204,15 +204,35 @@ func newMiddleware(tp *sdkTrace.TracerProvider, mp *sdkMetric.MeterProvider, pro
 //
 // Every request also gets a core.GenAIOperation record, sampled or not, so
 // the token metrics name the operation the duration metric does.
+//
+// Authentication resolves the user path inside next, so the server span gets
+// it once the handler returns, or panics: Recover runs outside this wrapper.
 func withGenerationTracing(next echo.HandlerFunc, captureContent bool) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := core.WithGenAIOperation(c.Request().Context())
-		if trace.SpanFromContext(ctx).IsRecording() {
-			ctx = core.WithGenerationTracing(ctx, captureContent)
+		span := trace.SpanFromContext(ctx)
+		if !span.IsRecording() {
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
 		}
-		c.SetRequest(c.Request().WithContext(ctx))
+		c.SetRequest(c.Request().WithContext(core.WithGenerationTracing(ctx, captureContent)))
+		defer func() { span.SetAttributes(userPathAttributes(c.Request().Context())...) }()
 		return next(c)
 	}
+}
+
+// userPathAttribute names the caller's effective user path on spans, in
+// full. The token and cost metrics carry the same key only when the operator
+// opts in, cut to a bounded depth and value count (see usagemetrics).
+const userPathAttribute = "gomodel.user_path"
+
+// userPathAttributes returns the request's effective user path, the same
+// value usage and audit records carry, or nothing when none is set.
+func userPathAttributes(ctx context.Context) []attribute.KeyValue {
+	if userPath := core.UserPathFromContext(ctx); userPath != "" {
+		return []attribute.KeyValue{attribute.String(userPathAttribute, userPath)}
+	}
+	return nil
 }
 
 // operationalEndpointSkipper leaves health probes, Prometheus scrapes, and
