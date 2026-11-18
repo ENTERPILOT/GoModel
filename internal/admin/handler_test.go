@@ -36,6 +36,8 @@ type mockUsageReader struct {
 	breakdownErr         error
 	invoice              *usage.Invoice
 	lastInvoice          usage.InvoiceParams
+	benchmark            *usage.Benchmark
+	lastBenchmark        usage.BenchmarkParams
 	sessionUsage         *usage.SessionUsageResult
 	usageLog             *usage.UsageLogResult
 	usageByRequestID     map[string][]usage.UsageLogEntry
@@ -146,6 +148,11 @@ func (m *mockUsageReader) GetUsageBreakdown(_ context.Context, params usage.Usag
 func (m *mockUsageReader) GetUsageInvoice(_ context.Context, params usage.InvoiceParams) (*usage.Invoice, error) {
 	m.lastInvoice = params
 	return m.invoice, nil
+}
+
+func (m *mockUsageReader) GetUsageBenchmark(_ context.Context, params usage.BenchmarkParams) (*usage.Benchmark, error) {
+	m.lastBenchmark = params
+	return m.benchmark, nil
 }
 
 func (m *mockUsageReader) GetUsageBySession(_ context.Context, params usage.SessionUsageParams) (*usage.SessionUsageResult, error) {

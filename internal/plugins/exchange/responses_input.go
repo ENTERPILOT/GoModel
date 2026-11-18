@@ -299,7 +299,7 @@ var inputElementKeys = []string{"type", "role", "status", "content", "call_id", 
 
 func patchInputMap(origMap map[string]any, item inputItem) (map[string]any, error) {
 	if origMap != nil && !item.edited {
-		return cloneAnyMap(origMap), nil
+		return maps.Clone(origMap), nil
 	}
 	updated, err := elementAsMap(item.elem)
 	if err != nil {
@@ -308,7 +308,7 @@ func patchInputMap(origMap map[string]any, item inputItem) (map[string]any, erro
 	if origMap == nil {
 		return updated, nil
 	}
-	out := cloneAnyMap(origMap)
+	out := maps.Clone(origMap)
 	for _, key := range inputElementKeys {
 		delete(out, key)
 	}

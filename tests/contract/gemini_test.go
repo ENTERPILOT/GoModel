@@ -21,6 +21,8 @@ func TestGeminiReplayChatCompletion(t *testing.T) {
 		{name: "basic", fixturePath: "gemini/chat_completion.json"},
 		{name: "params", fixturePath: "gemini/chat_with_params.json"},
 		{name: "tools", fixturePath: "gemini/chat_with_tools.json"},
+		{name: "thinking", fixturePath: "gemini/chat_with_thinking.json"},
+		{name: "thinking truncated", fixturePath: "gemini/chat_with_thinking_truncated.json"},
 	}
 
 	for _, tc := range testCases {
@@ -45,27 +47,39 @@ func TestGeminiReplayChatCompletion(t *testing.T) {
 }
 
 func TestGeminiReplayStreamChatCompletion(t *testing.T) {
-	provider := newGeminiReplayProvider(t, map[string]replayRoute{
-		replayKey(http.MethodPost, "/chat/completions"): sseFixtureRoute(t, "gemini/chat_completion_stream.txt"),
-	})
+	testCases := []struct {
+		name        string
+		fixturePath string
+	}{
+		{name: "basic", fixturePath: "gemini/chat_completion_stream.txt"},
+		{name: "thinking", fixturePath: "gemini/chat_with_thinking_stream.txt"},
+	}
 
-	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
-		Model: "gemini-2.5-flash",
-		Messages: []core.Message{{
-			Role:    "user",
-			Content: "stream",
-		}},
-	})
-	require.NoError(t, err)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := newGeminiReplayProvider(t, map[string]replayRoute{
+				replayKey(http.MethodPost, "/chat/completions"): sseFixtureRoute(t, tc.fixturePath),
+			})
 
-	raw := readAllStream(t, stream)
-	chunks, done := parseChatStream(t, raw)
+			stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+				Model: "gemini-2.5-flash",
+				Messages: []core.Message{{
+					Role:    "user",
+					Content: "stream",
+				}},
+			})
+			require.NoError(t, err)
 
-	compareGoldenJSON(t, goldenPathForFixture("gemini/chat_completion_stream.txt"), map[string]any{
-		"done":   done,
-		"chunks": chunks,
-		"text":   extractChatStreamText(chunks),
-	})
+			raw := readAllStream(t, stream)
+			chunks, done := parseChatStream(t, raw)
+
+			compareGoldenJSON(t, goldenPathForFixture(tc.fixturePath), map[string]any{
+				"done":   done,
+				"chunks": chunks,
+				"text":   extractChatStreamText(chunks),
+			})
+		})
+	}
 }
 
 func TestGeminiReplayListModels(t *testing.T) {

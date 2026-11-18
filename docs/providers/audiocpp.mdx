@@ -76,7 +76,12 @@ curl -s http://localhost:8080/v1/audio/transcriptions \
 `voice` names an audio.cpp voice preset, a cached voice id, or a wav in the
 configured voice library — audio.cpp has no fixed voice set, so OpenAI's
 `alloy`/`nova`/… mean nothing to it. List what a model offers with
-`GET /p/audiocpp/audio/voices?model=<id>`.
+[`GET /v1/audio/voices`](/advanced/api-endpoints#voice-discovery):
+
+```bash
+curl -s "http://localhost:8080/v1/audio/voices?model=audiocpp/pocket-tts" \
+  -H "Authorization: Bearer change-me"
+```
 
 Omit `voice` to let audio.cpp apply the model's configured
 `default_voice_preset`.
@@ -163,7 +168,7 @@ server root.
 | `POST /p/audiocpp/audio/transcriptions/live` | Raw chunked PCM in, transcript events out, on one connection |
 | `POST /p/audiocpp/audio/speech/live` | The speech-to-speech live-ingest variant |
 | `POST /p/audiocpp/audio/alignments` | Forced alignment of known text against audio |
-| `GET /p/audiocpp/audio/voices?model=<id>` | The voices a TTS model offers |
+| `GET /p/audiocpp/audio/voices?model=<id>` | audio.cpp's raw voice list; `GET /v1/audio/voices` returns it normalized to `{id, name}` without passthrough |
 | `POST /p/audiocpp/tasks/run` | audio.cpp's generic framework request, for tasks with no OpenAI endpoint (separation, VAD, diarization, music) |
 | `GET /p/audiocpp/health` | Server readiness and configured model count |
 
