@@ -1,10 +1,18 @@
 package admin
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // TestRegisterRoutes_RegistersExpectedPaths is a smoke test for the admin
@@ -144,4 +152,49 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		registered = append(registered, route.Method+" "+route.Path)
 	}
 	require.ElementsMatch(t, want, registered)
+}
+
+// The request log was served under /admin/audit before it was renamed. The old
+// paths are a compatibility promise: each must reach the same handler as its
+// replacement and answer identically.
+func TestDeprecatedAuditPathsServeTheRequestLog(t *testing.T) {
+	now := time.Now().UTC()
+	entry := requestlog.LogEntry{ID: "log-1", Timestamp: now, RequestID: "req-1", StatusCode: http.StatusOK}
+	reader := &mockRequestLogReader{
+		logResult:          &requestlog.LogListResult{Entries: []requestlog.LogEntry{entry}, Total: 1, Limit: 25},
+		logByID:            &entry,
+		conversationResult: &requestlog.ConversationResult{AnchorID: "log-1", Entries: []requestlog.LogEntry{entry}},
+		statsResult:        &requestlog.RequestStats{},
+		sessionsResult:     &requestlog.SessionListResult{},
+	}
+	e := echo.New()
+	NewHandler(nil, nil, WithRequestLogReader(reader)).RegisterRoutes(e.Group("/admin"))
+
+	// as_of is the time the list was read, so it differs between two calls.
+	get := func(path string) (int, map[string]any) {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body), rec.Body.String())
+		delete(body, "as_of")
+		return rec.Code, body
+	}
+
+	tests := []struct{ deprecated, current string }{
+		{"/admin/audit/log?days=7", "/admin/request-logs?days=7"},
+		{"/admin/audit/sessions?days=7", "/admin/request-logs/sessions?days=7"},
+		{"/admin/audit/stats?days=7", "/admin/request-logs/stats?days=7"},
+		{"/admin/audit/detail?log_id=log-1", "/admin/request-logs/detail?log_id=log-1"},
+		{"/admin/audit/conversation?log_id=log-1", "/admin/request-logs/conversation?log_id=log-1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.deprecated, func(t *testing.T) {
+			wantCode, wantBody := get(tt.current)
+			require.Equal(t, http.StatusOK, wantCode, wantBody)
+
+			gotCode, gotBody := get(tt.deprecated)
+			assert.Equal(t, wantCode, gotCode)
+			assert.Equal(t, wantBody, gotBody)
+		})
+	}
 }
