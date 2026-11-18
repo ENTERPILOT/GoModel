@@ -55,7 +55,7 @@ test("pageVisibleForScope hides gateway-wide pages from scoped admins only", () 
     assert.equal(pageVisibleForScope(page, true), false, page);
     assert.equal(pageVisibleForScope(page, false), true, page);
   }
-  for (const page of ["overview", "usage", "budgets", "rate-limits", "auth-keys", "users", "audit-logs", "settings", "playground"]) {
+  for (const page of ["overview", "usage", "budgets", "rate-limits", "auth-keys", "users", "requests", "settings", "playground"]) {
     assert.equal(pageVisibleForScope(page, true), true, page);
   }
 });

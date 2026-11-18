@@ -11,7 +11,7 @@ keywords: ["GoModel Pro", "SAML", "SAML 2.0", "SSO", "Single Sign-On", "Identity
 
 `protocol: saml` macht das Gateway zu einem SAML-2.0-Service-Provider statt
 zu einem OIDC-Client. Sessions, User-Paths,
-[Gruppen-Mapping](/de/pro/sso#gruppen-mapping), Abmeldung und Audit
+[Gruppen-Mapping](/de/pro/sso#gruppen-mapping), Abmeldung und Anmeldeereignisse
 funktionieren genau wie für [OIDC SSO](/de/pro/sso) beschrieben; es ändert
 sich nur, wie eine Anmeldung nachgewiesen wird.
 
@@ -20,7 +20,7 @@ sich nur, wie eine Anmeldung nachgewiesen wird.
   `client_id`, `client_secret`, `redirect_url`) nicht gesetzt sein, weder in
   YAML noch in der Umgebung. Mit `protocol: oidc` darf keine
   `saml`-Einstellung gesetzt sein. Andernfalls wird der Start abgebrochen.
-- **Ein Protokollwechsel ändert jede Principal-ID.** Die in Audit-Einträgen
+- **Ein Protokollwechsel ändert jede Principal-ID.** Die in Request-Log-Einträgen
   gespeicherte ID wird aus dem Protokoll, dem Identity-Provider und dem
   Subject abgeleitet. Dieselbe Person erscheint nach dem Wechsel also unter
   einem neuen Principal.
@@ -230,7 +230,7 @@ extensions:
 
 Eine Anmeldung gelingt nur, wenn alle folgenden Punkte zutreffen. Jeder
 Fehlschlag hat seinen eigenen
-[Audit-Grund](/de/pro/sso#gründe-für-abgelehnte-anmeldungen).
+[Ablehnungsgrund](/de/pro/sso#gründe-für-abgelehnte-anmeldungen).
 
 - **Sie beantwortet eine Anmeldung, die dieser Browser gestartet hat.** Das
   signierte Transaktions-Cookie (10 Minuten gültig), `RelayState` und

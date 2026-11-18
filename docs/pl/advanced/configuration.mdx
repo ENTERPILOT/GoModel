@@ -62,12 +62,12 @@ Najczęstszy sposób konfigurowania GoModel. Ustaw dowolną z poniższych zmienn
 
 Body requestów może być skompresowane za pomocą `Content-Encoding: gzip` (lub `x-gzip`)
 albo `zstd`; SDK TypeSafe domyślnie kompresują zstd body o rozmiarze 1 KiB lub
-większym. Gateway dekoduje je przed routingiem, więc guardrails, audyt i
+większym. Gateway dekoduje je przed routingiem, więc guardrails, logowanie requestów i
 providerzy widzą zwykłe body, a `BODY_SIZE_LIMIT` dotyczy zarówno rozmiaru
 po kompresji, jak i po zdekodowaniu (`413`, gdy którykolwiek go przekracza). Inne kodowania
 zwracają `415`. Body jest odczytywane i dekodowane dopiero po uwierzytelnieniu
 requestu, więc z body requestu bez ważnych danych uwierzytelniających nie jest
-odczytywany żaden fragment, a jego wpis audytu nie zawiera body requestu. Taki
+odczytywany żaden fragment, a jego wpis logu requestów nie zawiera body requestu. Taki
 request dostaje `401`, nawet jeśli jego body po zdekodowaniu przekroczyłoby limit;
 tylko zadeklarowany rozmiar powyżej limitu nadal zwraca `413`.
 
@@ -76,13 +76,13 @@ gateway przed klientami, którzy otwierają odpowiedź streamingową i przestaj�
 zapis do klienta dostaje nowy termin, więc timeout zadziała tylko wtedy, gdy socket
 klienta pozostaje pełny przez cały ten czas, a nigdy wtedy, gdy wolny model po prostu nie ma nic do wysłania.
 Gdy timeout zadziała, połączenie zostaje zamknięte, request do upstreamowego providera jest
-anulowany, a wpis audytowy zapisuje `client_stalled` – również wtedy, gdy stream
+anulowany, a wpis logu requestów zapisuje `client_stalled` – również wtedy, gdy stream
 został zaserwowany z cache'u odpowiedzi. Zwiększ tę wartość dla klientów, którzy w uzasadniony sposób
 wstrzymują odczyt streamu na dłużej niż minutę; ustaw `0`, żeby ją wyłączyć.
 
 #### Adresy klientów za proxy
 
-Każdy adres klienta raportowany przez GoModel – we wpisach audytowych, kluczach rate limitów, logach –
+Każdy adres klienta raportowany przez GoModel – we wpisach logu requestów, kluczach rate limitów, logach –
 to adres połączenia, które dotarło do gatewaya, więc za reverse
 proxy wszystkie wskazują na proxy. Ustaw `SERVER_TRUSTED_PROXIES` na sieci,
 w których stoją Twoje własne proxy, a GoModel odczyta przekazany adres klienta.
@@ -151,7 +151,7 @@ gatewaya. Gdy wydasz już zarządzane klucze API gatewaya, ustaw
 `MASTER_KEY_DISABLED=true` (`server.master_key_disabled` w YAML), żeby go wycofać
 i zostawić te klucze – razem z każdym używanym rozszerzeniem uwierzytelniania,
 takim jak SSO – jako jedyną drogę dostępu. Ścieżki użytkownika, budżety, rate limity
-i ślady audytowe przypisane do kluczy obowiązują wtedy dla każdego requestu, także w Admin API.
+i logi requestów przypisane do kluczy obowiązują wtedy dla każdego requestu, także w Admin API.
 
 ```bash
 MASTER_KEY_DISABLED=true
@@ -234,8 +234,8 @@ Pełny przewodnik po funkcji znajdziesz w [MCP Gateway](/pl/features/mcp-gateway
 
 #### Logowanie
 
-Wyjście loggera w czasie działania. Trwały ślad audytowy API (body
-requestów/odpowiedzi, nagłówki) opisuje sekcja [Logowanie audytowe](#logowanie-audytowe) poniżej.
+Wyjście loggera w czasie działania. Trwały log requestów API (body
+requestów/odpowiedzi, nagłówki) opisuje sekcja [Logowanie requestów](#logowanie-requestów) poniżej.
 
 | Zmienna      | Opis                                                                                                                                                                              | Wartość domyślna     |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
@@ -274,7 +274,7 @@ requestów/odpowiedzi, nagłówki) opisuje sekcja [Logowanie audytowe](#logowani
 
 #### Storage
 
-Storage jest współdzielony przez logowanie audytowe, śledzenie użycia i przyszłe funkcje, takie jak IAM.
+Storage jest współdzielony przez logowanie requestów, śledzenie użycia i przyszłe funkcje, takie jak IAM.
 
 | Zmienna              | Opis                                          | Wartość domyślna  |
 | -------------------- | --------------------------------------------- | ----------------- |
@@ -301,7 +301,7 @@ Storage jest współdzielony przez logowanie audytowe, śledzenie użycia i przy
 
 #### Storage mediów
 
-Pliki multimedialne – audio i obrazy przechwytywane do logu audytowego, gdy
+Pliki multimedialne – audio i obrazy przechwytywane do logu requestów, gdy
 włączone jest `LOGGING_LOG_AUDIO_BODIES` lub `LOGGING_LOG_IMAGE_BODIES` – są przechowywane
 poza bazą danych. Ich metadane trafiają do opisanego wyżej backendu storage'u; tutaj
 trafiają tylko same bajty, więc ich rozmiar nie jest ograniczany, a baza danych pozostaje
@@ -316,17 +316,17 @@ mała. Zobacz [ADR-0013](https://github.com/ENTERPILOT/GoModel/blob/main/docs/ad
 istnieje katalog `./data`, w przeciwnym razie systemowy katalog danych
 użytkownika. W kontenerach zamontuj tam wolumen; przy kilku replikach użyj
 współdzielonego montowania (EFS, montowanie S3 przez FUSE), żeby każda instancja mogła serwować każdy plik.
-Pliki są przechowywane tak długo jak wpisy audytowe, które się do nich odwołują
+Pliki są przechowywane tak długo jak wpisy logu requestów, które się do nich odwołują
 (`LOGGING_RETENTION_DAYS`), i usuwane przez cogodzinne czyszczenie.
 
-#### Logowanie audytowe
+#### Logowanie requestów
 
 | Zmienna                           | Opis                                       | Wartość domyślna |
 | --------------------------------- | ------------------------------------------ | ------- |
-| `LOGGING_ENABLED`                 | Włącza logowanie audytowe                  | `true`  |
+| `LOGGING_ENABLED`                 | Włącza logowanie requestów                 | `true`  |
 | `LOGGING_LOG_BODIES`              | Loguje body requestów/odpowiedzi           | `true`  |
 | `LOGGING_LOG_REVISION_BODIES`     | Loguje body przepisane przez request rewritery i guardrails promptów | `true`  |
-| `LOGGING_LOG_GUARDRAIL_STEPS`     | Jedna rewizja audytowa na każdy guardrail edytujący prompt (wyłączone: jedna na łańcuch) | `true`  |
+| `LOGGING_LOG_GUARDRAIL_STEPS`     | Jedna rewizja requestu na każdy guardrail edytujący prompt (wyłączone: jedna na łańcuch) | `true`  |
 | `LOGGING_LOG_AUDIO_BODIES`        | Loguje wejścia/wyjścia endpointów audio    | `false` |
 | `LOGGING_LOG_IMAGE_BODIES`        | Loguje wejścia/wyjścia endpointów obrazów  | `false` |
 | `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | Które bajty obrazów zapisywać: `all`, `input`, `output` | `all` |
@@ -337,19 +337,19 @@ Pliki są przechowywane tak długo jak wpisy audytowe, które się do nich odwo�
 | `LOGGING_FLUSH_INTERVAL`          | Interwał zapisu w sekundach                | `5`     |
 | `LOGGING_RETENTION_DAYS`          | Automatyczne usuwanie po N dniach (0 = nigdy) | `30`    |
 
-Wpisy audytowe zapisują adres klienta ustalony przez gateway. Za reverse
+Wpisy logu requestów zapisują adres klienta ustalony przez gateway. Za reverse
 proxy jest to adres proxy, dopóki nie wpiszesz jego sieci do
 `SERVER_TRUSTED_PROXIES` – zobacz [adresy klientów za
 proxy](#adresy-klientów-za-proxy).
 
-Podgląd na żywo w dashboardzie i trwałe logi audytowe to osobne funkcje.
+Podgląd na żywo w dashboardzie i trwałe logi requestów to osobne funkcje.
 Przy `DASHBOARD_LIVE_LOGS_ENABLED=true` i `LOGGING_ENABLED=false` requesty
 mogą pojawiać się na żywo, ale nie są zapisywane w storage'u i znikają po odświeżeniu
-strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i może minąć do
+strony. Gdy logowanie requestów jest włączone, zapisy są asynchroniczne i może minąć do
 `LOGGING_FLUSH_INTERVAL` sekund, zanim pojawią się w API zapisanych logów.
 
 <Note>
-  W PostgreSQL wyszukiwanie pełnotekstowe w logu audytowym korzysta z indeksu trigramowego z
+  W PostgreSQL wyszukiwanie pełnotekstowe w logu requestów korzysta z indeksu trigramowego z
   dołączonego rozszerzenia `pg_trgm`. GoModel instaluje rozszerzenie i buduje
   indeks przy starcie, jeśli jego rola w bazie danych ma do tego uprawnienia; w przeciwnym razie wyszukiwanie
   nadal działa, ale skanuje każdy wpis w wybranym zakresie dat. Żeby włączyć je przy
@@ -358,7 +358,7 @@ strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i moż
 </Note>
 
 <Tip>
-  Przy dużych tabelach audytu wybierz pole obok wyszukiwarki logów audytu w
+  Przy dużych tabelach logu requestów wybierz pole obok wyszukiwarki na stronie „Requesty” w
   dashboardzie zamiast **Wszystkie pola**. **User Path** i **Model** dopasowują
   wartości zaczynające się od wpisanego tekstu (z rozróżnieniem wielkości liter,
   więc `voxina` znajdzie `/voxinate/events/…`; **Model** sprawdza model żądany i
@@ -381,13 +381,13 @@ strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i moż
   oba są włączone, każdy rewriter, który zmienił request (na przykład kompresja tokenów w GoModel Pro),
   i każdy guardrail promptu, który edytował prompt, zapisują
   request w takiej postaci, w jakiej go zostawiły, obok oryginalnego body klienta we wpisie
-  audytowym, więc łańcuch edycji można prześledzić krok po kroku. `LOGGING_LOG_GUARDRAIL_STEPS`
+  logu requestów, więc łańcuch edycji można prześledzić krok po kroku. `LOGGING_LOG_GUARDRAIL_STEPS`
   steruje tym zapisem per krok (body requestów są kodowane poza ścieżką
   requestu): wyłącz go, żeby zapisywać edycje łańcucha jako jedną rewizję zawierającą
   request w przekazanej dalej postaci, bez snapshotów poszczególnych kroków.
   Wyłączenie `LOGGING_LOG_REVISION_BODIES` zachowuje metadane rewizji (nazwę rewritera, rozmiary w bajtach, zaoszczędzone
   tokeny, szczegóły zmiany), ale pomija dodatkowe kopie body, mniej więcej o połowę zmniejszając
-  rozmiar danych audytowych na każdy przepisany request.
+  rozmiar danych logu requestów na każdy przepisany request.
 </Note>
 
 <Note>
@@ -397,7 +397,7 @@ strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i moż
   dashboard mógł je odtworzyć, a `/v1/audio/transcriptions` zapisuje przesłane
   audio (base64, maksymalnie 8 MB, również do odtworzenia) wraz z metadanymi uploadu.
   Domyślnie ma wartość `false`, bo payloady audio są
-  duże i szybko powiększają magazyn audytowy. Gdy logowanie body jest włączone, a to ustawienie wyłączone,
+  duże i szybko powiększają magazyn logów requestów. Gdy logowanie body jest włączone, a to ustawienie wyłączone,
   body audio (odpowiedź speech i upload do transkrypcji, który zachowuje swoje
   metadane) są zapisywane jako lekki placeholder `{__audio__, content_type, bytes, stored: false}`;
   gdy logowanie body jest wyłączone, body audio nie jest zapisywane wcale.
@@ -411,7 +411,7 @@ strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i moż
   `.../embed`, Gemini
   `:embedContent` i `:batchEmbedContents`). Wejścia embeddingów mogą być całymi
   dokumentami lub obrazami base64, a odpowiedzi to wektory liczb, więc masowe
-  indeksowanie szybko powiększa magazyn audytowy. Gdy logowanie body jest włączone,
+  indeksowanie szybko powiększa magazyn logów requestów. Gdy logowanie body jest włączone,
   a to ustawienie wyłączone, wpisy embeddingów zachowują metadane (model, provider,
   status, czasy, ścieżka użytkownika, usage) i pomijają body żądania i odpowiedzi.
   Domyślnie ma wartość `true`, co zachowuje dotychczasowe działanie.
@@ -426,7 +426,7 @@ strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i moż
   dashboard mógł je wyświetlić. `LOGGING_LOG_IMAGE_BODIES_SCOPE` zawęża to do
   `input` (tylko uploady) lub `output` (tylko wyniki); domyślne `all` zapisuje
   oba. Domyślnie ma wartość `false`, bo payloady obrazów są duże i szybko powiększają
-  magazyn audytowy. Gdy logowanie body jest włączone, a to ustawienie wyłączone, wpisy obrazów
+  magazyn logów requestów. Gdy logowanie body jest włączone, a to ustawienie wyłączone, wpisy obrazów
   zachowują wszystko poza pikselami: prompt i parametry, kopertę
   odpowiedzi (`usage`, `size`, `quality`), hostowane URL-e i placeholder z rozmiarem
   `{role, content_type, bytes, stored: false}` dla każdego obrazu.
@@ -503,13 +503,13 @@ Przykłady YAML, okresy, dopasowywanie i egzekwowanie w workflowach opisuje stro
 | ------------------------------------- | ------------------------------------------------ | ------- |
 | `ADMIN_ENDPOINTS_ENABLED`             | Włącza administracyjne REST API                  | `true`  |
 | `ADMIN_UI_ENABLED`                    | Włącza UI dashboardu administracyjnego           | `true`  |
-| `DASHBOARD_LIVE_LOGS_ENABLED`         | Streamuje podgląd audytu/użycia na żywo w dashboardzie | `true`  |
+| `DASHBOARD_LIVE_LOGS_ENABLED`         | Streamuje podgląd logu requestów i użycia na żywo w dashboardzie | `true`  |
 | `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | Okno odtwarzania w pamięci dla zdarzeń dashboardu na żywo | `10000` |
 | `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Maksymalna liczba zdarzeń odtwarzanych jednemu ponownie łączącemu się klientowi | `1000`  |
 | `DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS` | Interwał heartbeatu bezczynnego streamu w sekundach | `15`    |
 
-Logi na żywo w dashboardzie to kompaktowe podglądy dla stron Audit Logs i Usage.
-Aktualizują wiersze, zanim zakończy się asynchroniczny zapis do bazy danych. Zapisane tabele audytu i
+Logi na żywo w dashboardzie to kompaktowe podglądy dla stron „Requesty” i „Usage”.
+Aktualizują wiersze, zanim zakończy się asynchroniczny zapis do bazy danych. Zapisane tabele logu requestów i
 użycia pozostają źródłem prawdy; jeśli przeglądarka połączy się ponownie z kursorem
 spoza okna odtwarzania, dashboard przeładuje dane przez standardowe REST API.
 

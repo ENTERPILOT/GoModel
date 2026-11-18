@@ -7,18 +7,18 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/blobstore"
 	"github.com/enterpilot/gomodel/internal/mediastore"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
-// newTestMediaCapturer returns an audit media capturer backed by in-memory
+// newTestMediaCapturer returns a request log media capturer backed by in-memory
 // stores, plus the service so a test can read back what was stored.
-func newTestMediaCapturer(t *testing.T) (*auditlog.MediaCapturer, *mediastore.Service) {
+func newTestMediaCapturer(t *testing.T) (*requestlog.MediaCapturer, *mediastore.Service) {
 	t.Helper()
 	store := mediastore.NewService(mediastore.NewMemoryStore(), blobstore.NewMemory())
 	t.Cleanup(func() { _ = store.Close() })
-	return auditlog.NewMediaCapturer(store, 30), store
+	return requestlog.NewMediaCapturer(store, 30), store
 }
 
 // readTestMedia returns the bytes stored under a media id.

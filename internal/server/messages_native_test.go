@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/ext"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -76,7 +76,7 @@ func TestMessages_NativeStreamingLogsUsage(t *testing.T) {
 }
 
 // A forwarded Accept-Encoding would make the upstream body arrive compressed,
-// blinding the SSE usage and audit observers; it must be stripped so the
+// blinding the SSE usage and request log observers; it must be stripped so the
 // transport decompresses transparently.
 func TestBuildPassthroughHeadersDropsAcceptEncoding(t *testing.T) {
 	src := http.Header{
@@ -145,10 +145,10 @@ func TestMessages_NativeNonStreamingBodyErrorSkipsUsage(t *testing.T) {
 
 	reqBody := `{"model":"claude-fable-5","max_tokens":64,"messages":[{"role":"user","content":"Hi"}]}`
 	c, _ := echotest.Post(t, "/v1/messages", reqBody)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 
-	// The response has started, so the failure is recorded on the audit entry
+	// The response has started, so the failure is recorded on the request log entry
 	// before the handler returns rather than returned as an error.
 	require.NoError(t, handler.Messages(c))
 	require.Empty(t, usageLogger.entries)

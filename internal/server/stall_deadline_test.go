@@ -136,7 +136,7 @@ func (*timeoutError) Error() string   { return "i/o timeout" }
 func (*timeoutError) Timeout() bool   { return true }
 func (*timeoutError) Temporary() bool { return false }
 
-// The wrappers above the stall writer (echo's Response, the audit capture)
+// The wrappers above the stall writer (echo's Response, the request log capture)
 // drop flush errors, so a stall during the final flush of a stream must be
 // picked up from the stall writer itself rather than logged as a success.
 func TestFlushStream_ReportsStallDuringFinalFlush(t *testing.T) {
@@ -172,7 +172,7 @@ func (r readerThatMustNotBeRead) Read([]byte) (int, error) {
 	return 0, io.EOF
 }
 
-// The audit capture finds http.Hijacker with a direct type assertion on the
+// The request log capture finds http.Hijacker with a direct type assertion on the
 // writer beneath it, not through Unwrap. A realtime upgrade through the
 // middleware must therefore still reach the connection.
 func TestModelInteractionWriteDeadlineMiddleware_PreservesHijack(t *testing.T) {
@@ -236,7 +236,7 @@ func (w *flushStallingWriter) FlushError() error {
 	return &net.OpError{Op: "write", Err: &timeoutError{}}
 }
 
-// typeAssertingCapture mirrors the audit response capture: it forwards
+// typeAssertingCapture mirrors the request log response capture: it forwards
 // Flush and Hijack by asserting on its immediate inner writer.
 type typeAssertingCapture struct {
 	http.ResponseWriter

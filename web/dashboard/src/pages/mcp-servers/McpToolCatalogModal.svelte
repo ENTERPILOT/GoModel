@@ -140,7 +140,7 @@
             {#each issues as issue (issue.server)}
               <li>
                 <code class="mono">{issue.server}</code>
-                <span class="audit-status-badge {issue.statusClass}"
+                <span class="request-log-status-badge {issue.statusClass}"
                   >{mcpServerStatusLabel(issue)}</span
                 >
                 {#if issue.error}

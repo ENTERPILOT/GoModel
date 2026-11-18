@@ -28,7 +28,7 @@ exclude the path at the ingress, or set metrics.enabled false.
 {{- end }}
 {{- if and (eq .Values.storage.type "sqlite") (not .Values.persistence.enabled) }}
 
-WARNING: SQLite data is on an emptyDir volume. Audit logs, usage, budgets and
+WARNING: SQLite data is on an emptyDir volume. Request logs, usage, budgets and
 dashboard-created keys are lost when the pod is replaced. Enable persistence
 or use storage.type postgresql / mongodb.
 {{- end }}

@@ -165,7 +165,7 @@ providers:
 
 图片端点是一个按模型路由、直通提供商的轻量通道，**不会经过完整的推理编排器**。与 `/v1/chat/completions` 相比：
 
-- **不支持故障转移、护栏或响应缓存**：这些阶段会被跳过。请求仍会经过授权、预算检查、速率限制、计量，并写入[审计日志](/zh/advanced/admin-endpoints)。
+- **不支持故障转移、护栏或响应缓存**：这些阶段会被跳过。请求仍会经过授权、预算检查、速率限制、计量，并写入[请求日志](/zh/advanced/admin-endpoints)。
 - **不支持流式传输**：`stream: true` 会被以 `400` 拒绝，因为流式图片生成以 Server-Sent Events 形式交付，而这些端点不会转发它们。省略 `stream`（或将其设置为 `false`）即可接收完整的 JSON 响应。
 - **不暴露变体接口**（`/v1/images/variations`）。请使用[透传 API](/zh/features/passthrough-api)（`/p/{provider}/v1/images/...`）在特定提供商上调用。
 - **入站使用 OpenAI 请求格式**：Google Gemini 的原生图片 API（Imagen `predict`、Gemini 图片模型 `generateContent`）会在这些端点背后进行转换；请参阅下文的[提供商说明](#google-gemini)。其他原生图片 API 与 OpenAI 不同的提供商不会被转换，请对它们使用透传。
@@ -181,11 +181,11 @@ providers:
 
 在兼容 OpenAI 模式下，生成请求会转发到 Gemini 的 `/openai/images/generations` 端点，编辑请求会被拒绝（该接口没有编辑端点）。
 
-## 审计日志
+## 请求日志
 
-图片请求与其他模型交互一样会出现在审计日志中。启用 `LOGGING_LOG_BODIES` 时：
+图片请求与其他模型交互一样会出现在请求日志中。启用 `LOGGING_LOG_BODIES` 时：
 
 - 生成请求以 JSON 形式存储。编辑请求以图片体形式存储：包含提示词和参数，以及每张上传的源图片和蒙版各一项（文件名、内容类型、大小）。
 - 响应同样以图片体形式存储：包含响应封装（`created`、`usage`、`size`、`quality` 等），以及每张返回的图片各一项。托管 URL 以链接形式保留。
 
-除非设置 [`LOGGING_LOG_IMAGE_BODIES=true`](/zh/advanced/configuration#审计日志)，否则**不会**存储像素本身。开启后，上传的图片和生成的图片会写入[媒体存储](/zh/advanced/configuration#媒体存储)，每一项都带有一个 `media_id`，控制台通过 `GET /admin/media/{id}` 内联显示；`LOGGING_LOG_IMAGE_BODIES_SCOPE` 可将范围限制为 `input`（编辑上传）或 `output`（结果）。未开启时，每张图片都是一个带大小信息的占位符（`stored: false`）。无论哪种方式，条目都会保持精简且完整：即使是很大的 `b64_json` 结果，也绝不会触发通用的 1 MB 请求体截断，且对每条记录中存储的图片没有数量上限。文件的保留时间与引用它们的审计条目相同（`LOGGING_RETENTION_DAYS`）。
+除非设置 [`LOGGING_LOG_IMAGE_BODIES=true`](/zh/advanced/configuration#请求日志)，否则**不会**存储像素本身。开启后，上传的图片和生成的图片会写入[媒体存储](/zh/advanced/configuration#媒体存储)，每一项都带有一个 `media_id`，控制台通过 `GET /admin/media/{id}` 内联显示；`LOGGING_LOG_IMAGE_BODIES_SCOPE` 可将范围限制为 `input`（编辑上传）或 `output`（结果）。未开启时，每张图片都是一个带大小信息的占位符（`stored: false`）。无论哪种方式，条目都会保持精简且完整：即使是很大的 `b64_json` 结果，也绝不会触发通用的 1 MB 请求体截断，且对每条记录中存储的图片没有数量上限。文件的保留时间与引用它们的请求日志条目相同（`LOGGING_RETENTION_DAYS`）。

@@ -72,8 +72,8 @@ func TestAdminAPI_EndpointsEnabled_E2E(t *testing.T) {
 			},
 		},
 		{
-			name:     "audit log returns paginated entries envelope",
-			endpoint: "/admin/audit/log",
+			name:     "request log returns paginated entries envelope",
+			endpoint: "/admin/request-logs",
 			check: func(t *testing.T, body []byte) {
 				var envelope struct {
 					Entries []map[string]any `json:"entries"`
@@ -88,8 +88,8 @@ func TestAdminAPI_EndpointsEnabled_E2E(t *testing.T) {
 			},
 		},
 		{
-			name:     "audit conversation returns anchor + entries",
-			endpoint: "/admin/audit/conversation?log_id=test",
+			name:     "request log conversation returns anchor + entries",
+			endpoint: "/admin/request-logs/conversation?log_id=test",
 			check: func(t *testing.T, body []byte) {
 				var conv struct {
 					AnchorID string           `json:"anchor_id"`
@@ -140,8 +140,8 @@ func TestAdminAPI_EndpointsDisabled_E2E(t *testing.T) {
 	endpoints := []string{
 		"/admin/usage/summary",
 		"/admin/usage/daily",
-		"/admin/audit/log",
-		"/admin/audit/conversation?log_id=test",
+		"/admin/request-logs",
+		"/admin/request-logs/conversation?log_id=test",
 		"/admin/models",
 	}
 
