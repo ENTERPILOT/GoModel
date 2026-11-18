@@ -14,7 +14,9 @@ Jeśli prompt cache providera zdążył już wygasnąć, ta jednowyrazowa tura j
 rozliczana jako cały kontekst po pełnej cenie.
 
 Guardrail `courtesy_reply` rozpoznaje takie tury i odpowiada na nie w
-gatewayu, więc request w ogóle nie trafia do providera. Działa na
+gatewayu, więc rozmowa nie jest wysyłana ponownie. Domyślnie odpowiedzią jest
+gotowy tekst i nic nie trafia do providera; przy `reply: model` tylko kilka
+ostatnich wiadomości trafia do małego `reply_model`. Działa na
 `/v1/chat/completions`, `/v1/responses` i `/v1/messages` oraz rozpoznaje
 podziękowania i pożegnania po angielsku, polsku, niemiecku, hiszpańsku,
 francusku, portugalsku i włosku.
@@ -68,18 +70,33 @@ guardrails:
       fail_mode: "open"
 ```
 
-To wszystko: podziękowania i pożegnania przy zimnym cache dostają teraz
-gotową odpowiedź bez kosztu inferencji. Regułę możesz też utworzyć w
+Podziękowania i pożegnania spełniające powyższe warunki dostają teraz
+gotową odpowiedź bez kosztu inferencji. Reguły z `config.yaml` trafiają do
+domyślnego workflow; własny [workflow](/pl/advanced/workflows#kroki-guardrails)
+uruchamia regułę tylko wtedy, gdy odwołuje się do niej jeden z jego kroków
+fazy prompt. Regułę możesz też utworzyć w
 **Plugins & Guardrails** w Dashboardzie, który pokazuje każde ustawienie z
 opisem.
 
 ## Główne ustawienia
 
+Ustawienia umieszczasz pod kluczem `config:` reguły:
+
+```yaml
+- name: "courtesy"
+  type: "courtesy_reply"
+  fail_mode: "open"
+  config:
+    reply: "model"
+    reply_model: "openai/gpt-4o-mini"
+    reply_to_acknowledgments: true
+```
+
 | Ustawienie | Domyślnie | Przeznaczenie |
 | --- | --- | --- |
 | `reply` | `canned` | `canned` odpowiada stałym tekstem; `model` prosi `reply_model` o jedno krótkie zdanie, wysyłając tylko kilka ostatnich wiadomości. |
 | `reply_model` | — | Tani model czatu dla `reply: model`, na przykład `openai/gpt-4o-mini`. |
-| `cache_policy` | `cold_only` | `always` odpowiada na każdą turę grzecznościową, niezależnie od cache. |
+| `cache_policy` | `cold_only` | `always` odpowiada także przy ciepłym cache. Pozostałe warunki nadal obowiązują. |
 | `cache_ttl` | `auto` | Jak długo provider trzyma cache, na przykład `5m` lub `1h`. `auto` odczytuje to z requestu. |
 | `unknown_cache` | `cold` | Jak traktować rozmowy, których gateway nie obserwował. |
 | `min_context_tokens` | `2000` | Mniejsze rozmowy zawsze trafiają do modelu. |

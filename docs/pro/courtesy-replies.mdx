@@ -14,7 +14,9 @@ back. If the provider's prompt cache has expired by then, that one-word turn
 is billed as the full context at full price.
 
 The `courtesy_reply` guardrail recognizes these turns and answers them at the
-gateway, so the request never reaches the provider. It works on
+gateway, so the conversation is never resent. By default the reply is canned
+text and nothing reaches a provider; with `reply: model`, only the last few
+messages go to a small `reply_model`. It works on
 `/v1/chat/completions`, `/v1/responses`, and `/v1/messages`, and recognizes
 thank-yous and goodbyes in English, Polish, German, Spanish, French,
 Portuguese, and Italian.
@@ -68,17 +70,32 @@ guardrails:
       fail_mode: "open"
 ```
 
-That's it: cold-cache thank-yous and goodbyes now get a canned reply at no
-inference cost. You can also create the rule from **Plugins & Guardrails** in
-the Dashboard, which shows every setting with its help text.
+Thank-yous and goodbyes that meet the conditions above now get a canned
+reply at no inference cost. Rules from `config.yaml` join the default
+workflow; a [workflow](/advanced/workflows#guardrail-steps) of your own runs
+the rule only when one of its prompt steps references it. You can also create
+the rule from **Plugins & Guardrails** in the Dashboard, which shows every
+setting with its help text.
 
 ## Main settings
+
+Settings go under the rule's `config:` key:
+
+```yaml
+- name: "courtesy"
+  type: "courtesy_reply"
+  fail_mode: "open"
+  config:
+    reply: "model"
+    reply_model: "openai/gpt-4o-mini"
+    reply_to_acknowledgments: true
+```
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `reply` | `canned` | `canned` answers with fixed text; `model` asks `reply_model` for one short sentence, sending only the last few messages. |
 | `reply_model` | — | A cheap chat model for `reply: model`, such as `openai/gpt-4o-mini`. |
-| `cache_policy` | `cold_only` | `always` answers every courtesy turn, warm cache or not. |
+| `cache_policy` | `cold_only` | `always` also answers when the cache is warm. The other conditions still apply. |
 | `cache_ttl` | `auto` | How long the provider keeps the cache, such as `5m` or `1h`. `auto` reads it from the request. |
 | `unknown_cache` | `cold` | How to treat conversations the gateway has not observed. |
 | `min_context_tokens` | `2000` | Smaller conversations always go to the model. |

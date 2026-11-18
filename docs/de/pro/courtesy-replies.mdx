@@ -15,7 +15,10 @@ abgelaufen, wird diese Ein-Wort-Nachricht als voller Kontext zum vollen Preis
 abgerechnet.
 
 Die Guardrail `courtesy_reply` erkennt solche Nachrichten und beantwortet sie
-im Gateway, sodass der Request den Provider nie erreicht. Sie funktioniert
+im Gateway, sodass die Unterhaltung nicht erneut gesendet wird. Standardmäßig
+ist die Antwort ein fester Text und nichts erreicht einen Provider; mit
+`reply: model` gehen nur die letzten Nachrichten an ein kleines `reply_model`.
+Sie funktioniert
 mit `/v1/chat/completions`, `/v1/responses` und `/v1/messages` und erkennt
 Dank und Abschied auf Englisch, Polnisch, Deutsch, Spanisch, Französisch,
 Portugiesisch und Italienisch.
@@ -75,18 +78,33 @@ guardrails:
       fail_mode: "open"
 ```
 
-Das ist alles: Dank und Abschied bei kaltem Cache erhalten nun eine
-vorgefertigte Antwort ohne Inferenzkosten. Sie können die Regel auch unter
+Dank und Abschied, die die obigen Bedingungen erfüllen, erhalten nun eine
+vorgefertigte Antwort ohne Inferenzkosten. Regeln aus `config.yaml` gehören
+zum Standard-Workflow; ein eigener [Workflow](/de/advanced/workflows#guardrail-steps)
+führt die Regel nur aus, wenn einer seiner Prompt-Schritte auf sie verweist.
+Sie können die Regel auch unter
 **Plugins & Guardrails** im Dashboard anlegen, das jede Einstellung mit
 Hilfetext zeigt.
 
 ## Wichtigste Einstellungen
 
+Einstellungen gehören unter den Schlüssel `config:` der Regel:
+
+```yaml
+- name: "courtesy"
+  type: "courtesy_reply"
+  fail_mode: "open"
+  config:
+    reply: "model"
+    reply_model: "openai/gpt-4o-mini"
+    reply_to_acknowledgments: true
+```
+
 | Einstellung | Standard | Zweck |
 | --- | --- | --- |
 | `reply` | `canned` | `canned` antwortet mit festem Text; `model` bittet `reply_model` um einen kurzen Satz und sendet nur die letzten Nachrichten. |
 | `reply_model` | — | Ein günstiges Chat-Modell für `reply: model`, etwa `openai/gpt-4o-mini`. |
-| `cache_policy` | `cold_only` | `always` beantwortet jede Höflichkeitsnachricht, ob der Cache warm ist oder nicht. |
+| `cache_policy` | `cold_only` | `always` antwortet auch bei warmem Cache. Die übrigen Bedingungen gelten weiterhin. |
 | `cache_ttl` | `auto` | Wie lange der Provider den Cache hält, etwa `5m` oder `1h`. `auto` liest es aus dem Request. |
 | `unknown_cache` | `cold` | Wie Unterhaltungen behandelt werden, die das Gateway nicht beobachtet hat. |
 | `min_context_tokens` | `2000` | Kleinere Unterhaltungen gehen immer an das Modell. |
