@@ -494,7 +494,7 @@ func RedactHeaders(headers map[string]string) map[string]string {
 // redactHeaderValue returns the audit-safe value of one header.
 func redactHeaderValue(key, value string) string {
 	if isSensitiveHeader(key) {
-		return "[REDACTED]"
+		return redactedValue
 	}
 	if strings.EqualFold(key, "Location") {
 		return core.RedactSensitiveURLQuery(value)

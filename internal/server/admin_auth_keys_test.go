@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/admin"
+	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
@@ -76,4 +77,58 @@ func TestManagedDashboardKeyCannotWidenItsOwnAccess(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"openai/gpt-4o-mini"}, view.AllowedModels)
 	assert.Equal(t, []string{"team-a"}, view.Labels)
+}
+
+// The response to POST /admin/auth-keys is the only place the plaintext token
+// of a new key appears. The audit log captures admin response bodies when
+// LOGGING_ONLY_MODEL_INTERACTIONS is off, and must not keep the token.
+func TestIssuedAuthKeyIsNotStoredInAuditLog(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		accept string
+	}{
+		{name: "admin route", path: "/admin/auth-keys"},
+		{name: "gzip response", path: "/admin/auth-keys", accept: "gzip"},
+		{name: "legacy alias", path: "/admin/api/v1/auth-keys"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, err := authkeys.NewSQLStore(t.Context(), sqlxtest.NewSQLite(t))
+			require.NoError(t, err)
+			service, err := authkeys.NewService(store)
+			require.NoError(t, err)
+			logger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: true}}
+			srv := New(&mockProvider{}, &Config{
+				MasterKey:             "master",
+				AdminEndpointsEnabled: true,
+				AdminHandler:          admin.NewHandler(nil, nil, admin.WithAuthKeys(service)),
+				Authenticator:         service,
+				AuditLogger:           logger,
+			})
+
+			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(`{"name":"ci"}`))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer master")
+			if tt.accept != "" {
+				req.Header.Set("Accept-Encoding", tt.accept)
+			}
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+			if tt.accept == "" {
+				assert.Contains(t, rec.Body.String(), `"value":"`+authkeys.DefaultTokenPrefix, "the caller still receives the token")
+			}
+
+			keys := service.ListViews()
+			require.Len(t, keys, 1)
+			require.Len(t, logger.entries, 1)
+			require.NotNil(t, logger.entries[0].Data)
+			logged, ok := auditlog.BodyDocument(logger.entries[0].Data.ResponseBody).(map[string]any)
+			require.True(t, ok, "response body: %v", logger.entries[0].Data.ResponseBody)
+			assert.Equal(t, "[REDACTED]", logged["value"])
+			assert.Equal(t, keys[0].ID, logged["id"])
+			assert.Equal(t, "ci", logged["name"])
+		})
+	}
 }

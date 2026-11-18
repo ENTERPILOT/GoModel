@@ -173,8 +173,9 @@ wolumen, ograniczaj dostęp i odpowiednio klasyfikuj kopie zapasowe.
 ### Inne kwestie związane z danymi uwierzytelniającymi
 
 - **Zarządzane klucze API** są przechowywane jako hash SHA-256 losowego sekretu o wysokiej
-  entropii, nigdy w postaci możliwej do odzyskania. Jawny tekst jest pokazywany raz, przy utworzeniu. To
-  celowo inne podejście niż w przypadku danych uwierzytelniających providerów.
+  entropii, nigdy w postaci możliwej do odzyskania. Jawny tekst jest pokazywany raz, przy utworzeniu,
+  a wpis audytu tej odpowiedzi zapisuje w jego miejscu `[REDACTED]`. To celowo inne podejście niż
+  w przypadku danych uwierzytelniających providerów.
 - **Nagłówki z danymi uwierzytelniającymi klienta są redagowane przed utrwaleniem.** Przy
   `LOGGING_LOG_HEADERS=true` nagłówki `Authorization`, `x-api-key`, `Cookie` i
   inne nagłówki z danymi uwierzytelniającymi są zastępowane przez `[REDACTED]` na ścieżce zapisu, więc

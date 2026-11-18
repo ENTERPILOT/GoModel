@@ -197,8 +197,9 @@ Volume, beschränken Sie den Zugriff und stufen Sie Backups entsprechend ein.
 
 - **Verwaltete API-Keys** werden als SHA-256-Hash eines zufälligen Secrets mit
   hoher Entropie gespeichert, niemals wiederherstellbar. Der Klartext wird
-  einmalig bei der Erstellung angezeigt. Das unterscheidet sich bewusst von
-  Provider-Zugangsdaten.
+  einmalig bei der Erstellung angezeigt, und der Audit-Eintrag zu dieser
+  Antwort speichert an seiner Stelle `[REDACTED]`. Das unterscheidet sich
+  bewusst von Provider-Zugangsdaten.
 - **Header mit Client-Zugangsdaten werden vor dem Persistieren geschwärzt.**
   Mit `LOGGING_LOG_HEADERS=true` werden `Authorization`, `x-api-key`, `Cookie`
   und die übrigen Header mit Zugangsdaten beim Schreiben durch `[REDACTED]`
