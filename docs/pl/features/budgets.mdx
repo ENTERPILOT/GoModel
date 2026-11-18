@@ -432,8 +432,10 @@ gdy wydatki osiągną któryś z nich.
 
 Alerty wymagają włączonych budżetów, a więc i śledzenia użycia
 (`BUDGETS_ENABLED` i `USAGE_ENABLED`, oba domyślnie włączone); w przeciwnym
-razie ustawienia `BUDGETS_ALERTS_*` nie są stosowane. Start nadal odrzuca
-referencję do sekretu w `BUDGETS_ALERTS_THRESHOLDS`, jak dla każdej zmiennej
+razie ustawienia `BUDGETS_ALERTS_*` nie są stosowane. Błędna wartość nadal
+przerywa start: liczba niecałkowita w `BUDGETS_ALERTS_INTERVAL`,
+`BUDGETS_ALERTS_WEBHOOK_TIMEOUT` lub `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` albo
+referencja do sekretu w `BUDGETS_ALERTS_THRESHOLDS`, jak dla każdej zmiennej
 czytanej jako liczba. Są też wyłączone, dopóki
 nie mają dokąd trafić: do webhooka albo do `ext.AlertSink` zarejestrowanego
 we własnym buildzie. Zadeklaruj webhook, a każdy budżet zacznie alarmować przy
@@ -529,10 +531,15 @@ dostarczenia.
 Odbiorca może mimo to zobaczyć ten sam alert dwa razy. Ponowienie powtarza
 `POST`, na który odpowiedź zaginęła w drodze powrotnej, z tym samym `id`, więc
 deduplikuj po `id`. Repliki z SQLite, każda z własną bazą, zgłaszają alert
-osobno i z innym `id`, bo każda baza nadaje budżetowi własną `revision`. Aby
+osobno, zwykle z innym `id`, bo każda baza nadaje budżetowi własną `revision`
+(repliki uruchomione z kopii tej samej bazy dzielą ją, a z nią `id`). Aby
 scalić także je, deduplikuj po `budget.scope`, `budget.subject`,
 `budget.effective_subject`, `budget.period_seconds`, `period_start`
-i `threshold_percent`.
+i `threshold_percent`. Ten klucz odrzuca też alert zgłoszony ponownie po zmianie
+kwoty lub podstawy kosztu budżetu w tym samym okresie, bo żadne z jego pól się
+nie zmienia; dodanie `amount` i `cost_basis` nie pomaga, gdy budżet wraca do
+wcześniejszej wartości. Aby zachować te alerty między replikami, daj im wspólną
+bazę.
 
 ### Payload webhooka
 
@@ -586,7 +593,7 @@ Dwa dostarczenia mają to samo `id` dokładnie wtedy, gdy są tym samym alertem:
 ten sam budżet (`scope`, `subject`, `effective_subject`, okres), ta sama
 `revision`, ten sam `period_start` i ten sam `threshold_percent`. Ponowienia
 i dostarczenia z innej repliki korzystającej z tej samej bazy używają go
-ponownie. Repliki z własną bazą SQLite nie, bo każda przechowuje własną
+ponownie. Repliki z własną bazą SQLite zwykle nie, bo każda przechowuje własną
 `revision`. Nowy okres, reset,
 przesunięta kotwica resetu albo nowa rewizja dają nowe `id`.
 

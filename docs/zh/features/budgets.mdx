@@ -312,7 +312,7 @@ Settings -> Budget Resets
 
 预算用尽后会拒绝请求。告警会在此之前通知你：每个预算都有阈值（金额的百分比），支出达到某个阈值时，GoModel 发送一条告警。
 
-告警要求启用预算，因而也要求启用用量追踪（`BUDGETS_ENABLED` 和 `USAGE_ENABLED`，两者默认开启）；否则 `BUDGETS_ALERTS_*` 设置不会生效。但启动时仍会拒绝 `BUDGETS_ALERTS_THRESHOLDS` 中的密钥引用，这与所有按数字读取的变量一致。此外，在有投递目标之前，告警处于关闭状态：目标可以是 webhook，也可以是自定义构建注册的 `ext.AlertSink`。声明一个 webhook 后，每个预算都会在默认阈值 80% 和 100% 时告警：
+告警要求启用预算，因而也要求启用用量追踪（`BUDGETS_ENABLED` 和 `USAGE_ENABLED`，两者默认开启）；否则 `BUDGETS_ALERTS_*` 设置不会生效。但格式错误的值仍会导致启动失败：`BUDGETS_ALERTS_INTERVAL`、`BUDGETS_ALERTS_WEBHOOK_TIMEOUT` 或 `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` 不是整数，或 `BUDGETS_ALERTS_THRESHOLDS` 中含有密钥引用，这与所有按数字读取的变量一致。此外，在有投递目标之前，告警处于关闭状态：目标可以是 webhook，也可以是自定义构建注册的 `ext.AlertSink`。声明一个 webhook 后，每个预算都会在默认阈值 80% 和 100% 时告警：
 
 ```env
 BUDGETS_ALERTS_WEBHOOK_URL=https://alerts.example.com/gomodel
@@ -371,7 +371,7 @@ GoModel 在后台每隔 `interval` 秒评估一次预算，从不在处理请求
 
 投递最多一次，且不保证送达。记录在投递之前写入，同一条告警不会再次触发：网关在两者之间被停止时，这条告警会丢失；重试后仍无法投递的告警会被丢弃：记录到日志并计数，不会稍后补发。关闭时，队列中的告警有 5 秒时间完成投递；之后仍在排队的告警会被放弃、记录到日志并计为投递失败。
 
-接收端仍可能两次收到同一条告警。重试会以相同的 `id` 重发一个响应在返回途中丢失的 `POST`，因此请按 `id` 去重。使用 SQLite 的多个副本各有自己的数据库，会各自以不同的 `id` 触发告警，因为每个数据库都会为预算生成自己的 `revision`。如需把这些也合并，请按 `budget.scope`、`budget.subject`、`budget.effective_subject`、`budget.period_seconds`、`period_start` 和 `threshold_percent` 去重。
+接收端仍可能两次收到同一条告警。重试会以相同的 `id` 重发一个响应在返回途中丢失的 `POST`，因此请按 `id` 去重。使用 SQLite 的多个副本各有自己的数据库，会各自触发告警，通常 `id` 不同，因为每个数据库都会为预算生成自己的 `revision`（从同一数据库副本启动的实例会共享它，从而共享 `id`）。如需把这些也合并，请按 `budget.scope`、`budget.subject`、`budget.effective_subject`、`budget.period_seconds`、`period_start` 和 `threshold_percent` 去重。这个键也会丢弃同一周期内预算金额或成本基准变更后再次触发的告警，因为它的字段都没有变化；加入 `amount` 和 `cost_basis` 也无济于事，因为预算可能改回先前的值。若要在多个副本间保留这些告警，请让它们共享同一个数据库。
 
 ### Webhook 负载
 
@@ -421,7 +421,7 @@ GoModel 在后台每隔 `interval` 秒评估一次预算，从不在处理请求
 | `projected_spend`          | 参见[支出预测](#支出预测)。周期经过的时间太短时省略。                        |
 | `projected_exhaustion_at`  | 按当前速度预算耗尽的时间。没有预测或预算足够撑过本周期时省略。               |
 
-两次投递带有相同的 `id`，当且仅当它们是同一条告警：同一预算（`scope`、`subject`、`effective_subject`、周期）、同一 `revision`、同一 `period_start` 和同一 `threshold_percent`。重试以及来自共享同一数据库的其他副本的投递都沿用它；各自使用 SQLite 数据库的副本则不会，因为每个数据库存储自己的 `revision`。新周期、重置、重置锚点移动或新修订版本都会产生新的 `id`。
+两次投递带有相同的 `id`，当且仅当它们是同一条告警：同一预算（`scope`、`subject`、`effective_subject`、周期）、同一 `revision`、同一 `period_start` 和同一 `threshold_percent`。重试以及来自共享同一数据库的其他副本的投递都沿用它；各自使用 SQLite 数据库的副本通常不会，因为每个数据库存储自己的 `revision`。新周期、重置、重置锚点移动或新修订版本都会产生新的 `id`。
 
 字段只会增加。每次投递还带有以下请求头：
 

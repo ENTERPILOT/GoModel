@@ -423,8 +423,10 @@ alert when spend reaches one.
 
 Alerts need budgets, and therefore usage tracking, to be on (`BUDGETS_ENABLED`
 and `USAGE_ENABLED`, both on by default); otherwise the `BUDGETS_ALERTS_*`
-settings are not applied. Startup still refuses a secret reference in
-`BUDGETS_ALERTS_THRESHOLDS`, as it does for every variable read as a number.
+settings are not applied. A malformed one still fails startup: a non-integer
+`BUDGETS_ALERTS_INTERVAL`, `BUDGETS_ALERTS_WEBHOOK_TIMEOUT`, or
+`BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES`, or a secret reference in
+`BUDGETS_ALERTS_THRESHOLDS`, as for every variable read as a number.
 They are also off until they have somewhere to go: a
 webhook, or an `ext.AlertSink` registered by a custom build. Declare a webhook
 and every budget starts alerting at the default thresholds, 80% and 100%:
@@ -516,11 +518,16 @@ and counted as delivery failures.
 
 A receiver can still see the same alert twice. A retry repeats a `POST` whose
 answer was lost on the way back, with the same `id`, so deduplicate on `id`.
-Replicas on SQLite, each with its own database, each raise the alert under a
-different `id`, because each database gives the budget its own `revision`. To
-collapse those too, deduplicate on `budget.scope`, `budget.subject`,
-`budget.effective_subject`, `budget.period_seconds`, `period_start`, and
-`threshold_percent`.
+Replicas on SQLite, each with its own database, each raise the alert, usually
+under a different `id`, because each database gives the budget its own
+`revision` (replicas started from copies of one database share it, and with it
+the `id`). To collapse those too, deduplicate on `budget.scope`,
+`budget.subject`, `budget.effective_subject`, `budget.period_seconds`,
+`period_start`, and `threshold_percent`. That key also drops the alert raised
+again after the budget's amount or cost basis changes within the period, since
+none of its fields change; adding `amount` and `cost_basis` doesn't help when a
+budget changes back to an earlier value. To keep those alerts across replicas,
+give them one shared database.
 
 ### Webhook payload
 
@@ -574,7 +581,8 @@ Two deliveries carry the same `id` exactly when they are the same alert: the
 same budget (`scope`, `subject`, `effective_subject`, period), the same
 `revision`, the same `period_start`, and the same `threshold_percent`. Retries,
 and deliveries from another replica sharing the database, reuse it. Replicas
-with their own SQLite databases do not, since each stores its own `revision`. A new period, a reset, a moved
+with their own SQLite databases usually do not, since each stores its own
+`revision`. A new period, a reset, a moved
 reset anchor, or a new revision gives a new `id`.
 
 Fields are only ever added. Every delivery also carries these headers:
