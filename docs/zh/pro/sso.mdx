@@ -1,10 +1,10 @@
 ---
 title: "OIDC 单点登录"
 sidebarTitle: "OIDC SSO"
-description: "使用您的 OIDC 身份提供商，通过带 PKCE 的授权码流程保护 GoModel 控制台。"
+description: "使用您的 OIDC 身份提供商，通过带 PKCE 的授权码流程保护 GoModel 控制台，并将身份提供商的组映射到用户路径。"
 icon: "key-round"
 tag: "Pro"
-keywords: ["GoModel Pro", "OIDC", "SSO", "单点登录", "single sign-on", "PKCE", "控制台认证", "dashboard authentication"]
+keywords: ["GoModel Pro", "OIDC", "SSO", "单点登录", "single sign-on", "PKCE", "控制台认证", "dashboard authentication", "组映射", "group mapping", "user_path", "拒绝原因", "rejected login reasons"]
 ---
 
 ## 概览
@@ -13,6 +13,8 @@ OIDC SSO 用于保护控制台，支持带 PKCE 的授权码（Authorization Cod
 `SameSite=Lax` 会话。
 
 与其他 Pro 功能不同，显式启用的 SSO 配置采用失败即拒绝（fail closed）策略：当缺少 `sso` 授权或配置无效时，启动会中止，以确保认证边界不会悄无声息地消失。
+
+如需改用 SAML 2.0 登录，请参阅 [SAML SSO](/zh/pro/saml)。除 OIDC 客户端设置外，本页的全部内容对两种协议都适用：用户路径、[组映射](#组映射)、会话、退出登录和登录事件。
 
 ## 配置 SSO
 
@@ -31,17 +33,157 @@ extensions:
 ```
 
 `PRO_SSO_*` 环境变量会覆盖 YAML 中的值。重定向 URL
-必须以 `/sso/callback` 结尾（包括已配置的 `BASE_PATH`），并且除本地回环开发 URL 外均要求使用 HTTPS。默认情况下，至少需要一个管理员组；只有对于有意不加限制的 OIDC 客户端，才应设置 `PRO_SSO_ALLOW_ALL_ADMINS=true`。
+必须以 `/sso/callback` 结尾（包括已配置的 `BASE_PATH`），并且除本地回环开发 URL 外均要求使用 HTTPS。默认情况下，至少需要一个管理员组或一条[组映射](#组映射)；只有当身份提供商已经把应用（OIDC 客户端或 [SAML](/zh/pro/saml) 应用）的使用者限定为正确的人员时，才应设置 `PRO_SSO_ALLOW_ALL_ADMINS=true`。
+
+OIDC 服务发现不会阻塞启动。如果网关启动时身份提供商不可达，网关仍会启动，现有会话继续有效，新的登录返回 `503` 和 `identity_provider_unavailable`，服务发现在后台重试（5 秒起，每次翻倍，最长 5 分钟）。设置 `require_discovery: true`（`PRO_SSO_REQUIRE_DISCOVERY=true`）可将不可达的提供商改为启动错误。
+
+## 身份与准入
+
+每次被接受的登录都会获得自己的用户路径，以及限定在该路径范围内的控制台访问权限。使用默认值时，用户位于 `/users/<小写邮箱>`。
+
+| 设置 | 环境变量 | 默认值 | 何时修改 |
+| --- | --- | --- | --- |
+| `user_path_claim` | `PRO_SSO_USER_PATH_CLAIM` | `email` | 邮箱会变更，或在您的提供商处未经验证。请指定另一个能标识此人的值，例如不可变的用户 ID：ID Token 的顶层字符串声明（OIDC），或通过名称或[别名](/zh/pro/saml#属性与主体)指定的 SAML 属性。使用 `email` 时，邮箱必须已验证，并会转换为小写。 |
+| `user_path_case_insensitive` | `PRO_SSO_USER_PATH_CASE_INSENSITIVE` | `false` | 自定义声明或属性在您的提供商处不区分大小写。其他值保留原有大小写。 |
+| `user_path_prefix` | `PRO_SSO_USER_PATH_PREFIX` | `/users` | 未匹配任何组映射的用户需要位于路径树的其他位置。 |
+| `groups_claim` | `PRO_SSO_GROUPS_CLAIM` | `groups` | 您的提供商通过其他声明（OIDC）或属性（SAML）发送组信息。 |
+| `admin_groups` | `PRO_SSO_ADMIN_GROUPS` | 无 | 列出其成员无需组映射即可登录的组。在环境变量中以逗号分隔。 |
+| `allow_all_admins` | `PRO_SSO_ALLOW_ALL_ADMINS` | `false` | OIDC 客户端或 SAML 应用已在提供商处限定为正确的人员。 |
+| `allowed_domains` | `PRO_SSO_ALLOWED_DOMAINS` | 无（任意域名） | 只允许这些域名下已验证的邮箱登录。 |
+| `session_ttl` | `PRO_SSO_SESSION_TTL` | `1h` | 会话需要更短或更长。允许范围：`5m` 到 `24h`。 |
+
+`user_path_claim` 的值会成为一个路径段，因此为空或包含 `/` 的值会被拒绝。
+
+## 组映射
+
+`group_mappings` 将身份提供商某个组的成员放到一个用户路径节点之下。在该节点上设置的预算、速率限制和模型访问随即覆盖每一位成员，无需逐个用户配置：
+
+```yaml
+extensions:
+  sso:
+    group_mappings:
+      - group: eng-platform        # groups_claim 中的一个值
+        user_path: /eng/platform   # 一个节点；每位成员位于其下一级
+      - group: finance
+        user_path: /finance
+```
+
+`PRO_SSO_GROUP_MAPPINGS` 以 JSON 数组的形式承载同一份列表。设置后，它会整体替换 YAML 列表；两者永远不会合并，`[]` 会清空列表。不是 JSON 数组的值会使启动中止。
+
+```bash
+PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"group":"finance","user_path":"/finance"}]'
+```
+
+### 登录如何映射
+
+- **匹配是精确且区分大小写的。** `group` 会与 `groups_claim` 按原样发送的各个值进行比较：无论声明是列表还是单个字符串，都不会去除空白，空字符串表示没有组。Entra ID 发送的是组的对象 ID 而不是名称，因此请填写对象 ID。
+- **第一个声明的匹配项生效。** 请按从最具体到最宽泛的顺序排列列表；一个人始终只有一个用户路径。
+- **路径为 `<user_path>/<user>`。** `<user>` 是 `user_path_claim` 的值，因此 `eng-platform` 组中的 `alice@example.com` 会以 `/eng/platform/alice@example.com` 登录。`user_path_prefix` 只适用于未匹配任何映射的登录。
+- **映射得到的是每个用户各自的叶子，而不是节点本身。** 用户路径同时也是会话的[访问作用域](/zh/features/user-path#访问作用域)，因此绑定到 `/eng/platform` 的人将能管理整个团队。每位成员只能看到自己的用量、请求日志条目和密钥。
+- **路径会覆盖某个节点的登录将被拒绝。** 如果声明的值会使路径等于某个已映射的节点或 `user_path_prefix`，或位于其中之一的上层，登录会以 `claim_mapping_failed` 失败。例如，存在节点 `/eng` 和 `/eng/platform` 时，映射到 `/eng` 的组中声明值为 `platform` 的成员会被拒绝。
+- **不检查在其他地方配置的路径。** 该规则只知道 SSO 配置的节点（映射的用户路径和 `user_path_prefix`），不知道[用户](/zh/features/users)策略、预算或速率限制中指定的路径。指向此类路径的 `user_path_claim` 值会使会话获得该路径及其下所有内容的访问作用域：`/users` 下值为 `contractors` 的 `preferred_username` 会使此人以 `/users/contractors` 登录，并拥有其下所有人的访问作用域。默认的 `email` 声明同样如此。它的值始终是此人自己已验证的邮箱，因此 `/users/alice@example.com` 这样的路径通常就是 Alice 自己的策略，这是预期行为。风险在于以邮箱命名、其下还有其他用户或密钥的路径；请不要把它们放在那里。
+
+### 谁可以登录
+
+1. 如果设置了 `allowed_domains`，会首先检查它。
+2. 当由组决定准入时（设置了 `admin_groups` 或 `group_mappings`），无法读取组的登录会被拒绝，即使设置了 `allow_all_admins` 也是如此：类型错误的组声明以 `claim_mapping_failed` 拒绝，提供商以引用方式而非在登录中发送的组以 `groups_overage` 拒绝（参见[限制](#限制)）。
+3. 匹配某条映射的登录会在该节点下被接受。
+4. 未匹配任何映射的登录如果被准入，则位于 `user_path_prefix` 之下：设置了 `admin_groups` 时，此人必须属于其中一个组（否则为 `group_denied`，即使设置了 `allow_all_admins`）；未设置 `admin_groups` 时，`allow_all_admins: true` 会准入所有人。
+5. 如果既未配置 `admin_groups` 也未配置 `allow_all_admins`，未匹配的登录会以原因 `group_unmapped` 被拒绝。
+
+因此，启动至少需要 `admin_groups`、`group_mappings` 或 `allow_all_admins: true` 之一。如果只想准入已映射的组，请只使用映射。
+
+没有组声明的登录被视为不属于任何组，而不是错误，因为许多身份提供商会对不属于任何组的人省略该声明。因此，在设置了 `allow_all_admins` 而未设置 `admin_groups` 时，这样的登录会位于 `user_path_prefix` 之下，处于所有已映射节点及其限制之外，除非 `user_path_prefix` 本身位于某个已映射节点之内。启动时不会拒绝这种重叠（例如映射到 `/teams`，前缀为 `/teams/guests`）；此时这些登录受包含 `user_path_prefix` 的每个节点的预算、速率限制和模型访问约束，而其访问作用域仍只是自己的叶子。如果绝不允许任何人绕过映射（例如配置错误的提供商可能丢失该声明），请不要启用 `allow_all_admins`；仅使用 `admin_groups` 或映射时，这样的登录会被拒绝。
+
+以下情况会导致启动失败：条目缺少 `group` 或 `user_path`、`group` 重复、存在未知键、某个键在条目中重复或大小写与 `group`、`user_path` 不同（YAML 和 `PRO_SSO_GROUP_MAPPINGS` 均如此），或 `user_path` 不是绝对路径、是根路径 `/`、包含 `.`、`..` 段或带 `:` 的段。
+
+### 配置变更时
+
+会话携带决定其路径的设置的指纹：`group_mappings`（包括顺序）、`user_path_prefix`、`user_path_claim` 及其值是否转换为小写（`user_path_case_insensitive`），以及 `groups_claim`；使用 [SAML](/zh/pro/saml) 时还包括协议，以及 `user_path_claim` 和 `groups_claim` 所对应的 SAML 属性。只要网关以其中任何一项发生变化的配置运行，之前签发的每个会话都会被拒绝，持有者需重新登录。因此，添加、删除或调整顺序的映射会立即生效，而不是等到会话过期。
+
+`admin_groups`、`allow_all_admins`、`allowed_domains`、`session_ttl` 以及 SAML 设置 `trust_email` 和 `principal_attribute` 只决定准入，不影响现有会话。
+
+此外，路径为已映射节点、`user_path_prefix` 或其上层的会话，在每个请求上都会被拒绝，而不仅仅是在登录时。
+
+### 限制
+
+- **组成员关系的变更在下次登录时生效。** 路径是已签名会话的一部分，会话期间 GoModel 不会再次询问提供商，因此调整最迟在 `session_ttl` 之后生效（默认 1 小时，最长 24 小时）。对映射本身的修改会立即生效；参见[配置变更时](#配置变更时)。
+- **API 密钥保留在旧路径上。** 用户在原叶子上创建的密钥，在其更换组或离开后仍然有效。请在控制台中将其停用。
+- **对于所属组过多的用户，Entra ID 会省略其组。** OIDC Token（JWT）中超过 200 个组、SAML 断言中超过 150 个组时，Entra ID 会改为发送指向 Microsoft Graph 的引用：组声明在 `_claim_names` 中的条目（OIDC），或 `http://schemas.microsoft.com/claims/groups.link` 属性（SAML）。GoModel 不会从 Graph 获取组，也无法判断此人属于哪个节点，因此只要设置了 `admin_groups` 或映射，这样的登录就会以 `groups_overage` 被拒绝。请在 Entra ID 中让组声明只包含分配给应用的组。此时上限只计算这些组，因此只要分配给应用的组不超过 200 个（OIDC）或 150 个（SAML），OIDC 和 SAML 用户（包括总共属于 151 到 200 个组的 SAML 用户）都可以登录。
 
 ## 跨副本退出登录
+
+退出登录总是先结束 GoModel 会话。如需同时结束身份提供商的会话，请将 `provider_logout_url`（`PRO_SSO_PROVIDER_LOGOUT_URL`）设置为提供商的绝对 HTTPS 登出 URL；退出登录后网关会重定向到该地址。请将提供商配置为返回 `BASE_PATH`（如有）下的 `/sso/logged-out`：设置 `BASE_PATH=/g` 时为 `https://gomodel.example.com/g/sso/logged-out`。未设置时，GoModel 显示自己的已退出页面。
 
 退出登录会立即在处理该请求的副本上吊销会话，并将吊销记录写入已配置的存储后端。每个副本每 2 秒重新读取一次吊销记录，因此使用 PostgreSQL 或 MongoDB 存储时，已退出的会话会在几秒内在所有副本上失效。吊销记录在重启后依然保留，并在会话本应过期后删除。
 
 使用 SQLite 时请只运行一个副本：每个 SQLite 实例都有自己的数据库，其他副本永远看不到吊销记录，重放的 Cookie 在这些副本上会一直有效，直到过期。如果退出登录时存储后端不可达，吊销仍会在处理该请求的副本上生效，并记录一条警告，该副本会持续重试，直到其他副本能够看到它。
 
-## 审计与访问控制
+## 登录事件与访问控制
 
-成功登录、被策略拒绝的登录以及退出登录都会被记录为经过脱敏的审计事件。Token、授权码、Cookie、原始声明（claims）以及身份提供商的错误详情均不会被存储。
+成功登录、被策略拒绝的登录以及退出登录都会作为经过脱敏的认证事件记录在请求日志中。Token、授权码、Cookie、原始声明（claims）以及身份提供商的错误详情均不会被存储。
+
+- **方法。** 登录、拒绝和退出登录事件以 `auth_method` 记录协议：`oidc` 或 `saml`。使用 SSO 会话发出的请求（包括 `/v1/auth/verify`）记录为 `sso`。
+- **主体。** 在身份提供商的应答通过校验之后被拒绝的登录（准入被拒，以及 SAML 中被拒绝的主体或重放的断言）会以其指明的主体写入请求日志；如果已知，还会附上它本应获得的用户路径。因路径会成为已配置节点而被拒绝的登录，不会以该路径写入请求日志，因为该路径不属于任何人；日志以 `refused_path` 记录它。
+- **日志。** 每次登录还会以相同的 `request_id` 记录日志。`GoModel Pro: SSO login succeeded` 会注明放置此次登录的组映射（`matched_group` 和 `node`）（如有）。
 
 SSO 会话与托管 API 密钥一样携带 `user_path`，因此 [用户](/zh/features/users) 页面上组级和用户级的模型允许列表，同样适用于通过 SSO 会话发出的请求。按密钥设置的 `allowed_models` 是托管
 API 密钥的设置，不适用于 SSO 会话。
+
+### 登录被拒绝的原因
+
+被拒绝的登录会带着一个固定的原因写入请求日志，网关同时会记录日志 `GoModel Pro: SSO login rejected`，其中包含相同的 `reason` 和一个 `request_id`。用户只会看到一个通用的失败页面，并以该 ID 作为参考编号。
+
+| 原因 | 协议 | 含义 |
+| --- | --- | --- |
+| `identity_provider_unavailable` | 两者 | OIDC 服务发现或 SAML 元数据不可用。登录返回 `503`。 |
+| `missing_transaction` | 两者 | 浏览器没有发送登录事务 Cookie：登录不是在此网关上发起的（包括在身份提供商处发起的 SAML 登录），或 Cookie 被拦截。 |
+| `invalid_transaction` | 两者 | 事务 Cookie 无效，或已超过 10 分钟。 |
+| `provider_rejected` | 两者 | 身份提供商返回了错误（OIDC）或非成功状态（SAML）。 |
+| `invalid_state` | OIDC | `state` 与已发起的登录不匹配。 |
+| `missing_code` | OIDC | 回调中没有授权码。 |
+| `code_exchange_failed` | OIDC | 提供商拒绝用授权码换取 Token。 |
+| `missing_id_token` | OIDC | Token 响应中没有 ID Token。 |
+| `id_token_verification_failed` | OIDC | ID Token 的签名或声明校验失败。 |
+| `invalid_claims` | OIDC | 无法读取 ID Token 的声明，或 nonce 不匹配。 |
+| `response_too_large` | SAML | 提交的表单大于 1 MiB。 |
+| `invalid_relay_state` | SAML | `RelayState` 不是网关发送的那个值。 |
+| `malformed_response` | SAML | 不是简单、完整的 SAML 2.0 响应：经过压缩，或包含 DTD、注释、处理指令、超过 32 层嵌套、单个元素超过 64 个属性、重复的属性名，或缺少必需的部分。 |
+| `too_many_elements` | SAML | XML 元素超过 900 个，通常是因为[组太多](/zh/pro/saml#限制)。 |
+| `assertion_count` | SAML | 响应中直接包含的断言不是恰好一个。 |
+| `encrypted_assertion` | SAML | 断言已加密，而加密断言不受支持。 |
+| `destination_mismatch` | SAML | 响应的 `Destination` 不是 `acs_url`。 |
+| `in_response_to_mismatch` | SAML | 该响应不是对此浏览器发起的请求的应答。 |
+| `issuer_mismatch` | SAML | 签发者不是身份提供商元数据中的实体 ID。 |
+| `assertion_unsigned` | SAML | 断言本身没有签名。仅对响应签名是不够的。 |
+| `weak_signature_algorithm` | SAML | 不是使用 SHA-256 或更强摘要的 RSA-SHA256、-SHA384 或 -SHA512，或 RSA 密钥短于 2048 位。 |
+| `untrusted_certificate` | SAML | 签名 `KeyInfo` 中的证书不是元数据中受信任的证书，或没有任何受信任证书处于有效期内。 |
+| `invalid_signature` | SAML | 签名校验未通过，或不是预期的形式。没有 `KeyInfo` 的签名会依次用每个受信任证书校验，因此未知的签名者以此原因报告。 |
+| `audience_mismatch` | SAML | 没有受众限制，或某个受众限制未指明网关的实体 ID。 |
+| `invalid_conditions` | SAML | 缺少 Conditions、其中没有有效期窗口，或包含网关无法识别的条件。 |
+| `assertion_not_yet_valid` | SAML | `NotBefore` 在未来 60 秒以后。 |
+| `assertion_expired` | SAML | `NotOnOrAfter` 已过去超过 60 秒，或 `SessionNotOnOrAfter` 已过。 |
+| `recipient_mismatch` | SAML | 主体确认中的 `Recipient` 不是 `acs_url`。 |
+| `invalid_subject` | SAML | 没有唯一的 bearer 主体确认，或没有稳定的主体：NameID 缺失或为临时（transient）且未设置 `principal_attribute`，或 `principal_attribute` 缺失或有多个值。SAML 以此原因报告所有缺失主体的情况。 |
+| `assertion_replayed` | SAML | 该断言已被使用过。 |
+| `replay_check_unavailable` | SAML | 存储未能响应重放检查，因此登录被拒绝。 |
+| `unverified_identity` | 两者 | 邮箱未经验证，而 `allowed_domains` 或 `user_path_claim: email` 需要它。对于 SAML，邮箱属性只有在设置 [`trust_email`](/zh/pro/saml#邮箱信任) 时才视为已验证，因此该原因表示设置了 `allowed_domains` 而断言中没有单个邮箱值。 |
+| `domain_denied` | 两者 | 邮箱域名不在 `allowed_domains` 中。 |
+| `group_denied` | 两者 | 没有匹配的映射，且此人不属于任何 `admin_groups`。 |
+| `group_unmapped` | 两者 | 没有匹配的映射，且既未配置 `admin_groups` 也未配置 `allow_all_admins`。 |
+| `groups_overage` | 两者 | 设置了 `admin_groups` 或映射，而提供商以引用方式而非在登录中发送组：ID Token 在 `_claim_names` 中列出 `groups_claim`（OIDC），或断言中没有 `groups_claim` 属性但有 `http://schemas.microsoft.com/claims/groups.link`（SAML）。参见[限制](#限制)。 |
+| `claim_mapping_failed` | 两者 | 无法构建用户路径：`user_path_claim` 的值缺失、为空或包含 `/`；在设置了 `admin_groups` 或映射时，组声明既不是字符串也不是字符串列表（OIDC）或含有非文本值（SAML）；ID Token 没有主体（仅 OIDC）；路径会覆盖某个[已映射的节点](#登录如何映射)；或该值因[小写转换](#升级说明)而被拒绝。 |
+
+## 升级说明
+
+以下说明适用于升级到引入组映射和 SAML 登录的 GoModel Pro 版本。
+
+<Warning>
+  当用户路径会被转换为小写，而其值包含转换为小写后与另一字符相同的字符（即转换时会改变、但不是转换结果的大写形式的字符）时，登录会以 `claim_mapping_failed` 被拒绝。这些字符包括：开尔文符号（U+212A，类似 `K`）、带点的大写 I `İ`（U+0130，类似 `I`）、埃符号（U+212B，类似 `Å`）、欧姆符号（U+2126，类似 `Ω`）、大写 sharp s `ẞ`（U+1E9E）、大写 theta 符号（U+03F4，类似 `Θ`）以及首字母大写的二合字母 `ǅ`、`ǈ`、`ǋ`、`ǲ`，以及无效的 UTF-8。否则，这样的写法可能进入另一个人的用户路径。只要用户路径会被转换为小写，这一规则就同时适用于 OIDC 和 SAML：即使用默认的 `user_path_claim: email`，或设置了 `user_path_case_insensitive: true`。`allowed_domains` 也不匹配以这种方式书写的域名。其他路径不变：没有单一大写形式的小写字母（`ß`、`ς`、`ſ`）保持原样。
+
+  值中包含这些字符之一的用户将无法再登录。请让身份提供商发送不含这些字符的写法，或将 `user_path_claim` 设置为非邮箱的值，例如不可变的用户 ID；后者会把每个用户移到新的路径。
+</Warning>
+
+<Note>
+  由更早版本签发的会话没有[配置指纹](#配置变更时)。在未配置任何组映射时它们仍然有效，一旦配置了映射就会被拒绝，因此配置第一条映射会使所有人退出登录。
+</Note>

@@ -23,15 +23,15 @@
   import ModelsPage from "$pages/models/ModelsPage.svelte";
   import PlaygroundPage from "$pages/playground/PlaygroundPage.svelte";
   import WorkflowsPage from "$pages/workflows/WorkflowsPage.svelte";
-  import AuditLogsPage from "$pages/audit-logs/AuditLogsPage.svelte";
+  import RequestsPage from "$pages/requests/RequestsPage.svelte";
   import GuardrailsPage from "$pages/guardrails/GuardrailsPage.svelte";
   import McpServersPage from "$pages/mcp-servers/McpServersPage.svelte";
   import ProvidersConfigPage from "$pages/providers-config/ProvidersConfigPage.svelte";
   import AuthKeysPage from "$pages/auth-keys/AuthKeysPage.svelte";
   import UsersPage from "$pages/users/UsersPage.svelte";
   import SettingsPage from "$pages/settings/SettingsPage.svelte";
-  import ConversationDrawer from "$pages/audit-logs/ConversationDrawer.svelte";
-  import { conversationDrawer } from "$pages/audit-logs/conversationDrawer.svelte.js";
+  import ConversationDrawer from "$pages/requests/ConversationDrawer.svelte";
+  import { conversationDrawer } from "$pages/requests/conversationDrawer.svelte.js";
 
   const pageComponents = {
     overview: OverviewPage,
@@ -41,7 +41,7 @@
     models: ModelsPage,
     playground: PlaygroundPage,
     workflows: WorkflowsPage,
-    "audit-logs": AuditLogsPage,
+    requests: RequestsPage,
     guardrails: GuardrailsPage,
     "mcp-servers": McpServersPage,
     "providers-config": ProvidersConfigPage,

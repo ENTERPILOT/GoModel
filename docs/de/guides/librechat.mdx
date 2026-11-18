@@ -1,6 +1,6 @@
 ---
 title: "GoModel & LibreChat"
-description: "Geben Sie LibreChat über GoModel einen einzigen Custom Endpoint zu allen Providern und erhalten Sie Audit-Logs, Kostenerfassung pro Benutzer und Metriken für jeden Chat."
+description: "Geben Sie LibreChat über GoModel einen einzigen Custom Endpoint zu allen Providern und erhalten Sie Request-Logs, Kostenerfassung pro Benutzer und Metriken für jeden Chat."
 icon: "message-circle"
 keywords: ["LibreChat", "librechat.yaml", "Custom Endpoint", "custom endpoint", "self-hosted Chat", "self-hosted chat", "Kosten pro Benutzer", "per-user costs", "LLM-Observability", "LLM observability", "Einrichtungsanleitung", "setup guide"]
 ---
@@ -18,7 +18,7 @@ Ablauf:
 
 Was Sie erhalten:
 
-- Vollständige Request- und Response-Bodys für jeden Chat im Audit-Log von GoModel.
+- Vollständige Request- und Response-Bodys für jeden Chat im Request-Log von GoModel.
 - Kosten pro LibreChat-Benutzer über Header-Templates und [Labels](/de/features/labelling).
 - Alle Provider hinter einem Custom Endpoint; keine Einrichtung pro Provider in LibreChat.
 - Prometheus-Metriken und OpenTelemetry-Traces für den Chat-Traffic, sobald Sie diese Exporter
@@ -127,7 +127,7 @@ GoModel bereitstellt – einschließlich Anthropic- und Gemini-Modellen sowie al
 Wählen Sie ein beliebiges Modell – `openai/gpt-5-mini`, `anthropic/claude-haiku-4-5-20251001`,
 `gemini/gemini-2.5-flash` – und chatten Sie. Streaming-Responses und die Titelgenerierung, die
 LibreChat nach dem ersten Austausch ausführt, laufen vollständig durch GoModel. Jeder Aufruf
-erscheint im Audit-Log mit dem vollständigen Prompt, der Response, den Tokens, den Kosten und dem
+erscheint im Request-Log mit dem vollständigen Prompt, der Response, den Tokens, den Kosten und dem
 Header, der den Benutzer identifiziert.
 
 <Note>

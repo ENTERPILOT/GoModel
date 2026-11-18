@@ -25,7 +25,7 @@ func (p passthroughSemanticEnricherStub) Enrich(_ *core.RequestSnapshot, _ *core
 	}
 	cloned := *info
 	cloned.SemanticOperation = p.providerType + ".responses"
-	cloned.AuditPath = "/v1/responses"
+	cloned.RequestLogPath = "/v1/responses"
 	return &cloned
 }
 
@@ -49,6 +49,6 @@ func TestPassthroughSemanticEnrichment_EnrichesPromptBeforeWorkflowResolution(t 
 	require.NotNil(t, capturedWorkflow.Passthrough)
 	require.Equal(t, "responses", capturedWorkflow.Passthrough.NormalizedEndpoint)
 	require.Equal(t, "openai.responses", capturedWorkflow.Passthrough.SemanticOperation)
-	require.Equal(t, "/v1/responses", capturedWorkflow.Passthrough.AuditPath)
+	require.Equal(t, "/v1/responses", capturedWorkflow.Passthrough.RequestLogPath)
 	require.True(t, capturedWorkflow.Passthrough.Stream)
 }

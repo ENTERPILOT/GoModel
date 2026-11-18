@@ -9,8 +9,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // exchange abstracts the transport for one cache-mediated request so the
@@ -30,7 +30,7 @@ type exchange interface {
 	// Capture runs next and returns the response bytes when they are a
 	// cacheable success (HTTP 200, valid JSON or SSE, no failover involved).
 	Capture(warnMessage string, next func() error) ([]byte, bool, error)
-	// MarkHit records transport-level side effects of a cache hit (audit
+	// MarkHit records transport-level side effects of a cache hit (request log
 	// enrichment on the HTTP path; a no-op for internal calls).
 	MarkHit(cacheType string)
 }
@@ -58,7 +58,7 @@ func (e *echoExchange) Capture(warnMessage string, next func() error) ([]byte, b
 }
 
 func (e *echoExchange) MarkHit(cacheType string) {
-	auditlog.EnrichEntryWithCacheType(e.c, cacheType)
+	requestlog.EnrichEntryWithCacheType(e.c, cacheType)
 }
 
 // InternalResponse is the buffered outcome of the transport-free LLM call a
@@ -162,7 +162,7 @@ func (e *internalExchange) Capture(warnMessage string, next func() error) ([]byt
 	return data, true, nil
 }
 
-// MarkHit is a no-op: audit entries live in the Echo context store, which a
+// MarkHit is a no-op: request log entries live in the Echo context store, which a
 // transport-free call does not have. (This matches the previous synthetic-
 // context behavior, where the store was always empty.)
 func (e *internalExchange) MarkHit(string) {}

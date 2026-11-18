@@ -10,8 +10,8 @@ import (
 	"github.com/labstack/echo/v5/middleware"
 
 	"github.com/enterpilot/gomodel/internal/anthropicapi"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // handleError converts gateway errors to an HTTP response, rendered in the wire
@@ -22,7 +22,7 @@ func handleError(c *echo.Context, err error) error {
 }
 
 // handleErrorAsAnthropic renders err in the Anthropic error envelope whatever
-// the path's own dialect is, with the same logging and audit enrichment as
+// the path's own dialect is, with the same logging and request log enrichment as
 // handleError. The models routes serve both dialects on one path, so their
 // Anthropic clients are identified by the anthropic-version header instead.
 func handleErrorAsAnthropic(c *echo.Context, err error) error {
@@ -35,7 +35,7 @@ func handleErrorAsAnthropic(c *echo.Context, err error) error {
 const statusClientClosedRequest = 499
 
 // recordHandledError normalizes err to a gateway error, logs it and enriches
-// the audit entry and response headers, returning the error left to render.
+// the request log entry and response headers, returning the error left to render.
 func recordHandledError(c *echo.Context, err error) *core.GatewayError {
 	if isClientClosedRequest(c, err) {
 		return recordClientClosedRequest(c, err)
@@ -45,8 +45,8 @@ func recordHandledError(c *echo.Context, err error) *core.GatewayError {
 		gatewayErr = core.NewProviderError("", http.StatusInternalServerError, "an unexpected error occurred", err)
 	}
 	logHandledError(c, gatewayErr)
-	enrichAuditEntryWithProviderAttempts(c)
-	auditlog.EnrichEntryWithGatewayError(c, gatewayErr)
+	enrichRequestLogEntryWithProviderAttempts(c)
+	requestlog.EnrichEntryWithGatewayError(c, gatewayErr)
 	applyErrorResponseHeaders(c, err)
 	return gatewayErr
 }
@@ -63,19 +63,19 @@ func isClientClosedRequest(c *echo.Context, err error) bool {
 
 // recordClientClosedRequest records a request the client abandoned before the
 // response was ready as client_disconnected with status 499, the way the
-// streaming path does, so the audit log and error metrics do not count it as
+// streaming path does, so the request log and error metrics do not count it as
 // a provider failure. The rendered body only reaches a client that is gone.
 func recordClientClosedRequest(c *echo.Context, err error) *core.GatewayError {
 	gatewayErr := core.NewInvalidRequestErrorWithStatus(statusClientClosedRequest, "request canceled", err).
 		WithCode("request_canceled")
 	logHandledError(c, gatewayErr)
-	enrichAuditEntryWithProviderAttempts(c)
-	auditlog.EnrichEntryWithError(c, "client_disconnected", err.Error(), "")
+	enrichRequestLogEntryWithProviderAttempts(c)
+	requestlog.EnrichEntryWithError(c, "client_disconnected", err.Error(), "")
 	return gatewayErr
 }
 
 // writeGatewayError renders a gateway error in the request's wire dialect
-// without logging or audit enrichment, for callers that already recorded it.
+// without logging or request log enrichment, for callers that already recorded it.
 func writeGatewayError(c *echo.Context, gatewayErr *core.GatewayError) error {
 	if requestDialect(c) == "anthropic" {
 		status, body := anthropicapi.ErrorFromGateway(gatewayErr)
@@ -83,6 +83,10 @@ func writeGatewayError(c *echo.Context, gatewayErr *core.GatewayError) error {
 	}
 	return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 }
+
+// escapedErrorHandledKey holds the escaped error the central handler last
+// dealt with on a request.
+const escapedErrorHandledKey = "gomodel.escaped-error-handled"
 
 // gatewayErrorHandler renders every error that escapes a handler — a recovered
 // panic, a response body the JSON serializer could not encode, or an
@@ -95,30 +99,75 @@ func gatewayErrorHandler(c *echo.Context, err error) {
 	if err == nil {
 		return
 	}
+	// echo's default request logger hands an error here and then returns it,
+	// so the server delivers the same error a second time. A different error
+	// later on the same request, such as a panic, is still handled.
+	if handled, ok := c.Get(escapedErrorHandledKey).(error); ok && isSameError(err, handled) {
+		return
+	}
+	c.Set(escapedErrorHandledKey, err)
+	// Once the response has started it cannot become an error response, so a
+	// failure while writing it is a broken relay (most often the client hanging
+	// up), not a gateway 500. A panic is still reported as one. Only the log is
+	// written: the request log middleware has already queued the request's entry, so
+	// a relay that wants the failure on the request log row records it before
+	// returning (recordResponseFailure).
+	committed := responseCommitted(c)
+	if _, panicked := errors.AsType[*middleware.PanicStackError](err); committed && !panicked {
+		logStreamFailure(c, responseTerminatedMessage, classifyStreamError(c.Request().Context(), err), err)
+		return
+	}
 	gatewayErr := escapedGatewayError(err)
-	// Log before checking whether the response can still be changed: a panic
-	// after the first streamed chunk must still reach the operator.
 	logHandledError(c, gatewayErr)
 	// Finalize as handleError does, so an error that never passed through it —
 	// a panic, a rate-limit error returned rather than rendered — still lands
-	// on the audit row and keeps headers such as Retry-After. The audit half is
+	// on the request log row and keeps headers such as Retry-After. The request log half is
 	// skipped once an error is recorded: handleError returns its own response
 	// write failures here, and re-enriching would replace the real cause with
 	// this generic one.
-	if !auditlog.HasRecordedError(c) {
-		enrichAuditEntryWithProviderAttempts(c)
-		auditlog.EnrichEntryWithGatewayError(c, gatewayErr)
+	if !requestlog.HasRecordedError(c) {
+		enrichRequestLogEntryWithProviderAttempts(c)
+		requestlog.EnrichEntryWithGatewayError(c, gatewayErr)
 	}
 	applyErrorResponseHeaders(c, err)
 
 	// Once the status line and body are on the wire nothing can be changed;
 	// the response stands as the handler left it.
-	if response, unwrapErr := echo.UnwrapResponse(c.Response()); unwrapErr == nil && response.Committed {
+	if committed {
 		return
 	}
 	if writeErr := writeGatewayError(c, gatewayErr); writeErr != nil {
 		slog.Error("failed to send error response", "error", writeErr)
 	}
+}
+
+const responseTerminatedMessage = "response terminated abnormally"
+
+// recordResponseFailure records a response body that broke after the status
+// line was sent, on the request log entry and in the log. Nothing can be rendered
+// any more, so the caller returns nil.
+func recordResponseFailure(c *echo.Context, err error) {
+	if !requestlog.HasRecordedError(c) {
+		enrichRequestLogEntryWithProviderAttempts(c)
+	}
+	recordStreamFailure(c, nil, responseTerminatedMessage, err)
+}
+
+// isSameError reports whether err is, or wraps, handled. Comparing two error
+// values of an uncomparable type panics; those count as different errors.
+func isSameError(err, handled error) (same bool) {
+	defer func() {
+		if recover() != nil {
+			same = false
+		}
+	}()
+	return errors.Is(err, handled)
+}
+
+// responseCommitted reports whether the status line is already on the wire.
+func responseCommitted(c *echo.Context) bool {
+	response, err := echo.UnwrapResponse(c.Response())
+	return err == nil && response.Committed
 }
 
 // escapedGatewayError classifies an error that reached the central handler. A

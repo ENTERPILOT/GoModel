@@ -1,4 +1,4 @@
-// Media downloads for the audit log: stored audio and images are served by
+// Media downloads for the request log: stored audio and images are served by
 // GET /admin/media/{id} behind the bearer token, so they are fetched here
 // and handed to the page as Blobs.
 

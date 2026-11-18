@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -285,11 +285,11 @@ func TestImageEdits_HandlerRoute(t *testing.T) {
 	assert.Len(t, mock.capturedEdit.Images, 1)
 }
 
-// TestImageEdits_AuditsRequestMetadata verifies the edit parameters and upload
-// metadata reach the audit entry when body logging is on, along with the
+// TestImageEdits_LogsRequestMetadata verifies the edit parameters and upload
+// metadata reach the request log entry when body logging is on, along with the
 // resolved route, and that image bytes are embedded only when input logging
 // is enabled.
-func TestImageEdits_AuditsRequestMetadata(t *testing.T) {
+func TestImageEdits_LogsRequestMetadata(t *testing.T) {
 	tests := []struct {
 		name            string
 		logBodies       bool
@@ -319,8 +319,8 @@ func TestImageEdits_AuditsRequestMetadata(t *testing.T) {
 				catPNG,
 				editFormFile{field: "mask", filename: "mask.png", data: "mask-bytes"},
 			)
-			entry := &auditlog.LogEntry{}
-			c.Set(string(auditlog.LogEntryKey), entry)
+			entry := &requestlog.LogEntry{}
+			c.Set(string(requestlog.LogEntryKey), entry)
 			err := svc.CreateImageEdit(c)
 			require.NoError(t, err)
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -336,13 +336,13 @@ func TestImageEdits_AuditsRequestMetadata(t *testing.T) {
 				return
 			}
 
-			reqBody, ok := entry.Data.RequestBody.(auditlog.ImageBodyLog)
-			require.True(t, ok, "request body = %T, want auditlog.ImageBodyLog", entry.Data.RequestBody)
+			reqBody, ok := entry.Data.RequestBody.(requestlog.ImageBodyLog)
+			require.True(t, ok, "request body = %T, want requestlog.ImageBodyLog", entry.Data.RequestBody)
 			assert.Equal(t, "add a hat", reqBody.Meta["prompt"])
 			assert.Equal(t, "1024x1024", reqBody.Meta["size"])
-			assert.Equal(t, "gpt-image-1", reqBody.Meta["model"], "audited request meta = %v", reqBody.Meta)
+			assert.Equal(t, "gpt-image-1", reqBody.Meta["model"], "logged request meta = %v", reqBody.Meta)
 			_, present := reqBody.Meta["provider"]
-			assert.False(t, present, "routing hint must not be audited: %v", reqBody.Meta)
+			assert.False(t, present, "routing hint must not be logged: %v", reqBody.Meta)
 			require.Len(t, reqBody.Items, 2)
 
 			src, mask := reqBody.Items[0], reqBody.Items[1]
@@ -350,7 +350,7 @@ func TestImageEdits_AuditsRequestMetadata(t *testing.T) {
 			assert.Equal(t, "cat.png", src.Filename)
 			assert.Equal(t, int64(len("cat-bytes")), src.Bytes)
 			assert.Equal(t, "mask", mask.Role)
-			assert.Equal(t, "mask.png", mask.Filename, "audited uploads = %+v", reqBody.Items)
+			assert.Equal(t, "mask.png", mask.Filename, "logged uploads = %+v", reqBody.Items)
 			assert.Equal(t, tt.logImageInputs, src.Stored)
 			assert.Equal(t, tt.logImageInputs, mask.Stored)
 			if tt.logImageInputs {
@@ -358,8 +358,8 @@ func TestImageEdits_AuditsRequestMetadata(t *testing.T) {
 				assert.Equal(t, "mask-bytes", string(readTestMedia(t, store, mask.MediaID)))
 			}
 
-			respBody, ok := entry.Data.ResponseBody.(auditlog.ImageBodyLog)
-			require.True(t, ok, "response body = %T, want auditlog.ImageBodyLog", entry.Data.ResponseBody)
+			respBody, ok := entry.Data.ResponseBody.(requestlog.ImageBodyLog)
+			require.True(t, ok, "response body = %T, want requestlog.ImageBodyLog", entry.Data.ResponseBody)
 			require.Len(t, respBody.Items, 1)
 			assert.Equal(t, "output", respBody.Items[0].Role)
 			assert.Equal(t, tt.logImageOutputs, respBody.Items[0].Stored)

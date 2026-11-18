@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A failed attempt must notify the observer immediately (so the live audit
+// A failed attempt must notify the observer immediately (so the live request log
 // preview can surface a failed primary while failover is still in flight),
 // while a successful attempt must not — keeping the success path free of extra
 // live publishes.

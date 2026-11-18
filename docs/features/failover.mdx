@@ -65,6 +65,10 @@ virtual_models:
       - { model: gemini/gemini-2.5-pro }
 ```
 
+Each target can force its own reasoning effort, so a fallback model runs at the
+level that suits it: see
+[Set an effort per target](/features/virtual-models#set-an-effort-per-target).
+
 A target may also name another virtual model
 ([chaining](/features/virtual-models#chain-virtual-models)); the sweep then
 tries every concrete model behind it. One exception keeps mutual protection
@@ -98,7 +102,7 @@ Failover is attempted only after an attempt returns:
 
 It applies to translated `/v1/chat/completions`, `/v1/responses`,
 `/v1/messages`, and `/v1/embeddings` requests. The request log shows every
-attempt, so a served failover is visible in the audit trail and priced at the
+attempt, so a served failover is visible there and priced at the
 model that answered.
 
 Embedding requests use the same configured failover chain and global/workflow
