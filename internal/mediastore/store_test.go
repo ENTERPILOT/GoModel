@@ -78,7 +78,7 @@ func testObject(id string, expiresAt time.Time) *Object {
 	return &Object{
 		ID:          id,
 		Kind:        KindAudio,
-		Source:      SourceAudit,
+		Source:      SourceRequestLog,
 		ContentType: "audio/mpeg",
 		Bytes:       12,
 		StorageKey:  "audio/2026/09/22/" + id + ".mp3",
@@ -98,7 +98,7 @@ func TestStore_InsertGetDelete(t *testing.T) {
 		got, err := store.Get(ctx, "a")
 		require.NoError(t, err)
 		assert.Equal(t, KindAudio, got.Kind)
-		assert.Equal(t, SourceAudit, got.Source)
+		assert.Equal(t, SourceRequestLog, got.Source)
 		assert.Equal(t, "audio/mpeg", got.ContentType)
 		assert.Equal(t, int64(12), got.Bytes)
 		assert.Equal(t, "audio/2026/09/22/a.mp3", got.StorageKey)

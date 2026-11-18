@@ -18,7 +18,7 @@ func TestPassthroughExecutionTarget_PrefersWorkflow(t *testing.T) {
 			Provider:           "openai",
 			RawEndpoint:        "v1/responses",
 			NormalizedEndpoint: "responses",
-			AuditPath:          "/v1/responses",
+			RequestLogPath:     "/v1/responses",
 		},
 	})))
 

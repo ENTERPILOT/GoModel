@@ -1,14 +1,20 @@
 <script>
   // One target row of the virtual-model editor. The primary target and the
   // extra {#each} rows share this shape; two or more rows make the redirect
-  // a load balancer (weights show only for round-robin). The ☰ handle drags
+  // a load balancer (weights show only for round-robin) and let each target
+  // force its own reasoning effort. The ☰ handle drags
   // a row onto another row to reorder the list; keyboard users get the same
   // via ArrowUp/ArrowDown on the focused handle.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { virtualModelEditor as vm } from "./virtualModelEditor.svelte.js";
-  import { moveFormTarget, vmFormShowWeights } from "./vmForm.js";
+  import {
+    moveFormTarget,
+    vmFormShowTargetEffort,
+    vmFormShowWeights,
+    REASONING_EFFORT_LEVELS,
+  } from "./vmForm.js";
   import { GripVertical, Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
@@ -19,6 +25,9 @@
     provider = $bindable(""),
     model = $bindable(""),
     weight = $bindable(),
+    // reasoningEffort is the effort forced on requests sent to this target;
+    // empty keeps the virtual model's own, or the client's.
+    reasoningEffort = $bindable(""),
     id = undefined,
     placeholder = "openai/gpt-4o",
     showRemove = true,
@@ -30,6 +39,13 @@
   } = $props();
 
   let moveHandle = $state(null);
+
+  const showEffort = $derived(vmFormShowTargetEffort(vm.vmForm, reasoningEffort));
+  const showWeight = $derived(vmFormShowWeights(vm.vmForm));
+  // A row that shows a column lays out as one: without a remove button it
+  // keeps that button's width free, so its controls line up with the other
+  // rows and with the column labels above them.
+  const showColumns = $derived(showEffort || showWeight);
 
   // After a keyboard move the editor asks for focus at the moved row's new
   // index; grab it here so repeated arrows walk the same model, not whatever
@@ -44,6 +60,7 @@
 
 <div
   class="vm-target-row"
+  class:vm-target-columns={showColumns}
   role="group"
   class:vm-target-dragging={vm.vmDragIndex === index}
   class:vm-target-drop={vm.vmDropIndex === index && vm.vmDragIndex !== null && vm.vmDragIndex !== index}
@@ -121,19 +138,42 @@
     allowCustom
     mono
   />
-  {#if vmFormShowWeights(vm.vmForm)}
-    <input
-      type="number"
-      min="1"
-      step="1"
-      class="mono vm-target-weight"
-      placeholder={m.models_weight()}
-      title={m.models_weight_help()}
-      bind:value={weight}
-      disabled={vm.vmFormManaged}
-      required
-      aria-label={m.models_target_weight()}
-    />
+  <!-- Each control carries its own label for phones, where the row wraps and
+       the column labels above the list cannot line up with it. -->
+  {#if showEffort}
+    <label class="vm-target-effort">
+      <span class="form-field-label vm-target-cell-label">{m.models_target_effort_column()}</span>
+      <select
+        class="form-select"
+        class:vm-target-effort-inherit={!reasoningEffort}
+        title={m.models_target_effort_help()}
+        bind:value={reasoningEffort}
+        disabled={vm.vmFormManaged}
+        aria-label={m.models_target_effort()}
+      >
+        <option value="">{m.models_target_effort_inherit()}</option>
+        {#each REASONING_EFFORT_LEVELS as level (level)}
+          <option value={level}>{level}</option>
+        {/each}
+      </select>
+    </label>
+  {/if}
+  {#if showWeight}
+    <label class="vm-target-weight">
+      <span class="form-field-label vm-target-cell-label">{m.models_weight()}</span>
+      <input
+        type="number"
+        min="1"
+        step="1"
+        class="mono"
+        placeholder={m.models_weight()}
+        title={m.models_weight_help()}
+        bind:value={weight}
+        disabled={vm.vmFormManaged}
+        required
+        aria-label={m.models_target_weight()}
+      />
+    </label>
   {/if}
   {#if showRemove}
     <TableActionButton
@@ -144,10 +184,22 @@
     >
       <Icon icon={Trash2} class="table-icon-svg" />
     </TableActionButton>
+  {:else if showColumns}
+    <span class="vm-target-remove-space" aria-hidden="true"></span>
   {/if}
 </div>
 
 <style>
+  /* An unset effort reads as a placeholder, so the targets that force one
+     stand out; the open list keeps the normal text color. */
+  .vm-target-effort-inherit {
+    color: var(--text-muted);
+  }
+
+  .vm-target-effort-inherit option {
+    color: var(--text);
+  }
+
   .vm-target-move {
     display: inline-flex;
     align-items: center;
@@ -155,7 +207,11 @@
     cursor: grab;
     padding: 8px 4px 8px 10px;
     width: 24px;
+    /* The handle hangs in the dialog's padding and gives back the row's gap,
+       so the picker starts where it does on a row without a handle, under
+       the targets label. */
     margin-left: -24px;
+    margin-right: -8px;
     color: var(--muted, var(--text));
     touch-action: none;
     user-select: none;

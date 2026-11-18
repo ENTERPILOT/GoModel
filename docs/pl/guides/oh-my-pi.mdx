@@ -52,14 +52,14 @@ i zaloguj się przy użyciu `GOMODEL_MASTER_KEY`. Przejdź do
 3. Pozostaw **Dashboard access** wyłączone.
 4. Utwórz klucz i skopiuj wartość `sk_gom_...`. Jest wyświetlana tylko raz.
 
-Przypisana ścieżka użytkownika daje omp własny zakres użycia i audytu. Jeśli
+Przypisana ścieżka użytkownika daje omp własny zakres użycia i logów requestów. Jeśli
 korzystasz z [polityk dostępu do modeli](/pl/features/user-path#dostęp-do-modeli) dla
 całego gatewaya, zezwól na selektory, których omp potrzebuje dla `/agents/omp`.
 
 <Warning>
   W omp używaj tego zarządzanego klucza, a nie `GOMODEL_MASTER_KEY`. Zarządzany
   klucz bez dostępu do dashboardu może wywoływać endpointy modeli, ale nie może
-  czytać logów audytowych, tworzyć kluczy ani zmieniać ustawień gatewaya.
+  czytać logów requestów, tworzyć kluczy ani zmieniać ustawień gatewaya.
 </Warning>
 
 ## 3. Skonfiguruj omp
@@ -176,16 +176,16 @@ providers:
         maxTokens: 128000
 ```
 
-Obie ścieżki przechodzą przez ten sam klucz gatewaya, budżety i ścieżkę audytu.
+Obie ścieżki przechodzą przez ten sam klucz gatewaya, budżety i log requestów.
 Zalecanym domyślnym wyborem jest ścieżka kompatybilna z OpenAI z wykrywaniem
 modeli; formatu Anthropic używaj wtedy, gdy zależy Ci na semantyce Messages API
 end-to-end.
 
 ## 6. Sprawdź ruch w GoModel
 
-Otwórz logi audytowe w dashboardzie GoModel:
+Otwórz stronę „Requesty” w dashboardzie GoModel:
 
-[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+[http://localhost:8080/admin/dashboard/requests](http://localhost:8080/admin/dashboard/requests)
 
 Potwierdź, że streamowane requesty omp do `POST /v1/chat/completions` pojawiają
 się pod ścieżką użytkownika `/agents/omp` i że GoModel kieruje je do właściwego

@@ -43,7 +43,7 @@ export const NAV_ITEMS = [
   },
   { page: "models", label: m.navigation_models, icon: Box, visible: globalOnly },
   { page: "playground", label: m.navigation_playground, icon: FlaskConical },
-  { page: "audit-logs", label: m.navigation_audit_logs, icon: History },
+  { page: "requests", label: m.navigation_requests, icon: History },
   { page: "usage", label: m.navigation_usage, icon: ChartColumn },
   {
     page: "budgets",

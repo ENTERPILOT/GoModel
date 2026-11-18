@@ -221,7 +221,7 @@ przechodzą przez pełny orkiestrator inferencji**. W porównaniu z `/v1/chat/co
 
 - **Brak failoveru, guardrails i cache'u odpowiedzi** – te etapy są pomijane.
   Requesty są nadal autoryzowane, sprawdzane pod kątem budżetu, objęte limitem żądań, mierzone i
-  zapisywane w [logu audytowym](/pl/advanced/admin-endpoints).
+  zapisywane w [logu requestów](/pl/advanced/admin-endpoints).
 - **Brak streamingu** – `stream: true` jest odrzucane z kodem `400`, bo streamowane
   generowanie obrazów jest dostarczane jako server-sent events, których te endpointy
   nie przekazują. Pomiń `stream` (lub ustaw je na `false`), żeby otrzymać kompletną odpowiedź
@@ -262,9 +262,9 @@ W trybie kompatybilnym z OpenAI generowanie jest przekazywane do endpointu Gemin
 `/openai/images/generations`, a edycje są odrzucane (ten interfejs nie ma
 endpointu edycji).
 
-## Logowanie audytowe
+## Logowanie requestów
 
-Requesty obrazów pojawiają się w logu audytowym jak każda inna interakcja z modelem. Gdy
+Requesty obrazów pojawiają się w logu requestów jak każda inna interakcja z modelem. Gdy
 `LOGGING_LOG_BODIES` jest włączone:
 
 - Request generowania jest zapisywany jako JSON. Request edycji jest zapisywany jako
@@ -275,7 +275,7 @@ Requesty obrazów pojawiają się w logu audytowym jak każda inna interakcja z 
   są zachowywane jako linki.
 
 Same piksele **nie** są zapisywane, chyba że ustawiono
-[`LOGGING_LOG_IMAGE_BODIES=true`](/pl/advanced/configuration#logowanie-audytowe). Gdy
+[`LOGGING_LOG_IMAGE_BODIES=true`](/pl/advanced/configuration#logowanie-requestów). Gdy
 jest włączone, uploady i wygenerowane obrazy są zapisywane w
 [storage'u mediów](/pl/advanced/configuration#storage-mediów), a każdy element zawiera
 `media_id`, który dashboard wyświetla bezpośrednio przez `GET /admin/media/{id}`;
@@ -284,4 +284,4 @@ jest włączone, uploady i wygenerowane obrazy są zapisywane w
 (`stored: false`). W obu przypadkach wpis pozostaje mały i kompletny – nigdy
 nie podlega ogólnemu obcinaniu body do 1 MB, nawet przy dużych wynikach `b64_json`, i
 nie ma limitu zapisanych obrazów na wpis. Pliki są przechowywane tak długo jak
-wpisy audytowe, które się do nich odwołują (`LOGGING_RETENTION_DAYS`).
+wpisy logu requestów, które się do nich odwołują (`LOGGING_RETENTION_DAYS`).
