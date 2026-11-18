@@ -8,7 +8,6 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/clustersync"
@@ -21,6 +20,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/health"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/runtimesettings"
 	"github.com/enterpilot/gomodel/internal/sharedstore"
@@ -36,7 +36,7 @@ func (b *bootstrap) initStorage() error {
 	app := b.app
 
 	// One storage connection serves every subsystem. Each used to be able to
-	// open its own, which meant a deployment with audit logging and usage
+	// open its own, which meant a deployment with request logging and usage
 	// tracking both disabled opened a separate connection per subsystem to the
 	// same database.
 	sharedStorage, err := storage.New(b.ctx, b.appCfg.Storage.BackendConfig())
@@ -177,18 +177,18 @@ func (b *bootstrap) initProviders() error {
 	return nil
 }
 
-// initTracking builds the request-accounting subsystems: audit logging,
+// initTracking builds the request-accounting subsystems: request logging,
 // usage tracking, and the budgets and rate limits that consume usage.
 func (b *bootstrap) initTracking() error {
 	app := b.app
 	appCfg := b.appCfg
 
-	auditResult, err := auditlog.New(b.ctx, appCfg, app.storage)
+	requestLogResult, err := requestlog.New(b.ctx, appCfg, app.storage)
 	if err != nil {
-		return fmt.Errorf("failed to initialize audit logging: %w", err)
+		return fmt.Errorf("failed to initialize request logging: %w", err)
 	}
-	app.audit = auditResult
-	app.register(subsystemAudit, ownedByShutdown, app.audit.Close)
+	app.requestLog = requestLogResult
+	app.register(subsystemRequestLog, ownedByShutdown, app.requestLog.Close)
 
 	// Initialize usage tracking. Disabled tracking yields a noop logger.
 	usageResult, err := usage.New(b.ctx, appCfg, app.storage)
@@ -268,7 +268,7 @@ func (b *bootstrap) initStores() error {
 	app.register(subsystemFileStore, ownedByShutdown, app.fileStore.Close)
 
 	// Initialize media storage: records on the shared storage, bytes in the
-	// configured blob backend. Audit logging stores audio and image payloads
+	// configured blob backend. Request logging stores audio and image payloads
 	// through it (docs/adr/0013-media-storage.md).
 	// A config built without config.Load (test harnesses, embedders) still
 	// gets the documented defaults.
@@ -380,7 +380,7 @@ func selectorLabel(selector ext.RouteSelector) (name string) {
 }
 
 // mediaCaptureEnabled reports whether any enabled feature writes media: today
-// that is audit capture of audio or image bodies.
+// that is request log capture of audio or image bodies.
 func mediaCaptureEnabled(cfg *config.Config) bool {
 	return cfg.Logging.Enabled && cfg.Logging.LogBodies && (cfg.Logging.LogAudioBodies || cfg.Logging.LogImageBodies)
 }

@@ -9,7 +9,7 @@ import (
 
 // AudioSpeechRequest is an OpenAI-compatible POST /v1/audio/speech
 // (text-to-speech) request. Only the fields the gateway needs to route,
-// validate, and audit are typed; every other member (stream_format,
+// validate, and log are typed; every other member (stream_format,
 // model-specific extras, ...) is preserved verbatim in ExtraFields and
 // forwarded upstream so new provider parameters work without a gateway change
 // (ADR-0011 rule 1).

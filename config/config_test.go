@@ -98,7 +98,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING", "PLUGINS_ENABLED", "PLUGINS_LOAD",
 		"FAILOVER_MODE", "FAILOVER_MANUAL_RULES_PATH", "FAILOVER_ENABLED", "FAILOVER_RULES_JSON", "FAILOVER_DISABLED_MODELS", "FAILOVER_DISABLED_MODELS_JSON",
 		"MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "MODELS_VLLM_DISCOVERY_COMPAT", "UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
-		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT", "HTTP_TLS_CA_FILE", "HTTP_TLS_CLIENT_CERT_FILE", "HTTP_TLS_CLIENT_KEY_FILE", "HTTP_TLS_INSECURE_SKIP_VERIFY",
+		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT", "HTTP_MAX_IDLE_CONNS_PER_HOST", "HTTP_TLS_CA_FILE", "HTTP_TLS_CLIENT_CERT_FILE", "HTTP_TLS_CLIENT_KEY_FILE", "HTTP_TLS_INSECURE_SKIP_VERIFY",
 		"WORKFLOW_REFRESH_INTERVAL",
 		"LITELLM_TAGS_ENABLED",
 	} {
@@ -139,7 +139,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.Equal(t, DefaultStreamStallTimeoutSeconds, cfg.Server.StreamStallTimeout)
 	assert.True(t, cfg.Server.EnablePassthroughRoutes)
 	assert.True(t, cfg.Server.AllowPassthroughV1Alias)
-	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "edenai", "jev"}, cfg.Server.EnabledPassthroughProviders)
+	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner", "edenai", "jev"}, cfg.Server.EnabledPassthroughProviders)
 	assert.Equal(t, ConfiguredProviderModelsModeAllowlist, cfg.Models.ConfiguredProviderModelsMode)
 	assert.Nil(t, cfg.Cache.Model.Local)
 	assert.Equal(t, 3600, cfg.Cache.Model.RefreshInterval)
@@ -167,6 +167,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.Equal(t, MetricsCallerDimensionsConfig{UserPathDepth: 2, MaxValues: 100}, cfg.Metrics.CallerDimensions)
 	assert.Equal(t, 600, cfg.HTTP.Timeout)
 	assert.Equal(t, 600, cfg.HTTP.ResponseHeaderTimeout)
+	assert.Equal(t, 512, cfg.HTTP.MaxIdleConnsPerHost)
 	assert.Equal(t, time.Minute, cfg.Workflows.RefreshInterval)
 	assert.True(t, cfg.Admin.EndpointsEnabled)
 	assert.True(t, cfg.Admin.UIEnabled)
@@ -1025,9 +1026,8 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 		require.Equal(t, ".cache", result.Config.Cache.Model.Local.CacheDir)
 		require.Nil(t, result.Config.Cache.Model.Redis)
 
-		gotProviders := result.Config.Server.EnabledPassthroughProviders
-		wantProviders := []string{"openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek", "bailian"}
-		require.Equal(t, wantProviders, gotProviders)
+		// The example shows the default allowlist, so it must not drift from it.
+		require.Equal(t, buildDefaultConfig().Server.EnabledPassthroughProviders, result.Config.Server.EnabledPassthroughProviders)
 	})
 }
 
@@ -1286,11 +1286,13 @@ func TestLoad_HTTPConfig(t *testing.T) {
 	withTempDir(t, func(_ string) {
 		t.Setenv("HTTP_TIMEOUT", "30")
 		t.Setenv("HTTP_RESPONSE_HEADER_TIMEOUT", "60")
+		t.Setenv("HTTP_MAX_IDLE_CONNS_PER_HOST", "2048")
 
 		result, err := Load()
 		require.NoError(t, err)
 		assert.Equal(t, 30, result.Config.HTTP.Timeout)
 		assert.Equal(t, 60, result.Config.HTTP.ResponseHeaderTimeout)
+		assert.Equal(t, 2048, result.Config.HTTP.MaxIdleConnsPerHost)
 	})
 
 	withTempDir(t, func(_ string) {

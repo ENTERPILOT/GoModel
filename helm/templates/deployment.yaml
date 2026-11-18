@@ -95,7 +95,7 @@ spec:
             {{- if $addTmp }}
             # SQLite writes statement journals to a temp directory, and the
             # root filesystem is read-only: without this, multi-row writes
-            # such as audit log batches fail with "disk I/O error (6410)".
+            # such as request log batches fail with "disk I/O error (6410)".
             - name: tmp
               mountPath: /tmp
             {{- end }}

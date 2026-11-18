@@ -1,0 +1,109 @@
+---
+title: "Courtesy Replies"
+description: "Answer thank-you and goodbye turns at the gateway instead of resending a long conversation to the model at full price."
+icon: "hand-heart"
+tag: "Pro"
+keywords: ["GoModel Pro", "courtesy replies", "courtesy_reply", "guardrail", "prompt cache", "token savings", "thank you"]
+---
+
+## What it does
+
+When a user ends a long conversation with "thanks!" or "bye", the client
+resends the whole conversation to the model, just to get "You're welcome!"
+back. If the provider's prompt cache has expired by then, that one-word turn
+is billed as the full context at full price.
+
+The `courtesy_reply` guardrail recognizes these turns and answers them at the
+gateway, so the conversation is never resent. By default the reply is canned
+text and nothing reaches a provider; with `reply: model`, only the last few
+messages go to a small `reply_model`. It works on
+`/v1/chat/completions`, `/v1/responses`, and `/v1/messages`, and recognizes
+thank-yous and goodbyes in English, Polish, German, Spanish, French,
+Portuguese, and Italian.
+
+## When it answers
+
+By default it answers only when skipping the model saves real money:
+
+- **The cache is cold.** The gateway remembers when each conversation last
+  reached its provider and model. A courtesy turn is answered only when the
+  prompt cache has likely expired (five minutes by default, longer when the
+  request asks for a longer cache) or the provider is not caching at all.
+  While the cache is warm, the turn costs mostly cheap cache reads and goes
+  to the model as usual.
+- **The conversation is big enough.** Conversations under 2,000 tokens go to
+  the model; the saving is not worth replacing its reply.
+- **The message is only a courtesy.** Short messages made of nothing but
+  thanks or goodbye phrases. Anything with a question, a request, or new
+  information goes to the model.
+
+Cache tracking needs a session ID, which GoModel detects automatically for
+most clients; see [Session keeping](/features/session-keeping). A conversation
+the gateway has not observed, such as a new session or one served by another
+replica, is treated as cold unless `unknown_cache` is set to `warm`.
+
+## What always reaches the model
+
+The guardrail stays out of the way whenever a canned reply could be wrong:
+
+- pending tool or function results, and non-text content sent with the turn
+- a turn right after the assistant asked a question, where "thanks" may mean
+  "yes, go ahead"
+- forced tool calls and structured output
+- provider-stateful Responses requests; a Responses turn is answered only
+  with `"store": false`
+
+Acknowledgments such as "ok", "perfect", or "got it" are not answered by
+default, because they often mean "go ahead" with what the assistant proposed.
+Turn them on with `reply_to_acknowledgments`.
+
+## Enable it
+
+Add a rule to the `guardrails` section of `config/config.yaml`:
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "courtesy"
+      type: "courtesy_reply"
+      fail_mode: "open"
+```
+
+Thank-yous and goodbyes that meet the conditions above now get a canned
+reply at no inference cost. Rules from `config.yaml` join the default
+workflow; a [workflow](/advanced/workflows#guardrail-steps) of your own runs
+the rule only when one of its prompt steps references it. You can also create
+the rule from **Plugins & Guardrails** in the Dashboard, which shows every
+setting with its help text.
+
+## Main settings
+
+Settings go under the rule's `config:` key:
+
+```yaml
+- name: "courtesy"
+  type: "courtesy_reply"
+  fail_mode: "open"
+  config:
+    reply: "model"
+    reply_model: "openai/gpt-4o-mini"
+    reply_to_acknowledgments: true
+```
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `reply` | `canned` | `canned` answers with fixed text; `model` asks `reply_model` for one short sentence, sending only the last few messages. |
+| `reply_model` | — | A cheap chat model for `reply: model`, such as `openai/gpt-4o-mini`. |
+| `cache_policy` | `cold_only` | `always` also answers when the cache is warm. The other conditions still apply. |
+| `cache_ttl` | `auto` | How long the provider keeps the cache, such as `5m` or `1h`. `auto` reads it from the request. |
+| `unknown_cache` | `cold` | How to treat conversations the gateway has not observed. |
+| `min_context_tokens` | `2000` | Smaller conversations always go to the model. |
+| `reply_to_acknowledgments` | `false` | Also answer "ok", "got it", and similar. |
+
+The full list, including custom reply texts, extra phrases, and an optional
+decision model for phrasings the built-in list does not know, is returned by
+`GET /admin/guardrails/types` and shown in the Dashboard.
+
+Courtesy replies are part of the compression entitlement. Without it, a
+configured rule still loads and lets every request through.

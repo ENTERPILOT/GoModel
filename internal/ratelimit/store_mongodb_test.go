@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -268,12 +270,102 @@ func TestMongoDBStoreCounterRoundTrip(t *testing.T) {
 		store, err := NewMongoDBStore(context.Background(), db)
 		require.NoError(t, err)
 
+		counters := db.Collection("rate_limit_window_snapshots")
+		// Stale rows are seeded without expires_at, as releases before it
+		// saved them: the TTL monitor runs on its own schedule and could
+		// delete an expired one before the suite counts it. PruneCounters
+		// collects them on the same bounds.
 		runCounterStoreSuite(t, store, func(t *testing.T, snap WindowSnapshot, updatedAt int64) {
 			t.Helper()
 			snap.UpdatedAt = updatedAt
-			_, err := db.Collection("rate_limit_window_snapshots").InsertOne(context.Background(), snap)
+			_, err := counters.InsertOne(context.Background(), snap)
+			require.NoError(t, err)
+		}, func(t *testing.T) {
+			t.Helper()
+			ctx := context.Background()
+			require.NoError(t, store.PruneCounters(ctx))
+			// What the TTL monitor does about once a minute.
+			_, err := counters.DeleteMany(ctx, bson.D{{Key: "expires_at", Value: bson.D{{Key: "$lt", Value: time.Now()}}}})
 			require.NoError(t, err)
 		})
+	})
+}
+
+func TestMongoDBStoreSavesCounterBatches(t *testing.T) {
+	for _, n := range counterBatchSizes {
+		t.Run(strconv.Itoa(n), func(t *testing.T) {
+			mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+				store, err := NewMongoDBStore(context.Background(), db)
+				require.NoError(t, err)
+				runCounterBatchSuite(t, store, n)
+			})
+		})
+	}
+}
+
+// TestMongoDBStoreExpiresCountersByTTL checks the server collects what
+// expired: every save dates expires_at, and a TTL index deletes the row once
+// it passes. Documents saved before expires_at existed have none, so
+// PruneCounters collects them on their old bounds.
+func TestMongoDBStoreExpiresCountersByTTL(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(ctx, db)
+		require.NoError(t, err)
+		counters := db.Collection("rate_limit_window_snapshots")
+
+		specs, err := counters.Indexes().ListSpecifications(ctx)
+		require.NoError(t, err)
+		var ttl *mongo.IndexSpecification
+		for i := range specs {
+			if specs[i].Name == "expires_at_1" {
+				ttl = &specs[i]
+			}
+		}
+		require.NotNil(t, ttl, "expires_at has an index")
+		require.NotNil(t, ttl.ExpireAfterSeconds, "the index is a TTL index")
+		assert.Equal(t, int32(0), *ttl.ExpireAfterSeconds)
+
+		snap := WindowSnapshot{Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds, Writer: "w1"}
+		require.NoError(t, store.SaveCounters(ctx, []WindowSnapshot{snap}))
+		var saved struct {
+			UpdatedAt int64     `bson:"updated_at"`
+			ExpiresAt time.Time `bson:"expires_at"`
+		}
+		require.NoError(t, counters.FindOne(ctx, bson.D{{Key: "writer", Value: "w1"}}).Decode(&saved))
+		assert.Equal(t, saved.UpdatedAt+2*PeriodHourSeconds, saved.ExpiresAt.Unix())
+
+		now := time.Now().Unix()
+		legacy := []struct {
+			partition string
+			period    int64
+			updatedAt int64
+			kept      bool
+		}{
+			{"/team/stale", PeriodHourSeconds, now - 3*PeriodHourSeconds, false},
+			{"/team/live", PeriodHourSeconds, now - PeriodHourSeconds, true},
+			{"/team/gone", PeriodConcurrent, now - inFlightRowRetention - 60, false},
+			{"/team/idle", PeriodConcurrent, now - PeriodHourSeconds, true},
+		}
+		kept := []string{""}
+		for _, row := range legacy {
+			_, err := counters.InsertOne(ctx, WindowSnapshot{
+				Scope: string(ScopeUserPath), Subject: "/team", Partition: row.partition,
+				PeriodSeconds: row.period, Writer: "old-replica", UpdatedAt: row.updatedAt,
+			})
+			require.NoError(t, err)
+			if row.kept {
+				kept = append(kept, row.partition)
+			}
+		}
+		require.NoError(t, store.PruneCounters(ctx))
+		rows, err := store.LoadCounters(ctx, 0, "")
+		require.NoError(t, err)
+		var partitions []string
+		for _, row := range rows {
+			partitions = append(partitions, row.Partition)
+		}
+		assert.ElementsMatch(t, kept, partitions)
 	})
 }
 
@@ -301,7 +393,7 @@ func TestMongoDBStoreLoadCountersSkipsMalformedDocument(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		got, err := store.LoadCounters(ctx, 0)
+		got, err := store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		require.Equal(t, good, unstamped(got)[0])
@@ -354,7 +446,7 @@ func TestMongoDBStoreImportsLegacyCounters(t *testing.T) {
 
 		store, err := NewMongoDBStore(ctx, db)
 		require.NoError(t, err)
-		got, err := store.LoadCounters(ctx, 0)
+		got, err := store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Equal(t, []WindowSnapshot{legacy}, unstamped(got), "the legacy document loads under the empty writer")
 		remaining, err := legacyColl.CountDocuments(ctx, bson.D{})
@@ -364,7 +456,7 @@ func TestMongoDBStoreImportsLegacyCounters(t *testing.T) {
 		legacyWrite(t, 7)
 		store, err = NewMongoDBStore(ctx, db)
 		require.NoError(t, err)
-		got, err = store.LoadCounters(ctx, 0)
+		got, err = store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		require.Equal(t, int64(7), got[0].RequestsCurrent)
@@ -374,7 +466,7 @@ func TestMongoDBStoreImportsLegacyCounters(t *testing.T) {
 		require.NoError(t, err)
 		store, err = NewMongoDBStore(ctx, db)
 		require.NoError(t, err)
-		got, err = store.LoadCounters(ctx, 0)
+		got, err = store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Empty(t, got)
 	})

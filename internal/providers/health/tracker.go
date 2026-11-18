@@ -88,12 +88,12 @@ type event struct {
 }
 
 type modelState struct {
-	events       []event
-	lastError    *ErrorInfo
+	events    []event
+	lastError *ErrorInfo
 	// lastRejection is the latest circuit-breaker rejection, kept apart so
 	// it can stand in once the upstream failure leaves the window.
 	lastRejection *ErrorInfo
-	lastActivity time.Time
+	lastActivity  time.Time
 }
 
 type providerState struct {

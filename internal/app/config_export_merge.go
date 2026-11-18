@@ -66,10 +66,6 @@ func exportVirtualModels(declared []config.VirtualModelConfig, stored []virtualm
 		}) {
 			continue
 		}
-		targets := model.Targets
-		if len(targets) == 0 && model.Model != "" {
-			targets = []virtualmodels.Target{{Provider: model.ProviderName, Model: model.Model}}
-		}
 		// The parameters a virtual model forces or defaults are controls, such
 		// as a token cap or store: false, so an export must carry them.
 		params, err := requestparams.ToAny(model.Params)
@@ -94,7 +90,9 @@ func exportVirtualModels(declared []config.VirtualModelConfig, stored []virtualm
 			Params:          params,
 			DefaultParams:   defaultParams,
 		}
-		for _, target := range targets {
+		// An access policy has no targets, and is written without any: its
+		// provider and model are the scope its source names, not a destination.
+		for _, target := range model.Targets {
 			entry.Targets = append(entry.Targets, config.VirtualModelTargetConfig{
 				Provider: target.Provider, Model: target.Model, Weight: target.Weight, ReasoningEffort: target.ReasoningEffort,
 			})

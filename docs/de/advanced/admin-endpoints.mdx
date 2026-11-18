@@ -34,7 +34,7 @@ Variablen, Standardwerte und den entsprechenden YAML-Block `admin:`.
 Die Admin-REST-API-Endpunkte (`/admin/*`) akzeptieren zwei Arten von Zugangsdaten als Bearer-Token:
 
 - **`GOMODEL_MASTER_KEY`** – hat immer Admin-Zugriff.
-- **Ein verwalteter API-Key mit Dashboard-Zugriff** – verwaltete Keys werden standardmäßig *ohne* Dashboard-Zugriff erstellt, sodass ein für Modell-Traffic ausgegebener Key weder das Audit-Log lesen noch neue Keys ausstellen oder Gateway-Einstellungen ändern kann. Requests mit einem verwalteten Key ohne diesen Zugriff liefern `403` mit dem Fehlercode `dashboard_access_denied`.
+- **Ein verwalteter API-Key mit Dashboard-Zugriff** – verwaltete Keys werden standardmäßig *ohne* Dashboard-Zugriff erstellt, sodass ein für Modell-Traffic ausgegebener Key weder das Request-Log lesen noch neue Keys ausstellen oder Gateway-Einstellungen ändern kann. Requests mit einem verwalteten Key ohne diesen Zugriff liefern `403` mit dem Fehlercode `dashboard_access_denied`.
 
 <CodeGroup>
 
@@ -139,7 +139,7 @@ um; die Antwort enthält den aktualisierten Key. Der Name wird wie beim Erstelle
 getrimmt und darf nicht leer sein. Ein Key kann sich nicht selbst umbenennen
 (`403 auth_key_self_update`). Nutzungseinträge speichern die Key-ID, nicht den
 Namen, daher zeigt das Dashboard auch bisherige Nutzung unter dem neuen Namen;
-Audit-Einträge zeigen die Key-ID. Ein erneuter Import eines LiteLLM-Keys setzt
+Request-Log-Einträge zeigen die Key-ID. Ein erneuter Import eines LiteLLM-Keys setzt
 seinen Namen wieder aus dem Import. Teilen sich zwei Keys einen Namen, zeigt
 das Dashboard neben jedem das maskierte Token und ergänzt eine kurze Key-ID, wo
 die Tokens übereinstimmen oder fehlen. Das Erstellformular und der
@@ -211,11 +211,11 @@ Mit `GET /admin/access` finden Sie heraus, um welche Art es sich bei Zugangsdate
 
 Für einen bereichsbeschränkten Admin gilt:
 
-- Endpunkte für Nutzung, Audit, API-Keys, Benutzer, Budgets und Rate-Limits werden
+- Endpunkte für Nutzung, Request-Logs, API-Keys, Benutzer, Budgets und Rate-Limits werden
   auf den Bereich gefiltert. Ein fehlender `user_path`-Filter bedeutet die Wurzel des Bereichs; ein
   `user_path` außerhalb des Bereichs liefert `403` mit dem Code
   `user_path_out_of_scope`.
-- Über eine ID adressierte Objekte, die zu einem anderen Teilbaum gehören (ein Audit-Eintrag, ein
+- Über eine ID adressierte Objekte, die zu einem anderen Teilbaum gehören (ein Request-Log-Eintrag, ein
   API-Key), liefern `404` – genau so, als gäbe es sie nicht.
 - Neue API-Keys und Benutzerrichtlinien verwenden standardmäßig die Wurzel des Bereichs und können nicht
   außerhalb davon erstellt werden. Auf diese Weise erstellte Keys mit Dashboard-Zugriff sind ihrerseits
@@ -708,13 +708,15 @@ Zwei Endpunkte ignorieren den Parameter bewusst: `/admin/cache/overview` meldet 
 Cache-Treffer, und `/admin/usage/sessions` schließt sie immer ein (die Kostenfelder
 enthalten nur Provider-Kosten).
 
-### GET /admin/audit/stats
+### GET /admin/request-logs/stats
 
 Gibt in Zeitabschnitte eingeteilte Request-Zahlen zurück, gruppiert nach den Statusklassen
 `2xx`/`4xx`/`5xx`, dazu eine Zusammenfassung der Gesamterfolgsquote und die durchschnittliche Request-Dauer pro
 Provider. Darauf basieren die Diagramme „Requests by Status“ und „Provider Latency“ auf
-der Seite „Overview“ des Dashboards. Die Daten stammen aus dem Audit-Log (Audit-Logging ist standardmäßig aktiviert;
-`LOGGING_ENABLED`).
+der Seite „Overview“ des Dashboards. Die Daten stammen aus dem Request-Log (Request-Logging ist standardmäßig aktiviert;
+`LOGGING_ENABLED`). Die alten `/admin/audit/...`-Pfade sind veraltet: Sie funktionieren weiterhin, und ihre
+Antworten enthalten den Header `Deprecation: true` sowie einen `Link`-Header mit dem
+neuen Pfad. Ein Datum für die Entfernung steht nicht fest.
 
 **Query-Parameter:**
 
@@ -765,7 +767,7 @@ bis zum aktuellen Zeitpunkt mit Nullwerten aufgefüllt.
 Jede `provider_latency`-Reihe ist Index für Index an `buckets` ausgerichtet. Einträge sind
 `null` für Abschnitte, in denen der Provider keinen erfolgreichen Request bedient hat, und die
 Durchschnittswerte umfassen nur erfolgreiche (2xx) Requests, die den Provider erreicht haben – Treffer im lokalen
-Response-Cache und fehlgeschlagene Requests sind ausgenommen. Ist das Audit-Logging
+Response-Cache und fehlgeschlagene Requests sind ausgenommen. Ist das Request-Logging
 deaktiviert, werden leere Abschnitte zurückgegeben.
 
 ### Provider-Zugangsdaten
@@ -1087,13 +1089,13 @@ http://localhost:8080/admin/dashboard
 Es bietet einen visuellen Überblick über Nutzungsstatistiken und registrierte Modelle und verwendet dieselben Daten wie die oben beschriebenen REST-API-Endpunkte.
 
 Bei `DASHBOARD_LIVE_LOGS_ENABLED=true` öffnet das Dashboard
-`GET /admin/live/logs` und streamt kompakte Vorschauen des Audit-/Nutzungs-Lebenszyklus. So
-können die Seiten „Audit Logs“ und „Usage“ einen Request anzeigen, während er den
+`GET /admin/live/logs` und streamt kompakte Vorschauen des Request-Log-/Nutzungs-Lebenszyklus. So
+können die Seiten „Anfragen“ und „Usage“ einen Request anzeigen, während er den
 Workflow durchläuft, noch bevor das asynchrone Schreiben in die Datenbank abgeschlossen ist. Der Stream verwendet Sequenz-Cursor,
 begrenzte Wiederholung und Heartbeat-Events, damit sich wieder verbindende Browser nach kurzen
 Netzwerkunterbrechungen aufholen können.
 
-Die persistierten Audit- und Nutzungstabellen bleiben die maßgebliche Datenquelle. Fällt der
+Die persistierten Request-Log- und Nutzungstabellen bleiben die maßgebliche Datenquelle. Fällt der
 Cursor des Browsers aus dem Wiederholungspuffer heraus, sendet der Stream ein Reset-Event,
 und das Dashboard lädt die Daten neu über die normalen REST-Endpunkte.
 

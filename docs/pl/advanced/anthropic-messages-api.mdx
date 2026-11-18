@@ -15,7 +15,7 @@ formatem Anthropic, mogą wskazywać na GoModel bez żadnych zmian.
 Request jest tłumaczony na kanoniczny typ czatu GoModel już na wejściu i przechodzi przez
 ten sam pipeline co `/v1/chat/completions` – działają więc modele wirtualne, polityka
 workflow, budżety, failover, cache odpowiedzi, śledzenie użycia i kosztów oraz log
-audytowy. Ponieważ każdy provider obsługuje chat completion, request w formacie
+requestów. Ponieważ każdy provider obsługuje chat completion, request w formacie
 Anthropic można skierować do **dowolnego** skonfigurowanego providera (OpenAI, Gemini,
 Bedrock i innych), nie tylko do Anthropic.
 
@@ -32,7 +32,7 @@ a następnie przekazuje natywną odpowiedź providera lub strumień SSE bez zmia
 Zachowuje to wszystko, czego kanoniczne tłumaczenie nie potrafi odwzorować –
 breakpointy `cache_control`, podpisy bloków thinking, nagłówki `anthropic-beta` –
 od czego zależą agenty programistyczne takie jak Claude Code. Rate limity,
-budżety, log audytowy i śledzenie użycia nadal działają, zarówno dla odpowiedzi
+budżety, log requestów i śledzenie użycia nadal działają, zarówno dla odpowiedzi
 streamingowych, jak i niestreamingowych.
 
 Natywne przekazywanie działa automatycznie. Requesty wracają do pipeline'u
@@ -183,9 +183,9 @@ Odpowiedzi streamingowe emitują sekwencję zdarzeń SSE Anthropic (`message_sta
 `content_block_start`/`content_block_delta`/`content_block_stop`, `message_delta`,
 `message_stop`).
 
-## Śledzenie kosztów i logi audytowe
+## Śledzenie kosztów i logi requestów
 
-Requesty `/v1/messages` są śledzone i audytowane dokładnie tak jak trasy kompatybilne
+Requesty `/v1/messages` są śledzone i logowane dokładnie tak jak trasy kompatybilne
 z OpenAI. Koszt jest wyliczany na podstawie providera, który faktycznie obsłużył request,
 a użycie jest zapisywane pod endpointem `/v1/messages`, dzięki czemu można je filtrować
 w dashboardzie.

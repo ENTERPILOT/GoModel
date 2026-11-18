@@ -54,7 +54,7 @@ const (
 	subsystemProviders           = "providers"
 	subsystemSecretRotation      = "secret rotation"
 	subsystemRouteStrategies     = "routing-strategy plugins"
-	subsystemAudit               = "audit"
+	subsystemRequestLog          = "request log"
 	subsystemUsage               = "usage"
 	subsystemBudgets             = "budgets"
 	subsystemBudgetAlerts        = "budget alerts"
@@ -149,8 +149,8 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		{name: subsystemAuthKeys, close: closerOf(a.authKeys)},
 		{name: subsystemUsers, close: closerOf(a.users)},
 		{name: subsystemFileStore, close: closerOf(a.fileStore)},
-		// Stops the media retention sweep; audit entries referencing media
-		// are flushed by the audit subsystem below.
+		// Stops the media retention sweep; request log entries referencing media
+		// are flushed by the request log subsystem below.
 		{name: subsystemMediaStore, close: closerOf(a.media)},
 		// The remaining stores flush buffered work into storage, so they must
 		// close before the connection they write through.
@@ -158,7 +158,7 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		{name: subsystemBudgets, close: closerOf(a.budgets)},
 		{name: subsystemRateLimits, close: closerOf(a.rateLimits)},
 		{name: subsystemUsage, close: closerOf(a.usage)},
-		{name: subsystemAudit, close: closerOf(a.audit)},
+		{name: subsystemRequestLog, close: closerOf(a.requestLog)},
 		// Flushes the last spans and metric points once nothing else can emit.
 		{name: subsystemTelemetry, close: closerOf(a.telemetry)},
 		{name: subsystemStorage, close: closerOf(a.storage)},

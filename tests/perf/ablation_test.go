@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/session"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -19,7 +19,7 @@ func benchAblation(b *testing.B, mutate func(*server.Config)) {
 	cfg := &server.Config{
 		LogOnlyModelInteractions: true,
 		MasterKey:                "bench-master-key",
-		AuditLogger:              benchAuditLogger{cfg: auditlog.Config{Enabled: true, LogBodies: true, LogHeaders: true}},
+		RequestLogger:            benchRequestLogger{cfg: requestlog.Config{Enabled: true, LogBodies: true, LogHeaders: true}},
 		UsageLogger:              benchUsageLogger{cfg: usage.Config{Enabled: true}},
 		SessionDetector:          session.NewDetector(session.BuiltinRules(), true),
 		RateLimiter:              newBenchRateLimiter(b),
@@ -62,14 +62,14 @@ func BenchmarkAblationNoSessionKeeping(b *testing.B) {
 	benchAblation(b, func(c *server.Config) { c.SessionDetector = nil })
 }
 
-func BenchmarkAblationNoAuditBodies(b *testing.B) {
+func BenchmarkAblationNoRequestLogBodies(b *testing.B) {
 	benchAblation(b, func(c *server.Config) {
-		c.AuditLogger = benchAuditLogger{cfg: auditlog.Config{Enabled: true, LogHeaders: true}}
+		c.RequestLogger = benchRequestLogger{cfg: requestlog.Config{Enabled: true, LogHeaders: true}}
 	})
 }
 
-func BenchmarkAblationNoAudit(b *testing.B) {
-	benchAblation(b, func(c *server.Config) { c.AuditLogger = nil })
+func BenchmarkAblationNoRequestLog(b *testing.B) {
+	benchAblation(b, func(c *server.Config) { c.RequestLogger = nil })
 }
 
 func BenchmarkAblationNoAuth(b *testing.B) {
