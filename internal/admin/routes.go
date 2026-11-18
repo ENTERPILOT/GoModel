@@ -37,16 +37,24 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/usage/endpoints", h.UsageByEndpoint)
 	g.GET("/usage/breakdown", h.UsageBreakdown)
 	g.GET("/usage/invoice", h.UsageInvoice)
+	g.GET("/usage/benchmark", h.UsageBenchmark)
 	g.GET("/usage/sessions", h.UsageBySession)
 	g.GET("/usage/log", h.UsageLog)
 	g.GET("/usage/throughput", h.TokenThroughput, global)
 	g.POST("/usage/recalculate-pricing", h.RecalculateUsagePricing, global)
 
-	g.GET("/audit/log", h.AuditLog)
-	g.GET("/audit/sessions", h.AuditSessions)
-	g.GET("/audit/stats", h.AuditStats)
-	g.GET("/audit/detail", h.AuditLogDetail)
-	g.GET("/audit/conversation", h.AuditConversation)
+	g.GET("/request-logs", h.RequestLog)
+	g.GET("/request-logs/sessions", h.RequestLogSessions)
+	g.GET("/request-logs/stats", h.RequestLogStats)
+	g.GET("/request-logs/detail", h.RequestLogDetail)
+	g.GET("/request-logs/conversation", h.RequestLogConversation)
+	// Deprecated aliases: the request log was served under /audit before it
+	// was renamed. Existing clients keep working and are told where to move.
+	g.GET("/audit/log", h.RequestLog, deprecatedInFavorOf("/admin/request-logs"))
+	g.GET("/audit/sessions", h.RequestLogSessions, deprecatedInFavorOf("/admin/request-logs/sessions"))
+	g.GET("/audit/stats", h.RequestLogStats, deprecatedInFavorOf("/admin/request-logs/stats"))
+	g.GET("/audit/detail", h.RequestLogDetail, deprecatedInFavorOf("/admin/request-logs/detail"))
+	g.GET("/audit/conversation", h.RequestLogConversation, deprecatedInFavorOf("/admin/request-logs/conversation"))
 	g.GET("/media/:id", h.Media)
 
 	g.GET("/providers/status", h.ProviderStatus, global)
@@ -83,6 +91,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.DELETE("/virtual-models", h.DeleteVirtualModel, global)
 
 	g.GET("/mcp-servers", h.ListMCPServers, global)
+	g.GET("/mcp-servers/catalog", h.MCPToolCatalog, global)
 	g.PUT("/mcp-servers", h.UpsertMCPServer, global)
 	g.DELETE("/mcp-servers/:name", h.DeleteMCPServer, global)
 	g.POST("/mcp-servers/:name/reconnect", h.ReconnectMCPServer, global)
@@ -100,6 +109,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/auth-keys", h.ListAuthKeys)
 	g.POST("/auth-keys", h.CreateAuthKey)
 	g.POST("/auth-keys/import", h.ImportAuthKey, global)
+	g.PUT("/auth-keys/:id/name", h.UpdateAuthKeyName)
 	g.PUT("/auth-keys/:id/labels", h.UpdateAuthKeyLabels)
 	g.PUT("/auth-keys/:id/allowed-models", h.UpdateAuthKeyAllowedModels)
 	g.PUT("/auth-keys/:id/dashboard-access", h.UpdateAuthKeyDashboardAccess)
@@ -121,4 +131,20 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/workflows/:id", h.GetWorkflow, global)
 	g.POST("/workflows", h.CreateWorkflow, global)
 	g.POST("/workflows/:id/deactivate", h.DeactivateWorkflow, global)
+}
+
+// deprecatedInFavorOf marks a route as a deprecated alias of successor. The
+// response carries the same signals as the legacy /admin/api/v1 alias: a
+// Deprecation header and a Link to the replacement. There is no Sunset header
+// because no removal date is set.
+func deprecatedInFavorOf(successor string) echo.MiddlewareFunc {
+	link := "<" + successor + `>; rel="successor-version"`
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			header := c.Response().Header()
+			header.Set("Deprecation", "true")
+			header.Set("Link", link)
+			return next(c)
+		}
+	}
 }

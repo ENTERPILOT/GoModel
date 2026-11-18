@@ -2,7 +2,7 @@ package config
 
 import "github.com/enterpilot/gomodel/internal/storage"
 
-// StorageConfig holds database storage configuration (used by audit logging, usage tracking, future IAM, etc.)
+// StorageConfig holds database storage configuration (used by request logging, usage tracking, future IAM, etc.)
 type StorageConfig struct {
 	// Type specifies the storage backend: "sqlite" (default), "postgresql", or "mongodb"
 	Type string `yaml:"type" env:"STORAGE_TYPE"`

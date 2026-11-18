@@ -1,4 +1,12 @@
 {{- $usesPVC := include "gomodel.usesPVC" . -}}
+{{- /* A values file written before the chart mounted /tmp may already mount
+       one; a second mount at the same path would make the pod invalid. */ -}}
+{{- $addTmp := true -}}
+{{- range .Values.extraVolumeMounts -}}
+{{- if eq (clean (.mountPath | default "")) "/tmp" -}}
+{{- $addTmp = false -}}
+{{- end -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -84,6 +92,13 @@ spec:
               mountPath: /app/data
             - name: cache
               mountPath: /app/.cache
+            {{- if $addTmp }}
+            # SQLite writes statement journals to a temp directory, and the
+            # root filesystem is read-only: without this, multi-row writes
+            # such as request log batches fail with "disk I/O error (6410)".
+            - name: tmp
+              mountPath: /tmp
+            {{- end }}
             {{- if include "gomodel.configMapName" . }}
             - name: config
               mountPath: /app/config/config.yaml
@@ -103,6 +118,10 @@ spec:
           {{- end }}
         - name: cache
           emptyDir: {}
+        {{- if $addTmp }}
+        - name: tmp
+          emptyDir: {}
+        {{- end }}
         {{- with (include "gomodel.configMapName" .) }}
         - name: config
           configMap:

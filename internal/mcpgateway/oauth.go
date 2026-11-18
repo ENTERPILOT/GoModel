@@ -33,9 +33,11 @@ const maxPendingOAuthFlows = 64
 
 // oauthStartTimeout bounds discovery and client registration, and
 // oauthExchangeTimeout the code exchange: the shared upstream client has no
-// whole-request timeout because SSE upstreams stream for hours.
+// whole-request timeout because SSE upstreams stream for hours. The start
+// runs inside an admin request, so it stays under the inbound write timeout
+// (30s): past it the response, and with it the error, would be dropped.
 const (
-	oauthStartTimeout    = 30 * time.Second
+	oauthStartTimeout    = 20 * time.Second
 	oauthExchangeTimeout = 15 * time.Second
 )
 

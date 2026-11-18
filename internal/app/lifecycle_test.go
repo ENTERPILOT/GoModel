@@ -55,7 +55,7 @@ func TestFailedConstructionDoesNotRebindAuthenticationEventRecorder(t *testing.T
 	loaded, err := config.Load()
 	require.NoError(t, err)
 
-	// Force a failure late in construction, after the replacement audit logger
+	// Force a failure late in construction, after the replacement request logger
 	// exists. This models a rejected reload while an older generation serves.
 	enabled := true
 	loaded.Config.Cache.Response.Semantic = &config.SemanticCacheConfig{

@@ -12,9 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/config"
-	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/anthropicapi"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // mockEmbedder is an Embedder implementation for testing that returns a fixed vector.
@@ -132,6 +133,156 @@ func TestSemanticCacheMiddleware_MultimodalAttachmentIsolatesNamespace(t *testin
 
 	rec := serveSemanticRequest(t, m, body2, "")
 	require.NotEqual(t, "HIT (semantic)", rec.Header().Get("X-Cache"))
+}
+
+// Earlier turns have to match exactly, tool calls and tool results included:
+// the same question asked after a different tool exchange has another answer.
+func TestSemanticCacheMiddleware_ToolHistoryIsolatesNamespace(t *testing.T) {
+	const responsesParisSunny = `{"model":"gpt-4","input":[
+		{"role":"user","content":"What is the weather like?"},
+		{"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Paris\"}"},
+		{"type":"function_call_output","call_id":"call_1","output":"Sunny, 25C"}
+	]}`
+	tests := []struct {
+		name  string
+		path  string
+		first string
+		other string
+	}{
+		{
+			name:  "responses function_call arguments",
+			path:  "/v1/responses",
+			first: responsesParisSunny,
+			other: `{"model":"gpt-4","input":[
+				{"role":"user","content":"What is the weather like?"},
+				{"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Oslo\"}"},
+				{"type":"function_call_output","call_id":"call_1","output":"Sunny, 25C"}
+			]}`,
+		},
+		{
+			name:  "responses function_call_output",
+			path:  "/v1/responses",
+			first: responsesParisSunny,
+			other: `{"model":"gpt-4","input":[
+				{"role":"user","content":"What is the weather like?"},
+				{"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Paris\"}"},
+				{"type":"function_call_output","call_id":"call_1","output":"Snow, -10C"}
+			]}`,
+		},
+		{
+			name: "chat tool_calls arguments",
+			path: "/v1/chat/completions",
+			first: `{"model":"gpt-4","messages":[
+				{"role":"user","content":"What is the weather like?"},
+				{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},
+				{"role":"tool","tool_call_id":"call_1","content":"See the forecast."}
+			]}`,
+			other: `{"model":"gpt-4","messages":[
+				{"role":"user","content":"What is the weather like?"},
+				{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Oslo\"}"}}]},
+				{"role":"tool","tool_call_id":"call_1","content":"See the forecast."}
+			]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, store, _ := newTestSemanticMiddleware(0.90, 10, false)
+			serve := func(body string) *httptest.ResponseRecorder {
+				c, rec := echotest.Post(t, tt.path, []byte(body))
+				require.NoError(t, m.Handle(&echoExchange{c: c}, []byte(body), func() error {
+					return c.JSON(http.StatusOK, map[string]string{"answer": "42"})
+				}))
+				return rec
+			}
+
+			serve(tt.first)
+			m.wg.Wait()
+			require.Equal(t, 1, store.Len())
+
+			assert.Empty(t, serve(tt.other).Header().Get("X-Cache"))
+			assert.Equal(t, "HIT (semantic)", serve(tt.first).Header().Get("X-Cache"))
+		})
+	}
+}
+
+// /v1/messages reaches the cache as the chat translation of the Anthropic
+// request, so the semantic layer keys it like a chat request: the system
+// prompt and the tool_use / tool_result history have to match exactly, and
+// only the last user text is matched by similarity.
+func TestSemanticCacheMiddleware_MessagesPath(t *testing.T) {
+	type conversation struct{ system, toolInput, toolResult, lastUser string }
+	translated := func(t *testing.T, conv conversation) []byte {
+		t.Helper()
+		decoded, err := anthropicapi.DecodeMessagesRequest([]byte(`{"model":"claude-test","max_tokens":64,"system":"` + conv.system + `","messages":[
+			{"role":"user","content":[{"type":"text","text":"What is the weather like?"}]},
+			{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"get_weather","input":{"city":"` + conv.toolInput + `"}}]},
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"toolu_1","content":"` + conv.toolResult + `"},
+				{"type":"text","text":"` + conv.lastUser + `"}
+			]}
+		]}`))
+		require.NoError(t, err)
+		req, err := anthropicapi.ToChatRequest(decoded)
+		require.NoError(t, err)
+		body, err := json.Marshal(req)
+		require.NoError(t, err)
+		return body
+	}
+
+	first := conversation{system: "Be brief.", toolInput: "Paris", toolResult: "Sunny, 25C", lastUser: "And tomorrow?"}
+	tests := []struct {
+		name    string
+		other   conversation
+		wantHit bool
+	}{
+		{name: "paraphrased last user text", other: conversation{system: "Be brief.", toolInput: "Paris", toolResult: "Sunny, 25C", lastUser: "What about tomorrow?"}, wantHit: true},
+		{name: "system", other: conversation{system: "Be thorough.", toolInput: "Paris", toolResult: "Sunny, 25C", lastUser: "And tomorrow?"}},
+		{name: "tool_use input", other: conversation{system: "Be brief.", toolInput: "Oslo", toolResult: "Sunny, 25C", lastUser: "And tomorrow?"}},
+		{name: "tool_result", other: conversation{system: "Be brief.", toolInput: "Paris", toolResult: "Snow, -10C", lastUser: "And tomorrow?"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, store, emb := newTestSemanticMiddleware(0.90, 10, false)
+			serve := func(body []byte) string {
+				c, rec := echotest.Post(t, "/v1/messages", body)
+				require.NoError(t, m.Handle(&echoExchange{c: c}, body, func() error {
+					return c.JSON(http.StatusOK, map[string]string{"type": "message"})
+				}))
+				return rec.Header().Get("X-Cache")
+			}
+
+			require.Empty(t, serve(translated(t, first)))
+			m.wg.Wait()
+			require.Equal(t, 1, emb.calls)
+			require.Equal(t, 1, store.Len())
+
+			got := serve(translated(t, tt.other))
+			if tt.wantHit {
+				assert.Equal(t, "HIT (semantic)", got)
+			} else {
+				assert.Empty(t, got)
+			}
+		})
+	}
+}
+
+// A streamed Messages reply cannot be stored yet, so its lookup is skipped
+// rather than spending an embedding call that can never hit.
+func TestSemanticCacheMiddleware_StreamedMessagesSkipLookup(t *testing.T) {
+	m, store, emb := newTestSemanticMiddleware(0.90, 10, false)
+	body := []byte(`{"model":"claude-test","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"Hi"}]}`)
+
+	c, _ := echotest.Post(t, messagesPath, body)
+	called := false
+	require.NoError(t, m.Handle(&echoExchange{c: c}, body, func() error {
+		called = true
+		return nil
+	}))
+	m.wg.Wait()
+
+	assert.True(t, called)
+	assert.Zero(t, emb.calls)
+	assert.Zero(t, store.Len())
 }
 
 func TestSemanticCacheMiddleware_CacheMissOnLowScore(t *testing.T) {
@@ -594,7 +745,7 @@ func TestShouldSkipAllCacheHeaders_CacheControl(t *testing.T) {
 	}
 }
 
-func TestSemanticCacheMiddleware_HitMarksAuditEntryCacheType(t *testing.T) {
+func TestSemanticCacheMiddleware_HitMarksRequestLogEntryCacheType(t *testing.T) {
 	m, _, _ := newTestSemanticMiddleware(0.90, 10, false)
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"semantic-cache-type"}]}`)
 
@@ -603,12 +754,12 @@ func TestSemanticCacheMiddleware_HitMarksAuditEntryCacheType(t *testing.T) {
 
 	m.wg.Wait()
 
-	entry := &auditlog.LogEntry{ID: "semantic-audit-entry"}
-	c, rec := echotest.Post(t, "/v1/chat/completions", body, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	entry := &requestlog.LogEntry{ID: "semantic-request-log-entry"}
+	c, rec := echotest.Post(t, "/v1/chat/completions", body, echotest.WithValue(string(requestlog.LogEntryKey), entry))
 	err := m.Handle(&echoExchange{c: c}, body, func() error {
 		return c.JSON(http.StatusOK, map[string]string{"answer": "42"})
 	})
 	require.NoError(t, err)
 	require.Equal(t, "HIT (semantic)", rec.Header().Get("X-Cache"))
-	require.Equal(t, auditlog.CacheTypeSemantic, entry.CacheType)
+	require.Equal(t, requestlog.CacheTypeSemantic, entry.CacheType)
 }
