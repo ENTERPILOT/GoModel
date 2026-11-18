@@ -1,13 +1,16 @@
 package mcpgateway
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -209,10 +212,17 @@ func initializeRawSession(t *testing.T, endpoint string, headers map[string]stri
 	return sessionID
 }
 
+// rawMCPStatus returns once the handler has: the status reaches the client
+// while the handler still runs, but the response body ends only after it
+// returns. A test can then move a clock or read state without racing what a
+// handler does last, such as the end-of-POST touch of a shared session.
 func rawMCPStatus(t *testing.T, endpoint, body string, headers map[string]string) int {
 	t.Helper()
 	resp := rawMCPPost(t, endpoint, body, headers)
 	defer resp.Body.Close()
+	_, err := io.Copy(io.Discard, resp.Body)
+	require.NoError(t, err)
+
 	return resp.StatusCode
 }
 
@@ -705,6 +715,157 @@ func TestUpstreamHeadersStayOnConfiguredOrigin(t *testing.T) {
 	_ = resp.Body.Close()
 	require.Equal(t, "Bearer upstream-secret", sameOriginHeader)
 	require.Empty(t, redirectedHeader)
+}
+
+// Reconnect runs inside an admin request, so a server that accepts the
+// connection and never answers must not hold it past reconnectTimeout: the
+// call returns the degraded view, which keeps the last known catalog.
+func TestReconnectToAHangingUpstreamReturnsWithinItsBudget(t *testing.T) {
+	upstream := mcp.NewServer(&mcp.Implementation{Name: "alpha", Version: "test"}, nil)
+	addEchoTool("echo")(upstream)
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return upstream }, nil)
+	var hang atomic.Bool
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hang.Load() {
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(func() {
+		close(release)
+		ts.Close()
+	})
+
+	service, _ := newTestService(t, nil, testSpec("alpha", ts.URL, nil))
+	service.manager.reconnectTimeout = 200 * time.Millisecond
+	hang.Store(true)
+
+	start := time.Now()
+	view, err := service.Reconnect(context.Background(), "alpha")
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 5*time.Second, "the reconnect outlived its budget")
+	assert.Equal(t, StatusDegraded, view.Status)
+	assert.Equal(t, 1, view.ToolCount, "the last known catalog is kept")
+	assert.NotEmpty(t, view.LastError)
+}
+
+// Closing a session waits for the calls in flight on it, which can run for
+// the server's whole tool timeout. Reconnect must not wait with it: the old
+// session ends in the background while the redial goes ahead.
+func TestReconnectDoesNotWaitForACallInFlight(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	upstream := mcp.NewServer(&mcp.Implementation{Name: "alpha", Version: "test"}, nil)
+	upstream.AddTool(&mcp.Tool{Name: "slow", InputSchema: map[string]any{"type": "object"}},
+		func(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			started <- struct{}{}
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return &mcp.CallToolResult{}, nil
+		})
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return upstream }, nil)
+	ts := httptest.NewServer(handler)
+	t.Cleanup(func() {
+		close(release)
+		ts.Close()
+	})
+
+	service, _ := newTestService(t, nil, testSpec("alpha", ts.URL, func(spec *ServerSpec) {
+		spec.ToolTimeout = time.Minute
+	}))
+	go func() { _, _ = service.manager.CallTool(context.Background(), "alpha", "slow", nil) }()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "the tool call never reached the upstream")
+	}
+
+	start := time.Now()
+	view, err := service.Reconnect(context.Background(), "alpha")
+	require.NoError(t, err)
+	assert.Less(t, time.Since(start), 5*time.Second, "the reconnect waited for the call in flight")
+	assert.Equal(t, StatusConnected, view.Status)
+}
+
+// A dial or listing already in flight holds the connect lock for up to
+// connectTimeout plus listTimeout. Reconnect gives up waiting for it at its
+// budget and leaves the server as it was: still connected, on the same session.
+func TestReconnectGivesUpWaitingForAConnectInFlight(t *testing.T) {
+	url := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	service, _ := newTestService(t, nil, testSpec("alpha", url, nil))
+	service.manager.reconnectTimeout = 200 * time.Millisecond
+
+	u, ok := service.manager.get("alpha")
+	require.True(t, ok)
+	u.stateMu.Lock()
+	session := u.session
+	u.stateMu.Unlock()
+	require.NotNil(t, session)
+	u.connectMu.Lock()
+	defer u.connectMu.Unlock()
+
+	start := time.Now()
+	view, err := service.Reconnect(context.Background(), "alpha")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 5*time.Second, "the reconnect outlived its budget")
+	assert.Equal(t, StatusConnected, view.Status)
+	u.stateMu.Lock()
+	assert.Same(t, session, u.session, "a reconnect that never got the lock must not drop the session")
+	u.stateMu.Unlock()
+}
+
+// A server can complete the handshake and then stop answering. The session
+// dialed for the reconnect is then dropped when its listing times out, and
+// closing it waits on requests that server never answers; the reconnect must
+// not wait with it.
+func TestReconnectDoesNotWaitToCloseASessionWhoseListingStalled(t *testing.T) {
+	upstream := mcp.NewServer(&mcp.Implementation{Name: "alpha", Version: "test"}, nil)
+	addEchoTool("echo")(upstream)
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return upstream }, nil)
+	var stall atomic.Bool
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if stall.Load() && r.Method != http.MethodGet {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			// The handshake still answers; the listing and the requests that
+			// close the session do not.
+			if !bytes.Contains(body, []byte(`"server/discover"`)) && !bytes.Contains(body, []byte(`"initialize"`)) && !bytes.Contains(body, []byte(`"notifications/initialized"`)) {
+				select {
+				case <-release:
+				case <-r.Context().Done():
+				}
+				return
+			}
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(func() {
+		close(release)
+		ts.Close()
+	})
+
+	service, _ := newTestService(t, nil, testSpec("alpha", ts.URL, nil))
+	service.manager.reconnectTimeout = 200 * time.Millisecond
+	stall.Store(true)
+
+	start := time.Now()
+	view, err := service.Reconnect(context.Background(), "alpha")
+	require.ErrorContains(t, err, "list tools", "the handshake must succeed so the listing is what stalls")
+	assert.Less(t, time.Since(start), 3*time.Second, "the reconnect waited for the stalled session to close")
+	assert.Equal(t, StatusDegraded, view.Status)
+	assert.Equal(t, 1, view.ToolCount, "the last known catalog is kept")
 }
 
 func TestDegradedUpstreamKeepsCatalogAndReportsError(t *testing.T) {

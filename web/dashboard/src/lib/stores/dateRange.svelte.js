@@ -1,5 +1,5 @@
 // Shared reporting window (preset "last N days" or a custom range) used by
-// the overview, usage, audit, and settings pages. All math is UTC-day based
+// the overview, usage, Requests, and settings pages. All math is UTC-day based
 // in the effective timezone.
 //
 // The window is remembered in localStorage across sessions. A window that

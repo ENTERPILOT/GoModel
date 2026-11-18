@@ -141,7 +141,7 @@ type providerEnvValues struct {
 	// slot 1 regardless of the order os.Environ happens to return.
 	APIKeysByIndex map[int]string
 	// APIKeyVar and APIKeyVarsByIndex name the variables APIKey and
-	// APIKeysByIndex came from, so errors and audit records can name them.
+	// APIKeysByIndex came from, so errors and request log records can name them.
 	APIKeyVar                string
 	APIKeyVarsByIndex        map[int]string
 	BaseURL                  string

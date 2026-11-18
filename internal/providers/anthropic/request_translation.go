@@ -66,13 +66,19 @@ func resolveDefaultMaxTokens() int {
 // applyReasoning configures thinking and effort on an anthropicRequest.
 // Adaptive-thinking models (Opus 4.6+) use adaptive thinking with
 // output_config.effort. Older models use manual thinking with budget_tokens.
-// Effort "none" turns thinking off where the model allows it.
+// Effort "none" turns thinking off where the model allows it, and asks a
+// model that always thinks for "low", the least it accepts; omitting thinking
+// there would run the model's default effort instead.
 func applyReasoning(req *anthropicRequest, model, effort string) {
 	if effort == "none" {
 		if thinksByDefault(model) {
 			req.Thinking = &anthropicThinking{Type: "disabled"}
+			return
 		}
-		return
+		if !alwaysThinks(model) {
+			return
+		}
+		effort = "low"
 	}
 	if isAdaptiveThinkingModel(model) {
 		req.Thinking = &anthropicThinking{Type: "adaptive"}
@@ -114,6 +120,36 @@ func reasoningEffortToBudgetTokens(effort string) int {
 	default:
 		return 5000
 	}
+}
+
+// thinkingDisplaySummarized is the thinking.display value that returns
+// readable thinking text.
+const thinkingDisplaySummarized = "summarized"
+
+// applyReasoningSummary asks for summarized thinking text when the client
+// requested a reasoning summary. It never turns thinking on: a request with
+// no thinking block gets one only on a model that thinks anyway, and a
+// disabled block is left alone.
+func applyReasoningSummary(req *anthropicRequest, model string) {
+	switch {
+	case req.Thinking == nil:
+		if thinksByDefault(model) || alwaysThinks(model) {
+			req.Thinking = &anthropicThinking{Type: "adaptive", Display: thinkingDisplaySummarized}
+		}
+	case req.Thinking.Type != "disabled":
+		req.Thinking.Display = thinkingDisplaySummarized
+	}
+}
+
+// wantsReasoningSummary reports whether the client asked for a reasoning
+// summary (OpenAI Responses reasoning.summary "auto", "concise" or
+// "detailed"). Anthropic has one summary level, so any of them selects it.
+func wantsReasoningSummary(req *core.ChatRequest) bool {
+	if req.Reasoning == nil {
+		return false
+	}
+	summary := strings.ToLower(strings.TrimSpace(req.Reasoning.Summary))
+	return summary != "" && summary != "none"
 }
 
 func convertOpenAIToolsToAnthropic(tools []map[string]any) ([]anthropicTool, error) {
@@ -449,6 +485,9 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	if effort := resolveAnthropicReasoningEffort(req); effort != "" {
 		applyReasoning(anthropicReq, req.Model, effort)
 	}
+	if wantsReasoningSummary(req) {
+		applyReasoningSummary(anthropicReq, req.Model)
+	}
 
 	// Anthropic has no subset choice: declare only the allowed functions.
 	reqTools, reqToolChoice, err := core.NarrowToAllowedTools(req.Tools, req.ToolChoice)
@@ -565,10 +604,10 @@ func dropConflictingSamplingParameter(req *anthropicRequest) {
 }
 
 // relaxForcedToolChoice downgrades tool_choice "any" and "tool" to "auto" on
-// models that reject forced tool use (Fable 5.1 and Mythos 5.1). Anthropic's
-// documented replacement is "auto" plus a prompt instruction naming the tool,
-// so the returned instruction is appended to the system prompt to preserve the
-// caller's intent as closely as the provider allows.
+// models that reject forced tool use (see forcedToolChoiceRejectedPrefixes).
+// Anthropic's documented replacement is "auto" plus a prompt instruction
+// naming the tool, so the returned instruction is appended to the system
+// prompt to preserve the caller's intent as closely as the provider allows.
 func relaxForcedToolChoice(choice *anthropicToolChoice, model string) (*anthropicToolChoice, string) {
 	if choice == nil || !rejectsForcedToolChoice(model) {
 		return choice, ""
@@ -1089,6 +1128,7 @@ func supportsSystemRoleMessages(model string) bool {
 		"claude-opus-4-8",
 		"claude-opus-5",
 		"claude-sonnet-5",
+		"claude-haiku-5-5",
 	} {
 		if strings.HasPrefix(model, prefix) {
 			return true

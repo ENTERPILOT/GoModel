@@ -5,9 +5,12 @@ import "github.com/goccy/go-json"
 // anthropicThinking represents the thinking configuration for Anthropic's extended thinking.
 // For adaptive-thinking models (Opus 4.6+): {type: "adaptive"} (budget_tokens omitted).
 // For older models: {type: "enabled", budget_tokens: N}.
+// Display "summarized" asks for readable thinking text; Opus 4.7 and later
+// return an empty thinking field without it.
 type anthropicThinking struct {
 	Type         string `json:"type"`
 	BudgetTokens int    `json:"budget_tokens,omitempty"`
+	Display      string `json:"display,omitempty"`
 }
 
 // anthropicOutputConfig controls the effort level for adaptive-thinking models
