@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"io"
-	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
@@ -412,14 +411,7 @@ func (s *audioService) relayAudioStream(c *echo.Context, route modelCallRoute, r
 		s.captureAudioResponseBody(c, contentType, data)
 	}
 	if flushErr != nil {
-		errorType := classifyStreamError(ctx, flushErr)
-		auditlog.EnrichEntryWithError(c, errorType, flushErr.Error(), "")
-		slog.Warn("audio stream terminated abnormally",
-			"error", flushErr,
-			"error_type", errorType,
-			"path", c.Request().URL.Path,
-			"request_id", route.requestID,
-		)
+		recordStreamFailure(c, nil, "audio stream terminated abnormally", flushErr)
 	}
 	return nil
 }
