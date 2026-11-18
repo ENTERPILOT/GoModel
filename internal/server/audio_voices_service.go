@@ -6,8 +6,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // AudioVoices handles GET /v1/audio/voices.
@@ -59,9 +59,9 @@ func (s *audioService) ListVoices(c *echo.Context) error {
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
 	c.SetRequest(c.Request().WithContext(ctx))
-	auditlog.EnrichEntry(c, selector.Model, "")
+	requestlog.EnrichEntry(c, selector.Model, "")
 	route := s.routeFor(selector, requestID)
-	auditlog.EnrichEntryWithResolvedRoute(c, selector.QualifiedModel(), route.providerType, route.providerName)
+	requestlog.EnrichEntryWithResolvedRoute(c, selector.QualifiedModel(), route.providerType, route.providerName)
 	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRoute{provider: route.providerName, model: route.model})
 	if err != nil {
 		return handleError(c, err)

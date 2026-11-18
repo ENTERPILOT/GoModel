@@ -14,7 +14,7 @@ import (
 // snapshotObserver stores a streamed response the way a buffered one is
 // stored: the terminal event carries the complete response, and its snapshot
 // is written in the background once that event passes through. It observes
-// the stream next to the usage and audit observers; nil when the response is
+// the stream next to the usage and request log observers; nil when the response is
 // not stored.
 func (s *translatedInferenceService) snapshotObserver(ctx context.Context, workflow *core.Workflow, req *core.ResponsesRequest, providerType, providerName, requestID string) streaming.Observer {
 	if s.currentResponseStore() == nil || (req.Store != nil && !*req.Store) {

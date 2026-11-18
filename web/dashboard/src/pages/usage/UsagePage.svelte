@@ -7,7 +7,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
-  import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
+  import { liveLogs } from "../requests/liveLogs.svelte.js";
   import { usagePage } from "./usage.svelte.js";
   import { usageFacets } from "./usageFacets.svelte.js";
   import { restoreUsageUrl } from "./usage-view.js";

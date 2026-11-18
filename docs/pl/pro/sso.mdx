@@ -4,7 +4,7 @@ sidebarTitle: "OIDC SSO"
 description: "Chroń GoModel Dashboard za pomocą swojego dostawcy tożsamości OIDC, korzystając z Authorization Code flow z PKCE, i mapuj grupy dostawcy tożsamości na ścieżki użytkowników."
 icon: "key-round"
 tag: "Pro"
-keywords: ["GoModel Pro", "OIDC", "SSO", "single sign-on", "jednokrotne logowanie", "PKCE", "uwierzytelnianie dashboardu", "dashboard authentication", "mapowanie grup", "group mapping", "user_path", "powody audytowe", "audit reasons"]
+keywords: ["GoModel Pro", "OIDC", "SSO", "single sign-on", "jednokrotne logowanie", "PKCE", "uwierzytelnianie dashboardu", "dashboard authentication", "mapowanie grup", "group mapping", "user_path", "powody odrzucenia", "rejected login reasons"]
 ---
 
 ## Przegląd
@@ -20,7 +20,7 @@ granica uwierzytelniania nie może po cichu zniknąć.
 
 Logowanie przez SAML 2.0 opisuje strona [SAML SSO](/pl/pro/saml). Wszystko na
 tej stronie poza ustawieniami klienta OIDC dotyczy obu protokołów: ścieżki
-użytkowników, [mapowanie grup](#mapowanie-grup), sesje, wylogowanie i audyt.
+użytkowników, [mapowanie grup](#mapowanie-grup), sesje, wylogowanie i zdarzenia logowania.
 
 ## Skonfiguruj SSO
 
@@ -118,7 +118,7 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
   użytkownika jest też
   [zakresem dostępu](/pl/features/user-path#zakres-dostępu) sesji, więc osoba
   przypisana do `/eng/platform` administrowałaby całym zespołem. Każdy
-  członek widzi tylko własne użycie, wpisy audytowe i klucze.
+  członek widzi tylko własne użycie, wpisy logu requestów i klucze.
 - **Logowanie, którego ścieżka objęłaby węzeł, jest odrzucane.** Jeśli
   wartość claimu sprawiłaby, że ścieżka byłaby równa zmapowanemu węzłowi lub
   `user_path_prefix` albo znalazłaby się nad jednym z nich, logowanie kończy
@@ -247,10 +247,10 @@ niedostępny podczas wylogowania, unieważnienie i tak obowiązuje na replice,
 która je obsłużyła, zapisywane jest ostrzeżenie, a ta replika ponawia zapis,
 dopóki pozostałe repliki go nie zobaczą.
 
-## Audyt i kontrola dostępu
+## Zdarzenia logowania i kontrola dostępu
 
 Udane logowania, odrzucenia przez polityki i wylogowania są zapisywane jako
-oczyszczone zdarzenia audytowe. Tokeny, kody autoryzacyjne, ciasteczka, surowe
+oczyszczone zdarzenia uwierzytelniania w logu requestów. Tokeny, kody autoryzacyjne, ciasteczka, surowe
 claimy ani szczegóły błędów providera nie są przechowywane.
 
 - **Metoda.** Zdarzenia logowania, odrzucenia i wylogowania zapisują protokół
@@ -258,10 +258,10 @@ claimy ani szczegóły błędów providera nie są przechowywane.
   łącznie z `/v1/auth/verify`, są zapisywane jako `sso`.
 - **Principal.** Logowanie odrzucone po zweryfikowaniu odpowiedzi dostawcy
   tożsamości (odrzucenie przy dopuszczaniu, a w SAML także odrzucony podmiot
-  lub powtórzona asercja) trafia do audytu pod principalem, którego wskazuje,
+  lub powtórzona asercja) trafia do logu requestów pod principalem, którego wskazuje,
   oraz, jeśli jest znana, pod ścieżką użytkownika, którą by otrzymało.
   Logowanie odrzucone dlatego, że jego ścieżka byłaby skonfigurowanym węzłem,
-  nie trafia do audytu pod tą ścieżką, bo nie należy ona do żadnej osoby; log
+  nie trafia do logu requestów pod tą ścieżką, bo nie należy ona do żadnej osoby; log
   podaje ją jako `refused_path`.
 - **Logi.** Każde logowanie jest też logowane pod tym samym `request_id`.
   `GoModel Pro: SSO login succeeded` wskazuje mapowanie grupy, które
@@ -275,7 +275,7 @@ dotyczy sesji SSO.
 
 ### Powody odrzuconych logowań
 
-Odrzucone logowanie trafia do audytu z jednym stałym powodem, a gateway
+Odrzucone logowanie trafia do logu requestów z jednym stałym powodem, a gateway
 zapisuje w logu `GoModel Pro: SSO login rejected` z tym samym `reason` oraz
 `request_id`. Osoba widzi jedynie ogólną stronę błędu z tym identyfikatorem
 jako numerem referencyjnym.

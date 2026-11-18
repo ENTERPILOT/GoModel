@@ -33,7 +33,7 @@ agentischen Coding-, Chat- und Tool-lastigen Workloads erprobt.
 - **Volle Kontrolle.** Wählen Sie die Stufe pro Gateway oder pro Request, schließen Sie
   Modelle per Glob aus, schützen Sie bestehende Verläufe mit `new_messages_only`, behalten Sie
   Quellcode wortgetreu bei und prüfen Sie jede Umschreibung über Response-Header,
-  Audit-Revisionen und Metriken.
+  Request-Revisionen und Metriken.
 
 ## Übersicht
 
@@ -100,7 +100,7 @@ X-GoModel-Pro-Tokens-Saved: 1843
 X-GoModel-Pro-Compression-Blocks: 12
 ```
 
-Audit-Logs bewahren den ursprünglichen Request und eine Revision pro Rewriter auf. Die
+Request-Logs bewahren den ursprünglichen Request und eine Revision pro Rewriter auf. Die
 Revision erfasst ihre Bytegrößen und Komprimierungsdetails; der umgeschriebene Body wird
 zusätzlich aufbewahrt, wenn `LOGGING_LOG_BODIES=true` gesetzt ist. Prometheus-Metriken verwenden das
 Präfix `gomodel_pro_compression_`, und die Seite „Usage“ im Dashboard zeigt die Pro-Einsparungen

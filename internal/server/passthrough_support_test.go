@@ -5,17 +5,21 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/iotest"
 
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -112,6 +116,93 @@ func TestProxyPassthroughStreamClientDisconnectIsNotReturned(t *testing.T) {
 	assert.Contains(t, logOutput, `"msg":"stream terminated abnormally"`)
 	assert.Contains(t, logOutput, `"error_type":"client_disconnected"`)
 	assert.NotContains(t, logOutput, `"level":"ERROR"`)
+}
+
+// brokenClientWriter fails every body write the way a closed client
+// connection does.
+type brokenClientWriter struct {
+	http.ResponseWriter
+}
+
+func (brokenClientWriter) Write([]byte) (int, error) {
+	return 0, &net.OpError{Op: "write", Net: "tcp", Err: syscall.EPIPE}
+}
+
+// A response that breaks after its status line was sent is recorded on the
+// request log entry before the handler returns, and is not returned as an error.
+func TestRelayFailuresAreRecordedNotReturned(t *testing.T) {
+	jsonHeaders := map[string][]string{"Content-Type": {"application/json"}}
+	truncatedBody := func() io.ReadCloser {
+		return io.NopCloser(io.MultiReader(strings.NewReader(`{"id":"msg_1",`), iotest.ErrReader(io.ErrUnexpectedEOF)))
+	}
+	info := &core.PassthroughRouteInfo{Provider: "anthropic", RawEndpoint: "messages", Model: "claude-fable-5"}
+
+	tests := []struct {
+		name          string
+		brokenClient  bool
+		relay         func(c *echo.Context) error
+		wantStatus    int
+		wantErrorType string
+	}{
+		{
+			name: "passthrough body cut short by the provider",
+			relay: func(c *echo.Context) error {
+				resp := &core.PassthroughResponse{StatusCode: http.StatusOK, Headers: jsonHeaders, Body: truncatedBody()}
+				return proxyPassthroughResponse(c, nil, nil, nil, "anthropic", "anthropic", "messages", info, resp)
+			},
+			wantStatus:    http.StatusOK,
+			wantErrorType: "stream_error",
+		},
+		{
+			name:         "passthrough body the client stopped reading",
+			brokenClient: true,
+			relay: func(c *echo.Context) error {
+				resp := &core.PassthroughResponse{StatusCode: http.StatusOK, Headers: jsonHeaders, Body: io.NopCloser(strings.NewReader(`{"id":"msg_1"}`))}
+				return proxyPassthroughResponse(c, nil, nil, nil, "anthropic", "anthropic", "messages", info, resp)
+			},
+			wantStatus:    http.StatusOK,
+			wantErrorType: "client_disconnected",
+		},
+		{
+			// The provider's own error is already on the request log entry and stays
+			// the recorded cause.
+			name:         "relayed provider error the client stopped reading",
+			brokenClient: true,
+			relay: func(c *echo.Context) error {
+				body := `{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens is required"}}`
+				resp := &core.PassthroughResponse{StatusCode: http.StatusBadRequest, Headers: jsonHeaders, Body: io.NopCloser(strings.NewReader(body))}
+				return proxyPassthroughResponse(c, nil, nil, nil, "anthropic", "anthropic", "messages", info, resp)
+			},
+			wantStatus:    http.StatusBadRequest,
+			wantErrorType: string(core.ErrorTypeInvalidRequest),
+		},
+		{
+			name: "realtime signaling body cut short by the provider",
+			relay: func(c *echo.Context) error {
+				return relayRealtimeHTTPResponse(c, &http.Response{StatusCode: http.StatusCreated, Body: truncatedBody()}, "application/sdp")
+			},
+			wantStatus:    http.StatusCreated,
+			wantErrorType: "stream_error",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var opts []echotest.Option
+			if tc.brokenClient {
+				opts = append(opts, echotest.WithResponseWriter(func(w http.ResponseWriter) http.ResponseWriter {
+					return brokenClientWriter{ResponseWriter: w}
+				}))
+			}
+			c, rec := echotest.Post(t, "/v1/messages", `{}`, opts...)
+			entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+			c.Set(string(requestlog.LogEntryKey), entry)
+
+			require.NoError(t, tc.relay(c))
+
+			assert.Equal(t, tc.wantStatus, rec.Code)
+			assert.Equal(t, tc.wantErrorType, entry.ErrorType)
+		})
+	}
 }
 
 // Any complete-body success status must be accounted, not only 200: /p/ is

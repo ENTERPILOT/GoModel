@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -18,8 +18,8 @@ func TestBrokerPublishesAndReplaysBySequence(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 4, ReplayLimit: 4})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
-	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogStarted, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: now,
 		Method:    "POST",
@@ -65,8 +65,8 @@ func TestSubscriptionLatestSnapshotsSequenceAtSubscribe(t *testing.T) {
 			b := NewBroker(Config{Enabled: true})
 			publish := func(n int) {
 				for range n {
-					b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
-						ID:        "audit-1",
+					b.PublishRequestLogEvent(EventRequestLogStarted, &requestlog.LogEntry{
+						ID:        "request-log-1",
 						RequestID: "req-1",
 						Timestamp: time.Now(),
 					})
@@ -118,15 +118,15 @@ func TestBrokerReplaysActiveSnapshotsForFreshSubscribers(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 1, ReplayLimit: 1})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
-	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogStarted, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: now,
 		Method:    "POST",
 		Path:      "/v1/chat/completions",
 	})
-	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-		ID:             "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+		ID:             "request-log-1",
 		RequestID:      "req-1",
 		Timestamp:      now.Add(time.Second),
 		RequestedModel: "gpt-test",
@@ -148,7 +148,7 @@ func TestBrokerReplaysActiveSnapshotsForFreshSubscribers(t *testing.T) {
 	require.False(t, sub.Reset)
 	require.Len(t, sub.Replay, 2)
 	got := sub.Replay[0].Type
-	require.Equal(t, EventAuditUpdated, got)
+	require.Equal(t, EventRequestLogUpdated, got)
 
 	payload := eventPayload(t, sub.Replay[0])
 	require.Equal(t, "POST", payload["method"], "snapshot method")
@@ -157,20 +157,20 @@ func TestBrokerReplaysActiveSnapshotsForFreshSubscribers(t *testing.T) {
 	require.Equal(t, EventUsageCompleted, got)
 }
 
-func TestBrokerNormalizesAuditActiveSnapshotAliases(t *testing.T) {
+func TestBrokerNormalizesRequestLogActiveSnapshotAliases(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
 	// The first event has no request ID, so its snapshot is keyed by entry ID;
 	// the second carries both and must take over that snapshot rather than
 	// start a second one.
-	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		Timestamp: now,
 		Method:    "POST",
 	})
-	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: now.Add(time.Second),
 		Provider:  "openai",
@@ -189,8 +189,8 @@ func TestBrokerNormalizesAuditActiveSnapshotAliases(t *testing.T) {
 	got = payload["provider"]
 	require.Equal(t, "openai", got)
 
-	b.PublishAuditEvent(EventAuditFlushed, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogFlushed, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: now.Add(2 * time.Second),
 	})
@@ -243,13 +243,13 @@ func TestBrokerOmitsFlushedSnapshotsForFreshSubscribers(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
-	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogStarted, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: now,
 	})
-	b.PublishAuditEvent(EventAuditFlushed, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogFlushed, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: now.Add(time.Second),
 	})
@@ -276,8 +276,8 @@ func TestBrokerStaleCursorReceivesResetAndActiveSnapshots(t *testing.T) {
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
 	for i := range 3 {
-		b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-			ID:        "audit-1",
+		b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+			ID:        "request-log-1",
 			RequestID: "req-1",
 			Timestamp: now.Add(time.Duration(i) * time.Second),
 			Method:    "POST",
@@ -297,8 +297,8 @@ func TestBrokerStaleCursorReceivesResetAndActiveSnapshots(t *testing.T) {
 func TestBrokerSignalsResetWhenCursorFallsOutOfReplayWindow(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 1, ReplayLimit: 1})
 	for range 3 {
-		b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
-			ID:        "audit",
+		b.PublishRequestLogEvent(EventRequestLogStarted, &requestlog.LogEntry{
+			ID:        "request-log",
 			RequestID: "req",
 			Timestamp: time.Now(),
 		})
@@ -316,8 +316,8 @@ func TestBrokerSignalsResetWhenReplayGapExceedsLimit(t *testing.T) {
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
 	for i := range 5 {
-		b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-			ID:             "audit-1",
+		b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+			ID:             "request-log-1",
 			RequestID:      "req-1",
 			Timestamp:      now.Add(time.Duration(i) * time.Second),
 			RequestedModel: "gpt-test",
@@ -339,8 +339,8 @@ func TestBrokerSignalsResetWhenCursorIsAheadOfLatest(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 10, ReplayLimit: 10})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
-	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogStarted, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: now,
 		Method:    "POST",
@@ -364,8 +364,8 @@ func TestBrokerDropsSlowSubscribers(t *testing.T) {
 	defer sub.Close()
 
 	for range 4 {
-		b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-			ID:        "audit",
+		b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+			ID:        "request-log",
 			RequestID: "req",
 			Timestamp: time.Now(),
 		})
@@ -405,8 +405,8 @@ func TestBrokerCloseStopsSubscribersAndRejectsNewSubscriptions(t *testing.T) {
 	got := b.Subscribe(0)
 	require.Nil(t, got)
 
-	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
-		ID:        "audit-closed",
+	b.PublishRequestLogEvent(EventRequestLogStarted, &requestlog.LogEntry{
+		ID:        "request-log-closed",
 		RequestID: "req-closed",
 		Timestamp: time.Now(),
 	})
@@ -416,13 +416,13 @@ func TestBrokerCloseStopsSubscribersAndRejectsNewSubscriptions(t *testing.T) {
 	b.Close()
 }
 
-func TestBrokerAuditStartedPreviewIncludesRequestHeadersOnly(t *testing.T) {
+func TestBrokerRequestLogStartedPreviewIncludesRequestHeadersOnly(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
-	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogStarted, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: time.Now(),
-		Data: &auditlog.LogData{
+		Data: &requestlog.LogData{
 			UserAgent:       "test-agent",
 			APIKeyHash:      "hash123",
 			RequestHeaders:  map[string]string{"Authorization": "[REDACTED]", "Content-Type": "application/json"},
@@ -452,24 +452,24 @@ func TestBrokerAuditStartedPreviewIncludesRequestHeadersOnly(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestBrokerAuditActiveSnapshotMergesNestedPreviewData(t *testing.T) {
+func TestBrokerRequestLogActiveSnapshotMergesNestedPreviewData(t *testing.T) {
 	b := NewBroker(Config{Enabled: true, BufferSize: 1, ReplayLimit: 1})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
-	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogStarted, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: now,
-		Data: &auditlog.LogData{
+		Data: &requestlog.LogData{
 			RequestHeaders: map[string]string{"Authorization": "[REDACTED]"},
 		},
 	})
-	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: now.Add(time.Second),
-		Data: &auditlog.LogData{
-			WorkflowFeatures: &auditlog.WorkflowFeaturesSnapshot{Audit: true, Usage: true},
+		Data: &requestlog.LogData{
+			WorkflowFeatures: &requestlog.WorkflowFeaturesSnapshot{Audit: true, Usage: true},
 		},
 	})
 
@@ -491,19 +491,19 @@ func TestBrokerAuditActiveSnapshotMergesNestedPreviewData(t *testing.T) {
 	require.Equal(t, true, features["usage"], "workflow_features = %#v, want audit and usage flags", data["workflow_features"])
 }
 
-func TestBrokerAuditUpdatedPreviewIncludesRequestBodyOnly(t *testing.T) {
+func TestBrokerRequestLogUpdatedPreviewIncludesRequestBodyOnly(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	sub := b.Subscribe(0)
 	require.NotNil(t, sub)
 
 	defer sub.Close()
 
-	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-		ID:         "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+		ID:         "request-log-1",
 		RequestID:  "req-1",
 		Timestamp:  time.Now(),
 		StatusCode: 200,
-		Data: &auditlog.LogData{
+		Data: &requestlog.LogData{
 			RequestHeaders:  map[string]string{"Authorization": "[REDACTED]"},
 			RequestBody:     map[string]any{"model": "gpt-test"},
 			ResponseHeaders: map[string]string{"X-Request-ID": "req-1"},
@@ -535,26 +535,26 @@ func TestBrokerAuditUpdatedPreviewIncludesRequestBodyOnly(t *testing.T) {
 	require.Equal(t, "[REDACTED]", headers["Authorization"], "retained request_headers = %#v, want redacted authorization", retainedData["request_headers"])
 }
 
-func TestBrokerAuditCompletedPreviewIncludesCapturedDetailData(t *testing.T) {
+func TestBrokerRequestLogCompletedPreviewIncludesCapturedDetailData(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	sub := b.Subscribe(0)
 	require.NotNil(t, sub)
 
 	defer sub.Close()
 
-	entry := &auditlog.LogEntry{
-		ID:         "audit-1",
+	entry := &requestlog.LogEntry{
+		ID:         "request-log-1",
 		RequestID:  "req-1",
 		Timestamp:  time.Now(),
 		StatusCode: 200,
-		Data: &auditlog.LogData{
+		Data: &requestlog.LogData{
 			RequestHeaders:  map[string]string{"Authorization": "Bearer redacted"},
 			ResponseHeaders: map[string]string{"X-Request-ID": "req-1"},
 			RequestBody:     map[string]any{"model": "gpt-test", "nested": map[string]any{"token": "before"}},
 			ResponseBody:    map[string]any{"id": "chatcmpl-test", "usage": map[string]any{"total_tokens": 150}},
 		},
 	}
-	b.PublishAuditEvent(EventAuditCompleted, entry)
+	b.PublishRequestLogEvent(EventRequestLogCompleted, entry)
 	entry.Data.RequestHeaders["Authorization"] = "Bearer changed"
 	entry.Data.ResponseHeaders["X-Request-ID"] = "changed"
 	entry.Data.RequestBody.(map[string]any)["model"] = "changed"
@@ -601,20 +601,20 @@ func TestBrokerAuditCompletedPreviewIncludesCapturedDetailData(t *testing.T) {
 	require.Equal(t, "req-1", headers["X-Request-ID"], "retained response_headers = %#v, want x-request-id", retainedData["response_headers"])
 }
 
-func TestBrokerAuditPreviewIncludesCompactWorkflowData(t *testing.T) {
+func TestBrokerRequestLogPreviewIncludesCompactWorkflowData(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
-	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: time.Now(),
-		Data: &auditlog.LogData{
-			WorkflowFeatures: &auditlog.WorkflowFeaturesSnapshot{
+		Data: &requestlog.LogData{
+			WorkflowFeatures: &requestlog.WorkflowFeaturesSnapshot{
 				Cache:    true,
 				Audit:    true,
 				Usage:    true,
 				Failover: true,
 			},
-			Failover: &auditlog.FailoverSnapshot{TargetModel: "fallback-model"},
+			Failover: &requestlog.FailoverSnapshot{TargetModel: "fallback-model"},
 		},
 	})
 
@@ -632,18 +632,18 @@ func TestBrokerAuditPreviewIncludesCompactWorkflowData(t *testing.T) {
 	require.Equal(t, "fallback-model", failover["target_model"])
 }
 
-func TestBrokerAuditPreviewIncludesCompactAttempts(t *testing.T) {
+func TestBrokerRequestLogPreviewIncludesCompactAttempts(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
-	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: time.Now(),
-		Data: &auditlog.LogData{
-			Attempts: []auditlog.AttemptSnapshot{
-				{Seq: 1, Kind: auditlog.AttemptKindPrimary, StatusCode: 404, ErrorMessage: "model not available",
+		Data: &requestlog.LogData{
+			Attempts: []requestlog.AttemptSnapshot{
+				{Seq: 1, Kind: requestlog.AttemptKindPrimary, StatusCode: 404, ErrorMessage: "model not available",
 					ResponseBody:    map[string]any{"error": "nope"},
 					ResponseHeaders: map[string]string{"Retry-After": "30"}},
-				{Seq: 2, Kind: auditlog.AttemptKindFailover, StatusCode: 200, Success: true},
+				{Seq: 2, Kind: requestlog.AttemptKindFailover, StatusCode: 200, Success: true},
 			},
 		},
 	})
@@ -658,7 +658,7 @@ func TestBrokerAuditPreviewIncludesCompactAttempts(t *testing.T) {
 
 	primary, ok := attempts[0].(map[string]any)
 	require.True(t, ok, "attempt[0] = %T, want object", attempts[0])
-	require.Equal(t, auditlog.AttemptKindPrimary, primary["kind"])
+	require.Equal(t, requestlog.AttemptKindPrimary, primary["kind"])
 	require.Equal(t, float64(404), primary["status_code"], "attempt[0] = %#v, want failed primary metadata", primary)
 	_, present := primary["response_body"]
 	require.False(t, present, "live preview attempt should omit response_body, got %#v", primary)
@@ -666,15 +666,15 @@ func TestBrokerAuditPreviewIncludesCompactAttempts(t *testing.T) {
 	require.False(t, present, "live preview attempt should omit response_headers, got %#v", primary)
 }
 
-func TestBrokerAuditPreviewIncludesGuardrailOutcomesWithoutDetail(t *testing.T) {
+func TestBrokerRequestLogPreviewIncludesGuardrailOutcomesWithoutDetail(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
-	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: time.Now(),
-		Data: &auditlog.LogData{
-			Guardrails: []auditlog.GuardrailOutcomeSnapshot{
-				{Seq: 1, Phase: "prompt", Instance: "check", Action: auditlog.GuardrailActionBlock, Code: "policy",
+		Data: &requestlog.LogData{
+			Guardrails: []requestlog.GuardrailOutcomeSnapshot{
+				{Seq: 1, Phase: "prompt", Instance: "check", Action: requestlog.GuardrailActionBlock, Code: "policy",
 					Detail: map[string]any{"verdict": "unsafe"}},
 			},
 		},
@@ -691,26 +691,26 @@ func TestBrokerAuditPreviewIncludesGuardrailOutcomesWithoutDetail(t *testing.T) 
 	outcome, ok := outcomes[0].(map[string]any)
 	require.True(t, ok, "guardrails[0] = %T, want object", outcomes[0])
 	require.Equal(t, "check", outcome["instance"])
-	require.Equal(t, auditlog.GuardrailActionBlock, outcome["action"])
+	require.Equal(t, requestlog.GuardrailActionBlock, outcome["action"])
 	require.Equal(t, "policy", outcome["code"], "guardrails[0] = %#v, want the block outcome", outcome)
 	_, present := outcome["detail"]
 	require.False(t, present, "live preview outcome should omit detail, got %#v", outcome)
 }
 
-func TestAuditPreviewRemainsPendingUntilFlush(t *testing.T) {
-	entry := &auditlog.LogEntry{
-		ID:        "audit-1",
+func TestRequestLogPreviewRemainsPendingUntilFlush(t *testing.T) {
+	entry := &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: time.Now(),
 	}
 
-	queued := auditPreviewFromEntry(EventAuditCompleted, entry)
+	queued := requestLogPreviewFromEntry(EventRequestLogCompleted, entry)
 	require.True(t, queued.LivePending)
 
-	flushed := auditPreviewFromEntry(EventAuditFlushed, entry)
+	flushed := requestLogPreviewFromEntry(EventRequestLogFlushed, entry)
 	require.False(t, flushed.LivePending)
 
-	failed := auditPreviewFromEntry(EventAuditFailed, entry)
+	failed := requestLogPreviewFromEntry(EventRequestLogFailed, entry)
 	require.False(t, failed.LivePending)
 }
 
@@ -759,11 +759,11 @@ func TestBrokerRingCapacityBoundedByReplayWindow(t *testing.T) {
 
 func TestBrokerActiveSnapshotsExcludeBodiesForFreshSubscribers(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
-	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: time.Now(),
-		Data: &auditlog.LogData{
+		Data: &requestlog.LogData{
 			RequestBody: map[string]any{"model": "gpt-test"},
 		},
 	})
@@ -790,11 +790,11 @@ func TestBrokerCompactsOversizedRetainedEvents(t *testing.T) {
 		headerValue[i] = 'x'
 	}
 	oversized["X-Big"] = string(headerValue)
-	b.PublishAuditEvent(EventAuditCompleted, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogCompleted, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: time.Now(),
-		Data: &auditlog.LogData{
+		Data: &requestlog.LogData{
 			RequestHeaders: oversized,
 			RequestBody:    map[string]any{"model": "gpt-test"},
 		},
@@ -810,20 +810,20 @@ func TestBrokerCompactsOversizedRetainedEvents(t *testing.T) {
 	require.Equal(t, true, data["request_body_captured"])
 }
 
-func TestBrokerAuditStreamPreviewCarriesPartialResponseBody(t *testing.T) {
+func TestBrokerRequestLogStreamPreviewCarriesPartialResponseBody(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	sub := b.Subscribe(0)
 	require.NotNil(t, sub)
 
 	defer sub.Close()
 
-	b.PublishAuditEvent(EventAuditStream, &auditlog.LogEntry{
-		ID:         "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogStream, &requestlog.LogEntry{
+		ID:         "request-log-1",
 		RequestID:  "req-1",
 		Timestamp:  time.Now(),
 		StatusCode: 200,
 		Stream:     true,
-		Data: &auditlog.LogData{
+		Data: &requestlog.LogData{
 			ResponseBody: map[string]any{
 				"object": "chat.completion",
 				"choices": []any{map[string]any{
@@ -837,7 +837,7 @@ func TestBrokerAuditStreamPreviewCarriesPartialResponseBody(t *testing.T) {
 	// Connected subscribers receive the partial body, flagged as partial and
 	// still pending.
 	payload := eventPayload(t, <-sub.Events)
-	require.Equal(t, EventAuditStream, payload["_live_state"])
+	require.Equal(t, EventRequestLogStream, payload["_live_state"])
 	require.Equal(t, true, payload["_live_pending"])
 
 	data, ok := payload["data"].(map[string]any)
@@ -957,12 +957,12 @@ func TestBrokerReplayAfterBufferWrap(t *testing.T) {
 	require.True(t, subStale.Reset)
 }
 
-// benchAuditRequestLifecycle publishes the audit events one non-streaming chat
+// benchRequestLogLifecycle publishes the request log events one non-streaming chat
 // request emits with body and header capture on: audit.started, the
 // audit.updated events handlers raise while enriching the entry, then
 // audit.completed and audit.flushed. It is the per-request broker cost on
 // every request, whether or not a dashboard is connected.
-func benchAuditRequestLifecycle(b *testing.B, subscribe bool) {
+func benchRequestLogLifecycle(b *testing.B, subscribe bool) {
 	// The subscriber buffer is far larger than the default so a drain
 	// goroutine that falls behind cannot get the subscriber dropped, which
 	// would silently turn the subscribed case into the idle one.
@@ -982,42 +982,42 @@ func benchAuditRequestLifecycle(b *testing.B, subscribe bool) {
 		})
 	}
 
-	requestBody := auditlog.CaptureLoggedBody([]byte(`{"model":"gpt-4o-mini","messages":[{"role":"system","content":"You are a helpful assistant that answers briefly."},{"role":"user","content":"Summarise the attached incident report in three bullet points and suggest one follow-up action for the on-call engineer."}],"temperature":0.2,"max_tokens":256,"stream":false}`))
-	responseBody := auditlog.CaptureLoggedBody([]byte(`{"id":"chatcmpl-bench","object":"chat.completion","created":1700000000,"model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"- Database failover took 4 minutes\n- Alerts fired late\n- No data loss\nFollow-up: tune the replica lag alert."},"finish_reason":"stop"}],"usage":{"prompt_tokens":61,"completion_tokens":34,"total_tokens":95}}`))
+	requestBody := requestlog.CaptureLoggedBody([]byte(`{"model":"gpt-4o-mini","messages":[{"role":"system","content":"You are a helpful assistant that answers briefly."},{"role":"user","content":"Summarise the attached incident report in three bullet points and suggest one follow-up action for the on-call engineer."}],"temperature":0.2,"max_tokens":256,"stream":false}`))
+	responseBody := requestlog.CaptureLoggedBody([]byte(`{"id":"chatcmpl-bench","object":"chat.completion","created":1700000000,"model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"- Database failover took 4 minutes\n- Alerts fired late\n- No data loss\nFollow-up: tune the replica lag alert."},"finish_reason":"stop"}],"usage":{"prompt_tokens":61,"completion_tokens":34,"total_tokens":95}}`))
 	requestHeaders := map[string]string{"Authorization": "[REDACTED]", "Content-Type": "application/json", "User-Agent": "openai-python/1.60.0"}
 	responseHeaders := map[string]string{"Content-Type": "application/json", "X-Request-Id": "req-bench"}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		entry := &auditlog.LogEntry{
-			ID:        "audit-bench",
+		entry := &requestlog.LogEntry{
+			ID:        "request-log-bench",
 			RequestID: "req-bench",
 			Timestamp: time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC),
 			Method:    "POST",
 			Path:      "/v1/chat/completions",
-			Data: &auditlog.LogData{
+			Data: &requestlog.LogData{
 				UserAgent:      "openai-python/1.60.0",
 				RequestHeaders: requestHeaders,
 				RequestBody:    requestBody,
 			},
 		}
-		broker.PublishAuditEvent(EventAuditStarted, entry)
+		broker.PublishRequestLogEvent(EventRequestLogStarted, entry)
 
 		entry.RequestedModel, entry.Provider = "gpt-4o-mini", "openai"
-		broker.PublishAuditEvent(EventAuditUpdated, entry)
+		broker.PublishRequestLogEvent(EventRequestLogUpdated, entry)
 		entry.AuthMethod = "master_key"
-		broker.PublishAuditEvent(EventAuditUpdated, entry)
+		broker.PublishRequestLogEvent(EventRequestLogUpdated, entry)
 		entry.ResolvedModel, entry.ProviderName = "openai/gpt-4o-mini", "openai"
-		broker.PublishAuditEvent(EventAuditUpdated, entry)
+		broker.PublishRequestLogEvent(EventRequestLogUpdated, entry)
 		entry.UserPath = "/team"
-		broker.PublishAuditEvent(EventAuditUpdated, entry)
+		broker.PublishRequestLogEvent(EventRequestLogUpdated, entry)
 
 		entry.StatusCode, entry.DurationNs = 200, 812_000_000
 		entry.Data.ResponseHeaders = responseHeaders
 		entry.Data.ResponseBody = responseBody
-		broker.PublishAuditEvent(EventAuditCompleted, entry)
-		broker.PublishAuditEvent(EventAuditFlushed, entry)
+		broker.PublishRequestLogEvent(EventRequestLogCompleted, entry)
+		broker.PublishRequestLogEvent(EventRequestLogFlushed, entry)
 	}
 	b.StopTimer()
 	if subscribe && !broker.HasLiveSubscribers() {
@@ -1025,39 +1025,39 @@ func benchAuditRequestLifecycle(b *testing.B, subscribe bool) {
 	}
 }
 
-func BenchmarkBrokerAuditRequestLifecycleNoSubscribers(b *testing.B) {
-	benchAuditRequestLifecycle(b, false)
+func BenchmarkBrokerRequestLogLifecycleNoSubscribers(b *testing.B) {
+	benchRequestLogLifecycle(b, false)
 }
 
-func BenchmarkBrokerAuditRequestLifecycleWithSubscriber(b *testing.B) {
-	benchAuditRequestLifecycle(b, true)
+func BenchmarkBrokerRequestLogLifecycleWithSubscriber(b *testing.B) {
+	benchRequestLogLifecycle(b, true)
 }
 
 // An event reports only what its type carries, so the accumulated snapshot
 // must keep what earlier events established rather than let a later event's
 // zero fields erase it.
-func TestBrokerAuditActiveSnapshotKeepsEarlierFields(t *testing.T) {
+func TestBrokerRequestLogActiveSnapshotKeepsEarlierFields(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 
-	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogStarted, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: now,
 		Method:    "POST",
 		Path:      "/v1/chat/completions",
 		Stream:    true,
-		Data: &auditlog.LogData{
+		Data: &requestlog.LogData{
 			UserAgent:      "openai-python/1.60.0",
 			RequestHeaders: map[string]string{"Authorization": "[REDACTED]", "Content-Type": "application/json"},
 		},
 	})
-	b.PublishAuditEvent(EventAuditCompleted, &auditlog.LogEntry{
-		ID:         "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogCompleted, &requestlog.LogEntry{
+		ID:         "request-log-1",
 		RequestID:  "req-1",
 		Timestamp:  now.Add(time.Second),
 		StatusCode: 200,
-		Data: &auditlog.LogData{
+		Data: &requestlog.LogData{
 			ResponseHeaders: map[string]string{"X-Request-Id": "req-1"},
 			RequestHeaders:  map[string]string{"Content-Type": "application/json; charset=utf-8"},
 		},
@@ -1074,7 +1074,7 @@ func TestBrokerAuditActiveSnapshotKeepsEarlierFields(t *testing.T) {
 	assert.Equal(t, "/v1/chat/completions", payload["path"])
 	assert.Equal(t, true, payload["stream"])
 	assert.Equal(t, float64(200), payload["status_code"], "status code from audit.completed")
-	assert.Equal(t, EventAuditCompleted, payload["_live_state"], "the newest event names the state")
+	assert.Equal(t, EventRequestLogCompleted, payload["_live_state"], "the newest event names the state")
 
 	data, ok := payload["data"].(map[string]any)
 	require.True(t, ok, "preview data = %T, want object", payload["data"])
@@ -1088,21 +1088,21 @@ func TestBrokerAuditActiveSnapshotKeepsEarlierFields(t *testing.T) {
 	assert.Equal(t, "req-1", responseHeaders["X-Request-Id"])
 }
 
-// Snapshots outlive the request, so they must not alias maps the audit entry
+// Snapshots outlive the request, so they must not alias maps the request log entry
 // goes on mutating.
-func TestBrokerAuditActiveSnapshotDoesNotAliasEntryData(t *testing.T) {
+func TestBrokerRequestLogActiveSnapshotDoesNotAliasEntryData(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 	headers := map[string]string{"Authorization": "[REDACTED]"}
 
-	b.PublishAuditEvent(EventAuditStarted, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogStarted, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: now,
-		Data:      &auditlog.LogData{RequestHeaders: headers},
+		Data:      &requestlog.LogData{RequestHeaders: headers},
 	})
-	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-		ID:        "audit-1",
+	b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: now.Add(time.Second),
 		Provider:  "openai",
@@ -1127,22 +1127,22 @@ func TestBrokerAuditActiveSnapshotDoesNotAliasEntryData(t *testing.T) {
 // Merges keep the snapshot's header map when an update repeats it, so the
 // snapshot must own that map from its first event: a later in-place change to
 // the entry's map must neither leak in nor erase what was reported.
-func TestBrokerAuditActiveSnapshotOwnsRepeatedHeaders(t *testing.T) {
+func TestBrokerRequestLogActiveSnapshotOwnsRepeatedHeaders(t *testing.T) {
 	b := NewBroker(Config{Enabled: true})
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 	headers := map[string]string{"Authorization": "[REDACTED]", "Content-Type": "application/json"}
-	entry := &auditlog.LogEntry{
-		ID:        "audit-1",
+	entry := &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: now,
-		Data:      &auditlog.LogData{RequestHeaders: headers},
+		Data:      &requestlog.LogData{RequestHeaders: headers},
 	}
 
-	b.PublishAuditEvent(EventAuditStarted, entry)
-	b.PublishAuditEvent(EventAuditUpdated, entry)
+	b.PublishRequestLogEvent(EventRequestLogStarted, entry)
+	b.PublishRequestLogEvent(EventRequestLogUpdated, entry)
 	delete(headers, "Authorization")
 	headers["Content-Type"] = "text/plain"
-	b.PublishAuditEvent(EventAuditUpdated, entry)
+	b.PublishRequestLogEvent(EventRequestLogUpdated, entry)
 
 	sub := b.Subscribe(0)
 	require.NotNil(t, sub)
@@ -1190,11 +1190,11 @@ func TestBrokerCapsRetainedSizeAfterMerge(t *testing.T) {
 	half := strings.Repeat("x", maxRetainedEventBytes*2/3)
 
 	for i, header := range []string{"X-First", "X-Second"} {
-		b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
-			ID:        "audit-1",
+		b.PublishRequestLogEvent(EventRequestLogUpdated, &requestlog.LogEntry{
+			ID:        "request-log-1",
 			RequestID: "req-1",
 			Timestamp: now.Add(time.Duration(i) * time.Second),
-			Data:      &auditlog.LogData{RequestHeaders: map[string]string{header: half}},
+			Data:      &requestlog.LogData{RequestHeaders: map[string]string{header: half}},
 		})
 	}
 
@@ -1221,11 +1221,11 @@ func TestBrokerCapsRetainedEventsWithOversizedErrorMessage(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			b := NewBroker(Config{Enabled: true})
 
-			b.PublishAuditEvent(EventAuditFailed, &auditlog.LogEntry{
-				ID:        "audit-1",
+			b.PublishRequestLogEvent(EventRequestLogFailed, &requestlog.LogEntry{
+				ID:        "request-log-1",
 				RequestID: "req-1",
 				Timestamp: time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC),
-				Data:      &auditlog.LogData{ErrorMessage: strings.Repeat("e", tc.size)},
+				Data:      &requestlog.LogData{ErrorMessage: strings.Repeat("e", tc.size)},
 			})
 
 			require.Len(t, b.events, 1)

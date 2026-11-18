@@ -454,7 +454,8 @@ var paramsHashPromptFields = map[string]struct{}{
 // paramsHashCallerFields identify the caller or steer provider-side prompt
 // caching. They never change what the model generates, so they are left out
 // of the hash, except on responsesPath: a Responses object echoes them back,
-// and a hit must not hand one caller's values to another.
+// and a hit must not hand one caller's values to another. The exact-cache key
+// leaves them out on the same terms (see cacheKeyRequestBody).
 var paramsHashCallerFields = map[string]struct{}{
 	"user":                   {},
 	"metadata":               {},

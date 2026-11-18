@@ -25,11 +25,11 @@ genauso, wie es bereits zwischen Ihren Anwendungen und den Modell-Providern steh
   Agent-Kontext klein hält.
 - **Observability.** Jeder Tool-Aufruf wird zu einem Nutzungseintrag (Server, Tool,
   Dauer, Größen, Fehler-Flag, Labels, User-Path), und MCP-Requests erscheinen im
-  Audit-Log und im Request-Log wie jeder andere Modell-Traffic — gekennzeichnet mit
+  Request-Log und auf der Nutzungsseite wie jeder andere Modell-Traffic — gekennzeichnet mit
   der JSON-RPC-Methode und bei Aufrufen mit dem Tool- oder Prompt-Namen, sodass eine
   `tools/call`-Zeile `github_create_issue` lautet und nicht nur einen Pfad zeigt. Mit
   `LOGGING_LOG_BODIES=true` werden die JSON-RPC-Request- und -Response-Frames
-  ebenfalls im Audit-Eintrag erfasst (einschließlich Tool-Argumenten und
+  ebenfalls im Request-Log-Eintrag erfasst (einschließlich Tool-Argumenten und
   -Ergebnissen), mit derselben Obergrenze von 1 MB wie bei anderen Endpunkten.
   Rate-Limits und Budgets pro User-Path gelten auch für MCP-Requests.
 

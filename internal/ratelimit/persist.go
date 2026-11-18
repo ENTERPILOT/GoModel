@@ -55,14 +55,19 @@ func persistContext(parent context.Context) (context.Context, context.CancelFunc
 // others'. It is separate from NewService because a reload builds the next
 // generation while the current one still serves: only the generation that
 // gets to serve may touch the snapshot, or a replacement that is built and
-// then discarded would publish its counters too. Start is idempotent, and a
-// failed load leaves the generation idle rather than persisting from a blank
-// slate.
+// then discarded would publish its counters too. Start is idempotent.
 //
 // The loaded rows become the limiter's remote counters, not its own: this
 // generation's rows only ever hold what it counted itself (see
 // WindowSnapshot), so a restart counts its predecessor's requests once,
 // through their rows, rather than again through its own.
+//
+// A failed load does not keep the generation from persisting, for the same
+// reason: its rows are new ones under its own writer id, so saving them
+// without having read the others' overwrites nothing. The peer cache stays
+// empty, which makes the next flush read everything again. Leaving the
+// generation idle instead would cut this replica off for good after one
+// database hiccup at start: its counts unseen by the others, theirs by it.
 func (s *Service) Start(ctx context.Context) {
 	if s == nil || s.store == nil {
 		return
@@ -87,11 +92,10 @@ func (s *Service) Start(ctx context.Context) {
 		return
 	}
 	if err != nil {
-		s.persistState = persistIdle
-		slog.Warn("rate limit counters: load failed; not persisting this generation", "error", err)
-		return
+		slog.Warn("rate limit counters: load failed at start; counting without the saved counters until a load succeeds", "error", err)
+	} else {
+		s.installPeers(snapshots, loadedAt, true)
 	}
-	s.installPeers(snapshots, loadedAt, true)
 	s.startFlushLoop()
 	s.persistState = persistActive
 	if len(snapshots) > 0 {

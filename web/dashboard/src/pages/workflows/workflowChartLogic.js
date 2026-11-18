@@ -1,5 +1,5 @@
 // Pure workflow pipeline-chart contract. Builds the plain object rendered by
-// WorkflowChart.svelte. Runtime data (audit entries, live-log state) is
+// WorkflowChart.svelte. Runtime data (request log entries, live-log state) is
 // supported so one chart contract serves both configuration previews and
 // recorded runs.
 
@@ -44,7 +44,7 @@ function workflowMutatingRefs(guardrailRefs) {
 // steps ascending, each holding the refs that share that step number, which
 // the gateway runs together. `mutator` names the step's mutating instance
 // (at most one per step; the gateway applies its edit after the step's
-// checks) when instance rows are given; the audit view has none. Refs keep
+// checks) when instance rows are given; the request log view has none. Refs keep
 // their configured order; a step whose ref is not chosen yet (editor draft)
 // stays in as "" so the flow matches the node's step count.
 export function workflowGuardrailFlow(source, phase = "prompt", guardrailRefs = []) {
@@ -136,7 +136,7 @@ function nonNegativeInt(value) {
 }
 
 // guardrailOutcome normalizes one outcome into the shape the chart and the
-// audit page share. `edited` implies a target: the phase's own subject
+// Requests page share. `edited` implies a target: the phase's own subject
 // unless the record names one.
 function guardrailOutcome(fields) {
   const action = String(fields.action || "").trim().toLowerCase();
@@ -224,7 +224,7 @@ function workflowLegacyGuardrails(revisions) {
 }
 
 // workflowEntryGuardrails returns the outcome of every guardrail instance
-// that ran for an audit entry, in execution order, normalized to
+// that ran for a request log entry, in execution order, normalized to
 // { seq, phase, step, instance, type, action, code, message, detail, error,
 //   failMode, edited, target, replacedEvents, droppedEvents, durationNs }.
 // Entries without data.guardrails fall back to the legacy revision trail.
@@ -441,7 +441,7 @@ export function workflowChartWorkflowID(source, entry) {
   return null;
 }
 
-// ─── Audit-entry runtime extraction ───
+// ─── Request-log entry runtime extraction ───
 
 function workflowEntryFeatures(entry) {
   const raw = entry && entry.data && entry.data.workflow_features;
@@ -762,10 +762,10 @@ export function workflowAsyncNodeClass(visible, highlightPresent, current) {
 
 // ─── Live-log entry state ───
 
-function workflowAuditFlushed(entry, fallback) {
+function workflowRequestLogFlushed(entry, fallback) {
   if (!entry || !entry._live) return !!fallback;
   const state = String(entry._live_state || "").trim();
-  return !!entry._audit_flushed || state === "audit.flushed" || state === "audit.detail";
+  return !!entry._request_log_flushed || state === "audit.flushed" || state === "audit.detail";
 }
 
 function workflowUsageFlushed(entry, fallback) {
@@ -783,8 +783,8 @@ function workflowLiveUsagePending(entry) {
   return !!(entry && entry._live && entry._usage_live_pending && !entry._usage_flushed);
 }
 
-function workflowLiveAuditPending(entry, runtime) {
-  if (!entry || !entry._live || workflowAuditFlushed(entry, false)) return false;
+function workflowLiveRequestLogPending(entry, runtime) {
+  if (!entry || !entry._live || workflowRequestLogFlushed(entry, false)) return false;
   const state = String(entry._live_state || "").trim();
   return state === "audit.completed" || !!(runtime && Number.isFinite(runtime.statusCode));
 }
@@ -792,8 +792,8 @@ function workflowLiveAuditPending(entry, runtime) {
 function workflowLiveCurrentStep(entry, runtime, features) {
   if (!entry || !entry._live) return "";
   if (workflowLiveUsagePending(entry)) return "usage";
-  if (workflowLiveAuditPending(entry, runtime)) return "audit";
-  if (workflowAuditFlushed(entry, false) && !entry._live_pending) return "";
+  if (workflowLiveRequestLogPending(entry, runtime)) return "request-log";
+  if (workflowRequestLogFlushed(entry, false) && !entry._live_pending) return "";
 
   if (runtime && runtime.cacheHit) return "cache";
   if (runtime && (runtime.provider || runtime.model)) return "ai";
@@ -812,7 +812,7 @@ function workflowChartModel(source, runtime, options, caps) {
     config.features && typeof config.features === "object" && !Array.isArray(config.features)
       ? workflowNormalizedFeatures(config.features)
       : workflowSourceFeatures(source, caps);
-  const forceAudit = !!config.forceAudit;
+  const forceRequestLog = !!config.forceRequestLog;
   const highlightAsyncPresent = !!config.highlightAsyncPresent;
   const showBudget = !!features.budget || workflowRuntimeBudgetExceeded(runtime);
   // Recorded outcomes show their nodes even when the workflow version
@@ -849,14 +849,14 @@ function workflowChartModel(source, runtime, options, caps) {
     runtime,
   );
   const showUsage = !!features.usage;
-  const showAudit = forceAudit || !!features.audit;
-  const showAsync = !!config.forceAsync || !!(showUsage || showAudit);
+  const showRequestLog = forceRequestLog || !!features.audit;
+  const showAsync = !!config.forceAsync || !!(showUsage || showRequestLog);
   const showFailover = !!features.failover || workflowRuntimeUsedFailover(runtime);
   const workflowID = workflowChartWorkflowID(source, config.entry);
   const liveStep = workflowLiveCurrentStep(config.entry, runtime, features);
   const usagePending = workflowLiveUsagePending(config.entry);
-  const auditPending = workflowLiveAuditPending(config.entry, runtime);
-  const auditFlushed = workflowAuditFlushed(config.entry, highlightAsyncPresent);
+  const requestLogPending = workflowLiveRequestLogPending(config.entry, runtime);
+  const requestLogFlushed = workflowRequestLogFlushed(config.entry, highlightAsyncPresent);
   const usageFlushed = workflowUsageFlushed(config.entry, highlightAsyncPresent);
   return {
     showBudget,
@@ -917,10 +917,10 @@ function workflowChartModel(source, runtime, options, caps) {
     authNodeClass: workflowAuthNodeClass(runtime, liveStep === "auth"),
     authNodeSublabel: workflowAuthNodeSublabel(runtime),
     usageNodeClass: workflowAsyncNodeClass(showUsage, usageFlushed, usagePending),
-    auditNodeClass: workflowAsyncNodeClass(showAudit, auditFlushed, auditPending),
+    requestLogNodeClass: workflowAsyncNodeClass(showRequestLog, requestLogFlushed, requestLogPending),
     showAsync,
     showUsage,
-    showAudit,
+    showRequestLog,
     workflowID,
   };
 }
@@ -932,10 +932,10 @@ export function workflowChart(source, caps, guardrailRefs = []) {
   return workflowChartModel(source, null, { forceCache: false, guardrailRefs }, caps);
 }
 
-// workflowAuditChart renders a chart for an audit-log entry. The resolved
+// workflowRequestLogChart renders a chart for a request-log entry. The resolved
 // workflow version (source) is passed in by the caller — the version cache
-// lives with the audit page.
-export function workflowAuditChart(entry, source, caps) {
+// lives with the Requests page.
+export function workflowRequestLogChart(entry, source, caps) {
   const runtime = workflowRuntimeFromEntry(entry, source);
   const features =
     workflowEntryFeatures(entry) ||
@@ -955,7 +955,7 @@ export function workflowAuditChart(entry, source, caps) {
     {
       entry,
       features,
-      forceAudit: true,
+      forceRequestLog: true,
       forceAsync: true,
       highlightAsyncPresent: true,
     },

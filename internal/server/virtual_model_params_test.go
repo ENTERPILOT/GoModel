@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/requestparams"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
@@ -62,7 +62,7 @@ func TestChatCompletion_VirtualModelParams(t *testing.T) {
 	post := func(body string) {
 		t.Helper()
 		c, rec := echotest.Post(t, "/v1/chat/completions", body)
-		c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+		c.Set(string(requestlog.LogEntryKey), &requestlog.LogEntry{Data: &requestlog.LogData{}})
 		require.NoError(t, handler.ChatCompletion(c))
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	}

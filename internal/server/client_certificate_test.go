@@ -13,7 +13,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
-// The check runs before Echo's logger and audit middleware, so the warning
+// The check runs before Echo's logger and request log middleware, so the warning
 // handleError writes is the only trace a rejected request leaves.
 func TestRequireClientCertificateLogsRejection(t *testing.T) {
 	var buf bytes.Buffer

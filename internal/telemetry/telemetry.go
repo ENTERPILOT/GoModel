@@ -227,7 +227,7 @@ func withGenerationTracing(next echo.HandlerFunc, captureContent bool) echo.Hand
 const userPathAttribute = "gomodel.user_path"
 
 // userPathAttributes returns the request's effective user path, the same
-// value usage and audit records carry, or nothing when none is set.
+// value usage and request log records carry, or nothing when none is set.
 func userPathAttributes(ctx context.Context) []attribute.KeyValue {
 	if userPath := core.UserPathFromContext(ctx); userPath != "" {
 		return []attribute.KeyValue{attribute.String(userPathAttribute, userPath)}
