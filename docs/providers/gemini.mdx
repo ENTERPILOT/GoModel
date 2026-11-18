@@ -122,7 +122,7 @@ carries a whole image as base64, can be up to 32 MiB; stream plugins hold at
 most 4 MiB by default, so a larger image ends a stream that runs through them.
 Request 2K and 4K images without streaming when such plugins are on.
 
-Each image is several megabytes of base64. Audit logs capture at most 1 MB of
+Each image is several megabytes of base64. Request logs capture at most 1 MB of
 a response body, so a logged body is truncated and marked as such. The response
 cache stores the whole response.
 
@@ -150,6 +150,25 @@ forwards `reasoning_effort` as a thinking level and rejects the same values.
 On Gemini 4, thinking tokens count against `max_tokens`, and a long answer that
 hits the per-request output cap finishes with `length` (Gemini's
 `CONTINUATION`); GoModel does not resume it.
+
+Google bills thinking tokens as output. Its OpenAI-compatible endpoint counts
+them in `total_tokens` but leaves them out of `completion_tokens`, so in
+`openai_compatible` mode GoModel adds them back before it records usage and
+answers the client. As in native mode, the output count then includes thinking:
+Chat Completions report it in `completion_tokens` and
+`completion_tokens_details.reasoning_tokens`, the Responses API in
+`output_tokens` and `output_tokens_details.reasoning_tokens`. Recorded output
+tokens and cost rise accordingly. How much is added depends on the response:
+
+- **Reasoning tokens itemised**: at most that count is added, and an explicit
+  `0` adds nothing. `reasoning_tokens` reports the itemised count, or the
+  output count when the itemised count is larger, whether or not anything was
+  added, so it never exceeds the output count.
+- **Not itemised** (the shape recorded from Gemini 2.5 Flash and 3 Flash): the
+  whole part of `total_tokens` beyond prompt and completion tokens is added
+  and reported as reasoning tokens. It can include prompt tokens of Google's
+  built-in tools, which are then priced as thinking: at the output rate, or at
+  `reasoning_output_per_mtok` when the model has one.
 
 ## Sampling parameters on Gemini 3 and 4
 

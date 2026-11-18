@@ -71,7 +71,7 @@ func TestCreateImageNativeDimensions(t *testing.T) {
 
 func TestCreateImageErrors(t *testing.T) {
 	// nativeMessage is MiniMax's base_resp.status_msg; when set, the gateway
-	// error must carry it along with the raw upstream body for auditing.
+	// error must carry it along with the raw upstream body for the request log.
 	for _, tc := range []struct {
 		name, body    string
 		status, want  int

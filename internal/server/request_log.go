@@ -6,7 +6,7 @@ import (
 )
 
 // redactSensitiveRequestURI keeps query parameters available to handlers while
-// preventing the outer request logger from persisting OAuth credentials and
+// preventing the outer access logger from persisting OAuth credentials and
 // transaction secrets. It applies generically so extensions do not need to
 // expose provider-specific callback paths to Core.
 func redactSensitiveRequestURI() echo.MiddlewareFunc {

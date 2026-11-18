@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/ext"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 type mockRequestAuthenticator struct {
@@ -204,17 +204,17 @@ func TestAuthMiddleware(t *testing.T) {
 	}
 }
 
-func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndAudit(t *testing.T) {
+func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndRequestLog(t *testing.T) {
 	testHandler := func(c *echo.Context) error {
 		got := core.GetAuthKeyID(c.Request().Context())
 		require.Equal(t, "key-123", got)
 
-		entryVal := c.Get(string(auditlog.LogEntryKey))
-		entry, ok := entryVal.(*auditlog.LogEntry)
+		entryVal := c.Get(string(requestlog.LogEntryKey))
+		entry, ok := entryVal.(*requestlog.LogEntry)
 		require.True(t, ok)
 		require.NotNil(t, entry)
 		require.Equal(t, "key-123", entry.AuthKeyID)
-		require.Equal(t, auditlog.AuthMethodAPIKey, entry.AuthMethod)
+		require.Equal(t, requestlog.AuthMethodAPIKey, entry.AuthMethod)
 
 		return c.String(http.StatusOK, "ok")
 	}
@@ -226,7 +226,7 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndAudit(t *te
 
 	c, rec := echotest.Get(t, "/",
 		echotest.WithHeader("Authorization", "Bearer sk_gom_token"),
-		echotest.WithValue(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}}),
+		echotest.WithValue(string(requestlog.LogEntryKey), &requestlog.LogEntry{Data: &requestlog.LogData{}}),
 	)
 
 	err := handler(c)
@@ -254,7 +254,7 @@ func TestAuthMiddlewareWithRequestAuthenticatorEnrichesRequest(t *testing.T) {
 		assert.Equal(t, "oidc:principal-1", identity.PrincipalID)
 		assert.Equal(t, "/users/person@example.com", identity.UserPath)
 		assert.Equal(t, "oidc", identity.Method)
-		entry := c.Get(string(auditlog.LogEntryKey)).(*auditlog.LogEntry)
+		entry := c.Get(string(requestlog.LogEntryKey)).(*requestlog.LogEntry)
 		assert.Equal(t, "oidc", entry.AuthMethod)
 		assert.Equal(t, "oidc:principal-1", entry.PrincipalID)
 		assert.Equal(t, "/users/person@example.com", entry.UserPath)
@@ -262,7 +262,7 @@ func TestAuthMiddlewareWithRequestAuthenticatorEnrichesRequest(t *testing.T) {
 	}))
 
 	c, rec := echotest.Get(t, "/admin/usage")
-	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+	c.Set(string(requestlog.LogEntryKey), &requestlog.LogEntry{Data: &requestlog.LogData{}})
 	require.NoError(t, handler(c))
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, "/users/person@example.com", rec.Header().Get(ext.AuthenticationUserHeader))
@@ -325,8 +325,8 @@ func TestAuthMiddlewareWithRequestAuthenticatorsFailurePaths(t *testing.T) {
 			}
 			handler := AuthMiddlewareWithRequestAuthenticators("", nil, authenticators, nil)(next)
 			c, rec := echotest.Get(t, "/admin/auth-keys")
-			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-			c.Set(string(auditlog.LogEntryKey), entry)
+			entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+			c.Set(string(requestlog.LogEntryKey), entry)
 			require.NoError(t, handler(c))
 			assert.Equal(t, tt.wantStatus, rec.Code)
 			for i, wantCalls := range tt.wantCalls {
@@ -339,7 +339,7 @@ func TestAuthMiddlewareWithRequestAuthenticatorsFailurePaths(t *testing.T) {
 				assert.Equal(t, "extension_authentication_failed", entry.Data.ErrorCode)
 			}
 			if tt.adminGate {
-				assert.Equal(t, auditlog.AuthMethodExtension, entry.AuthMethod)
+				assert.Equal(t, requestlog.AuthMethodExtension, entry.AuthMethod)
 			}
 		})
 	}
@@ -559,8 +559,8 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathOverridesHeader(t *te
 		got = c.Request().Header.Get(core.UserPathHeader)
 		require.Equal(t, "/team/auth-key", got, "header %s", core.UserPathHeader)
 
-		entryVal := c.Get(string(auditlog.LogEntryKey))
-		entry, ok := entryVal.(*auditlog.LogEntry)
+		entryVal := c.Get(string(requestlog.LogEntryKey))
+		entry, ok := entryVal.(*requestlog.LogEntry)
 		require.True(t, ok)
 		require.NotNil(t, entry)
 		got = entry.UserPath
@@ -576,7 +576,7 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathOverridesHeader(t *te
 	}, nil)(testHandler))
 
 	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-5-mini"}`, echotest.WithHeader(core.UserPathHeader, "/team/from-header"), echotest.WithHeader("Authorization", "Bearer sk_gom_token"))
-	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+	c.Set(string(requestlog.LogEntryKey), &requestlog.LogEntry{Data: &requestlog.LogData{}})
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -625,19 +625,19 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyFailureUsesGenericClientMessa
 	})
 
 	c, rec := echotest.Get(t, "/", echotest.WithHeader("Authorization", "Bearer sk_gom_token"))
-	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+	c.Set(string(requestlog.LogEntryKey), &requestlog.LogEntry{Data: &requestlog.LogData{}})
 
 	err := handler(c)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	assert.JSONEq(t, `{"error":{"message":"authentication failed","type":"authentication_error","param":null,"code":null}}`, rec.Body.String())
 
-	entryVal := c.Get(string(auditlog.LogEntryKey))
-	entry, ok := entryVal.(*auditlog.LogEntry)
+	entryVal := c.Get(string(requestlog.LogEntryKey))
+	entry, ok := entryVal.(*requestlog.LogEntry)
 	require.True(t, ok)
 	require.NotNil(t, entry)
 	require.NotNil(t, entry.Data)
-	assert.Equal(t, auditlog.AuthMethodAPIKey, entry.AuthMethod)
+	assert.Equal(t, requestlog.AuthMethodAPIKey, entry.AuthMethod)
 	assert.Equal(t, string(core.ErrorTypeAuthentication), entry.ErrorType)
 	assert.Equal(t, "authentication unavailable", entry.Data.ErrorMessage)
 }
@@ -792,19 +792,19 @@ func TestAuthMiddleware_SkipPathsMatchEscapedPath(t *testing.T) {
 	}
 }
 
-func TestAuthMiddleware_SkipPathEnrichesNoKeyAuditMethod(t *testing.T) {
+func TestAuthMiddleware_SkipPathEnrichesNoKeyRequestLogMethod(t *testing.T) {
 	handler := AuthMiddlewareWithAuthenticator("secret-key", nil, []string{"/health"})(func(c *echo.Context) error {
-		entryVal := c.Get(string(auditlog.LogEntryKey))
-		entry, ok := entryVal.(*auditlog.LogEntry)
+		entryVal := c.Get(string(requestlog.LogEntryKey))
+		entry, ok := entryVal.(*requestlog.LogEntry)
 		require.True(t, ok)
 		require.NotNil(t, entry)
-		require.Equal(t, auditlog.AuthMethodNoKey, entry.AuthMethod)
+		require.Equal(t, requestlog.AuthMethodNoKey, entry.AuthMethod)
 
 		return c.String(http.StatusOK, "ok")
 	})
 
 	c, rec := echotest.Get(t, "/health",
-		echotest.WithValue(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}}),
+		echotest.WithValue(string(requestlog.LogEntryKey), &requestlog.LogEntry{Data: &requestlog.LogData{}}),
 	)
 
 	err := handler(c)

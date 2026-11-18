@@ -38,7 +38,7 @@ func (r *Result) Close() error {
 }
 
 // New creates a usage logger on the shared storage connection.
-// This is useful when you want to share the database connection with audit logging.
+// This is useful when you want to share the database connection with request logging.
 func New(ctx context.Context, cfg *config.Config, store storage.Storage) (*Result, error) {
 	// Return noop if usage tracking is disabled
 	if !cfg.Usage.Enabled {

@@ -69,7 +69,7 @@ und melden Sie sich mit `GOMODEL_MASTER_KEY` an. Gehen Sie zu
    einmal angezeigt.
 
 Der gebundene User Path gibt Kimi einen eigenen Bereich für Nutzung und
-Audit. Verwaltete Keys werden direkt an einen User Path gebunden, während
+Request-Logs. Verwaltete Keys werden direkt an einen User Path gebunden, während
 Modelleinschränkungen separat als gatewayweite
 [Modellzugriffsrichtlinien](/de/features/user-path#modellzugriff) konfiguriert
 werden. Wenn Sie diese Richtlinien verwenden, erlauben Sie für `/agents/kimi`
@@ -78,7 +78,7 @@ nur die Selektoren, die Kimi benötigt.
 <Warning>
   Verwenden Sie in Kimi diesen verwalteten Key, nicht `GOMODEL_MASTER_KEY`. Ein
   verwalteter Key ohne Dashboard-Zugriff kann Modell-Endpunkte aufrufen, aber
-  keine Audit-Logs lesen, keine Keys anlegen und keine Gateway-Einstellungen
+  keine Request-Logs lesen, keine Keys anlegen und keine Gateway-Einstellungen
   ändern. Der Master-Key umgeht diese Einschränkung.
 </Warning>
 
@@ -175,11 +175,11 @@ tool-ok
 
 ## 6. Den Datenverkehr in GoModel prüfen
 
-Öffnen Sie die Audit-Logs im GoModel-Dashboard:
+Öffnen Sie die Seite „Anfragen“ im GoModel-Dashboard:
 
-[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+[http://localhost:8080/admin/dashboard/requests](http://localhost:8080/admin/dashboard/requests)
 
-Prüfen Sie anhand des Audit-Trails, dass Kimi Streaming-Requests an
+Prüfen Sie anhand des Request-Logs, dass Kimi Streaming-Requests an
 `POST /v1/chat/completions` sendet und dass GoModel sie an den gewählten
 Provider routet. Melden Sie sich mit dem Master-Key oder einem separaten
 verwalteten Key mit Dashboard-Zugriff an; der Kimi-Key kann diese Seite

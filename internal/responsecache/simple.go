@@ -21,11 +21,18 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-const embeddingsPath = "/v1/embeddings"
+const (
+	embeddingsPath = "/v1/embeddings"
+	messagesPath   = "/v1/messages"
+)
 
+// cacheablePaths lists the paths whose request body the semantic layer can
+// read. /v1/messages is one of them because it reaches the cache as the chat
+// translation of the Anthropic request.
 var cacheablePaths = map[string]bool{
 	"/v1/chat/completions": true,
 	"/v1/responses":        true,
+	messagesPath:           true,
 	embeddingsPath:         true,
 }
 

@@ -12,7 +12,6 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -23,6 +22,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 	"github.com/enterpilot/gomodel/internal/providers/opencodego"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
@@ -199,7 +199,7 @@ func newUpstreamFixture(t *testing.T, rows []users.User, models []virtualmodels.
 func (f *upstreamFixture) post(t *testing.T, userPath, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	c, rec := echotest.Post(t, path, body)
-	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+	c.Set(string(requestlog.LogEntryKey), &requestlog.LogEntry{Data: &requestlog.LogData{}})
 	if userPath != "" {
 		c.SetRequest(c.Request().WithContext(core.WithEffectiveUserPath(c.Request().Context(), userPath)))
 	}

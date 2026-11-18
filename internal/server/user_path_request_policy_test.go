@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/requestparams"
 	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
@@ -110,7 +110,7 @@ func newPolicyFixture(t *testing.T, rows ...users.User) *policyFixture {
 func (f *policyFixture) post(t *testing.T, userPath, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	c, rec := echotest.Post(t, path, body)
-	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+	c.Set(string(requestlog.LogEntryKey), &requestlog.LogEntry{Data: &requestlog.LogData{}})
 	if userPath != "" {
 		c.SetRequest(c.Request().WithContext(core.WithEffectiveUserPath(c.Request().Context(), userPath)))
 	}

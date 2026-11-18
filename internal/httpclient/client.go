@@ -39,6 +39,16 @@ type ClientConfig struct {
 	// ResponseHeaderTimeout specifies the amount of time to wait for a server's response headers
 	ResponseHeaderTimeout time.Duration
 
+	// HTTP2SendPingTimeout is how long an HTTP/2 connection may stay silent
+	// before the transport pings it to check it is still alive. Zero disables
+	// the health check.
+	HTTP2SendPingTimeout time.Duration
+
+	// HTTP2PingTimeout is how long the transport waits for a ping reply before
+	// closing the connection, so requests multiplexed on a connection that died
+	// silently fail instead of hanging. Zero uses net/http's default (15s).
+	HTTP2PingTimeout time.Duration
+
 	// Proxy selects the outbound proxy for each request. Nil keeps the
 	// process-wide HTTP_PROXY / HTTPS_PROXY / NO_PROXY behaviour; a function
 	// returning nil sends that request directly.
@@ -71,6 +81,43 @@ var (
 	configuredResponseHeaderTimeoutSeconds atomic.Int64
 )
 
+// DefaultMaxIdleConnsPerHost is the built-in idle (keep-alive) pool size per
+// upstream host. Each provider has its own transport, so this is effectively
+// the provider's pool; it is sized for HTTP/1.1 self-hosted backends serving
+// hundreds of concurrent requests.
+const DefaultMaxIdleConnsPerHost = 512
+
+// configuredMaxIdleConnsPerHost holds the pool size installed by
+// SetConfiguredMaxIdleConnsPerHost. Zero means "not configured" and falls back
+// to DefaultMaxIdleConnsPerHost.
+var configuredMaxIdleConnsPerHost atomic.Int64
+
+// defaultHTTP2HealthCheckTimeout bounds both how long an HTTP/2 connection may
+// stay silent before it is pinged and how long the ping may go unanswered.
+const defaultHTTP2HealthCheckTimeout = 15 * time.Second
+
+// SetConfiguredMaxIdleConnsPerHost installs the config-file (`http:` block)
+// idle pool size per upstream host, already overlaid with the
+// HTTP_MAX_IDLE_CONNS_PER_HOST env var. Non-positive values clear it back to
+// DefaultMaxIdleConnsPerHost, because net/http reads zero as a pool of two.
+func SetConfiguredMaxIdleConnsPerHost(n int) {
+	configuredMaxIdleConnsPerHost.Store(int64(max(n, 0)))
+}
+
+// ConfiguredMaxIdleConnsPerHost returns the value installed by
+// SetConfiguredMaxIdleConnsPerHost, or 0 when none is, so a caller can put it
+// back after a rejected reload.
+func ConfiguredMaxIdleConnsPerHost() int {
+	return int(configuredMaxIdleConnsPerHost.Load())
+}
+
+func maxIdleConnsPerHost() int {
+	if n := configuredMaxIdleConnsPerHost.Load(); n > 0 {
+		return int(n)
+	}
+	return DefaultMaxIdleConnsPerHost
+}
+
 // SetConfiguredTimeouts installs the config-file (`http:` block) timeout
 // defaults, in seconds. App startup calls this once before providers are
 // constructed. The HTTP_TIMEOUT / HTTP_RESPONSE_HEADER_TIMEOUT env vars still
@@ -97,15 +144,18 @@ func configuredOrDefault(configured *atomic.Int64, fallback time.Duration) time.
 //   - the built-in 600s default
 func DefaultConfig() ClientConfig {
 	defaultLongTimeout := 600 * time.Second
+	idlePerHost := maxIdleConnsPerHost()
 	return ClientConfig{
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   100,
+		MaxIdleConns:          idlePerHost,
+		MaxIdleConnsPerHost:   idlePerHost,
 		IdleConnTimeout:       90 * time.Second,
 		Timeout:               getEnvDuration("HTTP_TIMEOUT", configuredOrDefault(&configuredTimeoutSeconds, defaultLongTimeout)),
 		DialTimeout:           30 * time.Second,
 		KeepAlive:             30 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: getEnvDuration("HTTP_RESPONSE_HEADER_TIMEOUT", configuredOrDefault(&configuredResponseHeaderTimeoutSeconds, defaultLongTimeout)),
+		HTTP2SendPingTimeout:  defaultHTTP2HealthCheckTimeout,
+		HTTP2PingTimeout:      defaultHTTP2HealthCheckTimeout,
 	}
 }
 
@@ -211,6 +261,10 @@ func newTransport(config *ClientConfig, state *trustState) *http.Transport {
 		TLSHandshakeTimeout:   config.TLSHandshakeTimeout,
 		ResponseHeaderTimeout: config.ResponseHeaderTimeout,
 		ForceAttemptHTTP2:     true,
+		HTTP2: &http.HTTP2Config{
+			SendPingTimeout: config.HTTP2SendPingTimeout,
+			PingTimeout:     config.HTTP2PingTimeout,
+		},
 		ExpectContinueTimeout: 1 * time.Second,
 		TLSClientConfig:       state.tlsConfig(),
 	}

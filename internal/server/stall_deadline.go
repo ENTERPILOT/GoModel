@@ -24,7 +24,7 @@ var ErrClientStall = errors.New("client stopped reading the response")
 //
 // It is installed directly on the connection's writer, beneath echo's
 // Response, because the flush methods of the wrappers above it (echo's, the
-// audit capture's) return no error. The first stall is therefore remembered
+// request log capture's) return no error. The first stall is therefore remembered
 // here and exposed through StallError, which is how a stall during the final
 // flush of a stream is still reported instead of being logged as a success.
 type stallDeadlineWriter struct {
@@ -63,7 +63,7 @@ func (w *stallDeadlineWriter) Flush() {
 	_ = w.FlushError()
 }
 
-// Hijack hands the connection over for WebSocket upgrades. The audit capture
+// Hijack hands the connection over for WebSocket upgrades. The request log capture
 // above looks for http.Hijacker with a direct type assertion rather than
 // through Unwrap, so the method has to exist here. net/http clears the
 // connection deadlines as part of hijacking.

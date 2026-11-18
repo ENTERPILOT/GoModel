@@ -1,6 +1,6 @@
 <script>
   // Overview page: live token throughput, usage summary over the shared
-  // reporting window, cache meter, usage chart, activity calendar, audit
+  // reporting window, cache meter, usage chart, activity calendar, request
   // status/latency charts, and the providers overview grid.
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
   import { untrack } from "svelte";
@@ -14,11 +14,11 @@
   import CacheMeter from "./CacheMeter.svelte";
   import UsageChart from "./UsageChart.svelte";
   import ContributionCalendar from "./ContributionCalendar.svelte";
-  import AuditStatsCharts from "./AuditStatsCharts.svelte";
+  import RequestStatsCharts from "./RequestStatsCharts.svelte";
   import ProviderStatusSection from "./ProviderStatusSection.svelte";
   import {
     providerStatusState,
-    auditStatsState,
+    requestStatsState,
     mcpServersState,
     calendarState,
   } from "./overviewState.svelte.js";
@@ -34,7 +34,7 @@
 
   function loadPage() {
     usageData.fetchUsage();
-    auditStatsState.fetch();
+    requestStatsState.fetch();
     calendarState.fetch();
     if (scoped) return;
     usageData.fetchCacheOverview("");
@@ -43,10 +43,10 @@
   }
 
   // A reporting-window or interval change refetches usage, the cache
-  // overview, and (on the overview) the audit stats.
+  // overview, and (on the overview) the request stats.
   function refetchWindow() {
     usageData.fetchUsage();
-    auditStatsState.fetch();
+    requestStatsState.fetch();
     if (scoped) return;
     usageData.fetchCacheOverview("");
   }
@@ -96,7 +96,7 @@
   {/if}
   <UsageChart onintervalchange={refetchWindow} />
   <ContributionCalendar />
-  <AuditStatsCharts />
+  <RequestStatsCharts />
   {#if !scoped}
     <ProviderStatusSection />
   {/if}

@@ -5,9 +5,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // RequestModelResolver resolves raw request selectors into concrete model
@@ -75,7 +75,7 @@ func storeRequestModelResolution(c *echo.Context, resolution *core.RequestModelR
 		cloned.Resolution = resolution
 		ctx = core.WithWorkflow(ctx, &cloned)
 		c.SetRequest(c.Request().WithContext(ctx))
-		auditlog.EnrichEntryWithWorkflow(c, &cloned)
+		requestlog.EnrichEntryWithWorkflow(c, &cloned)
 	}
 	if env := core.GetWhiteBoxPrompt(ctx); env != nil {
 		env.RouteHints.Model = resolution.ResolvedSelector.Model
@@ -118,7 +118,7 @@ func resolveAndStoreRequestModelResolution(
 	model, providerHint string,
 ) (*core.RequestModelResolution, error) {
 	requested := core.NewRequestedModelSelector(model, providerHint)
-	enrichAuditEntryWithRequestedModel(c, requested)
+	enrichRequestLogEntryWithRequestedModel(c, requested)
 
 	resolution, err := resolveRequestModelWithAuthorizer(c.Request().Context(), provider, resolver, authorizer, requested)
 	if err != nil {
@@ -128,7 +128,7 @@ func resolveAndStoreRequestModelResolution(
 	return resolution, nil
 }
 
-func enrichAuditEntryWithRequestedModel(c *echo.Context, requested core.RequestedModelSelector) {
+func enrichRequestLogEntryWithRequestedModel(c *echo.Context, requested core.RequestedModelSelector) {
 	if c == nil {
 		return
 	}
@@ -141,8 +141,8 @@ func enrichAuditEntryWithRequestedModel(c *echo.Context, requested core.Requeste
 		cloned.Resolution = &core.RequestModelResolution{
 			Requested: requested,
 		}
-		auditlog.EnrichEntryWithWorkflow(c, &cloned)
+		requestlog.EnrichEntryWithWorkflow(c, &cloned)
 		return
 	}
-	auditlog.EnrichEntryWithRequestedModel(c, requested.RequestedQualifiedModel())
+	requestlog.EnrichEntryWithRequestedModel(c, requested.RequestedQualifiedModel())
 }

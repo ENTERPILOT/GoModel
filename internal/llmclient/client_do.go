@@ -13,7 +13,7 @@ import (
 )
 
 // attachResponseHeaders records the upstream response headers on a provider
-// GatewayError so failed attempts can be audited. It is a no-op for other
+// GatewayError so failed attempts can be recorded in the request log. It is a no-op for other
 // error types or a nil header set.
 func attachResponseHeaders(err error, header http.Header) error {
 	if header == nil {

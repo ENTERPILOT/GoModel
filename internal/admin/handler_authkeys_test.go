@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 type authKeyTestStore struct {
@@ -133,8 +133,8 @@ func newAuthKeyHandler(t *testing.T, store authkeys.Store) *Handler {
 	return NewHandler(nil, nil, WithAuthKeys(service))
 }
 
-// newAuthKeyHandlerWithReader adds an audit reader, as initAdmin wires it.
-func newAuthKeyHandlerWithReader(t *testing.T, store authkeys.Store, reader auditlog.Reader) *Handler {
+// newAuthKeyHandlerWithReader adds a request log reader, as initAdmin wires it.
+func newAuthKeyHandlerWithReader(t *testing.T, store authkeys.Store, reader requestlog.Reader) *Handler {
 	t.Helper()
 	service, err := authkeys.NewService(store)
 	require.NoError(t, err)
@@ -143,7 +143,7 @@ func newAuthKeyHandlerWithReader(t *testing.T, store authkeys.Store, reader audi
 
 	return NewHandler(nil, nil,
 		WithAuthKeys(service),
-		WithAuditReader(reader),
+		WithRequestLogReader(reader),
 	)
 }
 
@@ -324,7 +324,7 @@ func TestCreateAuthKeyRejectsInvalidUserPath(t *testing.T) {
 
 func TestListAuthKeysIncludesLastUsed(t *testing.T) {
 	usedAt := time.Date(2026, 1, 16, 12, 30, 0, 0, time.UTC)
-	reader := &mockAuditReader{}
+	reader := &mockRequestLogReader{}
 	h := newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader)
 	usedKey := createAuthKey(t, h, `{"name":"used"}`)
 	unusedKey := createAuthKey(t, h, `{"name":"unused"}`)
@@ -351,7 +351,7 @@ func TestListAuthKeysIncludesLastUsed(t *testing.T) {
 }
 
 func TestListAuthKeysWorksWithoutLastUsedData(t *testing.T) {
-	// Without an audit reader the list still answers, with no last-used data.
+	// Without a request log reader the list still answers, with no last-used data.
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
 	createAuthKey(t, h, `{"name":"any"}`)
 	c, rec := echotest.Get(t, "/admin/auth-keys")
@@ -365,7 +365,7 @@ func TestListAuthKeysWorksWithoutLastUsedData(t *testing.T) {
 	assert.False(t, ok)
 
 	// A failing reader degrades the same way.
-	reader := &mockAuditReader{lastUsedErr: errors.New("audit reader down")}
+	reader := &mockRequestLogReader{lastUsedErr: errors.New("request log reader down")}
 	h = newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader)
 	createAuthKey(t, h, `{"name":"any"}`)
 	c, rec = echotest.Get(t, "/admin/auth-keys")

@@ -27,7 +27,7 @@ func DecodeMessagesRequest(body []byte) (*MessagesRequest, error) {
 	// Require the body to hold exactly one JSON value: decoding again must
 	// reach EOF. This rejects any trailing bytes (a second object, stray
 	// brackets, garbage) so a malformed body cannot look valid while
-	// audit/cache inputs disagree with the parsed request.
+	// request log/cache inputs disagree with the parsed request.
 	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
 		return nil, fmt.Errorf("request body must contain a single JSON object")
 	}

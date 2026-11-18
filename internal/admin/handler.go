@@ -13,7 +13,6 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -25,6 +24,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/health"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/runtimesettings"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -37,7 +37,7 @@ import (
 type Handler struct {
 	usageReader         usage.UsageReader
 	usageRecalculator   usage.PricingRecalculator
-	auditReader         auditlog.Reader
+	requestLogReader    requestlog.Reader
 	registry            *providers.ModelRegistry
 	pricingResolver     usage.PricingResolver
 	billing             usage.Billing
@@ -182,13 +182,13 @@ type providerStatusResponse struct {
 	Providers []providerStatusItemResponse  `json:"providers"`
 }
 
-type auditLogEntryResponse struct {
-	auditlog.LogEntry
+type requestLogEntryResponse struct {
+	requestlog.LogEntry
 	Usage *usage.RequestUsageSummary `json:"usage,omitempty"`
 
 	// BodiesOmitted marks a list entry whose request/response bodies (and
 	// other heavy payloads) were stripped server-side; the full entry is
-	// available from GET /admin/audit/detail. It also tells the dashboard
+	// available from GET /admin/request-logs/detail. It also tells the dashboard
 	// the entry is persisted — a slim entry is never an in-flight request.
 	BodiesOmitted bool `json:"bodies_omitted,omitempty"`
 
@@ -198,37 +198,37 @@ type auditLogEntryResponse struct {
 	ConversationPayload bool `json:"conversation_payload,omitempty"`
 }
 
-type auditLogListResponse struct {
-	Entries []auditLogEntryResponse `json:"entries"`
-	Total   int                     `json:"total"`
-	Limit   int                     `json:"limit"`
-	Offset  int                     `json:"offset"`
+type requestLogListResponse struct {
+	Entries []requestLogEntryResponse `json:"entries"`
+	Total   int                       `json:"total"`
+	Limit   int                       `json:"limit"`
+	Offset  int                       `json:"offset"`
 	// AsOf is when the server read the page, in unix microseconds on its
 	// clock. A dashboard compares it with the write stamp of another
 	// replica's live entry to tell whether this page already counted it.
 	AsOf int64 `json:"as_of,omitempty"`
 }
 
-type auditConversationResponse struct {
-	AnchorID string                  `json:"anchor_id"`
-	Entries  []auditLogEntryResponse `json:"entries"`
+type requestLogConversationResponse struct {
+	AnchorID string                    `json:"anchor_id"`
+	Entries  []requestLogEntryResponse `json:"entries"`
 
 	// Truncated reports that more session or linkage entries exist than were
 	// returned.
 	Truncated bool `json:"truncated,omitempty"`
 }
 
-type auditSessionResponse struct {
-	RequestCount int                   `json:"request_count"`
-	Latest       auditLogEntryResponse `json:"latest"`
+type requestLogSessionResponse struct {
+	RequestCount int                     `json:"request_count"`
+	Latest       requestLogEntryResponse `json:"latest"`
 }
 
-type auditSessionsListResponse struct {
-	Sessions []auditSessionResponse `json:"sessions"`
-	Total    int                    `json:"total"`
-	Limit    int                    `json:"limit"`
-	Offset   int                    `json:"offset"`
-	// AsOf: see auditLogListResponse.AsOf.
+type requestLogSessionsListResponse struct {
+	Sessions []requestLogSessionResponse `json:"sessions"`
+	Total    int                         `json:"total"`
+	Limit    int                         `json:"limit"`
+	Offset   int                         `json:"offset"`
+	// AsOf: see requestLogListResponse.AsOf.
 	AsOf int64 `json:"as_of,omitempty"`
 }
 
@@ -264,10 +264,10 @@ type RuntimeRefresher interface {
 	RefreshRuntime(ctx context.Context) (RuntimeRefreshReport, error)
 }
 
-// WithAuditReader enables audit log read endpoints.
-func WithAuditReader(reader auditlog.Reader) Option {
+// WithRequestLogReader enables request log read endpoints.
+func WithRequestLogReader(reader requestlog.Reader) Option {
 	return func(h *Handler) {
-		h.auditReader = reader
+		h.requestLogReader = reader
 	}
 }
 

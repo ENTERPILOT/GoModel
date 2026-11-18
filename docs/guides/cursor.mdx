@@ -185,7 +185,7 @@ Create a file named gomodel-cursor-test.txt containing exactly tool-ok
 ```
 
 Confirm the edit before accepting it. Sign in to GoModel's dashboard separately
-with the master key or a dashboard-enabled managed key. Open **Audit Logs** and
+with the master key or a dashboard-enabled managed key. Open **Requests** and
 check that Cursor reached
 `POST /v1/chat/completions` and used the expected model.
 
@@ -194,7 +194,7 @@ check that Cursor reached
   selected model. Cursor has previously mixed Responses-style custom tools into
   Chat Completions requests for some newer GPT models. If Agent mode fails but
   text chat succeeds, try a standard non-reasoning chat model first and inspect
-  the GoModel audit response before changing the gateway.
+  the response in GoModel's request log before changing the gateway.
 </Warning>
 
 ## Troubleshooting
@@ -224,7 +224,7 @@ those models, then start a new chat.
 ### Agent or tool calls fail while text works
 
 Upgrade Cursor, retry with a standard OpenAI chat model, and inspect GoModel's
-audit log for the upstream response. Custom endpoint support has had
+request log for the upstream response. Custom endpoint support has had
 release-specific payload bugs, especially around custom tools on newer GPT
 models.
 

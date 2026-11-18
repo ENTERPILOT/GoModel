@@ -12,8 +12,8 @@ import (
 
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/anthropicapi"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // Messages handles POST /v1/messages.
@@ -21,7 +21,7 @@ import (
 // It accepts the Anthropic Messages API request dialect, translates it to the
 // canonical chat request, and runs it through the standard chat-completions
 // pipeline so it routes to any configured provider with full workflow, budget,
-// failover, cache, usage, and audit support. See ADR-0007.
+// failover, cache, usage, and request log support. See ADR-0007.
 //
 // @Summary      Create a message (Anthropic Messages API)
 // @Tags         messages
@@ -183,7 +183,7 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 			return s.writeChatShortCircuit(c, workflow, req, short, messagesJSON, messagesOuterWrap(req, resolvedModelFromWorkflow(workflow, req.Model)))
 		}
 		// A block or fail-closed outcome still belongs to the resolved
-		// workflow: the audit entry must carry it like every other outcome.
+		// workflow: the request log entry must carry it like every other outcome.
 		attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
 		s.recordGuardrailOutcomes(c)
 		recordPromptPluginRevisions(c, s.logger, req, nil)
@@ -333,16 +333,16 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 	if err != nil {
 		return handleError(c, err)
 	}
-	enrichAuditEntryWithProviderAttempts(c)
+	enrichRequestLogEntryWithProviderAttempts(c)
 	result.Response, err = chatResponsePhase.run(s, c, workflow, req, result.Response)
 	if err != nil {
 		return handleError(c, err)
 	}
 	if result.Meta.UsedFailover {
 		markRequestFailoverUsed(c)
-		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
+		requestlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
 	}
-	auditlog.EnrichEntryWithResolvedRoute(
+	requestlog.EnrichEntryWithResolvedRoute(
 		c,
 		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),
 		result.Meta.ProviderType,
