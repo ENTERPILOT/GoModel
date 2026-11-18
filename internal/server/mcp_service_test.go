@@ -13,14 +13,14 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
-func TestMCPAuditLabel(t *testing.T) {
+func TestMCPRequestLogLabel(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
@@ -69,13 +69,13 @@ func TestMCPAuditLabel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := mcpAuditLabel([]byte(tt.body), nil)
-			require.Equal(t, tt.want, got, "mcpAuditLabel(%s) = %q, want %q", tt.body, got, tt.want)
+			got := mcpRequestLogLabel([]byte(tt.body), nil)
+			require.Equal(t, tt.want, got, "mcpRequestLogLabel(%s) = %q, want %q", tt.body, got, tt.want)
 		})
 	}
 }
 
-func TestMCPAuditLabelResolvesToolNames(t *testing.T) {
+func TestMCPRequestLogLabelResolvesToolNames(t *testing.T) {
 	// Mimics a discovery session on the aggregated endpoint.
 	resolve := func(name, target string) string {
 		if name == "call_tool" && target != "" {
@@ -114,7 +114,7 @@ func TestMCPAuditLabelResolvesToolNames(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, mcpAuditLabel([]byte(tt.body), resolve))
+			require.Equal(t, tt.want, mcpRequestLogLabel([]byte(tt.body), resolve))
 		})
 	}
 }
@@ -228,28 +228,28 @@ func TestMCPServiceHandleGates(t *testing.T) {
 		require.NotEmpty(t, rec.Header().Get("Mcp-Session-Id"))
 	})
 
-	t.Run("body logging captures the JSON-RPC exchange on the audit entry", func(t *testing.T) {
+	t.Run("body logging captures the JSON-RPC exchange on the request log entry", func(t *testing.T) {
 		svc := &mcpService{gateway: newEmptyMCPGateway(t), enabled: true, logBodies: true}
 		c, rec := newMCPTestContext(t, http.MethodPost, mcpInitializeBody)
-		entry := &auditlog.LogEntry{}
-		c.Set(string(auditlog.LogEntryKey), entry)
+		entry := &requestlog.LogEntry{}
+		c.Set(string(requestlog.LogEntryKey), entry)
 		err := svc.handle(c, "")
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		require.NotNil(t, entry.Data)
 		require.NotNil(t, entry.Data.RequestBody)
-		require.NotNil(t, entry.Data.ResponseBody, "response body missing from the audit entry (content-type %q, body %q)", rec.Header().Get("Content-Type"), rec.Body.String())
+		require.NotNil(t, entry.Data.ResponseBody, "response body missing from the request log entry (content-type %q, body %q)", rec.Header().Get("Content-Type"), rec.Body.String())
 
 		frame, ok := entry.Data.ResponseBody.(map[string]any)
 		require.True(t, ok, "response body type = %T, want decoded JSON-RPC frame", entry.Data.ResponseBody)
 		require.Equal(t, "2.0", frame["jsonrpc"], "response frame = %v, want a JSON-RPC message", frame)
 	})
 
-	t.Run("body logging off leaves the audit entry without bodies", func(t *testing.T) {
+	t.Run("body logging off leaves the request log entry without bodies", func(t *testing.T) {
 		svc := &mcpService{gateway: newEmptyMCPGateway(t), enabled: true, logBodies: false}
 		c, rec := newMCPTestContext(t, http.MethodPost, mcpInitializeBody)
-		entry := &auditlog.LogEntry{}
-		c.Set(string(auditlog.LogEntryKey), entry)
+		entry := &requestlog.LogEntry{}
+		c.Set(string(requestlog.LogEntryKey), entry)
 		err := svc.handle(c, "")
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -280,8 +280,8 @@ func TestMCPServiceHandleGates(t *testing.T) {
 	})
 }
 
-// TestMCPResponseCaptureWrite covers the audit-cap boundaries of the response
-// tee: the buffer stops at auditlog.MaxBodyCapture (flagging truncation) while
+// TestMCPResponseCaptureWrite covers the request-log-cap boundaries of the response
+// tee: the buffer stops at requestlog.MaxBodyCapture (flagging truncation) while
 // the client always receives every byte.
 func TestMCPResponseCaptureWrite(t *testing.T) {
 	tests := []struct {
@@ -297,19 +297,19 @@ func TestMCPResponseCaptureWrite(t *testing.T) {
 		},
 		{
 			name:         "exactly the cap captures everything untruncated",
-			writes:       []string{strings.Repeat("x", auditlog.MaxBodyCapture)},
-			wantCaptured: strings.Repeat("x", auditlog.MaxBodyCapture),
+			writes:       []string{strings.Repeat("x", requestlog.MaxBodyCapture)},
+			wantCaptured: strings.Repeat("x", requestlog.MaxBodyCapture),
 		},
 		{
 			name:          "overflowing write is cut at the cap and flagged",
-			writes:        []string{strings.Repeat("x", auditlog.MaxBodyCapture+1)},
-			wantCaptured:  strings.Repeat("x", auditlog.MaxBodyCapture),
+			writes:        []string{strings.Repeat("x", requestlog.MaxBodyCapture+1)},
+			wantCaptured:  strings.Repeat("x", requestlog.MaxBodyCapture),
 			wantTruncated: true,
 		},
 		{
 			name:          "write after a full buffer only flags truncation",
-			writes:        []string{strings.Repeat("x", auditlog.MaxBodyCapture), "overflow"},
-			wantCaptured:  strings.Repeat("x", auditlog.MaxBodyCapture),
+			writes:        []string{strings.Repeat("x", requestlog.MaxBodyCapture), "overflow"},
+			wantCaptured:  strings.Repeat("x", requestlog.MaxBodyCapture),
 			wantTruncated: true,
 		},
 	}
@@ -334,7 +334,7 @@ func TestMCPResponseCaptureWrite(t *testing.T) {
 	}
 }
 
-// TestMCPResponseCaptureEnrich covers what the tee records on the audit entry:
+// TestMCPResponseCaptureEnrich covers what the tee records on the request log entry:
 // only SSE replies (the middleware owns the rest), with the truncation flag
 // carried through.
 func TestMCPResponseCaptureEnrich(t *testing.T) {
@@ -369,8 +369,8 @@ func TestMCPResponseCaptureEnrich(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c, rec := newMCPTestContext(t, http.MethodPost, "")
-			entry := &auditlog.LogEntry{}
-			c.Set(string(auditlog.LogEntryKey), entry)
+			entry := &requestlog.LogEntry{}
+			c.Set(string(requestlog.LogEntryKey), entry)
 			capture := &mcpResponseCapture{ResponseWriter: rec}
 			capture.Header().Set("Content-Type", tt.contentType)
 			_, err := capture.Write([]byte(tt.body))
@@ -389,24 +389,24 @@ func TestMCPResponseCaptureEnrich(t *testing.T) {
 	}
 }
 
-// configLogger stubs auditlog.LoggerInterface with a fixed config.
-type configLogger struct{ cfg auditlog.Config }
+// configLogger stubs requestlog.LoggerInterface with a fixed config.
+type configLogger struct{ cfg requestlog.Config }
 
-func (l configLogger) Write(*auditlog.LogEntry) {}
-func (l configLogger) Config() auditlog.Config  { return l.cfg }
-func (l configLogger) Close() error             { return nil }
+func (l configLogger) Write(*requestlog.LogEntry) {}
+func (l configLogger) Config() requestlog.Config  { return l.cfg }
+func (l configLogger) Close() error               { return nil }
 
 // TestHandlerMCPLogBodies covers how Handler.mcp() derives the service's
-// logBodies flag from the audit logger configuration.
+// logBodies flag from the request logger configuration.
 func TestHandlerMCPLogBodies(t *testing.T) {
 	tests := []struct {
 		name   string
-		logger auditlog.LoggerInterface
+		logger requestlog.LoggerInterface
 		want   bool
 	}{
 		{name: "nil logger defaults to off", logger: nil, want: false},
-		{name: "body logging disabled stays off", logger: configLogger{cfg: auditlog.Config{Enabled: true}}, want: false},
-		{name: "body logging enabled propagates", logger: configLogger{cfg: auditlog.Config{Enabled: true, LogBodies: true}}, want: true},
+		{name: "body logging disabled stays off", logger: configLogger{cfg: requestlog.Config{Enabled: true}}, want: false},
+		{name: "body logging enabled propagates", logger: configLogger{cfg: requestlog.Config{Enabled: true, LogBodies: true}}, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -417,46 +417,46 @@ func TestHandlerMCPLogBodies(t *testing.T) {
 	}
 }
 
-func TestEnrichMCPAuditEntryRestoresBody(t *testing.T) {
+func TestEnrichMCPRequestLogEntryRestoresBody(t *testing.T) {
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
 	c, _ := echotest.Post(t, "/mcp", body)
 
-	enrichMCPAuditEntry(c, false, nil)
+	enrichMCPRequestLogEntry(c, false, nil)
 
 	restored, err := io.ReadAll(c.Request().Body)
 	require.NoError(t, err)
 	require.Equal(t, body, string(restored))
 }
 
-func TestEnrichMCPAuditEntryCapturesRequestBody(t *testing.T) {
+func TestEnrichMCPRequestLogEntryCapturesRequestBody(t *testing.T) {
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"linear_list_issues"}}`
-	entry := &auditlog.LogEntry{}
-	c, _ := echotest.Post(t, "/mcp", body, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	entry := &requestlog.LogEntry{}
+	c, _ := echotest.Post(t, "/mcp", body, echotest.WithValue(string(requestlog.LogEntryKey), entry))
 
-	enrichMCPAuditEntry(c, true, nil)
+	enrichMCPRequestLogEntry(c, true, nil)
 
 	require.NotNil(t, entry.Data)
 	require.NotNil(t, entry.Data.RequestBody)
 
-	captured, ok := auditlog.BodyDocument(entry.Data.RequestBody).(map[string]any)
+	captured, ok := requestlog.BodyDocument(entry.Data.RequestBody).(map[string]any)
 	require.True(t, ok, "captured body type = %T, want JSON object", entry.Data.RequestBody)
 	require.Equal(t, "tools/call", captured["method"])
 	require.Equal(t, "linear_list_issues", entry.RequestedModel)
 	require.Equal(t, "mcp", entry.Provider)
 }
 
-func TestEnrichMCPAuditEntryBodyLoggingOff(t *testing.T) {
-	entry := &auditlog.LogEntry{}
-	c, _ := echotest.Post(t, "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+func TestEnrichMCPRequestLogEntryBodyLoggingOff(t *testing.T) {
+	entry := &requestlog.LogEntry{}
+	c, _ := echotest.Post(t, "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, echotest.WithValue(string(requestlog.LogEntryKey), entry))
 
-	enrichMCPAuditEntry(c, false, nil)
+	enrichMCPRequestLogEntry(c, false, nil)
 
 	if entry.Data != nil {
 		require.Nil(t, entry.Data.RequestBody, "body logging is off")
 	}
 }
 
-func TestMCPSSEAuditBody(t *testing.T) {
+func TestMCPSSERequestLogBody(t *testing.T) {
 	tests := []struct {
 		name string
 		raw  string
@@ -502,7 +502,7 @@ func TestMCPSSEAuditBody(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.want(t, mcpSSEAuditBody([]byte(tt.raw)))
+			tt.want(t, mcpSSERequestLogBody([]byte(tt.raw)))
 		})
 	}
 }

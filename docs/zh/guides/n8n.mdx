@@ -1,6 +1,6 @@
 ---
 title: "GoModel & n8n"
-description: "只需一个凭据，即可将 n8n 中所有 AI Agent、LLM Chain 和 OpenAI 节点的调用经由 GoModel 路由，并为所有工作流获得审计日志、成本追踪和指标。"
+description: "只需一个凭据，即可将 n8n 中所有 AI Agent、LLM Chain 和 OpenAI 节点的调用经由 GoModel 路由，并为所有工作流获得请求日志、成本追踪和指标。"
 icon: "workflow"
 keywords: ["n8n", "AI Agent", "OpenAI 凭据", "Base URL", "工作流自动化", "LLM 可观测性", "配置指南", "OpenAI credential", "base URL", "workflow automation", "LLM observability", "setup guide"]
 ---
@@ -17,7 +17,7 @@ n8n 没有内置功能来追踪其 AI 节点发送和接收的内容。将 n8n �
 
 您将获得：
 
-- GoModel 审计日志中每次 AI 调用的完整请求体和响应体。
+- GoModel 请求日志中每次 AI 调用的完整请求体和响应体。
 - 按模型、按 API 密钥和按标签统计的 Token 用量和成本。
 - AI 流量的 Prometheus 指标和 OpenTelemetry Trace。
 - 故障转移、缓存、速率限制和预算均应用于 n8n 流量。
@@ -94,7 +94,7 @@ Anthropic 和 Gemini 模型以及所有 [虚拟模型](/zh/features/virtual-mode
 将凭据关联到 **OpenAI Chat Model** 子节点并选择模型。
 由于模型列表来自 GoModel，您可以在原本只支持 OpenAI 的同一个节点中选择
 `anthropic/claude-haiku-4-5-20251001` 或 `gemini/gemini-2.5-flash`。选择器中带提供商前缀的 ID 和 `gpt-5-mini` 这样的普通 ID 都可以使用。
-运行工作流，然后打开 GoModel 控制台：该调用会出现在审计日志中，包含完整的提示词、n8n 附加的工具定义、响应、Token 数和成本。
+运行工作流，然后打开 GoModel 控制台：该调用会出现在请求日志中，包含完整的提示词、n8n 附加的工具定义、响应、Token 数和成本。
 
 <Note>
   已在 n8n 2.36（AI Agent 3.1 和 2.2、OpenAI Chat Model 1.3）上验证，

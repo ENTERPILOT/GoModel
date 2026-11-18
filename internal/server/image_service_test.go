@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -227,18 +227,18 @@ func TestImageGenerations_HandlerRoute(t *testing.T) {
 	assert.Equal(t, "a cat", mock.captured.Prompt)
 }
 
-// TestImageGenerations_AuditsRequestBody verifies the prompt reaches the audit
+// TestImageGenerations_LogsRequestBody verifies the prompt reaches the request log
 // entry when body logging is on: the endpoint is not ingress-managed, so the
 // middleware has no request snapshot and relies on the service to capture it.
-func TestImageGenerations_AuditsRequestBody(t *testing.T) {
+func TestImageGenerations_LogsRequestBody(t *testing.T) {
 	for _, logBodies := range []bool{true, false} {
 		t.Run(map[bool]string{true: "enabled", false: "disabled"}[logBodies], func(t *testing.T) {
 			mock := newImageMock()
 			mock.resolved = &core.ModelSelector{Provider: "openai", Model: "dall-e-3"}
 			svc := &imageService{provider: mock, logBodies: logBodies}
 			c, rec := echotest.Post(t, "/v1/images/generations", `{"model":"dall-e-3","prompt":"a cat","style":"vivid"}`)
-			entry := &auditlog.LogEntry{}
-			c.Set(string(auditlog.LogEntryKey), entry)
+			entry := &requestlog.LogEntry{}
+			c.Set(string(requestlog.LogEntryKey), entry)
 			err := svc.CreateImage(c)
 			require.NoError(t, err)
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -254,19 +254,19 @@ func TestImageGenerations_AuditsRequestBody(t *testing.T) {
 				}
 				return
 			}
-			body, ok := auditlog.BodyDocument(entry.Data.RequestBody).(map[string]any)
+			body, ok := requestlog.BodyDocument(entry.Data.RequestBody).(map[string]any)
 			require.True(t, ok, "request body = %T, want JSON object", entry.Data.RequestBody)
 			assert.Equal(t, "a cat", body["prompt"])
-			assert.Equal(t, "vivid", body["style"], "audited request body = %v, want prompt and extra fields", body)
+			assert.Equal(t, "vivid", body["style"], "logged request body = %v, want prompt and extra fields", body)
 		})
 	}
 }
 
-// TestImageGenerations_AuditsResponseImages verifies the response is recorded
+// TestImageGenerations_LogsResponseImages verifies the response is recorded
 // as an image body (envelope metadata plus per-image items) and that base64
 // output is embedded only when output logging is enabled, so a large b64_json
 // payload never trips the generic capture limit.
-func TestImageGenerations_AuditsResponseImages(t *testing.T) {
+func TestImageGenerations_LogsResponseImages(t *testing.T) {
 	tests := []struct {
 		name            string
 		logBodies       bool
@@ -288,8 +288,8 @@ func TestImageGenerations_AuditsResponseImages(t *testing.T) {
 			media, store := newTestMediaCapturer(t)
 			svc := &imageService{provider: mock, logBodies: tt.logBodies, logImageOutputs: tt.logImageOutputs, media: media}
 			c, rec := echotest.Post(t, "/v1/images/generations", `{"model":"dall-e-3","prompt":"a cat"}`)
-			entry := &auditlog.LogEntry{}
-			c.Set(string(auditlog.LogEntryKey), entry)
+			entry := &requestlog.LogEntry{}
+			c.Set(string(requestlog.LogEntryKey), entry)
 			err := svc.CreateImage(c)
 			require.NoError(t, err)
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -300,10 +300,10 @@ func TestImageGenerations_AuditsResponseImages(t *testing.T) {
 				}
 				return
 			}
-			assert.True(t, auditlog.IsResponseBodyCapturedByHandler(c))
+			assert.True(t, requestlog.IsResponseBodyCapturedByHandler(c))
 
-			body, ok := entry.Data.ResponseBody.(auditlog.ImageBodyLog)
-			require.True(t, ok, "response body = %T, want auditlog.ImageBodyLog", entry.Data.ResponseBody)
+			body, ok := entry.Data.ResponseBody.(requestlog.ImageBodyLog)
+			require.True(t, ok, "response body = %T, want requestlog.ImageBodyLog", entry.Data.ResponseBody)
 			assert.Equal(t, "1024x1024", body.Meta["size"])
 			assert.Equal(t, int64(1713833628), body.Meta["created"], "response meta = %v", body.Meta)
 			require.Len(t, body.Items, 2)

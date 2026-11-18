@@ -207,7 +207,7 @@ opentelemetry:
 该变量还接受 `SPAN_ONLY` 和 `SPAN_AND_EVENT`，即较新版 OpenTelemetry 观测库使用的模式名称。
 
 <Warning>
-  开启捕获后，每个被采样的提示词和补全内容都会随其 Trace 离开网关。请仅在允许存储此类数据的后端上启用，并考虑使用采样（`OTEL_TRACES_SAMPLER`）来限制数据量。[审计日志](/zh/advanced/configuration#审计日志)则会将内容保存在您自己的存储中。
+  开启捕获后，每个被采样的提示词和补全内容都会随其 Trace 离开网关。请仅在允许存储此类数据的后端上启用，并考虑使用采样（`OTEL_TRACES_SAMPLER`）来限制数据量。[请求日志](/zh/advanced/configuration#请求日志)则会将内容保存在您自己的存储中。
 </Warning>
 
 ## 隐私

@@ -8,15 +8,15 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/session"
 )
 
 const interactionParentHeader = "X-GoModel-Interaction-Parent"
 
 type interactionParentLookup interface {
-	GetInteractionParent(ctx context.Context, id string) (*auditlog.InteractionParent, error)
+	GetInteractionParent(ctx context.Context, id string) (*requestlog.InteractionParent, error)
 }
 
 // sessionCapture resolves session identity after authentication and before
@@ -39,7 +39,7 @@ func sessionCapture(detector *session.Detector, parentLookup interactionParentLo
 				}
 				req := c.Request()
 				c.SetRequest(req.WithContext(core.WithSessionID(req.Context(), id)))
-				auditlog.EnrichEntryWithSessionID(c, id)
+				requestlog.EnrichEntryWithSessionID(c, id)
 				return true
 			}
 			detectAndStamp := func(snapshot *core.RequestSnapshot) bool {
@@ -104,7 +104,7 @@ func interactionParentSession(c *echo.Context, lookup interactionParentLookup, a
 // for session detection. JSON endpoints materialize the whole body: the handler
 // decodes every byte of it anyway and the server's body size limit already
 // bounds the read, so a long conversation keeps its body signals and
-// content-derived id past the audit capture limit. Opaque bodies are forwarded
+// content-derived id past the request log capture limit. Opaque bodies are forwarded
 // upstream as a stream, so they are only peeked up to MaxBodyCapture and
 // replayed intact; larger ones fall back to header signals.
 func sessionDetectionSnapshot(c *echo.Context, snapshot *core.RequestSnapshot) (*core.RequestSnapshot, error) {
@@ -124,7 +124,7 @@ func sessionDetectionSnapshot(c *echo.Context, snapshot *core.RequestSnapshot) (
 
 // materializeSessionBody reads the complete JSON body once, replays it from
 // memory for the handler, and returns a snapshot carrying every byte for
-// detection. The audit capture on the shared snapshot still stops at
+// detection. The request log capture on the shared snapshot still stops at
 // MaxBodyCapture; only the detection view sees an oversized body.
 func materializeSessionBody(c *echo.Context, snapshot *core.RequestSnapshot) (*core.RequestSnapshot, error) {
 	req := c.Request()
@@ -153,12 +153,12 @@ func materializeSessionBody(c *echo.Context, snapshot *core.RequestSnapshot) (*c
 // limit+1 bytes from an unknown-length one.
 func peekSessionBody(c *echo.Context, snapshot *core.RequestSnapshot) (*core.RequestSnapshot, error) {
 	req := c.Request()
-	if req.ContentLength > auditlog.MaxBodyCapture {
+	if req.ContentLength > requestlog.MaxBodyCapture {
 		return markSessionBodyNotCaptured(c, snapshot), nil
 	}
 
 	originalBody := req.Body
-	body, err := io.ReadAll(io.LimitReader(originalBody, auditlog.MaxBodyCapture+1))
+	body, err := io.ReadAll(io.LimitReader(originalBody, requestlog.MaxBodyCapture+1))
 	if err != nil {
 		req.Body = &combinedReadCloser{
 			Reader: io.MultiReader(bytes.NewReader(body), originalBody),
@@ -166,7 +166,7 @@ func peekSessionBody(c *echo.Context, snapshot *core.RequestSnapshot) (*core.Req
 		}
 		return snapshot, err
 	}
-	if int64(len(body)) > auditlog.MaxBodyCapture {
+	if int64(len(body)) > requestlog.MaxBodyCapture {
 		req.Body = &combinedReadCloser{
 			Reader: io.MultiReader(bytes.NewReader(body), originalBody),
 			rc:     originalBody,

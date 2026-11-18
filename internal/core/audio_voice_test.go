@@ -127,3 +127,33 @@ func TestAudioSpeechRequest_WithStringVoice(t *testing.T) {
 	stringReq := &AudioSpeechRequest{Model: "tts-1", Input: "hi", Voice: "alloy"}
 	assert.Same(t, stringReq, stringReq.WithStringVoice())
 }
+
+func TestAudioSpeechRequest_WithObjectVoice(t *testing.T) {
+	req := &AudioSpeechRequest{Model: "tts-1", Input: "hi", Voice: `voice_"1234`}
+
+	object := req.WithObjectVoice()
+	require.NotNil(t, object)
+	assert.NotSame(t, req, object)
+	assert.Equal(t, req.Voice, object.Voice)
+	encoded, err := json.Marshal(object)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"tts-1","input":"hi","voice":{"id":"voice_\"1234"}}`, string(encoded))
+
+	original, err := json.Marshal(req)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"tts-1","input":"hi","voice":"voice_\"1234"}`, string(original),
+		"the caller's request must keep the string form")
+
+	assert.Same(t, object, object.WithObjectVoice())
+	noVoice := &AudioSpeechRequest{Model: "tts-1", Input: "hi"}
+	assert.Same(t, noVoice, noVoice.WithObjectVoice())
+	assert.Nil(t, (*AudioSpeechRequest)(nil).WithObjectVoice())
+
+	// A voice replaced after decoding is the one sent as an object.
+	replaced, err := DecodeAudioSpeechRequest([]byte(`{"model":"tts-1","input":"hi","voice":{"id":"voice_old"}}`), nil)
+	require.NoError(t, err)
+	replaced.Voice = "voice_new"
+	encoded, err = json.Marshal(replaced.WithObjectVoice())
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"model":"tts-1","input":"hi","voice":{"id":"voice_new"}}`, string(encoded))
+}

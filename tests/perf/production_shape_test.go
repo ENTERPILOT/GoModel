@@ -8,11 +8,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/session"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -39,10 +39,13 @@ func (s *benchRateLimitStore) DeleteRule(context.Context, ratelimit.RuleScope, s
 func (s *benchRateLimitStore) ReplaceConfigRules(context.Context, []ratelimit.Rule) error {
 	return nil
 }
-func (s *benchRateLimitStore) LoadCounters(context.Context, int64) ([]ratelimit.WindowSnapshot, error) {
+func (s *benchRateLimitStore) LoadCounters(context.Context, int64, string) ([]ratelimit.WindowSnapshot, error) {
 	return nil, nil
 }
 func (s *benchRateLimitStore) SaveCounters(context.Context, []ratelimit.WindowSnapshot) error {
+	return nil
+}
+func (s *benchRateLimitStore) PruneCounters(context.Context) error {
 	return nil
 }
 func (s *benchRateLimitStore) ResetCounter(context.Context, ratelimit.RuleScope, string, int64) error {
@@ -71,7 +74,7 @@ func newBenchRateLimiter(tb testing.TB) *ratelimit.Service {
 }
 
 // BenchmarkGatewayHotPathProductionShape wires the middleware chain the way a
-// default deployment actually runs it: master-key auth, audit logging, usage
+// default deployment actually runs it: master-key auth, request logging, usage
 // tracking, session keeping, and a configured rate limit all enabled. The
 // original guard benchmarks leave every one of those nil, so they measure a
 // configuration nobody deploys — and therefore cannot see regressions in any
@@ -123,32 +126,32 @@ func newBenchRouter(tb testing.TB, modelCount int) *providers.Router {
 	return router
 }
 
-// benchLiveAuditLogger is the bench audit logger with the live broker a
-// dashboard subscribes to. The audit middleware publishes lifecycle events
-// through whichever logger implements auditlog.LiveEventEmitter, so this is
+// benchLiveRequestLogger is the bench request logger with the live broker a
+// dashboard subscribes to. The request log middleware publishes lifecycle events
+// through whichever logger implements requestlog.LiveEventEmitter, so this is
 // what a default deployment pays on every request — the broker runs whether or
 // not anyone is watching, which is the case the benchmark measures.
-type benchLiveAuditLogger struct {
-	cfg    auditlog.Config
+type benchLiveRequestLogger struct {
+	cfg    requestlog.Config
 	broker *live.Broker
 }
 
-func (l benchLiveAuditLogger) Write(entry *auditlog.LogEntry) {
+func (l benchLiveRequestLogger) Write(entry *requestlog.LogEntry) {
 	// The real logger publishes the terminal event as it persists the entry.
-	l.broker.PublishAuditEvent(auditlog.LiveEventAuditFlushed, entry)
+	l.broker.PublishRequestLogEvent(requestlog.LiveEventRequestLogFlushed, entry)
 }
 
-func (l benchLiveAuditLogger) Config() auditlog.Config { return l.cfg }
-func (l benchLiveAuditLogger) Close() error            { return nil }
+func (l benchLiveRequestLogger) Config() requestlog.Config { return l.cfg }
+func (l benchLiveRequestLogger) Close() error              { return nil }
 
-func (l benchLiveAuditLogger) PublishLiveEvent(eventType string, entry *auditlog.LogEntry) {
-	l.broker.PublishAuditEvent(eventType, entry)
+func (l benchLiveRequestLogger) PublishLiveEvent(eventType string, entry *requestlog.LogEntry) {
+	l.broker.PublishRequestLogEvent(eventType, entry)
 }
 
 // BenchmarkGatewayHotPathProductionShapeLiveBroker is the production shape with
 // live logs enabled and no dashboard connected — the default configuration of a
 // running gateway. The broker builds and retains an event for every lifecycle
-// step of every request, which the stub audit logger in the other benchmarks
+// step of every request, which the stub request logger in the other benchmarks
 // never exercises.
 func BenchmarkGatewayHotPathProductionShapeLiveBroker(b *testing.B) {
 	srv := newLiveBrokerBenchServer(b, routedCatalogSize)
@@ -178,8 +181,8 @@ func newLiveBrokerBenchServer(tb testing.TB, modelCount int) *server.Server {
 	return server.New(newBenchRouter(tb, modelCount), &server.Config{
 		LogOnlyModelInteractions: true,
 		MasterKey:                "bench-master-key",
-		AuditLogger: benchLiveAuditLogger{
-			cfg:    auditlog.Config{Enabled: true, LogBodies: true, LogHeaders: true},
+		RequestLogger: benchLiveRequestLogger{
+			cfg:    requestlog.Config{Enabled: true, LogBodies: true, LogHeaders: true},
 			broker: broker,
 		},
 		UsageLogger:     benchUsageLogger{cfg: usage.Config{Enabled: true}},
@@ -194,7 +197,7 @@ func newProductionBenchServer(tb testing.TB, modelCount int) *server.Server {
 	return server.New(newBenchRouter(tb, modelCount), &server.Config{
 		LogOnlyModelInteractions: true,
 		MasterKey:                "bench-master-key",
-		AuditLogger:              benchAuditLogger{cfg: auditlog.Config{Enabled: true, LogBodies: true, LogHeaders: true}},
+		RequestLogger:            benchRequestLogger{cfg: requestlog.Config{Enabled: true, LogBodies: true, LogHeaders: true}},
 		UsageLogger:              benchUsageLogger{cfg: usage.Config{Enabled: true}},
 		SessionDetector:          session.NewDetector(session.BuiltinRules(), true),
 		RateLimiter:              newBenchRateLimiter(tb),

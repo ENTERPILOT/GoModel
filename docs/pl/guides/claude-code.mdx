@@ -183,7 +183,7 @@ Zarządzany bazowy URL obsługuje `/v1/messages` z
 [natywnym przekazywaniem](/pl/advanced/anthropic-messages-api#natywne-przekazywanie-do-anthropic):
 requesty rozwiązywane do Anthropic są przekazywane bez zmian poza rozwiązaniem
 aliasu modelu (z zachowaniem `cache_control`, podpisów thinking i nagłówków beta),
-a jednocześnie działają rate limity, budżety, audyt i śledzenie użycia – a aliasy
+a jednocześnie działają rate limity, budżety, logowanie requestów i śledzenie użycia – a aliasy
 modeli lub modele wirtualne mogą kierować Claude Code do innych providerów.
 Alternatywnie `ANTHROPIC_BASE_URL=http://localhost:8080/p/anthropic` używa surowego
 passthrough przypiętego do upstreamu Anthropic.
@@ -211,9 +211,9 @@ ok
 
 ## 5. Sprawdź ruch w GoModel
 
-Otwórz logi audytowe w dashboardzie GoModel:
+Otwórz stronę „Requesty” w dashboardzie GoModel:
 
-[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+[http://localhost:8080/admin/dashboard/requests](http://localhost:8080/admin/dashboard/requests)
 
 To najprostsze miejsce, aby potwierdzić, że Claude Code dociera do GoModel,
 i przejrzeć pełny ślad requestów i odpowiedzi. W tym samym dashboardzie możesz

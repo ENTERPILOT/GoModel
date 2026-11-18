@@ -87,16 +87,16 @@ func PassthroughEndpointPath(info *core.PassthroughRouteInfo) string {
 	return endpoint
 }
 
-// PassthroughEndpointSemantics names the semantic operation and audit path
+// PassthroughEndpointSemantics names the semantic operation and request log path
 // for one provider passthrough endpoint.
 type PassthroughEndpointSemantics struct {
 	Operation      string
 	GenAIOperation string
-	AuditPath      string
+	RequestLogPath string
 }
 
 // SemanticEnricher implements core.PassthroughSemanticEnricher from a static
-// endpoint table. Endpoints missing from the table keep their audit path, or
+// endpoint table. Endpoints missing from the table keep their request log path, or
 // fall back to the generic /p/{provider}/... form when none is set.
 type SemanticEnricher struct {
 	providerType string
@@ -113,9 +113,9 @@ func NewSemanticEnricher(providerType string, endpoints map[string]PassthroughEn
 // while retaining the concrete provider type used to select the enricher.
 func NewOpenAICompatibleSemanticEnricher(providerType string) SemanticEnricher {
 	return NewSemanticEnricher(providerType, map[string]PassthroughEndpointSemantics{
-		"/chat/completions": {Operation: providerType + ".chat_completions", GenAIOperation: "chat", AuditPath: "/v1/chat/completions"},
-		"/responses":        {Operation: providerType + ".responses", GenAIOperation: "chat", AuditPath: "/v1/responses"},
-		"/embeddings":       {Operation: providerType + ".embeddings", GenAIOperation: "embeddings", AuditPath: "/v1/embeddings"},
+		"/chat/completions": {Operation: providerType + ".chat_completions", GenAIOperation: "chat", RequestLogPath: "/v1/chat/completions"},
+		"/responses":        {Operation: providerType + ".responses", GenAIOperation: "chat", RequestLogPath: "/v1/responses"},
+		"/embeddings":       {Operation: providerType + ".embeddings", GenAIOperation: "embeddings", RequestLogPath: "/v1/embeddings"},
 	})
 }
 
@@ -125,7 +125,7 @@ func (e SemanticEnricher) ProviderType() string {
 }
 
 // Enrich annotates passthrough route info with the provider's semantic
-// operation and audit path for known endpoints.
+// operation and request log path for known endpoints.
 func (e SemanticEnricher) Enrich(_ *core.RequestSnapshot, _ *core.WhiteBoxPrompt, info *core.PassthroughRouteInfo) *core.PassthroughRouteInfo {
 	if info == nil {
 		return nil
@@ -135,9 +135,9 @@ func (e SemanticEnricher) Enrich(_ *core.RequestSnapshot, _ *core.WhiteBoxPrompt
 	if semantics, ok := e.endpoints["/"+normalizedEndpoint]; ok {
 		enriched.SemanticOperation = semantics.Operation
 		enriched.GenAIOperation = semantics.GenAIOperation
-		enriched.AuditPath = semantics.AuditPath
-	} else if strings.TrimSpace(enriched.AuditPath) == "" && normalizedEndpoint != "" {
-		enriched.AuditPath = "/p/" + e.providerType + "/" + normalizedEndpoint
+		enriched.RequestLogPath = semantics.RequestLogPath
+	} else if strings.TrimSpace(enriched.RequestLogPath) == "" && normalizedEndpoint != "" {
+		enriched.RequestLogPath = "/p/" + e.providerType + "/" + normalizedEndpoint
 	}
 	return &enriched
 }

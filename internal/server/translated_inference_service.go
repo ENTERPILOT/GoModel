@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -16,13 +17,13 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/ext"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/observability"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/plugins/exchange"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/streaming"
@@ -41,7 +42,7 @@ type translatedInferenceService struct {
 	failoverPolicy           *gateway.FailoverPolicy
 	translatedRequestPatcher TranslatedRequestPatcher
 	pluginChains             PluginChainsResolver
-	logger                   auditlog.LoggerInterface
+	logger                   requestlog.LoggerInterface
 	usageLogger              usage.LoggerInterface
 	budgetChecker            BudgetChecker
 	rateLimiter              RateLimiter
@@ -158,16 +159,16 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	if err != nil {
 		return handleError(c, err)
 	}
-	enrichAuditEntryWithProviderAttempts(c)
+	enrichRequestLogEntryWithProviderAttempts(c)
 	result.Response, err = chatResponsePhase.run(s, c, workflow, req, result.Response)
 	if err != nil {
 		return handleError(c, err)
 	}
 	if result.Meta.UsedFailover {
 		markRequestFailoverUsed(c)
-		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
+		requestlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
 	}
-	auditlog.EnrichEntryWithResolvedRoute(
+	requestlog.EnrichEntryWithResolvedRoute(
 		c,
 		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),
 		result.Meta.ProviderType,
@@ -215,7 +216,7 @@ func handleTranslatedJSON[Req any](
 			return shortCircuit(s, c, workflow, req, short)
 		}
 		// A block or fail-closed outcome still belongs to the resolved
-		// workflow: the audit entry must carry it like every other outcome.
+		// workflow: the request log entry must carry it like every other outcome.
 		attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
 		s.recordGuardrailOutcomes(c)
 		recordPromptPluginRevisions(c, s.logger, req, nil)
@@ -347,7 +348,7 @@ func handleWithCache[R any](
 				return dispatch(c, req, workflow)
 			})
 			if replayErr, ok := errors.AsType[*responsecache.ReplayError](err); ok {
-				recordCachedStreamError(c, replayErr.Err)
+				recordStreamFailure(c, nil, "cached stream terminated abnormally", replayErr.Err)
 				return nil
 			}
 			return err
@@ -396,16 +397,16 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	if err != nil {
 		return handleError(c, err)
 	}
-	enrichAuditEntryWithProviderAttempts(c)
+	enrichRequestLogEntryWithProviderAttempts(c)
 	result.Response, err = responsesResponsePhase.run(s, c, workflow, req, result.Response)
 	if err != nil {
 		return handleError(c, err)
 	}
 	if result.Meta.UsedFailover {
 		markRequestFailoverUsed(c)
-		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
+		requestlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
 	}
-	auditlog.EnrichEntryWithResolvedRoute(
+	requestlog.EnrichEntryWithResolvedRoute(
 		c,
 		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),
 		result.Meta.ProviderType,
@@ -607,12 +608,12 @@ func (s *translatedInferenceService) dispatchEmbeddings(c *echo.Context, req *co
 	if err != nil {
 		return handleError(c, err)
 	}
-	enrichAuditEntryWithProviderAttempts(c)
+	enrichRequestLogEntryWithProviderAttempts(c)
 	if result.Meta.UsedFailover {
 		markRequestFailoverUsed(c)
-		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
+		requestlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
 	}
-	auditlog.EnrichEntryWithResolvedRoute(
+	requestlog.EnrichEntryWithResolvedRoute(
 		c,
 		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),
 		result.Meta.ProviderType,
@@ -638,7 +639,7 @@ func attachPreparedWorkflow(c *echo.Context, ctx context.Context, workflow *core
 	storeWorkflow(c, workflow)
 }
 
-// observeLiveProviderAttempts surfaces provider attempts in the live audit
+// observeLiveProviderAttempts surfaces provider attempts in the live request log
 // preview as they are recorded (e.g. a failed primary while failover is still
 // in flight), instead of only once the request finishes. It installs the
 // observer only when failover targets exist, so non-failover requests — the hot
@@ -649,7 +650,7 @@ func (s *translatedInferenceService) observeLiveProviderAttempts(c *echo.Context
 	}
 	req := c.Request()
 	c.SetRequest(req.WithContext(gateway.WithAttemptObserver(req.Context(), func() {
-		enrichAuditEntryWithProviderAttempts(c)
+		enrichRequestLogEntryWithProviderAttempts(c)
 	})))
 }
 
@@ -664,7 +665,7 @@ func cacheWorkflowResolutionHints(c *echo.Context, workflow *core.Workflow) {
 }
 
 // handleStreamingReadCloser flushes a provider SSE stream to the client while
-// fanning audit, usage, and generation-trace observers off the canonical
+// fanning request log, usage, and generation-trace observers off the canonical
 // (OpenAI-shaped) stream. generation is the stream result's
 // GenerationObserver, nil for synthesized streams.
 // outerWrap, when non-nil, wraps the observed stream as the outermost layer —
@@ -680,18 +681,18 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 	extra ...streaming.Observer,
 ) error {
 	model, provider, providerName := meta.Model, meta.ProviderType, meta.ProviderName
-	auditlog.MarkEntryAsStreaming(c, true)
-	auditlog.EnrichEntryWithStream(c, true)
-	enrichAuditEntryWithProviderAttempts(c)
-	auditlog.EnrichEntryWithFailover(c, meta.FailoverModel)
-	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(workflow, model, providerName), provider, providerName)
+	requestlog.MarkEntryAsStreaming(c, true)
+	requestlog.EnrichEntryWithStream(c, true)
+	enrichRequestLogEntryWithProviderAttempts(c)
+	requestlog.EnrichEntryWithFailover(c, meta.FailoverModel)
+	requestlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(workflow, model, providerName), provider, providerName)
 
-	entry := auditlog.GetStreamEntryFromContext(c)
-	auditEnabled := s.logger != nil && s.logger.Config().Enabled && (workflow == nil || workflow.AuditEnabled())
-	if auditEnabled && entry != nil {
-		auditlog.PopulateRequestData(entry, c.Request(), s.logger.Config())
+	entry := requestlog.GetStreamEntryFromContext(c)
+	requestLogEnabled := s.logger != nil && s.logger.Config().Enabled && (workflow == nil || workflow.RequestLogEnabled())
+	if requestLogEnabled && entry != nil {
+		requestlog.PopulateRequestData(entry, c.Request(), s.logger.Config())
 	}
-	streamEntry := auditlog.CreateStreamEntry(c.Request().Context(), entry)
+	streamEntry := requestlog.CreateStreamEntry(c.Request().Context(), entry)
 	if streamEntry != nil {
 		streamEntry.StatusCode = http.StatusOK
 	}
@@ -703,8 +704,8 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 	if generation != nil {
 		observers = append(observers, generation)
 	}
-	if auditEnabled && streamEntry != nil {
-		observers = append(observers, auditlog.NewStreamLogObserver(s.logger, streamEntry, endpoint))
+	if requestLogEnabled && streamEntry != nil {
+		observers = append(observers, requestlog.NewStreamLogObserver(s.logger, streamEntry, endpoint))
 	}
 	if s.usageLogger != nil && s.usageLogger.Config().Enabled && (workflow == nil || workflow.UsageEnabled()) {
 		usageObserver := usage.NewStreamUsageObserver(s.usageLogger, model, provider, requestID, endpoint, s.pricingResolver, core.UserPathFromContext(c.Request().Context()))
@@ -752,36 +753,41 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
 
-	if auditEnabled && streamEntry != nil && s.logger.Config().LogHeaders {
-		auditlog.PopulateResponseHeaders(streamEntry, c.Response().Header())
+	if requestLogEnabled && streamEntry != nil && s.logger.Config().LogHeaders {
+		requestlog.PopulateResponseHeaders(streamEntry, c.Response().Header())
 	}
 
 	c.Response().WriteHeader(http.StatusOK)
 	if err := flushStream(c.Response(), wrappedStream); err != nil {
-		recordStreamingError(streamEntry, model, provider, c.Request().URL.Path, requestID, c.Request().Context(), err)
+		recordStreamFailure(c, streamEntry, "stream terminated abnormally", err, "model", model, "provider", provider)
 	}
 	return nil
 }
 
-// handleStreamingDispatchError records audit context for a streaming request
+// handleStreamingDispatchError records request log context for a streaming request
 // that failed before any chunks could be flushed. It marks the entry as
 // streaming and distinguishes client cancellations from upstream failures so
-// the audit log reflects the actual cause.
+// the request log reflects the actual cause.
 func handleStreamingDispatchError(c *echo.Context, err error) error {
-	auditlog.EnrichEntryWithStream(c, true)
+	requestlog.EnrichEntryWithStream(c, true)
 	if isClientDisconnectDuringDispatch(c.Request().Context(), err) {
-		auditlog.EnrichEntryWithError(c, "client_disconnected", err.Error(), "")
+		requestlog.EnrichEntryWithError(c, "client_disconnected", err.Error(), "")
 		return nil
 	}
 	return handleError(c, err)
 }
 
-// classifyStreamError names the audit error_type of a failure while writing
+// classifyStreamError names the request log error_type of a failure while writing
 // a stream to the client.
 func classifyStreamError(ctx context.Context, err error) string {
 	switch {
 	case errors.Is(err, ErrClientStall):
 		return "client_stalled"
+	case isNetworkReadError(err):
+		// The gateway reads only from the provider while relaying, so the
+		// failed connection is the provider's even if the client has since
+		// gone away too.
+		return "stream_error"
 	case errors.Is(err, streaming.ErrStreamIncomplete) && (ctx == nil || ctx.Err() != context.Canceled):
 		// The provider stream failed while being read, so a connection reset
 		// it wraps is the provider's, not the client's.
@@ -792,52 +798,53 @@ func classifyStreamError(ctx context.Context, err error) string {
 	return "stream_error"
 }
 
-// recordCachedStreamError records a cache-served stream the client stopped
-// reading or abandoned, so the audit entry does not show a clean 200 for a
-// stalled client just because the response happened to be cached.
-func recordCachedStreamError(c *echo.Context, err error) {
-	errorType := classifyStreamError(c.Request().Context(), err)
-	auditlog.EnrichEntryWithError(c, errorType, err.Error(), "")
-	slog.Warn("cached stream terminated abnormally",
-		"error", err,
-		"error_type", errorType,
-		"path", c.Request().URL.Path,
-		"request_id", requestIDFromContextOrHeader(c.Request()),
-	)
+// isNetworkReadError reports a network read that failed.
+func isNetworkReadError(err error) bool {
+	opErr, ok := errors.AsType[*net.OpError](err)
+	return ok && opErr.Op == "read"
 }
 
-func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path, requestID string, ctx context.Context, err error) {
-	errorType := classifyStreamError(ctx, err)
-
-	// The nil-err branch in isClientDisconnect is reachable for callers that
-	// only have a canceled context to report. Fall back to the context error
-	// in that case so we never dereference a nil error.
-	logErr := err
-	errorMessage := ""
-	switch {
-	case err != nil:
-		errorMessage = err.Error()
-	case ctx != nil && ctx.Err() != nil:
-		logErr = ctx.Err()
-		errorMessage = logErr.Error()
+// recordStreamFailure records a response that broke after it had started, so
+// the request log row does not show a clean 200. The classified error lands on
+// streamEntry when the stream owns its request log row and on the request's entry
+// otherwise, where an error recorded earlier is kept as the real cause. It
+// must run before the handler returns: the request log middleware queues the
+// request's entry for writing as soon as the handler is done.
+func recordStreamFailure(c *echo.Context, streamEntry *requestlog.LogEntry, msg string, err error, attrs ...any) {
+	if err == nil {
+		// A caller with only a canceled context to report.
+		err = c.Request().Context().Err()
 	}
+	if err == nil {
+		return
+	}
+	errorType := classifyStreamError(c.Request().Context(), err)
 
-	if streamEntry != nil {
+	switch {
+	case streamEntry != nil:
 		streamEntry.ErrorType = errorType
 		if streamEntry.Data == nil {
-			streamEntry.Data = &auditlog.LogData{}
+			streamEntry.Data = &requestlog.LogData{}
 		}
-		streamEntry.Data.ErrorMessage = errorMessage
+		streamEntry.Data.ErrorMessage = err.Error()
+	case !requestlog.HasRecordedError(c):
+		requestlog.EnrichEntryWithError(c, errorType, err.Error(), "")
 	}
+	logStreamFailure(c, msg, errorType, err, attrs...)
+}
 
-	slog.Warn("stream terminated abnormally",
-		"error", logErr,
-		"error_type", errorType,
-		"model", model,
-		"provider", provider,
-		"path", path,
-		"request_id", requestID,
-	)
+// logStreamFailure logs a response that broke after it had started. A client
+// that hung up is routine and logged at debug, like a request canceled before
+// the response started.
+func logStreamFailure(c *echo.Context, msg, errorType string, err error, attrs ...any) {
+	req := c.Request()
+	level := slog.LevelWarn
+	if errorType == "client_disconnected" {
+		level = slog.LevelDebug
+	}
+	attrs = append([]any{"error", err, "error_type", errorType}, attrs...)
+	attrs = append(attrs, "path", req.URL.Path, "request_id", requestIDFromContextOrHeader(req))
+	slog.Log(req.Context(), level, msg, attrs...)
 }
 
 // isClientDisconnect classifies write-phase streaming errors (errors returned
