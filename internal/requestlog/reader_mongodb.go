@@ -92,7 +92,11 @@ func NewMongoDBReader(database *mongo.Database) (*MongoDBReader, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return &MongoDBReader{collection: requestLogCollection(ctx, database)}, nil
+	collection, err := requestLogCollection(ctx, database)
+	if err != nil {
+		return nil, err
+	}
+	return &MongoDBReader{collection: collection}, nil
 }
 
 func mongoUserPathMatchFilter(userPath string) bson.E {

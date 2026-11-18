@@ -226,6 +226,9 @@ func ensureSQLSchema(ctx context.Context, db sqlx.DB) error {
 	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
 		return err
 	}
+	if err := ensureLegacyViews(ctx, db); err != nil {
+		return err
+	}
 	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
 	indexes = append(indexes, writtenAtIndexes(db.Dialect())...)
 	if db.Dialect() != sqlx.PostgreSQL {

@@ -2133,7 +2133,7 @@ COMMIT;
 SELECT 'seed_prefix', '${prefix}';
 SELECT 'date_range', min(date(REPLACE(timestamp, 'T', ' '))), max(date(REPLACE(timestamp, 'T', ' '))) FROM usage WHERE id GLOB '${prefix}-*';
 SELECT 'usage_rows', count(*), coalesce(sum(total_tokens), 0) FROM usage WHERE id GLOB '${prefix}-*';
-SELECT 'audit_rows', count(*) FROM request_logs WHERE id GLOB '${prefix}-*';
+SELECT 'request_log_rows', count(*) FROM request_logs WHERE id GLOB '${prefix}-*';
 SELECT 'session_threads', count(DISTINCT session_id), count(*) FROM request_logs
 WHERE id GLOB '${prefix}-*' AND session_id IS NOT NULL;
 SELECT 'session_thread_sizes', min(n), max(n), round(avg(n), 1)
@@ -2161,7 +2161,7 @@ SELECT 'workflow_traffic', workflow_version_id, count(*)
 FROM request_logs WHERE id GLOB '${prefix}-*' GROUP BY 2 ORDER BY 3 DESC;
 SELECT 'request_revisions', count(*) FROM request_logs
 WHERE id GLOB '${prefix}-*' AND json_extract(data, '$.request_revisions') IS NOT NULL;
-SELECT 'audit_status_mix', status_code, count(*)
+SELECT 'request_log_status_mix', status_code, count(*)
 FROM request_logs WHERE id GLOB '${prefix}-*' GROUP BY 2 ORDER BY 2;
 SELECT 'blocked_requests', coalesce(json_extract(data, '$.error_code'), 'none'), count(*)
 FROM request_logs WHERE id GLOB '${prefix}-*' AND status_code >= 400 GROUP BY 2 ORDER BY 2;

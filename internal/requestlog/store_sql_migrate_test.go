@@ -22,16 +22,23 @@ var legacyNames = strings.NewReplacer(
 	requestLogIndexPrefix, legacyIndexPrefix,
 )
 
+// createLegacyTables applies DDL written with the current names under the
+// names v0.2.5 and older used. Every database those releases created has
+// them, so a fixture of an older schema is only faithful with them.
+func createLegacyTables(ctx context.Context, db sqlx.DB, statements ...string) error {
+	legacy := make([]string, len(statements))
+	for i, statement := range statements {
+		legacy[i] = legacyNames.Replace(statement)
+	}
+	return db.Schema(ctx, legacy...)
+}
+
 // createLegacySchema builds the tables and startup indexes of v0.2.5, plus one
 // index that release had already retired but an older database may still hold.
 func createLegacySchema(t *testing.T, db sqlx.DB) {
 	t.Helper()
 	ctx := context.Background()
-	var statements []string
-	for _, statement := range sqlTables {
-		statements = append(statements, legacyNames.Replace(statement))
-	}
-	require.NoError(t, db.Schema(ctx, statements...))
+	require.NoError(t, createLegacyTables(ctx, db, sqlTables...))
 
 	indexes := append(append([]string{}, sqlIndexes...), userPathIndexes(db.Dialect())...)
 	indexes = append(indexes, jsonPathIndexes(db.Dialect())...)
@@ -190,11 +197,7 @@ func TestLegacyViewsServeTheOlderRelease(t *testing.T) {
 		startSQLStore(t, db)
 
 		// Its startup: the tables "exist", and no column is missing.
-		var statements []string
-		for _, statement := range sqlTables {
-			statements = append(statements, legacyNames.Replace(statement))
-		}
-		require.NoError(t, db.Schema(ctx, statements...))
+		require.NoError(t, createLegacyTables(ctx, db, sqlTables...))
 		var legacyMigrations []string
 		for _, statement := range sqlMigrations {
 			legacyMigrations = append(legacyMigrations, legacyNames.Replace(statement))
@@ -284,5 +287,51 @@ func TestNewSQLStoreLeavesAFreshDatabaseWithoutLegacyNames(t *testing.T) {
 	runSQLStoreTest(t, 0, func(t *testing.T, _ *SQLStore, db sqlx.DB) {
 		assert.Empty(t, relationKindOf(t, db, legacyRequestLogTable))
 		assert.Empty(t, relationKindOf(t, db, legacyAttemptsTable))
+	})
+}
+
+// The views are made when the tables are renamed, before this release brings
+// the tables up to date. A database from before the attempts table, or from
+// before a column v0.2.5 expects, must still end up with views that binary can
+// start on: it would otherwise try to create a table that references a view,
+// or to add a column to one.
+func TestNewSQLStoreBringsLegacyViewsUpToDate(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		if db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("only PostgreSQL keeps views under the legacy names")
+		}
+		ctx := context.Background()
+		// The entry table alone, before it had its write stamp columns.
+		table, removed := sqlTables[0], 0
+		for _, column := range []string{"writer_id TEXT", "written_at " + sqlx.TypeInt64} {
+			if i := strings.Index(table, column); i >= 0 {
+				table = strings.TrimRight(table[:i], ", \t\n") + table[i+len(column):]
+				removed++
+			}
+		}
+		require.Equal(t, 2, removed, "the fixture no longer matches the table")
+		require.NoError(t, createLegacyTables(ctx, db, table))
+		startSQLStore(t, db)
+
+		views, err := legacyViewsCurrent(ctx, db)
+		require.NoError(t, err)
+		assert.True(t, views, "the views show every column of their tables")
+		assert.Equal(t, relationView, relationKindOf(t, db, legacyAttemptsTable))
+
+		// The startup and the writes of v0.2.5.
+		require.NoError(t, createLegacyTables(ctx, db, sqlTables...))
+		var legacyMigrations []string
+		for _, statement := range sqlMigrations {
+			legacyMigrations = append(legacyMigrations, legacyNames.Replace(statement))
+		}
+		require.NoError(t, sqlx.AddColumns(ctx, db, legacyMigrations...))
+		writeLegacyEntry(t, db, "from-older-replica", time.Unix(1700000000, 0).UTC())
+		require.NotNil(t, readEntry(t, db, "from-older-replica"))
+
+		// A second start finds the views current and leaves them alone.
+		startSQLStore(t, db)
+		views, err = legacyViewsCurrent(ctx, db)
+		require.NoError(t, err)
+		assert.True(t, views)
 	})
 }

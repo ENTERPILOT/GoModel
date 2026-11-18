@@ -245,9 +245,10 @@ func TestSQLReader_GetSessionsOnLegacyUUIDSchema(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		// The request_logs table exactly as the standalone PostgreSQL store
-		// created it; session_id is absent and arrives via migration.
-		err := db.Schema(ctx, `
+		// The tables exactly as the standalone PostgreSQL store created them,
+		// under the audit_logs names they had then (see createLegacyTables);
+		// session_id is absent and arrives via migration.
+		err := createLegacyTables(ctx, db, `
 			CREATE TABLE request_logs (
 				id UUID PRIMARY KEY,
 				timestamp TIMESTAMPTZ NOT NULL,

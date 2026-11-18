@@ -182,10 +182,14 @@ PostgreSQL, die Collection bei MongoDB. Die Umbenennung geschieht an Ort und
 Stelle und kopiert keine Zeilen. Bei PostgreSQL bleiben die alten Namen als
 Views erhalten, sodass Replicas mit der älteren Version das Request-Log während
 eines Rolling Upgrades weiter lesen und schreiben und eine zurückgerollte
-Version weiterhin startet; richten Sie eigene Abfragen auf `request_logs`. Bei
+Version weiterhin startet (sie protokolliert Warnungen zur Indexerstellung, da
+sie auf einer View keinen Index anlegen kann); richten Sie eigene Abfragen auf
+`request_logs`. Bei
 SQLite und MongoDB legt eine ältere Version, die nach der Umbenennung läuft, ein
 neues, leeres `audit_logs` an, und der nächste Start einer aktuellen Version
-verschiebt deren Einträge nach `request_logs`.
+verschiebt deren Einträge nach `request_logs`. Verweigert MongoDB die
+Umbenennung, etwa weil der Rolle das Privileg fehlt, protokolliert das Gateway
+eine Warnung und verwendet weiterhin `audit_logs`.
 
 ## Eine Version festlegen
 

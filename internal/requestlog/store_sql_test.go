@@ -163,7 +163,7 @@ func TestNewSQLStoreRenamesLegacyModelColumn(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
 		// The column was called `model` before requested/resolved were split.
-		err := db.Schema(ctx, `
+		err := createLegacyTables(ctx, db, `
 			CREATE TABLE request_logs (
 				id TEXT PRIMARY KEY,
 				timestamp `+sqlx.TypeTimestamp+` NOT NULL,
@@ -185,7 +185,7 @@ func TestNewSQLStoreDropsLegacyExecutionPlanIndex(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
 		// Databases created before v0.1.17 carry the pre-rename column and index.
-		err := db.Schema(ctx, `
+		err := createLegacyTables(ctx, db, `
 			CREATE TABLE request_logs (
 				id TEXT PRIMARY KEY,
 				timestamp `+sqlx.TypeTimestamp+` NOT NULL,
@@ -206,7 +206,7 @@ func TestNewSQLStoreReplacesSingleColumnUserPathIndex(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
 		// Databases created before the composite index carry the single-column one.
-		err := db.Schema(ctx, `
+		err := createLegacyTables(ctx, db, `
 			CREATE TABLE request_logs (
 				id TEXT PRIMARY KEY,
 				timestamp `+sqlx.TypeTimestamp+` NOT NULL,
@@ -320,7 +320,7 @@ func TestModelIndexesMatchReaderExpressions(t *testing.T) {
 func TestNewSQLStoreReplacesSingleColumnRequestedModelIndex(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
-		err := db.Schema(ctx, `
+		err := createLegacyTables(ctx, db, `
 			CREATE TABLE request_logs (
 				id TEXT PRIMARY KEY,
 				timestamp `+sqlx.TypeTimestamp+` NOT NULL,

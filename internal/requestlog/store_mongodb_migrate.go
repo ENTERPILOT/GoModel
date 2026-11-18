@@ -33,21 +33,26 @@ const (
 //
 // A deployment that cannot rename the collection — a role without the
 // privilege, a sharded collection on an older server — keeps its request log
-// under the legacy name rather than failing to start.
-func requestLogCollection(ctx context.Context, database *mongo.Database) *mongo.Collection {
+// under the legacy name rather than failing to start. When it cannot be told
+// which collection holds the request log, that is an error: guessing could
+// hide every existing entry.
+func requestLogCollection(ctx context.Context, database *mongo.Database) (*mongo.Collection, error) {
 	err := adoptLegacyCollection(ctx, database)
 	if err == nil {
-		return database.Collection(requestLogCollectionName)
+		return database.Collection(requestLogCollectionName), nil
 	}
-	if names, listErr := requestLogCollectionNames(ctx, database); listErr == nil &&
-		slices.Contains(names, legacyCollectionName) && !slices.Contains(names, requestLogCollectionName) {
+	names, listErr := requestLogCollectionNames(ctx, database)
+	if listErr != nil {
+		return nil, fmt.Errorf("failed to move the audit_logs collection to request_logs: %w", err)
+	}
+	if slices.Contains(names, legacyCollectionName) && !slices.Contains(names, requestLogCollectionName) {
 		slog.Warn("requestlog: could not rename the audit_logs collection to request_logs; the request log stays in audit_logs",
 			"error", err)
-		return database.Collection(legacyCollectionName)
+		return database.Collection(legacyCollectionName), nil
 	}
 	slog.Warn("requestlog: could not move the audit_logs collection into request_logs; its entries stay out of the request log until a later start",
 		"error", err)
-	return database.Collection(requestLogCollectionName)
+	return database.Collection(requestLogCollectionName), nil
 }
 
 // adoptLegacyCollection moves a database written by v0.2.5 or older onto the

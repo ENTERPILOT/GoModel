@@ -42,6 +42,13 @@ const (
 // readers: they work without a store when request logging is turned off, and
 // must still find the history an older release wrote.
 func adoptLegacyStorage(ctx context.Context, db sqlx.DB) error {
+	// Checked before taking the lock, which another replica can hold for as
+	// long as an index build runs: on a database with nothing to move, a
+	// reader does not wait for it.
+	legacy, err := relationKind(ctx, db, db.Dialect(), legacyRequestLogTable)
+	if err != nil || legacy != relationTable {
+		return err
+	}
 	return withSchemaLock(ctx, db, func(session sqlx.DB) error { return adoptLegacyTables(ctx, session) })
 }
 
@@ -268,6 +275,66 @@ func absorbLegacyTables(ctx context.Context, q sqlx.Querier, dialect sqlx.Dialec
 		}
 	}
 	return nil
+}
+
+// ensureLegacyViews brings the PostgreSQL views under the legacy names up to
+// date with the request log tables, on a database that has them. It runs after
+// the tables' own migrations: the views adoptLegacyTables created cover the
+// columns the tables had at that moment, and a table created or widened since
+// (a database older than the attempts table, a column this release adds) would
+// leave an older binary looking for a relation or a column it expects.
+func ensureLegacyViews(ctx context.Context, db sqlx.DB) error {
+	if db.Dialect() != sqlx.PostgreSQL {
+		return nil
+	}
+	legacy, err := relationKind(ctx, db, sqlx.PostgreSQL, legacyRequestLogTable)
+	if err != nil || legacy != relationView {
+		return err
+	}
+	current, err := legacyViewsCurrent(ctx, db)
+	if err != nil || current {
+		return err
+	}
+	// One transaction, so an older replica never finds the names missing.
+	err = db.InTx(ctx, func(q sqlx.Querier) error {
+		for _, statement := range []string{
+			"DROP VIEW IF EXISTS " + legacyAttemptsTable,
+			"DROP VIEW IF EXISTS " + legacyRequestLogTable,
+		} {
+			if _, err := q.Exec(ctx, statement); err != nil {
+				return err
+			}
+		}
+		return createLegacyViews(ctx, q)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to refresh the audit_logs views: %w", err)
+	}
+	return nil
+}
+
+// legacyViewsCurrent reports whether each legacy view shows every column of
+// its table.
+func legacyViewsCurrent(ctx context.Context, q sqlx.Querier) (bool, error) {
+	for _, pair := range [][2]string{{legacyRequestLogTable, requestLogTable}, {legacyAttemptsTable, attemptsTable}} {
+		view, err := tableColumns(ctx, q, sqlx.PostgreSQL, pair[0])
+		if err != nil {
+			return false, err
+		}
+		table, err := tableColumns(ctx, q, sqlx.PostgreSQL, pair[1])
+		if err != nil {
+			return false, err
+		}
+		for i, column := range table {
+			if column == attemptsLogID {
+				table[i] = legacyAttemptsLogID
+			}
+		}
+		if !slices.Equal(view, table) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // createLegacyViews exposes the request log tables under their legacy names.

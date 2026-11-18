@@ -144,18 +144,25 @@ func TestAdoptLegacyCollectionStagesUnderAUniqueName(t *testing.T) {
 		_, err := NewMongoDBStore(db, 0)
 		require.NoError(t, err)
 
-		// Another replica has set a batch aside and is still merging it.
-		writeLegacyDocument(t, db, "staged-by-another-replica", 200)
-		other := legacyStagingPrefix + "other"
-		require.NoError(t, renameCollection(ctx, db, legacyCollectionName, other))
-		writeLegacyDocument(t, db, "written-since", 200)
+		// Replica A sets a batch aside and merges it, then stalls before its drop.
+		writeLegacyDocument(t, db, "staged-by-a", 200)
+		stagedByA := db.Collection(legacyStagingPrefix + "a")
+		require.NoError(t, renameCollection(ctx, db, legacyCollectionName, stagedByA.Name()))
+		require.NoError(t, mergeIntoRequestLog(ctx, stagedByA))
 
+		// An older replica writes again, and replica B runs the whole move.
+		writeLegacyDocument(t, db, "written-since", 200)
 		require.NoError(t, adoptLegacyCollection(ctx, db))
-		// That replica's drop arrives late, after this one has moved on.
-		require.NoError(t, absorbStagedCollection(ctx, db, other))
+
+		// The older replica writes once more, then A's drop arrives. It can
+		// only remove A's own collection, not the batch a later move stages.
+		writeLegacyDocument(t, db, "written-last", 200)
+		require.NoError(t, stagedByA.Drop(ctx))
+		require.NoError(t, adoptLegacyCollection(ctx, db))
 
 		assert.Equal(t, []string{requestLogCollectionName}, collectionNames(t, db))
-		require.NotNil(t, mongoEntry(t, db, "staged-by-another-replica"))
-		require.NotNil(t, mongoEntry(t, db, "written-since"))
+		for _, id := range []string{"staged-by-a", "written-since", "written-last"} {
+			require.NotNil(t, mongoEntry(t, db, id), id)
+		}
 	})
 }
