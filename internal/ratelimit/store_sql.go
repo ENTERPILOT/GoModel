@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,6 +52,7 @@ const sqlRateLimitWindowSnapshotsSchema = `
 		tokens_previous ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		in_flight ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL,
+		expires_at ` + sqlx.TypeInt64 + `,
 		own_counts ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE,
 		PRIMARY KEY (scope, subject, partition, period_seconds, writer)
 	)`
@@ -109,6 +111,8 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	}
 	if err := sqlx.AddColumns(ctx, db,
 		`ALTER TABLE rate_limit_window_snapshots ADD COLUMN in_flight `+sqlx.TypeInt64+` NOT NULL DEFAULT 0`,
+		// NULL on rows saved before it existed; see pruneLegacyCountersSQL.
+		`ALTER TABLE rate_limit_window_snapshots ADD COLUMN expires_at `+sqlx.TypeInt64,
 		// Older releases never write it, so their rows read false and are
 		// merged by maximum (see WindowSnapshot.OwnCounts).
 		`ALTER TABLE rate_limit_window_snapshots ADD COLUMN own_counts `+sqlx.TypeBool+` NOT NULL DEFAULT FALSE`,
@@ -117,6 +121,10 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	}
 	// Every replica's flush loads the rows saved since its previous load.
 	if err := db.Schema(ctx, `CREATE INDEX IF NOT EXISTS idx_rate_limit_window_snapshots_updated_at ON rate_limit_window_snapshots(updated_at)`); err != nil {
+		return nil, fmt.Errorf("failed to create rate limit counter index: %w", err)
+	}
+	// Every replica's prune deletes the rows that expired.
+	if err := db.Schema(ctx, `CREATE INDEX IF NOT EXISTS idx_rate_limit_window_snapshots_expires_at ON rate_limit_window_snapshots(expires_at)`); err != nil {
 		return nil, fmt.Errorf("failed to create rate limit counter index: %w", err)
 	}
 	legacy, err := importLegacyCounters(ctx, db)
@@ -211,15 +219,20 @@ func (s *SQLStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 	})
 }
 
-func (s *SQLStore) LoadCounters(ctx context.Context, since int64) ([]WindowSnapshot, error) {
-	rows, err := s.db.Query(ctx, `
+func (s *SQLStore) LoadCounters(ctx context.Context, since int64, exclude string) ([]WindowSnapshot, error) {
+	query := `
 		SELECT scope, subject, partition, period_seconds, writer, epoch,
 			requests_window_start, requests_current, requests_previous,
 			tokens_window_start, tokens_current, tokens_previous,
 			in_flight, updated_at, own_counts
 		FROM rate_limit_window_snapshots
-		WHERE updated_at >= ?
-	`, since)
+		WHERE updated_at >= ?`
+	args := []any{since}
+	if exclude != "" {
+		query += ` AND writer <> ?`
+		args = append(args, exclude)
+	}
+	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list rate limit counters: %w", err)
 	}
@@ -248,12 +261,27 @@ func (s *SQLStore) LoadCounters(ctx context.Context, since int64) ([]WindowSnaps
 	return snapshots, nil
 }
 
-const upsertCounterSQL = `
+// SQLite caps a statement at 999 bind parameters and PostgreSQL at 65535;
+// SaveCounters sizes its multi-row upserts to fit, as usage.SQLStore does.
+const (
+	sqliteMaxBindParameters   = 999
+	postgresMaxBindParameters = 65535
+)
+
+const upsertCounterPrefix = `
 	INSERT INTO rate_limit_window_snapshots (
 		scope, subject, partition, period_seconds, writer, epoch,
 		requests_window_start, requests_current, requests_previous,
-		tokens_window_start, tokens_current, tokens_previous, in_flight, updated_at, own_counts
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		tokens_window_start, tokens_current, tokens_previous, in_flight, updated_at, expires_at,
+		own_counts
+	) VALUES `
+
+// upsertCounterColumnCount is the number of placeholders of one row.
+const upsertCounterColumnCount = 16
+
+var upsertCounterRow = "(" + strings.TrimSuffix(strings.Repeat("?, ", upsertCounterColumnCount), ", ") + ")"
+
+const upsertCounterSuffix = `
 	ON CONFLICT(scope, subject, partition, period_seconds, writer) DO UPDATE SET
 		epoch = excluded.epoch,
 		requests_window_start = excluded.requests_window_start,
@@ -264,38 +292,117 @@ const upsertCounterSQL = `
 		tokens_previous = excluded.tokens_previous,
 		in_flight = excluded.in_flight,
 		updated_at = excluded.updated_at,
+		expires_at = excluded.expires_at,
 		own_counts = excluded.own_counts
 `
 
-func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
-	now := time.Now().Unix()
-	return s.db.InTx(ctx, func(q sqlx.Querier) error {
-		for _, snap := range snapshots {
-			if _, err := q.Exec(ctx, upsertCounterSQL,
-				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds, snap.Writer, snap.Epoch,
-				snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
-				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, snap.InFlight, now, snap.OwnCounts,
-			); err != nil {
-				return fmt.Errorf("upsert rate limit counter: %w", err)
-			}
+// buildCounterUpsert returns one statement that upserts every snapshot,
+// stamped as saved at now. The snapshots must hold each key at most once:
+// PostgreSQL rejects an upsert that touches one row twice.
+func buildCounterUpsert(snapshots []WindowSnapshot, now int64) (string, []any) {
+	var query strings.Builder
+	query.Grow(len(upsertCounterPrefix) + len(upsertCounterSuffix) + len(snapshots)*(len(upsertCounterRow)+2))
+	query.WriteString(upsertCounterPrefix)
+	args := make([]any, 0, len(snapshots)*upsertCounterColumnCount)
+	for i, snap := range snapshots {
+		if i > 0 {
+			query.WriteString(", ")
 		}
-		if _, err := q.Exec(ctx, pruneCountersSQL, PeriodConcurrent, inFlightRowRetention, now); err != nil {
-			return fmt.Errorf("prune expired rate limit counters: %w", err)
-		}
-		return nil
-	})
+		query.WriteString(upsertCounterRow)
+		args = append(args,
+			snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds, snap.Writer, snap.Epoch,
+			snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
+			snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, snap.InFlight,
+			now, now+counterRetention(snap.PeriodSeconds), snap.OwnCounts,
+		)
+	}
+	query.WriteString(upsertCounterSuffix)
+	return query.String(), args
 }
 
-// pruneCountersSQL collects the rows nobody writes any more: a rule that was
+// SaveCounters upserts the snapshots in as few statements as the engine's
+// bind-parameter limit allows, in one transaction when it takes several.
+func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
+	if len(snapshots) == 0 {
+		return nil
+	}
+	now := time.Now().Unix()
+	maxParameters := sqliteMaxBindParameters
+	if s.db.Dialect() == sqlx.PostgreSQL {
+		maxParameters = postgresMaxBindParameters
+	}
+	rowsPerStatement := maxParameters / upsertCounterColumnCount
+	save := func(q sqlx.Querier) error {
+		for chunk := range slices.Chunk(snapshots, rowsPerStatement) {
+			query, args := buildCounterUpsert(chunk, now)
+			if _, err := q.Exec(ctx, query, args...); err != nil {
+				return fmt.Errorf("upsert %d rate limit counters: %w", len(snapshots), err)
+			}
+		}
+		return nil
+	}
+	if len(snapshots) <= rowsPerStatement {
+		return save(s.db)
+	}
+	return s.db.InTx(ctx, save)
+}
+
+// expiredCountersSQL matches the rows nobody writes any more: a rule that was
 // deleted, a window that went unchanged, or a writer that stopped — every
-// restart leaves its predecessor's rows behind. A window row is saved
-// whenever it counts something, so two periods without a write means every
-// count it holds has rolled out, the same bound a load drops it on. An
-// in-flight row has no window: it is kept for inFlightRowRetention.
-const pruneCountersSQL = `
-	DELETE FROM rate_limit_window_snapshots
-	WHERE updated_at + CASE WHEN period_seconds = ? THEN ? ELSE 2 * period_seconds END < ?
-`
+// restart leaves its predecessor's rows behind. Every save stamps expires_at
+// (see counterRetention), so this is a range scan of
+// idx_rate_limit_window_snapshots_expires_at; rows without one are left to
+// legacyExpiredCountersSQL.
+const expiredCountersSQL = `expires_at < ?`
+
+// legacyExpiredCountersSQL matches, on the same bounds, the rows without an
+// expires_at: those saved before it existed, imported from the legacy table,
+// or written by an older replica during a rolling upgrade. The index finds
+// them by the NULL, so once a cluster is upgraded it reads nothing.
+const legacyExpiredCountersSQL = `expires_at IS NULL
+	AND updated_at + CASE WHEN period_seconds = ? THEN ? ELSE 2 * period_seconds END < ?`
+
+const (
+	pruneCountersSQL       = `DELETE FROM rate_limit_window_snapshots WHERE ` + expiredCountersSQL
+	pruneLegacyCountersSQL = `DELETE FROM rate_limit_window_snapshots WHERE ` + legacyExpiredCountersSQL
+)
+
+// On PostgreSQL the prunes pass over the rows another session has locked
+// instead of waiting for them. A window that sat idle for two periods has
+// expired, and is also the row its writer saves again when traffic returns:
+// a delete that waits for a row of that save, while the save waits for a row
+// the delete already took, is a deadlock, and PostgreSQL aborts one of the
+// two. A row passed over is collected by a later prune if it is still expired.
+// The array keeps the delete a lookup by row address; ctid IN (SELECT ...)
+// can be planned as a join against a scan of the whole table.
+const (
+	pruneCountersPostgreSQL       = pruneSkipLockedPrefix + expiredCountersSQL + pruneSkipLockedSuffix
+	pruneLegacyCountersPostgreSQL = pruneSkipLockedPrefix + legacyExpiredCountersSQL + pruneSkipLockedSuffix
+
+	pruneSkipLockedPrefix = `
+		DELETE FROM rate_limit_window_snapshots
+		WHERE ctid = ANY(ARRAY(
+			SELECT ctid FROM rate_limit_window_snapshots
+			WHERE `
+	pruneSkipLockedSuffix = `
+			FOR UPDATE SKIP LOCKED
+		))`
+)
+
+func (s *SQLStore) PruneCounters(ctx context.Context) error {
+	now := time.Now().Unix()
+	expired, legacy := pruneCountersSQL, pruneLegacyCountersSQL
+	if s.db.Dialect() == sqlx.PostgreSQL {
+		expired, legacy = pruneCountersPostgreSQL, pruneLegacyCountersPostgreSQL
+	}
+	if _, err := s.db.Exec(ctx, expired, now); err != nil {
+		return fmt.Errorf("prune expired rate limit counters: %w", err)
+	}
+	if _, err := s.db.Exec(ctx, legacy, PeriodConcurrent, inFlightRowRetention, now); err != nil {
+		return fmt.Errorf("prune expired legacy rate limit counters: %w", err)
+	}
+	return nil
+}
 
 // ResetCounter draws a new counter epoch for the rule and removes every
 // writer's window rows for it in one transaction, so no replica's row,
