@@ -109,7 +109,7 @@ func assertMultiFilterReads(t *testing.T, store usageBatchWriter, reader UsageRe
 				for _, entry := range log.Entries {
 					logTokens += int64(entry.TotalTokens)
 				}
-				assert.Equal(t, tt.wantTokens, logTokens, "request log follows the same filters")
+				assert.Equal(t, tt.wantTokens, logTokens, "usage log follows the same filters")
 			})
 		}
 	})

@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 type authKeyTestStore struct {
@@ -48,6 +48,17 @@ func (s *authKeyTestStore) UpdateImported(_ context.Context, key authkeys.AuthKe
 		return authkeys.ErrNotFound
 	}
 	s.keys[key.ID] = key
+	return nil
+}
+
+func (s *authKeyTestStore) UpdateName(_ context.Context, id, name string, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return authkeys.ErrNotFound
+	}
+	key.Name = name
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
 	return nil
 }
 
@@ -122,8 +133,8 @@ func newAuthKeyHandler(t *testing.T, store authkeys.Store) *Handler {
 	return NewHandler(nil, nil, WithAuthKeys(service))
 }
 
-// newAuthKeyHandlerWithReader adds an audit reader, as initAdmin wires it.
-func newAuthKeyHandlerWithReader(t *testing.T, store authkeys.Store, reader auditlog.Reader) *Handler {
+// newAuthKeyHandlerWithReader adds a request log reader, as initAdmin wires it.
+func newAuthKeyHandlerWithReader(t *testing.T, store authkeys.Store, reader requestlog.Reader) *Handler {
 	t.Helper()
 	service, err := authkeys.NewService(store)
 	require.NoError(t, err)
@@ -132,7 +143,7 @@ func newAuthKeyHandlerWithReader(t *testing.T, store authkeys.Store, reader audi
 
 	return NewHandler(nil, nil,
 		WithAuthKeys(service),
-		WithAuditReader(reader),
+		WithRequestLogReader(reader),
 	)
 }
 
@@ -153,6 +164,10 @@ func TestAuthKeyEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 
 	c, rec = echotest.Request(t, http.MethodPut, "/admin/auth-keys/test-key/labels", `{"labels":["a"]}`, echotest.WithPathValue("id", "test-key"))
 	require.NoError(t, h.UpdateAuthKeyLabels(c))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/auth-keys/test-key/name", `{"name":"a"}`, echotest.WithPathValue("id", "test-key"))
+	require.NoError(t, h.UpdateAuthKeyName(c))
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
 
@@ -266,6 +281,40 @@ func TestUpdateAuthKeyLabels(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
+func TestUpdateAuthKeyName(t *testing.T) {
+	h := newAuthKeyHandler(t, newAuthKeyTestStore())
+	issued := createAuthKey(t, h, `{"name":"ci-deploy"}`)
+	other := createAuthKey(t, h, `{"name":"other"}`)
+
+	tests := []struct {
+		name       string
+		id         string
+		body       string
+		wantStatus int
+		wantName   string
+	}{
+		{name: "renames and trims", id: issued.ID, body: `{"name":"  ci-deploy-old  "}`, wantStatus: http.StatusOK, wantName: "ci-deploy-old"},
+		{name: "duplicate name is allowed", id: issued.ID, body: `{"name":"other"}`, wantStatus: http.StatusOK, wantName: "other"},
+		{name: "empty name", id: issued.ID, body: `{"name":"   "}`, wantStatus: http.StatusBadRequest},
+		{name: "missing name", id: issued.ID, body: `{}`, wantStatus: http.StatusBadRequest},
+		{name: "unknown id", id: "missing-id", body: `{"name":"x"}`, wantStatus: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/auth-keys/"+tt.id+"/name", tt.body, echotest.WithPathValue("id", tt.id))
+			require.NoError(t, h.UpdateAuthKeyName(c))
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			if tt.wantName != "" {
+				assert.Equal(t, tt.wantName, echotest.Decode[authkeys.View](t, rec).Name)
+			}
+		})
+	}
+
+	view, err := h.authKeys.View(other.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "other", view.Name, "renaming one key leaves the other untouched")
+}
+
 func TestCreateAuthKeyRejectsInvalidUserPath(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
 	c, rec := echotest.Post(t, "/admin/auth-keys", `{"name":"primary","user_path":"/team/../alpha"}`)
@@ -275,7 +324,7 @@ func TestCreateAuthKeyRejectsInvalidUserPath(t *testing.T) {
 
 func TestListAuthKeysIncludesLastUsed(t *testing.T) {
 	usedAt := time.Date(2026, 1, 16, 12, 30, 0, 0, time.UTC)
-	reader := &mockAuditReader{}
+	reader := &mockRequestLogReader{}
 	h := newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader)
 	usedKey := createAuthKey(t, h, `{"name":"used"}`)
 	unusedKey := createAuthKey(t, h, `{"name":"unused"}`)
@@ -302,7 +351,7 @@ func TestListAuthKeysIncludesLastUsed(t *testing.T) {
 }
 
 func TestListAuthKeysWorksWithoutLastUsedData(t *testing.T) {
-	// Without an audit reader the list still answers, with no last-used data.
+	// Without a request log reader the list still answers, with no last-used data.
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
 	createAuthKey(t, h, `{"name":"any"}`)
 	c, rec := echotest.Get(t, "/admin/auth-keys")
@@ -316,7 +365,7 @@ func TestListAuthKeysWorksWithoutLastUsedData(t *testing.T) {
 	assert.False(t, ok)
 
 	// A failing reader degrades the same way.
-	reader := &mockAuditReader{lastUsedErr: errors.New("audit reader down")}
+	reader := &mockRequestLogReader{lastUsedErr: errors.New("request log reader down")}
 	h = newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader)
 	createAuthKey(t, h, `{"name":"any"}`)
 	c, rec = echotest.Get(t, "/admin/auth-keys")
@@ -351,6 +400,7 @@ func TestAuthKeyCannotUpdateItself(t *testing.T) {
 		body    string
 		handler func(*echo.Context) error
 	}{
+		{name: "name", path: "name", body: `{"name":"renamed"}`, handler: h.UpdateAuthKeyName},
 		{name: "labels", path: "labels", body: `{"labels":[]}`, handler: h.UpdateAuthKeyLabels},
 		{name: "allowed models", path: "allowed-models", body: `{"allowed_models":["openai/gpt-4o-mini"]}`, handler: h.UpdateAuthKeyAllowedModels},
 		{name: "dashboard access", path: "dashboard-access", body: `{"dashboard_access":true}`, handler: h.UpdateAuthKeyDashboardAccess},

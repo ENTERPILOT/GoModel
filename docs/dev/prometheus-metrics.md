@@ -168,6 +168,193 @@ and failover both return empty increments the counter twice.
 
 Labels: `provider`, `model`, `reason`.
 
+## Token and Cost Metrics
+
+These do not come from the llmclient hooks: a hook sees the provider call, not
+the decoded usage. They come from the usage pipeline instead.
+
+```text
+internal/app/usage_metrics.go (wrapUsageLoggerForMetrics)
+  └─ if cfg.Metrics.Enabled or OpenTelemetry is on:
+       usage logger = usagemetrics.NewTap(logger, callers, recorders...)
+
+internal/usagemetrics
+  └─ Tap.Write(entry)        every finalized usage entry, streaming or not
+       newSample(entry)      tokens and cost, read once
+       Callers.Resolve(...)  opt-in caller dimensions, bounded
+       Recorder.RecordUsage  one call per enabled pipeline
+
+internal/observability/usage.go   UsageRecorder → gomodel_* counters
+internal/telemetry/usage.go       usageRecorder → gen_ai.* / gomodel.* instruments
+```
+
+The tap is the innermost usage-logger decorator: the billable and markup taps
+wrap it, so an entry arrives with its billed cost set. It does no I/O and is
+not installed when both pipelines are off. Entries exist only while usage
+tracking is on (`USAGE_ENABLED`), so the metrics need it too.
+
+### `gomodel_tokens_total`
+
+Counter. Tokens processed by providers.
+
+Labels: `provider`, `model`, `token_type` (`input`, `output`), `user_path`,
+`auth_key`, `request_labels`.
+
+`input` is the whole prompt (uncached + provider-cached + cache-write, from
+`usage.EntryInputSegments`, the split the dashboard uses) and `output`
+includes reasoning. Two recorded providers report reasoning on top of their
+output:
+
+- Gemini's native API reports `thoughtsTokenCount` beside
+  `candidatesTokenCount` (recorded: 11 + 4 + 21 = 36). Its adapter adds the
+  two, so the usage entry already holds the complete output (11 + 25 = 36).
+- xAI's chat completions report it on top of `completion_tokens`; xAI's
+  Responses API counts it inside `output_tokens`. Both store the count under
+  the same name, so `usage.EntryReasoningTokens` reads the usage object:
+  reasoning is on top when `total_tokens` has room for it beside input and
+  output (recorded: chat 10 + 35 + 375 = 420, Responses 17 + 276 = 293). An
+  xAI entry without such a total is read as containing its reasoning, which
+  can undercount but never counts a token twice.
+
+Every other usage entry is read as containing its reasoning (recorded: OpenAI
+43 + 148 = 191, MiniMax 769 + 116 = 885, Anthropic without a total). The total
+decides for xAI alone: another provider's total may count tokens that are
+neither input nor output, and room for them is not reasoning left out.
+Gemini's OpenAI-compatible mode (`api_mode: openai_compatible`) has no
+recorded response with reasoning tokens, so its usage is read as reported;
+record one before changing that. The cost calculation applies the same rule,
+when an entry is written and when its pricing is recalculated.
+
+### `gomodel_token_details_total`
+
+Counter. Parts of `gomodel_tokens_total`; a separate metric so that no sum
+over one metric counts a token twice.
+
+Labels: as above, with `token_type` one of `input_cached`,
+`input_cache_write`, `output_reasoning`.
+
+### `gomodel_provider_cost_usd_total`, `gomodel_billed_cost_usd_total`
+
+Counters, in USD. Provider cost is the entry's `TotalCost`; billed cost is
+its `BilledCost` (set by the markup tap, so absent while markups are off).
+Two metrics for the same reason as the token details.
+
+Labels: `provider`, `model`, `user_path`, `auth_key`, `request_labels`.
+
+### `gomodel_caller_requests_total`
+
+Counter. Provider calls by caller, recorded by the `OnRequestEnd` hook only
+while a caller dimension is enabled.
+
+Labels: `provider`, `model`, `status_type`, `user_path`, `auth_key`,
+`request_labels`.
+
+### What an entry adds
+
+| Entry | Tokens | Provider cost | Billed cost |
+| --- | --- | --- | --- |
+| Provider call | yes | when priced | when markups are on |
+| Response-cache hit | no | no | when cache hits are billed |
+| MCP tool call | none recorded | none recorded | none recorded |
+
+This matches the invoice export: tokens and provider cost cover requests sent
+to providers, billed cost also covers billed cache hits. Zero values are
+skipped, so a series appears with its first non-zero value.
+
+### Caller dimensions and cardinality
+
+`user_path`, `auth_key`, and `request_labels` are opt-in
+(`metrics.caller_dimensions`) and shared by both pipelines. A dimension that
+is off is an empty label in Prometheus and a missing attribute in
+OpenTelemetry.
+
+- The user path is cut to `user_path_depth` segments; a request without one
+  is `/`.
+- `auth_key` is the key's name, looked up from the in-memory key snapshot; an
+  unknown key ID is `{unknown}`. The ID and the secret are never exported.
+- `request_labels` is the sorted, comma-joined label set. One series per set
+  keeps sums exact; one series per label would count a multi-label request
+  once per label. A comma inside a label is written `%2C` and a percent sign
+  `%25` (`usagemetrics.joinLabels`), so a comma always separates two labels
+  and `["a,b"]` (`a%2Cb`) never shares a series with `["a", "b"]` (`a,b`).
+- Each dimension admits `max_values` distinct values and reports the rest as
+  `{other}` (`/{other}` for user paths). The admitted sets are process-wide
+  (`usagemetrics.admitted`), because Prometheus series outlive a reload.
+- A value over `usagemetrics.MaxValueBytes` (256), or spelled like a reserved
+  name (`{other}`, `/{other}`, `{unknown}`, `/{unknown}`), is the dimension's
+  overflow value (`{other}`, or `/{other}` for user paths) and takes no slot,
+  so neither long values nor spoofed bucket names can exhaust or forge the
+  cap. `{unknown}` itself takes no slot either.
+- A value that is not valid UTF-8 is the overflow value too, without a slot.
+  Caller values come from raw request headers; Prometheus panics on such a
+  label value and OTLP fails the whole export. Provider and model names are
+  cleaned in `usagemetrics.newSample` for the same reason (invalid bytes
+  become U+FFFD).
+- The resolver of `gomodel_caller_requests_total` is process-wide too; the app
+  installs it in `initServer`, after every fallible phase, so a rejected
+  reload leaves the serving generation's resolver in place. A reload without
+  Prometheus metrics or caller dimensions installs none.
+
+Caller labels are deliberately kept off `gomodel_requests_total`,
+`gomodel_request_duration_seconds` (one series per bucket), and
+`gomodel_requests_in_flight`. `gomodel_caller_requests_total` carries them
+instead, without `endpoint`, `status_code`, and `stream`. None of the new
+metrics has an `endpoint` label: usage entries of passthrough calls carry
+caller-chosen paths.
+
+### Batch usage
+
+Batch usage is written when results are fetched, once per batch: storage
+would drop entries written twice, because their IDs are derived from the
+batch, but the metrics would count them again.
+
+- A fetch takes the batch's claim (`batch.Store.ClaimUsage`), hands every
+  entry to the usage logger, and only then marks the usage as logged
+  (`CompleteUsage`). A marker saved before the entries would lose them for
+  good if the process stopped in between.
+- A fetch that finds the claim held waits. It returns when the usage is
+  logged, or takes the claim over once it is 30 seconds old
+  (`batchUsageClaimTimeout`), which means its holder stopped, and writes every
+  entry itself. A fetch therefore returns results only after the batch's
+  usage was handed to a logger.
+- The claim and the marker live beside the serialized batch
+  (`usage_claimed_at`, `usage_logged_at`). `Store.Update` never touches the
+  claim and never clears the marker, so a status poll or a cancel that saves
+  a copy it read earlier cannot undo either. It sets the marker when the
+  batch it saves carries one, which is how the update that follows a failed
+  `CompleteUsage` saves it.
+
+Storage stays exactly-once by ID. Entries written without their marker being
+saved are written again by a later fetch:
+
+- A holder stops, or stalls for longer than the timeout, after handing some
+  entries to its logger. The takeover writes all of them again.
+- The store fails while marking the usage as logged, or does not answer
+  within 5 seconds (`batchUsageCompleteTimeout`), and fails again on the
+  update that follows. The fetch returns its results all the same. The claim
+  stays held, and the next fetch after the claim timeout writes every entry
+  again.
+- The store fails while claiming. The entries are written unguarded, by every
+  such fetch. Losing billable usage is worse than counting it twice in a
+  metric.
+
+The metrics count once what one process writes twice. A process remembers the
+batches it wrote in full without saving their marker (`batchUsageHandoffs`,
+1024 at most, until it restarts or reloads its configuration) and marks their
+entries as repeated when it writes them again (`UsageEntry.Repeated`), which
+`usagemetrics.Tap` skips. The metrics count twice what the first writer had
+already exported when the second one is another replica, or the same one
+after a restart or reload, and whatever a holder that stopped or stalled
+partway had exported.
+
+The marker is set when the entries are handed to the logger, not when they
+are flushed: a process that stops with entries still in the logger's buffer
+loses them, as it loses those of any other request.
+
+The OpenTelemetry token metrics take `gen_ai.operation.name` from the
+provider call (`core.GenAIOperation`, set by the telemetry hook and copied to
+`UsageEntry.Operation`), so they match `gen_ai.client.operation.duration`.
+
 ## Helpers in `client.go`
 
 - `extractModel(body any) string` — pulls `Model` from `*core.ChatRequest` or
@@ -185,6 +372,10 @@ go test ./internal/observability/...
 
 They cover hook registration, success/error labelling, network errors,
 streaming, in-flight counting, and duration recording.
+
+Token and cost metrics are tested in `internal/usagemetrics` (samples, caller
+dimensions, the value cap), `internal/observability/usage_test.go`, and
+`internal/telemetry/usage_test.go`.
 
 For end-to-end verification:
 
@@ -218,7 +409,5 @@ not implemented yet — add it when there is a second backend, not before.
 
 Not committed; listed so contributors don't redesign the same things:
 
-- Token usage labels on duration / counter (requires plumbing usage from the
-  response into `ResponseInfo`).
 - Cache hit/miss counters for the response and model caches.
 - Request/response payload size histograms.

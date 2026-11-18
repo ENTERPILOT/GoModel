@@ -318,7 +318,7 @@ Vorverarbeitungsschritt wirkt.
 | `prompt` | Nein | eingebauter Anonymisierungs-Prompt | Eigene Anweisungen für die Umformulierung. |
 
 Umformulierungen laufen prozessintern über den normalen übersetzten
-Request-Pfad, sodass Workflow-Auswahl, Failover, Nutzungserfassung, Audit und
+Request-Pfad, sodass Workflow-Auswahl, Failover, Nutzungserfassung, Request-Logging und
 Cache-Verhalten weiterhin gelten. Der interne Request verwendet:
 
 - Pfad: `/v1/chat/completions`
@@ -363,7 +363,7 @@ nicht erkannt.
 | `case_insensitive` | Nein | `false` | Ohne Berücksichtigung der Groß-/Kleinschreibung suchen. |
 | `roles` | Nein | `["user"]` | Prompt-Nachrichten, für die die Regeln gelten: `system` (einschließlich Developer), `user`, `assistant`, `tool`. In der Response-Phase ist immer der Assistant-Text das Ziel. |
 | `on_match` | Nein | `replace` | `replace` ersetzt; `block` lehnt mit einem Fehler ab; `respond` antwortet mit `message` als Assistant-Antwort; `warn` fährt fort und erfasst den Treffer. Nur `replace` bearbeitet den Text. |
-| `message` | Nein | `Request blocked by policy` für `block` und `respond`, keiner für `warn` | Fehlermeldung für `block`, Assistant-Antwort für `respond`, Audit-Notiz für `warn`. Ein `warn` erfasst nur dann eine Notiz, wenn Sie eine festlegen, damit das Ergebnis im Dashboard nicht als Block gekennzeichnet wird. |
+| `message` | Nein | `Request blocked by policy` für `block` und `respond`, keiner für `warn` | Fehlermeldung für `block`, Assistant-Antwort für `respond`, Notiz im Request-Log für `warn`. Ein `warn` erfasst nur dann eine Notiz, wenn Sie eine festlegen, damit das Ergebnis im Dashboard nicht als Block gekennzeichnet wird. |
 | `block_status` | Nein | Standard der Phase | Ein HTTP-Statuscode zwischen 400 und 599 für `block`, zum Beispiel `403`. Leer bedeutet 400, wenn der Prompt blockiert wird, und 502, wenn die Response blockiert wird. |
 | `stream_lookbehind` | Nein | `64` | Anzahl der Zeichen gestreamten Texts, die zurückgehalten werden, damit ein Treffer, der sich über zwei Chunks erstreckt, trotzdem umgeschrieben wird; setzen Sie den Wert mindestens auf die Länge des längsten Suchtexts. Ein Treffer am Ende des bisher gestreamten Texts wird zurückgehalten, bis er nicht mehr wächst, sodass ein offenes Muster wie `sk-[A-Za-z0-9_-]{20,}` den gesamten Wert maskiert, sofern er höchstens so lang ist – bei einem längeren Wert bleibt der Teil jenseits des Lookbehinds stehen, setzen Sie den Wert daher über das längste erwartete Secret. Wird von `replace` und `warn` verwendet. |
 
@@ -550,14 +550,14 @@ ist entweder ein Chat-Modell oder ein Decision-Modell:
 | --- | -------- | ------- | ----------- |
 | `model` | Ja | | Judge-Modell: `provider/model`, ein Alias oder ein virtuelles Modell; ein Chat-Modell oder ein Decision-Modell. Seine Nutzung wird mit dem Ursprung `plugin` erfasst. |
 | `engine` | Nein | `auto` | Wie der Judge befragt wird: `chat`, `decision` oder `auto`, das `decision` für ein Modell verwendet, das ausschließlich Decisions beantwortet (jedes `jev`-Modell, die Decision-Modelle von OpenRouter oder ein virtuelles Modell, dessen Ziele alle solche Modelle sind), und andernfalls `chat`. |
-| `user_path` | Nein | Pfad des aktuellen Requests | User Path, auf den der Judge-Aufruf für Budgets und Audit eingegrenzt wird. |
+| `user_path` | Nein | Pfad des aktuellen Requests | User Path, auf den der Judge-Aufruf für Budgets und Request-Log eingegrenzt wird. |
 | `prompt` | Nein | eingebaute Richtlinie | Chat-Engine: System-Prompt für den Judge. |
 | `decision_question` | Nein | eingebaute Richtlinie | Decision-Engine: die Ja-oder-Nein-Frage, die zum Inhalt gestellt wird. Ja bedeutet, dass er gegen die Richtlinie verstößt. |
 | `block_threshold` | Nein | `0.5` | Decision-Engine: Wahrscheinlichkeit für Ja, von 0 bis 1, ab der (einschließlich) der Inhalt als Block-Urteil gilt. |
 | `judge_images` | Nein | `false` | Decision-Engine: auch die Bilder der beurteilten Nachrichten senden. |
 | `target` | Nein | `auto` | Was der Judge in der Prompt-Phase sieht: `auto` oder `last_user` (letzte User-Nachricht), `all_user`, `conversation`. In der Response-Phase sieht er immer den Assistant-Text. |
 | `action` | Nein | `block` | Bei einem Block-Urteil: `block` lehnt ab, `respond` antwortet mit `respond_text`, `warn` fährt fort und erfasst das Urteil. |
-| `message` | Nein | `This request was blocked by policy` | Fehlermeldung für `block`, Audit-Notiz für `warn`. |
+| `message` | Nein | `This request was blocked by policy` | Fehlermeldung für `block`, Notiz im Request-Log für `warn`. |
 | `block_status` | Nein | Standard der Phase | Ein HTTP-Statuscode zwischen 400 und 599 für `block`, zum Beispiel `403`. Leer bedeutet 400, wenn der Prompt blockiert wird, und 502, wenn die Response blockiert wird. |
 | `respond_text` | Nein | `I can't help with that request.` | Assistant-Antwort für `respond`. |
 | `on_unclear` | Nein | `warn` | Wenn die Antwort des Judges nicht geparst werden kann, durch `max_tokens` abgeschnitten wurde oder vollständig für Reasoning verbraucht wurde: `allow`, `warn` oder `block` (wendet `action` an). Als Urteil zählt nur ein JSON-Objekt oder ein alleinstehendes `allow` oder `block`, nie ein Wort innerhalb eines Satzes. |
@@ -578,7 +578,7 @@ Wahrscheinlichkeit größer oder gleich `block_threshold` ist ein Block-Urteil, 
 `action` greift. Eine niedrigere Wahrscheinlichkeit lässt den Inhalt zu. Der Aufruf
 durchläuft dasselbe Routing wie [`POST /v1/decisions`](/de/advanced/decisions-api):
 virtuelle Modelle, Failover auf Ziele, die Decisions bedienen, den exakten
-Response-Cache, Nutzung und Audit, unter dem User Path der Instanz.
+Response-Cache, Nutzung und Request-Logging, unter dem User Path der Instanz.
 
 Jedes Urteil erfasst die Wahrscheinlichkeit im Decision-Detail (`probability`),
 und die Instanz meldet sie als Histogramm
@@ -681,14 +681,14 @@ docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
 | `restore_roles` | Nein | `["user", "assistant", "tool"]` | Prompt-Rollen, deren Werte wieder eingesetzt werden. Wird von der Instanz berücksichtigt (Prompt- oder Response-Phase), die es setzt; ist es bei beiden gesetzt, muss eine Rolle in beiden Listen stehen. |
 | `restore_tools` | Nein | alle | Tools (Funktionsnamen), deren Aufrufargumente die Werte zurückerhalten. Die übrigen behalten die Platzhalter. |
 | `restore_tools_exclude` | Nein | | Tools, deren Aufrufargumente die Platzhalter behalten, selbst wenn `restore_tools` sie auswählt. |
-| `message` | Nein | `Request blocked: it contains personal data` | Fehlermeldung für `block`, Assistant-Antwort für `respond`, Audit-Notiz für `warn`. |
+| `message` | Nein | `Request blocked: it contains personal data` | Fehlermeldung für `block`, Assistant-Antwort für `respond`, Notiz im Request-Log für `warn`. |
 | `block_status` | Nein | Standard der Phase | Ein HTTP-Statuscode zwischen 400 und 599 für `block`. Leer bedeutet 400, wenn der Prompt blockiert wird, und 502, wenn die Response blockiert wird. |
 | `stream_chunk` | Nein | `256` | Anzahl der Zeichen gestreamten Texts (oder Tool-Call-Argumente), die gesammelt werden, bevor der Analyzer darauf läuft, damit er ganze Sätze sieht und einmal pro Chunk läuft. Der Client wartet jeweils höchstens auf diese Textmenge. |
 | `stream_lookbehind` | Nein | `64` | Anzahl der Zeichen gestreamten Texts (oder Tool-Call-Argumente), die zurückgehalten werden, damit ein Wert oder Platzhalter, der über zwei Chunks verteilt ist, trotzdem verarbeitet wird. Höchstens 4096. |
 
 Jeder Text-Part wird einzeln analysiert (je ein Analyzer-Aufruf, bis zu acht
 gleichzeitig), sodass der Analyzer nie die gesamte Unterhaltung als einen Text
-sieht und seine eigenen Limits pro Part gelten. Das Audit-Detail erfasst
+sieht und seine eigenen Limits pro Part gelten. Das Detail im Request-Log erfasst
 Entitätstypen und Anzahlen, nie die Werte, und Fehlermeldungen des Analyzers
 enthalten nie den übergebenen Text. Der Analyzer erhält den Text im Klartext.
 Betreiben Sie ihn daher als Sidecar auf demselben Host oder erreichen Sie ihn
@@ -696,13 +696,13 @@ Betreiben Sie ihn daher als Sidecar auf demselben Host oder erreichen Sie ihn
 
 <Warning>
   Die Anonymisierung verbirgt die Werte vor dem Provider, nicht vor Ihrem
-  Audit-Log. `LOGGING_LOG_BODIES` ist standardmäßig `true`, und die
+  Request-Log. `LOGGING_LOG_BODIES` ist standardmäßig `true`, und die
   gespeicherten `request_body` und `response_body` sind die, die der Client
   gesendet und empfangen hat, mit den personenbezogenen Daten im Klartext –
   anonymisiert ist nur der umgeschriebene Body unter `request_revisions`.
   Setzen Sie
-  [`LOGGING_LOG_BODIES=false`](/de/advanced/configuration#audit-logging), wenn
-  der Audit-Speicher keine personenbezogenen Daten enthalten darf.
+  [`LOGGING_LOG_BODIES=false`](/de/advanced/configuration#request-logging), wenn
+  der Request-Log-Speicher keine personenbezogenen Daten enthalten darf.
   `LOGGING_LOG_REVISION_BODIES=false` verwirft nur die anonymisierten Kopien;
   die Original-Bodys werden weiterhin gespeichert.
 </Warning>
@@ -1024,7 +1024,7 @@ request-spezifische Daten wieder einsetzt, wird überhaupt nicht gecacht (siehe
 `restore` unter [`presidio`](/de/advanced/guardrails#presidio)).
 
 Da die Response-Kette bei einem Cache-Treffer nicht läuft, erfasst der
-Audit-Eintrag für einen Treffer nur die Ergebnisse der Prompt-Phase sowie den
+Request-Log-Eintrag für einen Treffer nur die Ergebnisse der Prompt-Phase sowie den
 Cache-Typ.
 
 ## Entscheidungen, Fehler und Ablehnung
@@ -1033,20 +1033,20 @@ Cache-Typ.
 | --- | --- |
 | **block** | Einen Fehler im nativen Format des Endpunkts: HTTP 400 (Prompt-Phase) oder 502 (Response- und Stream-Phase), sofern der Guardrail kein `block_status` setzt; Code `guardrail_blocked`, sofern das Plugin keinen eigenen setzt. |
 | **respond** | Eine gewöhnliche Assistant-Antwort mit HTTP 200 (bei streamenden Requests ein Stream mit einem Turn). |
-| **warn** | Die unveränderte Response plus einen Header `X-GoModel-Guardrail: warn; code=<code>`; das Detail wird im Audit-Trail gespeichert. Bei einem Stream wird der Header nur gesendet, wenn die Warnung entschieden wurde, bevor die ersten Bytes hinausgingen (gepufferte Response); spätere Warnungen erscheinen nur im Audit. |
-| **Guardrail-Fehler** (`fail_mode: closed`) | HTTP 500 mit dem Code `plugin_failure`. Der Name des Guardrails steht in den Logs und im Audit-Datensatz, nicht in der Client-Nachricht. |
+| **warn** | Die unveränderte Response plus einen Header `X-GoModel-Guardrail: warn; code=<code>`; das Detail wird im Request-Log gespeichert. Bei einem Stream wird der Header nur gesendet, wenn die Warnung entschieden wurde, bevor die ersten Bytes hinausgingen (gepufferte Response); spätere Warnungen erscheinen nur im Request-Log. |
+| **Guardrail-Fehler** (`fail_mode: closed`) | HTTP 500 mit dem Code `plugin_failure`. Der Name des Guardrails steht in den Logs und im Request-Log-Eintrag, nicht in der Client-Nachricht. |
 
 Ein blockierter Request erreicht nie den Provider; eine blockierte Response
 erreicht nie den Client. Unter [Plugins](/de/advanced/plugins#entscheidungen)
 erfahren Sie, wie Entscheidungen zusammengeführt werden, wenn mehrere Guardrails
 mit demselben `order`-Wert laufen.
 
-Jedes Ergebnis, auch ein stilles Zulassen, wird im Audit-Eintrag des Requests
+Jedes Ergebnis, auch ein stilles Zulassen, wird im Request-Log-Eintrag des Requests
 unter `data.guardrails` erfasst – mit Phase, Step, Entscheidung, der Angabe, ob
 der Guardrail den Request oder die Response bearbeitet hat, und wie er
 fehlgeschlagen ist. Das Dashboard färbt die Guardrail-Steps im Workflow-Diagramm
-eines Audit-Eintrags danach ein: grün, wenn der Step bestanden oder bearbeitet
+eines Request-Log-Eintrags danach ein: grün, wenn der Step bestanden oder bearbeitet
 hat; gelb bei einer Warnung oder einem Fail-open-Fehler; rot bei einem
 Blockieren, einer Antwort oder einem Fail-closed-Fehler; abgedunkelt, wenn der
 Step nie gelaufen ist. Die Felder finden Sie unter
-[Plugins](/de/advanced/plugins#audit-trail).
+[Plugins](/de/advanced/plugins#request-log).

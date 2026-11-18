@@ -77,13 +77,13 @@ Jeder Hook gibt eine `pluginapi.Decision` zurück:
 | `allow` | mit den bereits am Exchange vorgenommenen Änderungen fortfahren | Nullwert von `Decision` |
 | `block` | mit `Status`, `Code` und `Message` im nativen Fehlerformat des Endpunkts ablehnen | `Status` 400 in der Phase `prompt`, 502 in den Phasen `response` und `stream`; `Code` `guardrail_blocked` |
 | `respond` | den Request mit `Response` als gewöhnlichen Assistant-Turn beantworten, HTTP 200 (ein synthetisierter Stream mit einem Turn bei Streaming-Requests); in den Phasen `response` und `stream` bleibt die `usage` des Providers in der Antwort erhalten, da die Inferenz bereits ausgeführt wurde | `pluginapi.Respond(text)` erzeugt eine Completion mit einer Choice |
-| `warn` | fortfahren; `Code`, `Message` und `Detail` im Audit-Trail festhalten und `X-GoModel-Guardrail: warn; code=<code>` zur Client-Response hinzufügen | `Code` `guardrail_warning` |
+| `warn` | fortfahren; `Code`, `Message` und `Detail` im Request-Log festhalten und `X-GoModel-Guardrail: warn; code=<code>` zur Client-Response hinzufügen | `Code` `guardrail_warning` |
 
 `respond` ist das „Blockieren mit einer sicheren Nachricht“, das die meisten Guardrail-Produkte
 anbieten: Agent-Schleifen laufen weiter, statt einen 4xx-Fehler auszulösen. Verwenden Sie `block`,
 wenn der Aufrufer einen Fehler sehen soll.
 
-`Detail` wird im Audit-Eintrag gespeichert und darf keine Secrets enthalten.
+`Detail` wird im Request-Log-Eintrag gespeichert und darf keine Secrets enthalten.
 
 `NoStore` bei einer beliebigen Entscheidung hält die Response aus dem
 [Response-Cache](/de/features/cache) heraus, sowohl exakt als auch semantisch, sodass der nächste
@@ -95,10 +95,10 @@ würde diesen Text an jeden weitergeben, der als Nächstes einen passenden Promp
 jeder Phase und jeder Instanz des Requests berücksichtigt, unabhängig von der zusammengeführten
 Entscheidung.
 
-### Audit-Trail
+### Request-Log
 
 Jede ausgeführte Instanz hinterlässt ein Ergebnis in der Liste `data.guardrails` des
-Audit-Eintrags, in Ausführungsreihenfolge über die Phasen `prompt`, `response` und `stream`
+Request-Log-Eintrags, in Ausführungsreihenfolge über die Phasen `prompt`, `response` und `stream`
 hinweg, stille `allow`-Entscheidungen eingeschlossen:
 
 | Feld | Bedeutung |
@@ -113,7 +113,7 @@ hinweg, stille `allow`-Entscheidungen eingeschlossen:
 
 Ein konfigurierter Step ohne Ergebnis ist nicht gelaufen: Ein früherer Block oder eine frühere
 Antwort hat den Request beendet, oder ein Cache-Treffer hat den Modellaufruf übersprungen. Das
-Dashboard färbt das Workflow-Diagramm eines Audit-Eintrags anhand dieser Liste ein, und sein Tab
+Dashboard färbt das Workflow-Diagramm eines Request-Log-Eintrags anhand dieser Liste ein, und sein Tab
 „Guardrails“ listet die Ergebnisse auf. Die Liste ist die Spur der Entscheidungen; die
 nachfolgend beschriebenen Request-Revisionen sind die Spur der Bodys.
 
@@ -142,7 +142,7 @@ Jede Instanz hat einen `fail_mode` und einen `timeout_ms`:
 | `fail_mode` | `closed`: Ein Fehler, ein Panic oder ein Timeout lehnt den Request mit HTTP 500 und dem Code `plugin_failure` ab; `open`: loggen und fortfahren, als hätte die Instanz `allow` zurückgegeben | `closed` für `prompt`, `response` und `stream` |
 | `timeout_ms` | Obergrenze für jeden Hook-Aufruf der Instanz | `0` (kein Timeout pro Instanz) |
 
-Der Instanzname eines Fehlers im Modus `closed` landet in den Logs und im Audit-Eintrag, aber nie
+Der Instanzname eines Fehlers im Modus `closed` landet in den Logs und im Request-Log-Eintrag, aber nie
 beim Client. Panics innerhalb eines Plugins werden abgefangen und als Fehler behandelt.
 
 **Timeouts werden zum Fristende durchgesetzt.** Ein Hook erhält einen Context, der bei
@@ -259,7 +259,7 @@ HTTP-Header erst mit den ersten Bytes des Bodys statt vorab. Ein `warn`, das üb
 Response entschieden wird, erreicht den Client daher als Header `X-GoModel-Guardrail`, sofern das
 Puffern vor dem ersten Keep-Alive-Kommentar (15 s) abgeschlossen war. Ein später entschiedenes
 `warn` (in `OnStreamEnd` eines `transform`-Streams oder nachdem ein Keep-Alive gesendet wurde) kann
-bereits gesendete Header nicht mehr ändern; es wird trotzdem im Audit-Trail und in den Logs
+bereits gesendete Header nicht mehr ändern; es wird trotzdem im Request-Log und in den Logs
 festgehalten.
 
 **Abbrechen eines Streams**: Eine `terminate`-Entscheidung im Modus `transform` oder ein
@@ -565,7 +565,7 @@ func (p *wordBlock) Manifest() pluginapi.Manifest {
 				Help: "Block rejects, respond answers with the message, warn records the match.",
 				Options: []pluginapi.Option{{Value: "block", Label: "Block"}, {Value: "respond", Label: "Respond"}, {Value: "warn", Label: "Warn"}},
 			},
-			{Key: "message", Label: "Message", Input: pluginapi.InputText, Default: "request blocked by policy", Help: "Error, reply, or audit note."},
+			{Key: "message", Label: "Message", Input: pluginapi.InputText, Default: "request blocked by policy", Help: "Error, reply, or request log note."},
 			pluginapi.BlockStatusField(),
 		},
 	}
@@ -642,7 +642,7 @@ Hinweise für Autoren:
   einem Schild-Symbol und führt sie zuerst auf.
 - Der an `Init` übergebene `Host` bietet `Logger()` (vorab mit Plugin und Instanz getaggt),
   `Inference().Complete(...)` (eine Chat Completion über das Gateway mit Ursprung `plugin`, für
-  Budgets und Audit auf `<user path>/guardrails/<instance>` begrenzt), `Metrics()` (Namen mit dem
+  Budgets und Request-Log auf `<user path>/guardrails/<instance>` begrenzt), `Metrics()` (Namen mit dem
   Präfix `plugin_<name>_`) und `HTTPClient()` für Aufrufe externer Dienste wie eines Klassifikators
   oder eines Detektors für personenbezogene Daten. Der Client wird von allen Instanzen gemeinsam
   genutzt, verwendet die Proxy-Umgebung und den Verbindungspool des Gateways und hat als

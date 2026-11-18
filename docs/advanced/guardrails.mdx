@@ -298,7 +298,7 @@ so a minimal config acts as an anonymizing preprocessor.
 | `prompt` | No | built-in anonymization prompt | Custom rewrite instructions. |
 
 Rewrites run through the normal translated request path in-process, so
-workflow selection, failover, usage, audit, and cache behavior still apply.
+workflow selection, failover, usage, request logging, and cache behavior still apply.
 The internal request uses:
 
 - path: `/v1/chat/completions`
@@ -341,7 +341,7 @@ text split across two parts is not matched.
 | `case_insensitive` | No | `false` | Match regardless of letter case. |
 | `roles` | No | `["user"]` | Prompt messages the rules apply to: `system` (includes developer), `user`, `assistant`, `tool`. In the response phase the assistant text is always the target. |
 | `on_match` | No | `replace` | `replace` substitutes; `block` rejects with an error; `respond` answers with `message` as an assistant reply; `warn` continues and records the match. Only `replace` edits the text. |
-| `message` | No | `Request blocked by policy` for `block` and `respond`, none for `warn` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. A `warn` records a note only when you set one, so the outcome is not labelled as a block in the dashboard. |
+| `message` | No | `Request blocked by policy` for `block` and `respond`, none for `warn` | Error message for `block`, assistant reply for `respond`, request log note for `warn`. A `warn` records a note only when you set one, so the outcome is not labelled as a block in the dashboard. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
 | `stream_lookbehind` | No | `64` | Characters of streamed text held back so a match spanning two chunks is still rewritten; set it to at least the longest find text. A match at the end of the text streamed so far is held until it stops growing, so an open-ended pattern such as `sk-[A-Za-z0-9_-]{20,}` masks the whole value when it is at most this long — a longer value keeps the part beyond the lookbehind, so raise it above the longest secret you expect. Used by `replace` and `warn`. |
 
@@ -519,14 +519,14 @@ model or a decision model:
 | --- | -------- | ------- | ----------- |
 | `model` | Yes | | Judge model: `provider/model`, an alias, or a virtual model; a chat model or a decision model. Its usage is accounted with origin `plugin`. |
 | `engine` | No | `auto` | How the judge is asked: `chat`, `decision`, or `auto`, which uses `decision` for a model that answers decisions only (any `jev` model, OpenRouter's decision models, or a virtual model whose targets all are) and `chat` otherwise. |
-| `user_path` | No | current request's path | User path the judge call is scoped to for budgets and audit. |
+| `user_path` | No | current request's path | User path the judge call is scoped to for budgets and request logs. |
 | `prompt` | No | built-in policy | Chat engine: system prompt for the judge. |
 | `decision_question` | No | built-in policy | Decision engine: the yes-or-no question asked about the content. Yes means it violates the policy. |
 | `block_threshold` | No | `0.5` | Decision engine: probability of yes, from 0 to 1, at or above which the content counts as a block verdict. |
 | `judge_images` | No | `false` | Decision engine: also send the images of the judged messages. |
 | `target` | No | `auto` | What the judge sees in the prompt phase: `auto` or `last_user` (last user message), `all_user`, `conversation`. In the response phase it always sees the assistant text. |
 | `action` | No | `block` | On a block verdict: `block` rejects, `respond` answers with `respond_text`, `warn` continues and records the verdict. |
-| `message` | No | `This request was blocked by policy` | Error message for `block`, audit note for `warn`. |
+| `message` | No | `This request was blocked by policy` | Error message for `block`, request log note for `warn`. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
 | `respond_text` | No | `I can't help with that request.` | Assistant reply for `respond`. |
 | `on_unclear` | No | `warn` | When the judge reply cannot be parsed, was cut off by `max_tokens`, or was spent entirely on reasoning: `allow`, `warn`, or `block` (applies `action`). A verdict counts only as a JSON object or a bare `allow` or `block`, never as a word inside a sentence. |
@@ -546,7 +546,7 @@ use `prompt`, `max_tokens`, or `temperature`. A probability at or above
 `block_threshold` is a block verdict, and `action` applies. A lower probability
 allows. The call goes through the same routing as
 [`POST /v1/decisions`](/advanced/decisions-api): virtual models, failover to
-targets that serve Decisions, the exact response cache, usage, and audit, under
+targets that serve Decisions, the exact response cache, usage, and request logging, under
 the instance's user path.
 
 Each verdict records the probability in the decision detail (`probability`),
@@ -645,26 +645,26 @@ docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
 | `restore_roles` | No | `["user", "assistant", "tool"]` | Prompt roles whose values are put back. Honored on whichever instance (prompt or response phase) sets it; set on both, a role must be in both lists. |
 | `restore_tools` | No | all | Tools (function names) whose call arguments get the values back. The others keep the placeholders. |
 | `restore_tools_exclude` | No | | Tools whose call arguments keep the placeholders even when `restore_tools` selects them. |
-| `message` | No | `Request blocked: it contains personal data` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
+| `message` | No | `Request blocked: it contains personal data` | Error message for `block`, assistant reply for `respond`, request log note for `warn`. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
 | `stream_chunk` | No | `256` | Characters of streamed text (or tool-call arguments) collected before the analyzer runs on them, so it sees whole sentences and runs once per chunk. The client waits for at most this much text at a time. |
 | `stream_lookbehind` | No | `64` | Characters of streamed text (or tool-call arguments) held back so a value or placeholder split across two chunks is still handled. At most 4096. |
 
 Every text part is analyzed on its own (one analyzer call each, up to eight
 in flight), so the analyzer never sees the whole conversation as one text and
-the analyzer's own limits apply per part. The audit detail records entity
+the analyzer's own limits apply per part. The request log detail records entity
 types and counts, never the values, and errors from the analyzer never carry
 the text it was given. The analyzer receives the text in clear, so run it as
 a sidecar on the same host or reach it over `https://` or a private network.
 
 <Warning>
-  Anonymizing hides the values from the provider, not from your audit log.
+  Anonymizing hides the values from the provider, not from your request log.
   `LOGGING_LOG_BODIES` defaults to `true`, and the stored `request_body` and
   `response_body` are the ones the client sent and received, with the personal
   data in clear — only the rewritten body kept under `request_revisions` is
   anonymized. Set
-  [`LOGGING_LOG_BODIES=false`](/advanced/configuration#audit-logging) when the
-  audit store must not hold personal data. `LOGGING_LOG_REVISION_BODIES=false`
+  [`LOGGING_LOG_BODIES=false`](/advanced/configuration#request-logging) when the
+  request log must not hold personal data. `LOGGING_LOG_REVISION_BODIES=false`
   only drops the anonymized copies; the original bodies are still stored.
 </Warning>
 
@@ -964,7 +964,7 @@ block or answer applies to a request that would otherwise have been a hit. A
 response a guardrail restores request-specific data into is never cached at all
 (see `restore` under [`presidio`](#presidio)).
 
-Because the response chain does not run on a hit, the audit entry for a hit
+Because the response chain does not run on a hit, the request log entry for a hit
 records the prompt-phase outcomes only, plus the cache type.
 
 ## Decisions, Errors, and Rejection
@@ -973,17 +973,17 @@ records the prompt-phase outcomes only, plus the cache type.
 | --- | --- |
 | **block** | An error in the endpoint's native format: HTTP 400 (prompt phase) or 502 (response and stream phases) unless the guardrail sets `block_status`; code `guardrail_blocked` unless the plugin sets its own. |
 | **respond** | An ordinary assistant reply with HTTP 200 (a one-turn stream for streaming requests). |
-| **warn** | The unchanged response plus an `X-GoModel-Guardrail: warn; code=<code>` header; the detail is stored in the audit trail. On a stream the header is sent only when the warn was decided before the first bytes went out (a buffered response); later warns are audit-only. |
-| **guardrail failure** (`fail_mode: closed`) | HTTP 500 with type `internal_error` and code `plugin_failure`. No provider is named, because the guardrail failed, not the provider (a response-phase guardrail can fail after the provider replied). The guardrail's name is in the logs and audit record, not in the client message. |
+| **warn** | The unchanged response plus an `X-GoModel-Guardrail: warn; code=<code>` header; the detail is stored in the request log. On a stream the header is sent only when the warn was decided before the first bytes went out (a buffered response); later warns are recorded in the request log only. |
+| **guardrail failure** (`fail_mode: closed`) | HTTP 500 with type `internal_error` and code `plugin_failure`. No provider is named, because the guardrail failed, not the provider (a response-phase guardrail can fail after the provider replied). The guardrail's name is in the logs and the request log entry, not in the client message. |
 
 A blocked request never reaches the provider; a blocked response never
 reaches the client. See [Plugins](/advanced/plugins#decisions) for how
 decisions merge when several guardrails run at the same order.
 
-Every outcome, a silent allow included, is recorded in the request's audit
+Every outcome, a silent allow included, is recorded in the request's log
 entry under `data.guardrails`, with the phase, step, decision, whether the
 guardrail edited the request or response, and how it failed. The dashboard
-colors the guardrail steps of an audit entry's workflow chart from it: green
+colors the guardrail steps of a request log entry's workflow chart from it: green
 when the step passed or edited, amber for a warning or a fail-open error,
 red for a block, an answer or a fail-closed error, dimmed when the step never
-ran. See [Plugins](/advanced/plugins#audit-trail) for the fields.
+ran. See [Plugins](/advanced/plugins#request-log) for the fields.

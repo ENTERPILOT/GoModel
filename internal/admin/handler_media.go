@@ -12,7 +12,7 @@ import (
 )
 
 // WithMediaStore enables GET /admin/media/{id}, which serves the audio and
-// images the audit log references by media id.
+// images the request log references by media id.
 func WithMediaStore(store *mediastore.Service) Option {
 	return func(h *Handler) {
 		h.media = store
@@ -22,7 +22,7 @@ func WithMediaStore(store *mediastore.Service) Option {
 // Media handles GET /admin/media/:id
 //
 // @Summary      Download a stored media object
-// @Description  Streams the bytes of an audio or image object the audit log
+// @Description  Streams the bytes of an audio or image object the request log
 // @Description  references by media_id, with its content type. Range requests
 // @Description  are honored so browser players can seek. An object outside the
 // @Description  caller's user-path scope is reported as missing.

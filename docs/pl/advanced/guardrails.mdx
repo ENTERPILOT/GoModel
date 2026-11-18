@@ -306,7 +306,7 @@ więc minimalna konfiguracja działa jak preprocesor anonimizujący.
 | `prompt` | Nie | wbudowany prompt anonimizacji | Własne instrukcje przepisywania. |
 
 Przepisania przechodzą wewnątrz procesu przez zwykłą ścieżkę tłumaczonych
-requestów, więc wybór workflow, failover, użycie, audyt i cache nadal działają.
+requestów, więc wybór workflow, failover, użycie, logowanie requestów i cache nadal działają.
 Wewnętrzny request używa:
 
 - ścieżki: `/v1/chat/completions`
@@ -350,7 +350,7 @@ dopasowywany.
 | `case_insensitive` | Nie | `false` | Dopasowuje bez względu na wielkość liter. |
 | `roles` | Nie | `["user"]` | Wiadomości promptu, do których stosowane są reguły: `system` (obejmuje developer), `user`, `assistant`, `tool`. W fazie response celem jest zawsze tekst asystenta. |
 | `on_match` | Nie | `replace` | `replace` podstawia; `block` odrzuca z błędem; `respond` odpowiada treścią `message` jako odpowiedzią asystenta; `warn` kontynuuje i zapisuje dopasowanie. Tylko `replace` edytuje tekst. |
-| `message` | Nie | `Request blocked by policy` dla `block` i `respond`, brak dla `warn` | Komunikat błędu dla `block`, odpowiedź asystenta dla `respond`, notatka audytowa dla `warn`. `warn` zapisuje notatkę tylko wtedy, gdy ją ustawisz, więc wynik nie jest oznaczany w dashboardzie jako blokada. |
+| `message` | Nie | `Request blocked by policy` dla `block` i `respond`, brak dla `warn` | Komunikat błędu dla `block`, odpowiedź asystenta dla `respond`, notatka w logu requestów dla `warn`. `warn` zapisuje notatkę tylko wtedy, gdy ją ustawisz, więc wynik nie jest oznaczany w dashboardzie jako blokada. |
 | `block_status` | Nie | domyślna dla fazy | Jeden kod statusu HTTP z zakresu 400–599 dla `block`, na przykład `403`. Pusta wartość oznacza 400 przy zablokowaniu promptu i 502 przy zablokowaniu odpowiedzi. |
 | `stream_lookbehind` | Nie | `64` | Liczba znaków streamowanego tekstu wstrzymywanych, aby dopasowanie rozciągające się na dwa chunki nadal zostało przepisane; ustaw co najmniej na długość najdłuższego wyszukiwanego tekstu. Dopasowanie na końcu dotychczas streamowanego tekstu jest wstrzymywane, dopóki przestaje rosnąć, więc otwarty wzorzec, taki jak `sk-[A-Za-z0-9_-]{20,}`, maskuje całą wartość, o ile nie jest od niej dłuższa – dłuższa wartość zachowuje część wykraczającą poza lookbehind, więc ustaw go powyżej najdłuższego sekretu, jakiego się spodziewasz. Używane przez `replace` i `warn`. |
 
@@ -532,14 +532,14 @@ czatowy albo model decyzyjny:
 | --- | -------- | ------- | ----------- |
 | `model` | Tak | | Model sędziego: `provider/model`, alias lub model wirtualny; model czatowy albo model decyzyjny. Jego użycie jest rozliczane z pochodzeniem `plugin`. |
 | `engine` | Nie | `auto` | Sposób odpytywania sędziego: `chat`, `decision` lub `auto`, które używa `decision` dla modelu odpowiadającego tylko na decyzje (każdy model `jev`, modele decyzyjne OpenRouter albo model wirtualny, którego wszystkie cele są takie), a w pozostałych przypadkach `chat`. |
-| `user_path` | Nie | ścieżka bieżącego requestu | Ścieżka użytkownika, do której przypisywane jest wywołanie sędziego na potrzeby budżetów i audytu. |
+| `user_path` | Nie | ścieżka bieżącego requestu | Ścieżka użytkownika, do której przypisywane jest wywołanie sędziego na potrzeby budżetów i logu requestów. |
 | `prompt` | Nie | wbudowana polityka | Silnik `chat`: system prompt dla sędziego. |
 | `decision_question` | Nie | wbudowana polityka | Silnik `decision`: pytanie tak/nie zadawane o treść. „Tak” oznacza naruszenie polityki. |
 | `block_threshold` | Nie | `0.5` | Silnik `decision`: prawdopodobieństwo odpowiedzi „tak”, od 0 do 1, od którego (włącznie) treść liczy się jako werdykt block. |
 | `judge_images` | Nie | `false` | Silnik `decision`: wysyłaj też obrazy z ocenianych wiadomości. |
 | `target` | Nie | `auto` | Co widzi sędzia w fazie prompt: `auto` lub `last_user` (ostatnia wiadomość użytkownika), `all_user`, `conversation`. W fazie response zawsze widzi tekst asystenta. |
 | `action` | Nie | `block` | Przy werdykcie block: `block` odrzuca, `respond` odpowiada treścią `respond_text`, `warn` kontynuuje i zapisuje werdykt. |
-| `message` | Nie | `This request was blocked by policy` | Komunikat błędu dla `block`, notatka audytowa dla `warn`. |
+| `message` | Nie | `This request was blocked by policy` | Komunikat błędu dla `block`, notatka w logu requestów dla `warn`. |
 | `block_status` | Nie | domyślna dla fazy | Jeden kod statusu HTTP z zakresu 400–599 dla `block`, na przykład `403`. Pusta wartość oznacza 400 przy zablokowaniu promptu i 502 przy zablokowaniu odpowiedzi. |
 | `respond_text` | Nie | `I can't help with that request.` | Odpowiedź asystenta dla `respond`. |
 | `on_unclear` | Nie | `warn` | Gdy odpowiedzi sędziego nie da się sparsować, została ucięta przez `max_tokens` albo w całości zużyta na reasoning: `allow`, `warn` lub `block` (stosuje `action`). Werdykt liczy się tylko jako obiekt JSON albo samo `allow` lub `block`, nigdy jako słowo wewnątrz zdania. |
@@ -559,7 +559,7 @@ tagów, i zadaje jedno pytanie typu predicate: `decision_question`. Nie używa
 `block_threshold` lub wyższe to werdykt block i stosowane jest `action`. Niższe
 prawdopodobieństwo przepuszcza treść. Wywołanie przechodzi przez ten sam routing
 co [`POST /v1/decisions`](/pl/advanced/decisions-api): modele wirtualne, failover
-na cele obsługujące Decisions, dokładny cache odpowiedzi, użycie i audyt, w ramach
+na cele obsługujące Decisions, dokładny cache odpowiedzi, użycie i logowanie requestów, w ramach
 ścieżki użytkownika instancji.
 
 Każdy werdykt zapisuje prawdopodobieństwo w szczegółach decyzji (`probability`),
@@ -661,7 +661,7 @@ docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
 | `restore_roles` | Nie | `["user", "assistant", "tool"]` | Role promptu, których wartości są przywracane. Uwzględniane na tej instancji (fazy prompt lub response), która je ustawia; gdy ustawiono je na obu, rola musi być na obu listach. |
 | `restore_tools` | Nie | wszystkie | Narzędzia (nazwy funkcji), w których argumentach wywołań przywracane są wartości. Pozostałe zachowują placeholdery. |
 | `restore_tools_exclude` | Nie | | Narzędzia, których argumenty wywołań zachowują placeholdery, nawet gdy wybiera je `restore_tools`. |
-| `message` | Nie | `Request blocked: it contains personal data` | Komunikat błędu dla `block`, odpowiedź asystenta dla `respond`, notatka audytowa dla `warn`. |
+| `message` | Nie | `Request blocked: it contains personal data` | Komunikat błędu dla `block`, odpowiedź asystenta dla `respond`, notatka w logu requestów dla `warn`. |
 | `block_status` | Nie | domyślna dla fazy | Jeden kod statusu HTTP z zakresu 400–599 dla `block`. Pusta wartość oznacza 400 przy zablokowaniu promptu i 502 przy zablokowaniu odpowiedzi. |
 | `stream_chunk` | Nie | `256` | Liczba znaków streamowanego tekstu (lub argumentów wywołań narzędzi) zbieranych przed uruchomieniem na nich analizatora, aby widział całe zdania i działał raz na chunk. Klient czeka jednorazowo najwyżej na tyle tekstu. |
 | `stream_lookbehind` | Nie | `64` | Liczba znaków streamowanego tekstu (lub argumentów wywołań narzędzi) wstrzymywanych, aby wartość lub placeholder rozdzielone między dwa chunki nadal zostały obsłużone. Maksymalnie 4096. |
@@ -669,19 +669,19 @@ docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
 Każda część tekstu jest analizowana osobno (jedno wywołanie analizatora na
 część, do ośmiu jednocześnie), więc analizator nigdy nie widzi całej rozmowy
 jako jednego tekstu, a jego własne limity dotyczą każdej części. Szczegóły
-audytu zapisują typy encji i ich liczby, nigdy wartości, a błędy analizatora
+w logu requestów zapisują typy encji i ich liczby, nigdy wartości, a błędy analizatora
 nigdy nie zawierają przekazanego mu tekstu. Analizator otrzymuje tekst jawnie,
 więc uruchamiaj go jako sidecar na tym samym hoście albo łącz się z nim przez
 `https://` lub sieć prywatną.
 
 <Warning>
-  Anonimizacja ukrywa wartości przed providerem, a nie przed logiem audytowym.
+  Anonimizacja ukrywa wartości przed providerem, a nie przed logiem requestów.
   `LOGGING_LOG_BODIES` ma domyślnie wartość `true`, a zapisane `request_body` i
   `response_body` to te, które klient wysłał i otrzymał, z danymi osobowymi w
   postaci jawnej – zanonimizowane jest tylko przepisane body przechowywane w
   `request_revisions`. Ustaw
-  [`LOGGING_LOG_BODIES=false`](/pl/advanced/configuration#logowanie-audytowe),
-  gdy magazyn audytu nie może przechowywać danych osobowych.
+  [`LOGGING_LOG_BODIES=false`](/pl/advanced/configuration#logowanie-requestów),
+  gdy magazyn logów requestów nie może przechowywać danych osobowych.
   `LOGGING_LOG_REVISION_BODIES=false` pomija tylko zanonimizowane kopie;
   oryginalne body nadal są zapisywane.
 </Warning>
@@ -992,7 +992,7 @@ cache hitem. Odpowiedź, do której guardrail przywraca dane specyficzne dla
 requestu, nigdy nie trafia do cache’u (zobacz `restore` w
 [`presidio`](#presidio)).
 
-Ponieważ przy cache hicie łańcuch response nie działa, wpis audytowy dla
+Ponieważ przy cache hicie łańcuch response nie działa, wpis logu requestów dla
 trafienia zapisuje tylko wyniki fazy prompt oraz typ cache’u.
 
 ## Decyzje, błędy i odrzucenie
@@ -1001,8 +1001,8 @@ trafienia zapisuje tylko wyniki fazy prompt oraz typ cache’u.
 | --- | --- |
 | **block** | Błąd w natywnym formacie endpointu: HTTP 400 (faza prompt) lub 502 (fazy response i stream), chyba że guardrail ustawia `block_status`; kod `guardrail_blocked`, chyba że plugin ustawia własny. |
 | **respond** | Zwykła odpowiedź asystenta z HTTP 200 (stream z jedną turą dla requestów streamingowych). |
-| **warn** | Niezmieniona odpowiedź plus nagłówek `X-GoModel-Guardrail: warn; code=<code>`; szczegóły są zapisywane w śladzie audytowym. W streamie nagłówek jest wysyłany tylko wtedy, gdy o ostrzeżeniu zdecydowano przed wysłaniem pierwszych bajtów (odpowiedź buforowana); późniejsze ostrzeżenia trafiają tylko do audytu. |
-| **błąd guardraila** (`fail_mode: closed`) | HTTP 500 z kodem `plugin_failure`. Nazwa guardraila jest w logach i rekordzie audytowym, a nie w komunikacie dla klienta. |
+| **warn** | Niezmieniona odpowiedź plus nagłówek `X-GoModel-Guardrail: warn; code=<code>`; szczegóły są zapisywane w logu requestów. W streamie nagłówek jest wysyłany tylko wtedy, gdy o ostrzeżeniu zdecydowano przed wysłaniem pierwszych bajtów (odpowiedź buforowana); późniejsze ostrzeżenia trafiają tylko do logu requestów. |
+| **błąd guardraila** (`fail_mode: closed`) | HTTP 500 z kodem `plugin_failure`. Nazwa guardraila jest w logach i wpisie logu requestów, a nie w komunikacie dla klienta. |
 
 Zablokowany request nigdy nie dociera do providera; zablokowana odpowiedź
 nigdy nie dociera do klienta. Zobacz [Pluginy](/pl/advanced/plugins#decyzje),
@@ -1010,10 +1010,10 @@ aby dowiedzieć się, jak łączą się decyzje, gdy kilka guardrails działa z 
 samym order.
 
 Każdy wynik, łącznie z cichym przepuszczeniem, jest zapisywany we wpisie
-audytowym requestu w `data.guardrails` – z fazą, krokiem, decyzją,
+logu requestów w `data.guardrails` – z fazą, krokiem, decyzją,
 informacją, czy guardrail edytował request lub odpowiedź, i sposobem, w jaki
 zawiódł. Na tej podstawie dashboard koloruje kroki guardrails na wykresie
-workflow wpisu audytowego: na zielono, gdy krok przeszedł lub edytował, na
+workflow wpisu logu requestów: na zielono, gdy krok przeszedł lub edytował, na
 bursztynowo przy ostrzeżeniu lub błędzie fail-open, na czerwono przy blokadzie,
 odpowiedzi lub błędzie fail-closed, a przyciemnia krok, który nigdy się nie
-uruchomił. Opis pól znajdziesz w [Pluginach](/pl/advanced/plugins#ścieżka-audytu).
+uruchomił. Opis pól znajdziesz w [Pluginach](/pl/advanced/plugins#log-requestów).

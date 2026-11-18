@@ -489,7 +489,7 @@ func TestUpsertVirtualModelLoadBalanced(t *testing.T) {
 	service := newVMService(t, catalog, newVMTestStore(), true)
 	h := NewHandler(nil, nil, WithVirtualModels(service))
 
-	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smart","strategy":"cost","targets":[{"model":"openai/gpt-4o"},{"model":"groq/llama","weight":2}]}`)
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smart","strategy":"cost","targets":[{"model":"openai/gpt-4o","reasoning_effort":"High"},{"model":"groq/llama","weight":2}]}`)
 	err := h.UpsertVirtualModel(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -499,6 +499,8 @@ func TestUpsertVirtualModelLoadBalanced(t *testing.T) {
 	assert.Equal(t, virtualmodels.StrategyCost, view.Strategy)
 	require.Len(t, view.Targets, 2)
 	assert.InDelta(t, 2, view.Targets[1].Weight, 0)
+	assert.Equal(t, "high", view.Targets[0].ReasoningEffort)
+	assert.Empty(t, view.Targets[1].ReasoningEffort)
 }
 
 func TestUpsertVirtualModelRejectsBlankTargets(t *testing.T) {
