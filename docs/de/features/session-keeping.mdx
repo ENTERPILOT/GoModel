@@ -1,6 +1,6 @@
 ---
 title: "Session Keeping"
-description: "Requests einer Client-Session für Sticky Load Balancing und gruppierte Audit-Logs zusammenfassen"
+description: "Requests einer Client-Session für Sticky Load Balancing und gruppierte Request-Logs zusammenfassen"
 icon: "pin"
 ---
 
@@ -15,7 +15,7 @@ Session und nutzt sie durchgängig für Routing und Observability:
 - **Sticky API-Key-Auswahl** – hat ein Provider mehrere Keys, verwendet jeder
   Request einer erkannten Session denselben Key, wodurch die
   Prompt-Cache-Affinität beim Provider erhalten bleibt.
-- **Gruppierte Audit-Logs** – die Seite „Audit Logs“ im Dashboard fasst die
+- **Gruppierte Request-Logs** – die Seite „Anfragen“ im Dashboard fasst die
   Requests einer Session zu einem Thread zusammen: Der neueste Request bildet
   die Zeile, und ein Aufklapp-Element zeigt die älteren Requests darunter an.
 - **Nutzung und Kosten pro Session** – Nutzungsdatensätze tragen dieselbe
@@ -120,16 +120,16 @@ Deaktivieren Sie sie pro Provider mit `session_sticky_keys: false`,
 **Session-sticky API keys** im Dashboard. Requests ohne erkannte Session werden
 weiterhin per Round Robin verteilt.
 
-## Gruppierte Audit-Logs
+## Gruppierte Request-Logs
 
-Audit-Einträge speichern die Session-ID (`session_id`), und die Seite „Audit
-Logs“ gruppiert sie standardmäßig danach (Schalter „Group by session“). Jeder
+Request-Log-Einträge speichern die Session-ID (`session_id`), und die Seite
+„Anfragen“ gruppiert sie standardmäßig danach (Schalter „Nach Sitzung gruppieren“). Jeder
 Thread zeigt seinen neuesten Request mit einem Zähler-Badge; das
 Aufklapp-Element links zeigt die älteren Requests an. Das Badge zählt die
 vollständige Session. Filter bestimmen, welche Sessions erscheinen und welcher
 passende Request jeden Thread repräsentiert.
-`GET /admin/audit/sessions` liefert für jeden Thread `request_count` und den
-neuesten passenden Audit-Log-Eintrag. `GET /admin/audit/log?session_id=…`
+`GET /admin/request-logs/sessions` liefert für jeden Thread `request_count` und den
+neuesten passenden Request-Log-Eintrag. `GET /admin/request-logs?session_id=…`
 liefert alle Requests einer aufgeklappten Session.
 
 Jeder gruppierte Thread hat außerdem eine Aktion für das Nutzungsdiagramm. Sie
@@ -209,7 +209,7 @@ session:
 ```
 
 Header mit Zugangsdaten (`Authorization`, API-Key-Header, …) werden als
-Session-Quellen abgelehnt, da die Session-ID in Audit- und Nutzungsdatensätzen
+Session-Quellen abgelehnt, da die Session-ID in Request-Log- und Nutzungsdatensätzen
 gespeichert wird.
 
 **Wann Sie die Standardwerte ändern sollten:** Setzen Sie

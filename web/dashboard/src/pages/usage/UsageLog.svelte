@@ -180,7 +180,7 @@ import {
               <td class="usage-log-cache-cell">{usageEntryCacheLabel(entry)}</td>
               <td class="usage-log-provider-cache-cell" title={providerCacheTitle(entry)}>
                 {#if hasProviderCache(entry)}
-                  <span class="audit-prompt-cache-pill mono">{providerCacheLabel(entry)}</span>
+                  <span class="request-log-prompt-cache-pill mono">{providerCacheLabel(entry)}</span>
                 {:else}
                   <span>-</span>
                 {/if}

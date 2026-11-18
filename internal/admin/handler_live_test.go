@@ -17,9 +17,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/live"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -33,16 +33,16 @@ func TestLiveCursorRejectsInvalidValue(t *testing.T) {
 }
 
 func TestLiveTypeFilterProvidedInvalidTokensMatchNothing(t *testing.T) {
-	require.True(t, liveTypeFilter("").matches(live.EventAuditStarted))
-	require.True(t, liveTypeFilter("audit").matches(live.EventAuditStarted))
-	require.False(t, liveTypeFilter("usage").matches(live.EventAuditStarted))
-	require.False(t, liveTypeFilter("foo").matches(live.EventAuditStarted))
+	require.True(t, liveTypeFilter("").matches(live.EventRequestLogStarted))
+	require.True(t, liveTypeFilter("audit").matches(live.EventRequestLogStarted))
+	require.False(t, liveTypeFilter("usage").matches(live.EventRequestLogStarted))
+	require.False(t, liveTypeFilter("foo").matches(live.EventRequestLogStarted))
 }
 
 func TestLiveLogsAppliesTypeFilterToReplayEvents(t *testing.T) {
 	broker := live.NewBroker(live.Config{Enabled: true})
-	broker.PublishAuditEvent(live.EventAuditStarted, &auditlog.LogEntry{
-		ID:        "audit-1",
+	broker.PublishRequestLogEvent(live.EventRequestLogStarted, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: time.Now(),
 	})
@@ -63,20 +63,20 @@ func TestLiveLogsAppliesTypeFilterToReplayEvents(t *testing.T) {
 
 func TestLiveLogsWritesResetAndReplayEvents(t *testing.T) {
 	broker := live.NewBroker(live.Config{Enabled: true, BufferSize: 1, ReplayLimit: 1})
-	broker.PublishAuditEvent(live.EventAuditStarted, &auditlog.LogEntry{
-		ID:        "audit-1",
+	broker.PublishRequestLogEvent(live.EventRequestLogStarted, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: time.Now(),
 		Method:    http.MethodPost,
 	})
-	broker.PublishAuditEvent(live.EventAuditUpdated, &auditlog.LogEntry{
-		ID:             "audit-1",
+	broker.PublishRequestLogEvent(live.EventRequestLogUpdated, &requestlog.LogEntry{
+		ID:             "request-log-1",
 		RequestID:      "req-1",
 		Timestamp:      time.Now(),
 		RequestedModel: "gpt-test",
 	})
-	broker.PublishAuditEvent(live.EventAuditUpdated, &auditlog.LogEntry{
-		ID:        "audit-1",
+	broker.PublishRequestLogEvent(live.EventRequestLogUpdated, &requestlog.LogEntry{
+		ID:        "request-log-1",
 		RequestID: "req-1",
 		Timestamp: time.Now(),
 		Provider:  "openai",
@@ -153,8 +153,8 @@ func TestLiveLogsWritesImmediateHeartbeat(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			broker := live.NewBroker(live.Config{Enabled: true})
 			for range tc.publish {
-				broker.PublishAuditEvent(live.EventAuditStarted, &auditlog.LogEntry{
-					ID:        "audit-1",
+				broker.PublishRequestLogEvent(live.EventRequestLogStarted, &requestlog.LogEntry{
+					ID:        "request-log-1",
 					RequestID: "req-1",
 					Timestamp: time.Now(),
 				})
@@ -180,7 +180,7 @@ func TestAppendLiveEventFrameMatchesMarshaledFrame(t *testing.T) {
 	// Data is what the broker stores: json.Marshal output, already compact
 	// and escaped.
 	data, err := json.Marshal(map[string]any{
-		"id":   "audit-1",
+		"id":   "request-log-1",
 		"data": map[string]any{"request_headers": map[string]string{"User-Agent": "a<b>&\"c\"\n\u2028"}},
 	})
 	require.NoError(t, err)
@@ -190,11 +190,11 @@ func TestAppendLiveEventFrameMatchesMarshaledFrame(t *testing.T) {
 	}{
 		{name: "heartbeat without sequence", event: live.Event{Type: live.EventHeartbeat, Timestamp: ts}},
 		{name: "heartbeat with sequence", event: live.Event{Seq: 42, Type: live.EventHeartbeat, Timestamp: ts}},
-		{name: "audit event", event: live.Event{Seq: 7, Type: live.EventAuditUpdated, RequestID: "req-1", Timestamp: ts, Data: data}},
+		{name: "request log event", event: live.Event{Seq: 7, Type: live.EventRequestLogUpdated, RequestID: "req-1", Timestamp: ts, Data: data}},
 		{name: "whole-second timestamp", event: live.Event{Seq: 1, Type: live.EventUsageCompleted, Timestamp: ts.Truncate(time.Second), Data: json.RawMessage(`{}`)}},
 		{name: "non-UTC timestamp", event: live.Event{Seq: 1, Type: live.EventReset, Timestamp: ts.In(time.FixedZone("CEST", 2*60*60))}},
-		{name: "request ID needing escapes", event: live.Event{Seq: 3, Type: live.EventAuditStarted, RequestID: "a\"b\\c<d>&e\n\x01", Timestamp: ts}},
-		{name: "non-ASCII request ID", event: live.Event{Seq: 3, Type: live.EventAuditStarted, RequestID: "żółw-\u2028-\xff", Timestamp: ts}},
+		{name: "request ID needing escapes", event: live.Event{Seq: 3, Type: live.EventRequestLogStarted, RequestID: "a\"b\\c<d>&e\n\x01", Timestamp: ts}},
+		{name: "non-ASCII request ID", event: live.Event{Seq: 3, Type: live.EventRequestLogStarted, RequestID: "żółw-\u2028-\xff", Timestamp: ts}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -222,7 +222,7 @@ func TestLiveEventWriterDropsOversizedFrameBuffer(t *testing.T) {
 	assert.LessOrEqual(t, cap(w.buf), maxReusedLiveFrameBuffer)
 
 	body := `"` + strings.Repeat("x", 2*maxReusedLiveFrameBuffer) + `"`
-	large := live.Event{Seq: 2, Type: live.EventAuditUpdated, Timestamp: ts, Data: json.RawMessage(body)}
+	large := live.Event{Seq: 2, Type: live.EventRequestLogUpdated, Timestamp: ts, Data: json.RawMessage(body)}
 	require.NoError(t, w.write(large))
 	assert.Nil(t, w.buf, "oversized frame buffer is dropped after writing")
 
@@ -238,10 +238,10 @@ func TestLiveEventWriterDropsOversizedFrameBuffer(t *testing.T) {
 func BenchmarkAppendLiveEventFrame(b *testing.B) {
 	event := live.Event{
 		Seq:       12345,
-		Type:      live.EventAuditUpdated,
+		Type:      live.EventRequestLogUpdated,
 		RequestID: "req-bench",
 		Timestamp: time.Date(2026, 9, 15, 12, 0, 0, 123456789, time.UTC),
-		Data:      json.RawMessage(`{"id":"audit-bench","request_id":"req-bench","timestamp":"2026-09-15T12:00:00Z","requested_model":"gpt-4o-mini","provider":"openai","method":"POST","path":"/v1/chat/completions","data":{"user_agent":"openai-python/1.60.0","request_headers":{"Authorization":"[REDACTED]","Content-Type":"application/json"}},"_live_state":"audit.updated","_live_pending":true}`),
+		Data:      json.RawMessage(`{"id":"request-log-bench","request_id":"req-bench","timestamp":"2026-09-15T12:00:00Z","requested_model":"gpt-4o-mini","provider":"openai","method":"POST","path":"/v1/chat/completions","data":{"user_agent":"openai-python/1.60.0","request_headers":{"Authorization":"[REDACTED]","Content-Type":"application/json"}},"_live_state":"audit.updated","_live_pending":true}`),
 	}
 	var buf []byte
 	b.ReportAllocs()

@@ -12,16 +12,22 @@ import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { createCopyState } from "$lib/utils/clipboard.svelte.js";
 import { displayModelSelector } from "$lib/utils/modelSelectors.js";
+import { authKeyLabels } from "$lib/utils/authKeyLabels.js";
 import {
   buildCreateAuthKeyPayload,
   countInactiveAuthKeys,
   defaultAuthKeyForm,
+  duplicateNameWarning,
   filterAuthKeys,
   parseAuthKeyAllowedModels,
   parseAuthKeyLabels,
   retentionDaysFromConfig,
   sortAuthKeys,
 } from "./authKeysLogic.js";
+
+function emptyNameEditor() {
+  return { open: false, id: "", name: "", value: "", submitting: false, error: "" };
+}
 
 function emptyLabelsEditor() {
   return { open: false, id: "", name: "", value: "", submitting: false, error: "" };
@@ -38,8 +44,8 @@ class AuthKeysStore {
   // Load and in-form errors only; row-action feedback goes through the
   // flash store.
   error = $state("");
-  // Audit retention window in days, from the runtime-config store (0 means
-  // retention is disabled and audit entries are kept forever, so a missing
+  // Request log retention window in days, from the runtime-config store (0 means
+  // retention is disabled and request log entries are kept forever, so a missing
   // entry really means the key was never used). null means unknown.
   retentionDays = $derived(retentionDaysFromConfig(runtimeConfig.config.LOGGING_RETENTION_DAYS));
 
@@ -60,6 +66,9 @@ class AuthKeysStore {
     ),
   );
   inactiveCount = $derived(countInactiveAuthKeys(this.keys));
+  // Names by id, with the redacted token appended where two keys share a
+  // name, for confirmations, flashes, and action labels.
+  keyLabels = $derived(authKeyLabels(this.keys));
 
   formOpen = $state(false);
   formSubmitting = $state(false);
@@ -68,6 +77,12 @@ class AuthKeysStore {
   dashboardAccessID = $state("");
   passthroughAccessID = $state("");
   form = $state(defaultAuthKeyForm());
+  // Non-blocking: a name already in use is allowed, the form only says so.
+  formNameWarning = $derived(duplicateNameWarning(this.keys, this.form.name));
+  nameEditor = $state(emptyNameEditor());
+  nameEditorWarning = $derived(
+    duplicateNameWarning(this.keys, this.nameEditor.value, this.nameEditor.id),
+  );
   labelsEditor = $state(emptyLabelsEditor());
   allowedModelsEditor = $state(emptyAllowedModelsEditor());
 
@@ -213,6 +228,81 @@ class AuthKeysStore {
     }
   }
 
+  // displayName is the key's name, with its redacted token when another key
+  // shares the name.
+  displayName(key) {
+    return (key && this.keyLabels[key.id]) || (key && key.name) || "";
+  }
+
+  openNameEditor(key) {
+    if (!key || this.nameEditor.submitting) {
+      return;
+    }
+    this.nameEditor = {
+      open: true,
+      id: key.id,
+      name: this.displayName(key),
+      value: key.name || "",
+      submitting: false,
+      error: "",
+    };
+  }
+
+  closeNameEditor() {
+    if (!this.nameEditor.open || this.nameEditor.submitting) {
+      return;
+    }
+    this.nameEditor = emptyNameEditor();
+  }
+
+  async submitNameEditor() {
+    const editor = this.nameEditor;
+    if (!editor.open || editor.submitting || !editor.id) {
+      return;
+    }
+    const name = String(editor.value || "").trim();
+    if (!name) {
+      editor.error = m.api_keys_name_required();
+      return;
+    }
+    editor.submitting = true;
+    editor.error = "";
+
+    try {
+      const outcome = await sendAdminMutation(
+        "/admin/auth-keys/" + encodeURIComponent(editor.id) + "/name",
+        "PUT",
+        { name },
+        {
+          label: "rename API key",
+          errorFallback: m.api_keys_name_update_failed(),
+          unavailableMessage: m.api_keys_feature_unavailable(),
+        },
+      );
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status === "unavailable") {
+        this.available = false;
+        editor.error = outcome.error;
+        return;
+      }
+      if (outcome.status === "error") {
+        editor.error = outcome.error;
+        if (outcome.result && outcome.result.status !== 401) {
+          console.error("Failed to rename auth key:", outcome.result.status, editor.error);
+        }
+        return;
+      }
+      flash.success(m.api_keys_name_updated({ name }));
+      editor.submitting = false;
+      this.closeNameEditor();
+      void this.fetchKeys();
+    } finally {
+      editor.submitting = false;
+    }
+  }
+
   openLabelsEditor(key) {
     if (!key || this.labelsEditor.submitting) {
       return;
@@ -220,7 +310,7 @@ class AuthKeysStore {
     this.labelsEditor = {
       open: true,
       id: key.id,
-      name: key.name || "",
+      name: this.displayName(key),
       value: (key.labels || []).join(", "),
       submitting: false,
       error: "",
@@ -285,7 +375,7 @@ class AuthKeysStore {
     this.allowedModelsEditor = {
       open: true,
       id: key.id,
-      name: key.name || "",
+      name: this.displayName(key),
       value: (key.allowed_models || []).map(displayModelSelector),
       submitting: false,
       error: "",
@@ -351,8 +441,8 @@ class AuthKeysStore {
     try {
       await this.updateKeyAccess(key, "dashboard_access", "dashboard-access", {
         failed: m.api_keys_access_update_failed(),
-        granted: m.api_keys_access_granted({ name: key.name }),
-        revoked: m.api_keys_access_revoked({ name: key.name }),
+        granted: m.api_keys_access_granted({ name: this.displayName(key) }),
+        revoked: m.api_keys_access_revoked({ name: this.displayName(key) }),
       });
     } finally {
       this.dashboardAccessID = "";
@@ -367,8 +457,8 @@ class AuthKeysStore {
     try {
       await this.updateKeyAccess(key, "passthrough_access", "passthrough-access", {
         failed: m.api_keys_passthrough_update_failed(),
-        granted: m.api_keys_passthrough_granted({ name: key.name }),
-        revoked: m.api_keys_passthrough_revoked({ name: key.name }),
+        granted: m.api_keys_passthrough_granted({ name: this.displayName(key) }),
+        revoked: m.api_keys_passthrough_revoked({ name: this.displayName(key) }),
       });
     } finally {
       this.passthroughAccessID = "";
@@ -416,7 +506,7 @@ class AuthKeysStore {
     if (!key || !key.active) {
       return;
     }
-    if (!window.confirm(m.api_keys_deactivate_confirm({ name: key.name }))) {
+    if (!window.confirm(m.api_keys_deactivate_confirm({ name: this.displayName(key) }))) {
       return;
     }
 
@@ -447,7 +537,7 @@ class AuthKeysStore {
         flash.error(outcome.error);
         return;
       }
-      flash.success(m.api_keys_deactivate_success({ name: key.name }));
+      flash.success(m.api_keys_deactivate_success({ name: this.displayName(key) }));
       void this.fetchKeys();
     } finally {
       this.deactivatingID = "";

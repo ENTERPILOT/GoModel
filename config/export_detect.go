@@ -2,12 +2,15 @@ package config
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"net/url"
 	"regexp"
 	"slices"
 	"strings"
 	"unicode"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // onlyReferences reports whether value is made of secret references alone,
@@ -128,6 +131,48 @@ func bearerCredential(value string) bool {
 	credential = strings.TrimLeft(credential, " \t")
 	return ok && strings.EqualFold(scheme, "bearer") && !strings.ContainsAny(credential, " \t\n") &&
 		literal(replaceReferences(credential, referencePlaceholder))
+}
+
+// headerLine matches an HTTP header written as a "Name: value" line, as the
+// header_edit plugin takes them, commented out with "#" or not. The value
+// ends before trailing white space.
+var headerLine = regexp.MustCompile("^[ \t#]*([0-9A-Za-z!#$%&'*+.^_`|~-]+)[ \t]*:[ \t]*(.*?)[ \t\r]*$")
+
+// headerCredential returns where the value of a "Name: value" header line
+// starts and ends when it is a credential that is not made of secret
+// references alone: the header names one ("X-Proxy-Key: ..."), or the value
+// is what Authorization holds ("X-Upstream: Bearer ..."). It returns -1 for
+// any other line.
+func headerCredential(line string) (start, end int) {
+	match := headerLine.FindStringSubmatchIndex(line)
+	if match == nil {
+		return -1, -1
+	}
+	name, value := line[match[2]:match[3]], line[match[4]:match[5]]
+	if value == "" || onlyReferences(value) {
+		return -1, -1
+	}
+	if credentialKey(name) || core.IsCredentialHeader(name) || authCredential(value) {
+		return match[4], match[5]
+	}
+	return -1, -1
+}
+
+// authCredential reports whether value is what an Authorization header
+// holds: a bearer token, or Basic credentials, the base64 of "user:password".
+// The scheme alone does not tell: "Mode: Basic auth" is text. A tab separates
+// the scheme as a space does.
+func authCredential(value string) bool {
+	value = strings.ReplaceAll(value, "\t", " ")
+	if bearerCredential(value) {
+		return true
+	}
+	scheme, credential, ok := cutAuthScheme(value)
+	if !ok || !strings.EqualFold(scheme, "basic") {
+		return false
+	}
+	decoded, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(strings.TrimSpace(credential), "="))
+	return err == nil && strings.Contains(string(decoded), ":")
 }
 
 // argCredential reports how a command-line argument carries a credential:
