@@ -714,7 +714,9 @@ Gibt in Zeitabschnitte eingeteilte Request-Zahlen zurück, gruppiert nach den St
 `2xx`/`4xx`/`5xx`, dazu eine Zusammenfassung der Gesamterfolgsquote und die durchschnittliche Request-Dauer pro
 Provider. Darauf basieren die Diagramme „Requests by Status“ und „Provider Latency“ auf
 der Seite „Overview“ des Dashboards. Die Daten stammen aus dem Request-Log (Request-Logging ist standardmäßig aktiviert;
-`LOGGING_ENABLED`). Die alten `/admin/audit/...`-Pfade funktionieren weiterhin als veraltete Aliasse.
+`LOGGING_ENABLED`). Die alten `/admin/audit/...`-Pfade sind veraltet: Sie funktionieren weiterhin, und ihre
+Antworten enthalten den Header `Deprecation: true` sowie einen `Link`-Header mit dem
+neuen Pfad. Ein Datum für die Entfernung steht nicht fest.
 
 **Query-Parameter:**
 

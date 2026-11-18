@@ -82,7 +82,7 @@ func describeEndpointPath(path string) EndpointDescriptor {
 		// Conversations are a gateway-managed resource store (no provider
 		// call), but they are an ingress-managed /v1 endpoint and are
 		// classified as a model interaction path so they appear in request
-		// and request logs alongside the other /v1 endpoints.
+		// logs alongside the other /v1 endpoints.
 		return EndpointDescriptor{
 			ModelInteraction: true,
 			IngressManaged:   true,

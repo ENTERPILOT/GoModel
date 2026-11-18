@@ -534,6 +534,21 @@ function applyPathSidebarTitles() {
   }
 }
 
+// markDeprecatedSummaries appends "(deprecated)" to the summary of every
+// deprecated operation. A deprecated alias shares its handler, and so its
+// summary, with the route that replaces it; the suffix keeps the two API
+// Reference pages apart and tells readers which one to use.
+function markDeprecatedSummaries() {
+  for (const pathItem of Object.values(spec.paths || {})) {
+    if (!pathItem || typeof pathItem !== "object") continue;
+    for (const operation of Object.values(pathItem)) {
+      if (!operation || typeof operation !== "object" || operation.deprecated !== true) continue;
+      if (typeof operation.summary !== "string" || operation.summary.endsWith("(deprecated)")) continue;
+      operation.summary = `${operation.summary} (deprecated)`;
+    }
+  }
+}
+
 // applyMintlifyOperationMetadata gives every generated API page a concise,
 // unique search title and description without replacing the full operation
 // description rendered in the reference body. Several routes intentionally
@@ -628,6 +643,7 @@ applyBudgetKeySchemaConstraints();
 applyStringArrayPropertyBounds("admin.upsertVirtualModelRequest", "user_paths", 100, 1024);
 applySlowdownSchemaConstraints();
 applyPricingSchemaConstraints();
+markDeprecatedSummaries();
 applyPathSidebarTitles();
 applyMintlifyOperationMetadata();
 

@@ -711,7 +711,9 @@ Zwraca liczby requestów w przedziałach czasowych, pogrupowane w klasy statusó
 ogólne podsumowanie wskaźnika sukcesu oraz średni czas trwania requestu per
 provider. Na tym opierają się wykresy „Requests by Status” i „Provider Latency” na
 stronie Overview w dashboardzie. Dane pochodzą z logu requestów (logowanie requestów jest domyślnie włączone;
-`LOGGING_ENABLED`). Stare ścieżki `/admin/audit/...` nadal działają jako przestarzałe aliasy.
+`LOGGING_ENABLED`). Stare ścieżki `/admin/audit/...` są przestarzałe: nadal działają, a ich odpowiedzi
+zawierają nagłówek `Deprecation: true` oraz nagłówek `Link` wskazujący nową ścieżkę.
+Data ich usunięcia nie jest ustalona.
 
 **Parametry zapytania:**
 

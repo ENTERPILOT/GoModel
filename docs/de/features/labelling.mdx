@@ -252,9 +252,10 @@ Provider, der `tags` ablehnt, gibt seinen Fehler zurück.
 - **Nutzungs-Dashboard** – die Nutzungsseite zeigt eine Aufschlüsselung nach
   Label (`GET /admin/usage/labels`). Ein Request mit mehreren Labels zählt
   einmal unter jedem davon.
-- **Request-Log** – Label-Chips pro Request, filterbar mit dem Query-Parameter
+- **Nutzungs-Log** – Label-Chips pro Request auf der Nutzungsseite, filterbar mit dem
+  Query-Parameter
   `label` bei `GET /admin/usage/log`.
-- **Seite „Anfragen“** – erfasst unter `data.labels` in jedem Request-Log-Eintrag (Request-Logging
+- **Request-Logs** – erfasst unter `data.labels` in jedem Eintrag (Request-Logging
   ist standardmäßig aktiviert).
 - **Seite API Keys** – die Labels jedes Keys werden neben seinem User Path
   aufgeführt.

@@ -138,7 +138,7 @@ func ClearRequestLogs(t *testing.T, pool *pgxpool.Pool) {
 	require.NoError(t, err, "failed to clear request logs")
 }
 
-// bsonToRequestLogEntry converts a BSON document to an RequestLogEntry.
+// bsonToRequestLogEntry converts a BSON document to a RequestLogEntry.
 func bsonToRequestLogEntry(t *testing.T, doc bson.M) RequestLogEntry {
 	t.Helper()
 	entry := RequestLogEntry{}

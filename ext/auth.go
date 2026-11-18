@@ -44,8 +44,8 @@ type RequestAuthenticator interface {
 	AuthenticateRequest(ctx context.Context, request *http.Request) (*Authentication, error)
 }
 
-// AuthenticationEvent is a security-audit record emitted by an extension
-// authentication flow. Reason must be a short, stable machine identifier; it
+// AuthenticationEvent is a security event emitted by an extension
+// authentication flow, which Core records in its request log. Reason must be a short, stable machine identifier; it
 // must not contain provider responses, tokens, claims, or other secrets.
 type AuthenticationEvent struct {
 	Timestamp   time.Time

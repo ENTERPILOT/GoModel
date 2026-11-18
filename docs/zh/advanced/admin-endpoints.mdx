@@ -594,7 +594,7 @@ curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode
 ### GET /admin/request-logs/stats
 
 返回按时间分桶、并按 `2xx`/`4xx`/`5xx` 状态类别分组的请求数，以及整体成功率汇总和每个提供商的平均请求耗时。控制台 Overview 页面上的 "Requests by Status" 和 "Provider Latency" 图表即基于此端点。数据来自请求日志（请求日志默认启用；
-`LOGGING_ENABLED`）。旧的 `/admin/audit/...` 路径仍可作为已弃用的别名继续使用。
+`LOGGING_ENABLED`）。旧的 `/admin/audit/...` 路径已弃用：它们仍可使用，其响应带有 `Deprecation: true` 响应头以及指向新路径的 `Link` 响应头。目前尚未确定移除日期。
 
 **查询参数：**
 

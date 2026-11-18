@@ -54,7 +54,7 @@ const (
 	subsystemProviders           = "providers"
 	subsystemSecretRotation      = "secret rotation"
 	subsystemRouteStrategies     = "routing-strategy plugins"
-	subsystemRequestLog          = "audit"
+	subsystemRequestLog          = "request log"
 	subsystemUsage               = "usage"
 	subsystemBudgets             = "budgets"
 	subsystemRateLimits          = "rate limits"

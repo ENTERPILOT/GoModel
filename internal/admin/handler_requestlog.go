@@ -63,6 +63,7 @@ const conversationBuildTimeout = 10 * time.Second
 // @Failure      401  {object}  core.GatewayError
 // @Failure      403  {object}  core.GatewayError
 // @Router       /admin/request-logs [get]
+// @DeprecatedRouter  /admin/audit/log [get]
 func (h *Handler) RequestLog(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
 	// always get a 400 for malformed inputs, regardless of whether request
@@ -241,6 +242,7 @@ func parseRequestLogQueryParams(c *echo.Context) (requestlog.LogQueryParams, err
 // @Failure      401  {object}  core.GatewayError
 // @Failure      403  {object}  core.GatewayError
 // @Router       /admin/request-logs/sessions [get]
+// @DeprecatedRouter  /admin/audit/sessions [get]
 func (h *Handler) RequestLogSessions(c *echo.Context) error {
 	params, err := parseRequestLogQueryParams(c)
 	if err != nil {
@@ -356,6 +358,7 @@ const requestLogStatsHourlyRangeDays = 3
 // @Failure      401  {object}  core.GatewayError
 // @Failure      403  {object}  core.GatewayError
 // @Router       /admin/request-logs/stats [get]
+// @DeprecatedRouter  /admin/audit/stats [get]
 func (h *Handler) RequestLogStats(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
 	// always get a 400 for malformed inputs, regardless of whether request
@@ -413,6 +416,7 @@ func (h *Handler) RequestLogStats(c *echo.Context) error {
 // @Failure      404  {object}  core.GatewayError
 // @Failure      500  {object}  core.GatewayError
 // @Router       /admin/request-logs/detail [get]
+// @DeprecatedRouter  /admin/audit/detail [get]
 func (h *Handler) RequestLogDetail(c *echo.Context) error {
 	logID := strings.TrimSpace(c.QueryParam("log_id"))
 	if logID == "" {
@@ -464,6 +468,7 @@ func (h *Handler) RequestLogDetail(c *echo.Context) error {
 // @Failure      401  {object}  core.GatewayError
 // @Failure      403  {object}  core.GatewayError
 // @Router       /admin/request-logs/conversation [get]
+// @DeprecatedRouter  /admin/audit/conversation [get]
 func (h *Handler) RequestLogConversation(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
 	// always get a 400 for missing/invalid params, regardless of whether

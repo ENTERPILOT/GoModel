@@ -62,7 +62,7 @@ func createLogStore(ctx context.Context, store storage.Storage, retentionDays in
 	)
 }
 
-// buildLoggerConfig creates an requestlog.Config from config.LogConfig.
+// buildLoggerConfig creates a requestlog.Config from config.LogConfig.
 func buildLoggerConfig(logCfg config.LogConfig) Config {
 	imageScope := config.ResolveImageBodyScope(logCfg.LogImageBodiesScope)
 	cfg := Config{

@@ -3,6 +3,7 @@ package admin
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,7 +157,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 
 // The request log was served under /admin/audit before it was renamed. The old
 // paths are a compatibility promise: each must reach the same handler as its
-// replacement and answer identically.
+// replacement and answer identically, apart from the deprecation headers.
 func TestDeprecatedAuditPathsServeTheRequestLog(t *testing.T) {
 	now := time.Now().UTC()
 	entry := requestlog.LogEntry{ID: "log-1", Timestamp: now, RequestID: "req-1", StatusCode: http.StatusOK}
@@ -171,13 +172,13 @@ func TestDeprecatedAuditPathsServeTheRequestLog(t *testing.T) {
 	NewHandler(nil, nil, WithRequestLogReader(reader)).RegisterRoutes(e.Group("/admin"))
 
 	// as_of is the time the list was read, so it differs between two calls.
-	get := func(path string) (int, map[string]any) {
+	get := func(path string) (*httptest.ResponseRecorder, map[string]any) {
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		var body map[string]any
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body), rec.Body.String())
 		delete(body, "as_of")
-		return rec.Code, body
+		return rec, body
 	}
 
 	tests := []struct{ deprecated, current string }{
@@ -189,12 +190,18 @@ func TestDeprecatedAuditPathsServeTheRequestLog(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.deprecated, func(t *testing.T) {
-			wantCode, wantBody := get(tt.current)
-			require.Equal(t, http.StatusOK, wantCode, wantBody)
+			current, wantBody := get(tt.current)
+			require.Equal(t, http.StatusOK, current.Code, wantBody)
+			assert.Empty(t, current.Header().Get("Deprecation"))
 
-			gotCode, gotBody := get(tt.deprecated)
-			assert.Equal(t, wantCode, gotCode)
+			deprecated, gotBody := get(tt.deprecated)
+			assert.Equal(t, current.Code, deprecated.Code)
 			assert.Equal(t, wantBody, gotBody)
+
+			// The alias tells its clients it is deprecated and where to go.
+			successor, _, _ := strings.Cut(tt.current, "?")
+			assert.Equal(t, "true", deprecated.Header().Get("Deprecation"))
+			assert.Equal(t, "<"+successor+`>; rel="successor-version"`, deprecated.Header().Get("Link"))
 		})
 	}
 }

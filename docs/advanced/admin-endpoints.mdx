@@ -742,8 +742,10 @@ the dashboard's Overview page. Data comes from the request log (request logging 
   `/admin/audit/`: `/admin/audit/log` is now `/admin/request-logs`, and
   `/admin/audit/sessions`, `/stats`, `/detail`, and `/conversation` are now
   `/admin/request-logs/sessions`, `/stats`, `/detail`, and `/conversation`.
-  The old `/admin/audit/...` paths still work as deprecated aliases. Query
-  parameters and response bodies are unchanged.
+  The old `/admin/audit/...` paths are deprecated: they still work, and their
+  responses carry a `Deprecation: true` header and a `Link` header naming the
+  replacement. No removal date is set. Query parameters and response bodies
+  are unchanged.
 </Note>
 
 **Query parameters:**
