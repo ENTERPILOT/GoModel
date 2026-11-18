@@ -16,9 +16,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -120,7 +120,7 @@ func TestAudioSlowdownAppliesAfterInferenceAndHonorsCancellation(t *testing.T) {
 			name:  "speech",
 			model: "gpt-4o-mini-tts",
 			newContext: func(t *testing.T) (*echo.Context, *httptest.ResponseRecorder) {
-				c, rec, _ := newSpeechRequestWithAuditEntry(t)
+				c, rec, _ := newSpeechRequestWithRequestLogEntry(t)
 				return c, rec
 			},
 			call: func(h *Handler, c *echo.Context) error { return h.AudioSpeech(c) },
@@ -132,7 +132,7 @@ func TestAudioSlowdownAppliesAfterInferenceAndHonorsCancellation(t *testing.T) {
 			name:  "transcription",
 			model: "gpt-4o-transcribe",
 			newContext: func(t *testing.T) (*echo.Context, *httptest.ResponseRecorder) {
-				c, rec, _ := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("audio"))
+				c, rec, _ := newTranscriptionRequestWithRequestLogEntry(t, "speech.mp3", []byte("audio"))
 				return c, rec
 			},
 			call: func(h *Handler, c *echo.Context) error { return h.AudioTranscriptions(c) },
@@ -496,9 +496,9 @@ func TestAudioTranslation_ErrorResponses(t *testing.T) {
 	}
 }
 
-// newTranscriptionRequestWithAuditEntry builds a multipart /v1/audio/transcriptions
-// request carrying the given audio bytes and seeds an empty audit entry.
-func newTranscriptionRequestWithAuditEntry(t *testing.T, filename string, audio []byte) (*echo.Context, *httptest.ResponseRecorder, *auditlog.LogEntry) {
+// newTranscriptionRequestWithRequestLogEntry builds a multipart /v1/audio/transcriptions
+// request carrying the given audio bytes and seeds an empty request log entry.
+func newTranscriptionRequestWithRequestLogEntry(t *testing.T, filename string, audio []byte) (*echo.Context, *httptest.ResponseRecorder, *requestlog.LogEntry) {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("model", "gpt-4o-transcribe")
@@ -508,8 +508,8 @@ func newTranscriptionRequestWithAuditEntry(t *testing.T, filename string, audio 
 	_ = w.Close()
 
 	c, rec := echotest.Post(t, "/v1/audio/transcriptions", &buf, echotest.WithContentType(w.FormDataContentType()))
-	entry := &auditlog.LogEntry{}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{}
+	c.Set(string(requestlog.LogEntryKey), entry)
 	return c, rec, entry
 }
 
@@ -527,12 +527,12 @@ func newTranscriptionMock() *audioMockProvider {
 func TestAudioTranscription_LogsUploadedAudioWhenEnabled(t *testing.T) {
 	media, store := newTestMediaCapturer(t)
 	svc := &audioService{provider: newTranscriptionMock(), logBodies: true, logAudioBodies: true, media: media}
-	c, rec, entry := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("uploaded-audio-bytes"))
+	c, rec, entry := newTranscriptionRequestWithRequestLogEntry(t, "speech.mp3", []byte("uploaded-audio-bytes"))
 	err := svc.CreateTranscription(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	body, ok := entry.Data.RequestBody.(auditlog.AudioBodyLog)
+	body, ok := entry.Data.RequestBody.(requestlog.AudioBodyLog)
 	require.True(t, ok, "request body not an AudioBodyLog, got %T", entry.Data.RequestBody)
 	require.True(t, body.Stored)
 	require.Equal(t, "audio/mpeg", body.ContentType, "expected stored audio/mpeg (from .mp3 extension), got %+v", body)
@@ -545,10 +545,10 @@ func TestAudioTranscription_LogsUploadedAudioWhenEnabled(t *testing.T) {
 // store bytes; without a media store the upload is a sized placeholder.
 func TestAudioTranscription_PlaceholderWithoutMediaStore(t *testing.T) {
 	svc := &audioService{provider: newTranscriptionMock(), logBodies: true, logAudioBodies: true}
-	c, _, entry := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("uploaded-audio-bytes"))
+	c, _, entry := newTranscriptionRequestWithRequestLogEntry(t, "speech.mp3", []byte("uploaded-audio-bytes"))
 	require.NoError(t, svc.CreateTranscription(c))
 
-	body, ok := entry.Data.RequestBody.(auditlog.AudioBodyLog)
+	body, ok := entry.Data.RequestBody.(requestlog.AudioBodyLog)
 	require.True(t, ok, "request body not an AudioBodyLog, got %T", entry.Data.RequestBody)
 	assert.False(t, body.Stored)
 	assert.Empty(t, body.MediaID)
@@ -560,11 +560,11 @@ func TestAudioTranscription_PlaceholderWithoutMediaStore(t *testing.T) {
 // (no audio bytes), mirroring the speech-response behavior.
 func TestAudioTranscription_MetadataPlaceholderWhenAudioDisabled(t *testing.T) {
 	svc := &audioService{provider: newTranscriptionMock(), logBodies: true, logAudioBodies: false}
-	c, _, entry := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("uploaded-audio-bytes"))
+	c, _, entry := newTranscriptionRequestWithRequestLogEntry(t, "speech.mp3", []byte("uploaded-audio-bytes"))
 	err := svc.CreateTranscription(c)
 	require.NoError(t, err)
 
-	body, ok := entry.Data.RequestBody.(auditlog.AudioBodyLog)
+	body, ok := entry.Data.RequestBody.(requestlog.AudioBodyLog)
 	require.True(t, ok, "request body not an AudioBodyLog, got %T", entry.Data.RequestBody)
 	assert.False(t, body.Stored)
 	assert.Empty(t, body.MediaID, "audio bytes must not be stored when LogAudioBodies is off, got %+v", body)
@@ -575,7 +575,7 @@ func TestAudioTranscription_MetadataPlaceholderWhenAudioDisabled(t *testing.T) {
 // the master LogBodies switch is off.
 func TestAudioTranscription_NoCaptureWhenBodiesDisabled(t *testing.T) {
 	svc := &audioService{provider: newTranscriptionMock(), logBodies: false, logAudioBodies: true}
-	c, _, entry := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("uploaded-audio-bytes"))
+	c, _, entry := newTranscriptionRequestWithRequestLogEntry(t, "speech.mp3", []byte("uploaded-audio-bytes"))
 	err := svc.CreateTranscription(c)
 	require.NoError(t, err)
 
@@ -590,7 +590,7 @@ func TestAudioSpeech_LogsUsage(t *testing.T) {
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
 	svc := &audioService{provider: newSpeechMock(), usageLogger: logger}
-	c, rec, _ := newSpeechRequestWithAuditEntry(t)
+	c, rec, _ := newSpeechRequestWithRequestLogEntry(t)
 	err := svc.CreateSpeech(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -644,7 +644,7 @@ func TestAudioSpeech_CostsOutputAudioDuration(t *testing.T) {
 				body += `,"response_format":"` + tt.responseFormat + `"`
 			}
 			body += `}`
-			c, _ := echotest.Post(t, "/v1/audio/speech", body, echotest.WithValue(string(auditlog.LogEntryKey), &auditlog.LogEntry{}))
+			c, _ := echotest.Post(t, "/v1/audio/speech", body, echotest.WithValue(string(requestlog.LogEntryKey), &requestlog.LogEntry{}))
 			err := svc.CreateSpeech(c)
 			require.NoError(t, err)
 			require.NotNil(t, captured)
@@ -694,7 +694,7 @@ func TestAudioTranscription_LogsUsage(t *testing.T) {
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
 	svc := &audioService{provider: newTranscriptionMock(), usageLogger: logger}
-	c, rec, _ := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("audio-bytes"))
+	c, rec, _ := newTranscriptionRequestWithRequestLogEntry(t, "speech.mp3", []byte("audio-bytes"))
 	err := svc.CreateTranscription(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -709,7 +709,7 @@ func TestAudioSpeech_NoUsageWhenDisabled(t *testing.T) {
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: false}, captured: &captured}
 	svc := &audioService{provider: newSpeechMock(), usageLogger: logger}
-	c, rec, _ := newSpeechRequestWithAuditEntry(t)
+	c, rec, _ := newSpeechRequestWithRequestLogEntry(t)
 	err := svc.CreateSpeech(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -754,14 +754,14 @@ func TestAudioTranscription_MissingModel(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-// newSpeechRequestWithAuditEntry builds a /v1/audio/speech request and seeds an
-// empty audit entry into the context (as the audit middleware would), returning
+// newSpeechRequestWithRequestLogEntry builds a /v1/audio/speech request and seeds an
+// empty request log entry into the context (as the request log middleware would), returning
 // the context, recorder, and the entry to assert on.
-func newSpeechRequestWithAuditEntry(t *testing.T) (*echo.Context, *httptest.ResponseRecorder, *auditlog.LogEntry) {
+func newSpeechRequestWithRequestLogEntry(t *testing.T) (*echo.Context, *httptest.ResponseRecorder, *requestlog.LogEntry) {
 	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}`
 	c, rec := echotest.Post(t, "/v1/audio/speech", body)
-	entry := &auditlog.LogEntry{}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{}
+	c.Set(string(requestlog.LogEntryKey), entry)
 	return c, rec, entry
 }
 
@@ -778,7 +778,7 @@ func newSpeechMock() *audioMockProvider {
 func TestAudioSpeech_LogsAudioBodiesWhenEnabled(t *testing.T) {
 	media, store := newTestMediaCapturer(t)
 	svc := &audioService{provider: newSpeechMock(), logBodies: true, logAudioBodies: true, media: media}
-	c, rec, entry := newSpeechRequestWithAuditEntry(t)
+	c, rec, entry := newSpeechRequestWithRequestLogEntry(t)
 	err := svc.CreateSpeech(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -788,7 +788,7 @@ func TestAudioSpeech_LogsAudioBodiesWhenEnabled(t *testing.T) {
 	assert.Equal(t, "hello", reqBody["input"])
 	assert.Equal(t, "alloy", reqBody["voice"], "request body mismatch: %+v", reqBody)
 
-	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
+	respBody, ok := entry.Data.ResponseBody.(requestlog.AudioBodyLog)
 	require.True(t, ok, "response body not an AudioBodyLog, got %T", entry.Data.ResponseBody)
 	require.True(t, respBody.Stored)
 	assert.Equal(t, int64(len("synthetic-audio")), respBody.Bytes)
@@ -800,14 +800,14 @@ func TestAudioSpeech_LogsAudioBodiesWhenEnabled(t *testing.T) {
 // input is not captured.
 func TestAudioSpeech_PlaceholderWhenAudioDisabled(t *testing.T) {
 	svc := &audioService{provider: newSpeechMock(), logBodies: true, logAudioBodies: false}
-	c, _, entry := newSpeechRequestWithAuditEntry(t)
+	c, _, entry := newSpeechRequestWithRequestLogEntry(t)
 	err := svc.CreateSpeech(c)
 	require.NoError(t, err)
 
 	if entry.Data != nil {
 		assert.Nil(t, entry.Data.RequestBody, "input should not be captured when LogAudioBodies is off")
 	}
-	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
+	respBody, ok := entry.Data.ResponseBody.(requestlog.AudioBodyLog)
 	require.True(t, ok, "response body not an AudioBodyLog, got %T", entry.Data.ResponseBody)
 	assert.False(t, respBody.Stored)
 	assert.Empty(t, respBody.MediaID, "audio bytes must not be stored when LogAudioBodies is off, got %+v", respBody)
@@ -818,7 +818,7 @@ func TestAudioSpeech_PlaceholderWhenAudioDisabled(t *testing.T) {
 // With it off, no audio body is captured even if LogAudioBodies is on.
 func TestAudioSpeech_NoAudioBodyWhenBodiesDisabled(t *testing.T) {
 	svc := &audioService{provider: newSpeechMock(), logBodies: false, logAudioBodies: true}
-	c, rec, entry := newSpeechRequestWithAuditEntry(t)
+	c, rec, entry := newSpeechRequestWithRequestLogEntry(t)
 	err := svc.CreateSpeech(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -859,7 +859,7 @@ func TestAudio_NilResponseSkipsUsage(t *testing.T) {
 		svc := &audioService{
 			provider:    &audioMockProvider{mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}}, speechResp: nil},
 			usageLogger: logger}
-		c, rec, _ := newSpeechRequestWithAuditEntry(t)
+		c, rec, _ := newSpeechRequestWithRequestLogEntry(t)
 		err := svc.CreateSpeech(c)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusBadGateway, rec.Code)
@@ -875,7 +875,7 @@ func TestAudio_NilResponseSkipsUsage(t *testing.T) {
 				providerNames:   map[string]string{"gpt-4o-transcribe": "audio-transcription"},
 			}, transcriptionResp: nil},
 			usageLogger: logger}
-		c, rec, _ := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("audio-bytes"))
+		c, rec, _ := newTranscriptionRequestWithRequestLogEntry(t, "speech.mp3", []byte("audio-bytes"))
 		err := // Must not panic on resp.Data when resp is nil.
 			svc.CreateTranscription(c)
 		require.NoError(t, err)

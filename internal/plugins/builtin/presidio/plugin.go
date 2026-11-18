@@ -133,7 +133,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "message", Label: "Message", Input: pluginapi.InputText, Default: DefaultMessage,
-				Help:        "Error message for block, assistant reply for respond, and audit note for warn.",
+				Help:        "Error message for block, assistant reply for respond, and request log note for warn.",
 				Placeholder: DefaultMessage,
 			},
 			pluginapi.BlockStatusField(),

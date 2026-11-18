@@ -1,6 +1,6 @@
 ---
 title: "GoModel & n8n"
-description: "Route every n8n AI Agent, LLM Chain, and OpenAI node call through GoModel with one credential, and get audit logs, cost tracking, and metrics for all of your workflows."
+description: "Route every n8n AI Agent, LLM Chain, and OpenAI node call through GoModel with one credential, and get request logs, cost tracking, and metrics for all of your workflows."
 icon: "workflow"
 keywords: ["n8n", "AI Agent", "OpenAI credential", "base URL", "workflow automation", "LLM observability", "setup guide"]
 ---
@@ -19,7 +19,7 @@ Flow:
 
 What you get:
 
-- Full request and response bodies for every AI call in the GoModel audit log.
+- Full request and response bodies for every AI call in the GoModel request log.
 - Token usage and cost per model, per API key, and per label.
 - Prometheus metrics and OpenTelemetry traces for AI traffic.
 - Failover, caching, rate limits, and budgets applied to n8n traffic.
@@ -102,7 +102,7 @@ Because the list comes from GoModel, you can select
 `anthropic/claude-haiku-4-5-20251001` or `gemini/gemini-2.5-flash` in the same
 node that used to be OpenAI-only. Both the provider-prefixed ids from the
 picker and plain ids such as `gpt-5-mini` work. Run the workflow, then open
-the GoModel dashboard: the call appears in the audit log with the full prompt,
+the GoModel dashboard: the call appears in the request log with the full prompt,
 the tool definitions n8n attached, the response, tokens, and cost.
 
 <Note>

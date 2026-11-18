@@ -58,7 +58,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "user_path", Label: "User path", Input: pluginapi.InputText, Default: "",
-				Help:        "Optional user path the judge call is scoped to for budgets and audit. Leave empty to use the current request's path.",
+				Help:        "Optional user path the judge call is scoped to for budgets and request logs. Leave empty to use the current request's path.",
 				Placeholder: "/internal/guardrails",
 			},
 			{
@@ -99,7 +99,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "message", Label: "Message", Input: pluginapi.InputText, Default: DefaultMessage,
-				Help:        "Error message for block and audit note for warn.",
+				Help:        "Error message for block and request log note for warn.",
 				Placeholder: DefaultMessage,
 			},
 			pluginapi.BlockStatusField(),

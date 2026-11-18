@@ -1,0 +1,402 @@
+package requestlog
+
+import (
+	"context"
+	"maps"
+	"slices"
+	"sort"
+	"strings"
+)
+
+// Note: MaxContentCapture and LogEntryStreamingKey constants are defined in constants.go
+
+// streamResponseBuilder accumulates data from SSE events to reconstruct a response
+type streamResponseBuilder struct {
+	// ChatCompletion fields
+	ID                string
+	Model             string
+	Provider          string
+	SystemFingerprint string
+	Created           int64
+	Usage             map[string]any
+	Choices           map[int]*streamChatChoiceState
+
+	// Responses API fields
+	IsResponsesAPI bool
+	ResponseID     string
+	CreatedAt      int64
+	Status         string
+	OutputText     strings.Builder
+	// Output is the complete output of the closing event, when one arrived.
+	Output []any
+
+	// Anthropic is set once the stream turns out to carry Anthropic Messages
+	// events rather than chat chunks.
+	Anthropic *anthropicStreamMessage
+
+	// Tracking
+	contentLen int // track content length to enforce limit
+	truncated  bool
+}
+
+// build returns the response in the dialect the stream spoke.
+func (b *streamResponseBuilder) build() map[string]any {
+	switch {
+	case b.IsResponsesAPI:
+		return b.buildResponsesAPIResponse()
+	case b.Anthropic != nil:
+		return b.Anthropic.build()
+	default:
+		return b.buildChatCompletionResponse()
+	}
+}
+
+type streamChatToolCallState struct {
+	ID          string
+	Type        string
+	Name        string
+	Arguments   strings.Builder
+	hasFunction bool
+}
+
+type streamChatChoiceState struct {
+	Role         string
+	Content      strings.Builder
+	FinishReason string
+	ToolCalls    map[int]*streamChatToolCallState
+}
+
+// buildChatCompletionResponse constructs a ChatCompletion response from accumulated data
+func (b *streamResponseBuilder) buildChatCompletionResponse() map[string]any {
+	choices := b.buildChatChoices()
+
+	response := map[string]any{
+		"id":      b.ID,
+		"object":  "chat.completion",
+		"model":   b.Model,
+		"created": b.Created,
+		"choices": choices,
+	}
+	if b.Provider != "" {
+		response["provider"] = b.Provider
+	}
+	if b.SystemFingerprint != "" {
+		response["system_fingerprint"] = b.SystemFingerprint
+	}
+	if b.Usage != nil {
+		response["usage"] = b.Usage
+	}
+	return response
+}
+
+func (b *streamResponseBuilder) buildChatChoices() []map[string]any {
+	if len(b.Choices) == 0 {
+		return []map[string]any{
+			{
+				"index": 0,
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": "",
+				},
+				"finish_reason": "",
+			},
+		}
+	}
+
+	indexes := make([]int, 0, len(b.Choices))
+	for index := range b.Choices {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+
+	choices := make([]map[string]any, 0, len(indexes))
+	for _, index := range indexes {
+		state := b.Choices[index]
+		message := map[string]any{
+			"role": nonEmptyString(state.Role, "assistant"),
+		}
+
+		content := state.Content.String()
+		toolCalls := buildStreamChatToolCalls(state.ToolCalls)
+		// OpenAI chat messages distinguish tool-only output from an explicitly
+		// empty message: no state.Content.String() plus state.ToolCalls renders
+		// message["content"] as nil; no text and no buildStreamChatToolCalls(...)
+		// result renders message["content"] as "".
+		switch {
+		case content != "":
+			message["content"] = content
+		case len(toolCalls) > 0:
+			message["content"] = nil
+		default:
+			message["content"] = ""
+		}
+		if len(toolCalls) > 0 {
+			message["tool_calls"] = toolCalls
+		}
+
+		choices = append(choices, map[string]any{
+			"index":         index,
+			"message":       message,
+			"finish_reason": state.FinishReason,
+		})
+	}
+
+	return choices
+}
+
+func buildStreamChatToolCalls(states map[int]*streamChatToolCallState) []map[string]any {
+	if len(states) == 0 {
+		return nil
+	}
+
+	indexes := make([]int, 0, len(states))
+	for index := range states {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+
+	toolCalls := make([]map[string]any, 0, len(indexes))
+	for _, index := range indexes {
+		state := states[index]
+		if !state.hasFunction {
+			continue
+		}
+		toolCalls = append(toolCalls, map[string]any{
+			"id":   state.ID,
+			"type": nonEmptyString(state.Type, "function"),
+			"function": map[string]any{
+				"name":      state.Name,
+				"arguments": state.Arguments.String(),
+			},
+		})
+	}
+	return toolCalls
+}
+
+func (b *streamResponseBuilder) chatChoice(index int) *streamChatChoiceState {
+	if b.Choices == nil {
+		b.Choices = make(map[int]*streamChatChoiceState)
+	}
+	state, ok := b.Choices[index]
+	if ok {
+		return state
+	}
+	state = &streamChatChoiceState{ToolCalls: make(map[int]*streamChatToolCallState)}
+	b.Choices[index] = state
+	return state
+}
+
+func (c *streamChatChoiceState) toolCall(index int) *streamChatToolCallState {
+	if c.ToolCalls == nil {
+		c.ToolCalls = make(map[int]*streamChatToolCallState)
+	}
+	state, ok := c.ToolCalls[index]
+	if ok {
+		return state
+	}
+	state = &streamChatToolCallState{}
+	c.ToolCalls[index] = state
+	return state
+}
+
+// buildResponsesAPIResponse constructs a Responses API response from accumulated data
+func (b *streamResponseBuilder) buildResponsesAPIResponse() map[string]any {
+	response := map[string]any{
+		"id":         b.ResponseID,
+		"object":     "response",
+		"model":      b.Model,
+		"created_at": b.CreatedAt,
+		"status":     b.Status,
+	}
+	if b.Output != nil {
+		response["output"] = b.Output
+		return response
+	}
+	// Without a closing output to keep (the stream was cut, or its output was
+	// empty or past the capture budget) the text deltas are all there is.
+	response["output"] = []map[string]any{
+		{
+			"type": "message",
+			"role": "assistant",
+			"content": []map[string]any{
+				{
+					"type": "output_text",
+					"text": b.OutputText.String(),
+				},
+			},
+		},
+	}
+	return response
+}
+
+// CreateStreamEntry creates a new log entry for a streaming request.
+// This should be called before starting the stream.
+//
+// ctx is the request context at stream start: the copy is what the stream
+// observer persists (the base entry never reaches the terminal write), and it
+// is taken before the request log middleware's post-handler enrichment runs — so
+// every context-derived field the middleware would apply later (auth key id,
+// effective user path, managed-key labels, session id) must be finalized on
+// the base entry here, through the same helper the middleware uses.
+func CreateStreamEntry(ctx context.Context, baseEntry *LogEntry) *LogEntry {
+	if baseEntry == nil {
+		return nil
+	}
+	if ctx != nil {
+		EnrichLogEntryWithRequestContext(baseEntry, ctx)
+	}
+
+	// Create a copy of the entry for the stream.
+	// The stream observer will complete and write it when the stream closes.
+	entryCopy := &LogEntry{
+		ID:                baseEntry.ID,
+		Timestamp:         baseEntry.Timestamp,
+		DurationNs:        baseEntry.DurationNs,
+		RequestedModel:    baseEntry.RequestedModel,
+		ResolvedModel:     baseEntry.ResolvedModel,
+		Provider:          baseEntry.Provider,
+		ProviderName:      baseEntry.ProviderName,
+		AliasUsed:         baseEntry.AliasUsed,
+		WorkflowVersionID: baseEntry.WorkflowVersionID,
+		CacheType:         baseEntry.CacheType,
+		StatusCode:        baseEntry.StatusCode,
+		// Copy extracted fields
+		RequestID:   baseEntry.RequestID,
+		PrincipalID: baseEntry.PrincipalID,
+		AuthKeyID:   baseEntry.AuthKeyID,
+		AuthMethod:  baseEntry.AuthMethod,
+		ClientIP:    baseEntry.ClientIP,
+		Method:      baseEntry.Method,
+		Path:        baseEntry.Path,
+		UserPath:    baseEntry.UserPath,
+		SessionID:   baseEntry.SessionID,
+		Stream:      true, // Mark as streaming
+		// Revision work still running finishes into this copy, the entry
+		// that is written.
+		pendingRevisions: baseEntry.pendingRevisions,
+		// So do the guardrail outcomes: the response and stream phases run
+		// while the stream is read and are folded in when it closes.
+		guardrailOutcomes: baseEntry.guardrailOutcomes,
+	}
+
+	// This is a whitelist copy, so every request-side field of LogData must be
+	// listed here or it is silently lost: the stream observer completes and
+	// writes THIS copy, and the base entry is never persisted. Only the
+	// response-side fields may be omitted — ResponseBody, ErrorMessage,
+	// ErrorCode and ResponseBodyTooBigToHandle are all filled in later, once
+	// the stream closes. Anything already known at ingress belongs below.
+	if baseEntry.Data != nil {
+		entryCopy.Data = &LogData{
+			UserAgent:                 baseEntry.Data.UserAgent,
+			APIKeyHash:                baseEntry.Data.APIKeyHash,
+			EventType:                 baseEntry.Data.EventType,
+			Labels:                    baseEntry.Data.Labels,
+			Temperature:               baseEntry.Data.Temperature,
+			MaxTokens:                 baseEntry.Data.MaxTokens,
+			RequestHeaders:            copyMap(baseEntry.Data.RequestHeaders),
+			ResponseHeaders:           copyMap(baseEntry.Data.ResponseHeaders),
+			RequestBody:               baseEntry.Data.RequestBody,
+			RequestBodyTooBigToHandle: baseEntry.Data.RequestBodyTooBigToHandle,
+			RequestRevisions:          copyRequestRevisions(baseEntry.Data.RequestRevisions),
+			Guardrails:                slices.Clone(baseEntry.Data.Guardrails),
+			Attempts:                  normalizeAttemptSnapshots(baseEntry.Data.Attempts),
+		}
+		if baseEntry.Data.WorkflowFeatures != nil {
+			snapshot := *baseEntry.Data.WorkflowFeatures
+			entryCopy.Data.WorkflowFeatures = &snapshot
+		}
+		if baseEntry.Data.Failover != nil {
+			snapshot := *baseEntry.Data.Failover
+			entryCopy.Data.Failover = &snapshot
+		}
+	}
+
+	return entryCopy
+}
+
+// copyRequestRevisions copies the ingress rewrite chain so the streamed entry
+// owns its own slice. The chain is complete before the stream opens, but the
+// copy keeps this consistent with the map copying above and leaves no shared
+// backing array between the base entry and the entry the observer writes.
+func copyRequestRevisions(revisions []RequestRevisionSnapshot) []RequestRevisionSnapshot {
+	if revisions == nil {
+		return nil
+	}
+	return slices.Clone(revisions)
+}
+
+// copyMap creates a shallow copy of a string map
+func copyMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	result := make(map[string]string, len(m))
+	maps.Copy(result, m)
+	return result
+}
+
+func jsonNumberToInt(value any) (int, bool) {
+	switch v := value.(type) {
+	case float64:
+		return int(v), true
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	default:
+		return 0, false
+	}
+}
+
+func jsonNumberToInt64(value any) (int64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return int64(v), true
+	case int:
+		return int64(v), true
+	case int64:
+		return v, true
+	default:
+		return 0, false
+	}
+}
+
+func nonEmptyString(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value != "" {
+		return value
+	}
+	return strings.TrimSpace(fallback)
+}
+
+// GetStreamEntryFromContext retrieves the log entry from Echo context for streaming.
+// This allows handlers to get the entry for wrapping streams.
+func GetStreamEntryFromContext(c interface{ Get(string) any }) *LogEntry {
+	entryVal := c.Get(string(LogEntryKey))
+	if entryVal == nil {
+		return nil
+	}
+
+	entry, ok := entryVal.(*LogEntry)
+	if !ok {
+		return nil
+	}
+
+	return entry
+}
+
+// MarkEntryAsStreaming marks the entry as a streaming request so the middleware
+// knows not to log it (the stream observer path will handle logging).
+func MarkEntryAsStreaming(c interface{ Set(string, any) }, isStreaming bool) {
+	c.Set(string(LogEntryStreamingKey), isStreaming)
+}
+
+// IsEntryMarkedAsStreaming checks if the entry is marked as streaming.
+func IsEntryMarkedAsStreaming(c interface{ Get(string) any }) bool {
+	val := c.Get(string(LogEntryStreamingKey))
+	if val == nil {
+		return false
+	}
+	streaming, _ := val.(bool)
+	return streaming
+}

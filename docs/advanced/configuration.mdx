@@ -45,6 +45,7 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `BASE_PATH`          | Mount path prefix, for example `/g`                   | `/`                    |
 | `GOMODEL_MASTER_KEY` | Authentication key for securing the gateway. Generate one with `openssl rand -hex 32`; startup fails on the template placeholders `your-secret-key`, `your-secret-key-here` and `my-secret-key` and warns on a key shorter than 16 characters, such as the guides' local example `change-me`. With `MASTER_KEY_DISABLED=true` the key is discarded unchecked | _(empty, unsafe mode)_ |
 | `MASTER_KEY_DISABLED` | Turn off master key authentication, leaving [managed keys](/features/users) and authentication extensions as the only credentials | `false`                |
+| `AUTH_KEY_PREFIX`    | Prefix of newly issued [managed keys](/features/users); see [Managed key prefix](#managed-key-prefix) | `sk_gom_`              |
 | `GOMODEL_DEMO_MODE`  | Enable public demo warnings in logs and the dashboard  | `false`                |
 | `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`), compressed and decompressed | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | Seconds one response write on a model route may wait for the client to read it; `0` disables | `60`                   |
@@ -61,12 +62,12 @@ The most common way to configure GoModel. Set any of the variables below to over
 
 Request bodies may be compressed with `Content-Encoding: gzip` (or `x-gzip`)
 or `zstd`; the TypeSafe SDKs zstd-compress bodies of 1 KiB or more by
-default. The gateway decodes them before routing, so guardrails, audit, and
+default. The gateway decodes them before routing, so guardrails, the request log, and
 providers see the plain body, and `BODY_SIZE_LIMIT` applies to both the
 compressed and the decoded size (`413` when either is over). Other encodings
 return `415`. A body is read and decoded only after the request is
 authenticated, so none of the body of a request without valid credentials is
-read, and its audit entry has no request body. Such a request gets `401` even
+read, and its request log entry has no request body. Such a request gets `401` even
 when its body would be over the limit once decoded; only a declared size over
 the limit is still `413`.
 
@@ -75,13 +76,13 @@ gateway from clients that open a streaming response and stop reading it. Each
 write to the client gets a fresh deadline, so it fires only when the client's
 socket stays full for that long, never while a slow model has nothing to send.
 When it fires the connection is closed, the upstream provider request is
-cancelled, and the audit entry records `client_stalled`, also when the stream
+cancelled, and the request log entry records `client_stalled`, also when the stream
 was served from the response cache. Raise it for clients that legitimately
 pause reading a stream for over a minute; set `0` to disable.
 
 #### Client addresses behind a proxy
 
-Every client address GoModel reports — audit entries, rate limit keys, logs —
+Every client address GoModel reports — request log entries, rate limit keys, logs —
 is the address of the connection that reached the gateway, so behind a reverse
 proxy they all show the proxy. Set `SERVER_TRUSTED_PROXIES` to the networks
 your own proxies sit on and GoModel reads the forwarded client instead.
@@ -150,7 +151,7 @@ of the gateway at once. Once managed gateway API keys are issued, set
 `MASTER_KEY_DISABLED=true` (`server.master_key_disabled` in YAML) to retire it
 and leave those keys — together with any authentication extension you run,
 such as SSO — as the only way in. Per-key user paths, budgets, rate limits,
-and audit trails then apply to every request, including the admin API.
+and request logs then apply to every request, including the admin API.
 
 ```bash
 MASTER_KEY_DISABLED=true
@@ -173,6 +174,21 @@ needs a credential, and the admin API stays behind one carrying dashboard
 access. Issue that credential before flipping the switch — with no master key,
 no managed key, and no authentication extension, the gateway rejects every
 request and logs a warning at startup saying so.
+
+#### Managed key prefix
+
+By default, managed keys start with `sk_gom_`. Set `AUTH_KEY_PREFIX`
+(`server.auth_key_prefix` in YAML) to white-label them, or to match your
+organization's key format or the patterns your secret scanner looks for:
+
+```bash
+AUTH_KEY_PREFIX=sk-acme-
+```
+
+The prefix is up to 32 ASCII letters, digits, `_`, and `-`; anything else stops
+startup, and an empty value keeps the default. Only keys issued afterwards get
+the new prefix. Existing keys, including ones issued under an earlier custom
+prefix, keep working and keep the redacted value they were shown with.
 
 #### Serving HTTPS
 
@@ -215,8 +231,8 @@ See [MCP Gateway](/features/mcp-gateway) for the full feature guide.
 
 #### Logging
 
-Runtime logger output. For the persisted API audit trail (request/response
-bodies, headers), see [Audit Logging](#audit-logging) below.
+Runtime logger output. For the persisted request log (request/response
+bodies, headers), see [Request Logging](#request-logging) below.
 
 | Variable     | Description                                                                                                                                                                       | Default              |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
@@ -255,7 +271,7 @@ bodies, headers), see [Audit Logging](#audit-logging) below.
 
 #### Storage
 
-Storage is shared by audit logging, usage tracking, and future features like IAM.
+Storage is shared by request logging, usage tracking, and future features like IAM.
 
 | Variable             | Description                                   | Default           |
 | -------------------- | --------------------------------------------- | ----------------- |
@@ -282,7 +298,7 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 
 #### Media Storage
 
-Media files — the audio and images captured for the audit log when
+Media files — the audio and images captured for the request log when
 `LOGGING_LOG_AUDIO_BODIES` or `LOGGING_LOG_IMAGE_BODIES` is on — are kept
 outside the database. Their metadata lives in the storage backend above; only
 the bytes go here, so they are never capped in size and the database stays
@@ -297,17 +313,17 @@ The default path follows the SQLite rule: `./data/media` when a `./data`
 directory exists next to the process, otherwise the OS per-user data
 directory. In containers mount a volume there; with several replicas use a
 shared mount (EFS, an S3 FUSE mount) so every instance can serve every file.
-Files are retained as long as the audit entries that reference them
+Files are retained as long as the request log entries that reference them
 (`LOGGING_RETENTION_DAYS`) and removed by an hourly sweep.
 
-#### Audit Logging
+#### Request Logging
 
 | Variable                          | Description                                | Default |
 | --------------------------------- | ------------------------------------------ | ------- |
-| `LOGGING_ENABLED`                 | Enable audit logging                       | `true`  |
+| `LOGGING_ENABLED`                 | Enable request logging                     | `true`  |
 | `LOGGING_LOG_BODIES`              | Log request/response bodies                | `true`  |
 | `LOGGING_LOG_REVISION_BODIES`     | Log rewritten bodies from request rewriters and prompt guardrails | `true`  |
-| `LOGGING_LOG_GUARDRAIL_STEPS`     | One audit revision per editing prompt guardrail (off: one per chain) | `true`  |
+| `LOGGING_LOG_GUARDRAIL_STEPS`     | One request log revision per editing prompt guardrail (off: one per chain) | `true`  |
 | `LOGGING_LOG_AUDIO_BODIES`        | Log audio endpoint inputs/outputs          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES`        | Log image endpoint inputs/outputs          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | Which image bytes to store: `all`, `input`, `output` | `all` |
@@ -318,19 +334,19 @@ Files are retained as long as the audit entries that reference them
 | `LOGGING_FLUSH_INTERVAL`          | Flush interval in seconds                  | `5`     |
 | `LOGGING_RETENTION_DAYS`          | Auto-delete after N days (0 = forever)     | `30`    |
 
-Audit entries record the client address the gateway resolved. Behind a reverse
+Request log entries record the client address the gateway resolved. Behind a reverse
 proxy that is the proxy until you list its network in
 `SERVER_TRUSTED_PROXIES` — see [client addresses behind a
 proxy](#client-addresses-behind-a-proxy).
 
-Realtime dashboard previews and persisted audit logs are separate features.
+Realtime dashboard previews and persisted request logs are separate features.
 With `DASHBOARD_LIVE_LOGS_ENABLED=true` and `LOGGING_ENABLED=false`, requests
 can appear live but are not written to storage and disappear after a page
-refresh. When audit logging is enabled, writes are asynchronous and can take up
+refresh. When request logging is enabled, writes are asynchronous and can take up
 to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
 
 <Note>
-  On PostgreSQL, the audit log's free-text search uses a trigram index from the
+  On PostgreSQL, the request log's free-text search uses a trigram index from the
   bundled `pg_trgm` extension. GoModel installs the extension and builds the
   index on startup when its database role is allowed to; otherwise the search
   still works but scans every entry in the selected date range. To enable it on
@@ -339,7 +355,7 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
 </Note>
 
 <Tip>
-  On large audit tables, pick a field next to the dashboard's audit search box
+  On large request logs, pick a field next to the Requests page's search box
   instead of **All fields**. **User path** and **Model** match values that
   start with what you type (case-sensitive, so `voxina` finds
   `/voxinate/events/…`; **Model** checks the requested and the resolved model,
@@ -360,13 +376,13 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   request-rewrite chain — it has no effect unless body logging is enabled. With
   both on, every rewriter that changed a request (for example GoModel Pro token
   compression) and every prompt guardrail that edited the prompt store the
-  request as they left it alongside the original client body in the audit
+  request as they left it alongside the original client body in the request log
   entry, so a chain of edits reads step by step. `LOGGING_LOG_GUARDRAIL_STEPS`
   controls that per-step record (the request bodies are encoded off the request
   path): turn it off to record a chain's edits as one revision carrying the
   request as forwarded, with no per-step snapshots.
   Disabling `LOGGING_LOG_REVISION_BODIES` keeps the revision metadata (rewriter name, byte sizes, tokens
-  saved, change detail) but drops the extra body copies, roughly halving audit
+  saved, change detail) but drops the extra body copies, roughly halving request log
   storage per rewritten request.
 </Note>
 
@@ -377,7 +393,7 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   dashboard can play it back, and `/v1/audio/transcriptions` stores the uploaded
   audio (base64, capped at 8 MB, also playable) plus its upload metadata. It
   defaults to `false` because audio payloads are
-  large and grow the audit store quickly. When body logging is on but this is off,
+  large and grow the request log quickly. When body logging is on but this is off,
   audio bodies (the speech response and the transcription upload, which keeps its
   metadata) are recorded as a lightweight `{__audio__, content_type, bytes, stored: false}`
   placeholder; when body logging is off, no audio body is stored at all.
@@ -390,7 +406,7 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   llama.cpp `/embedding`, Cohere and Ollama `.../embed`, Gemini `:embedContent` and
   `:batchEmbedContents`). Embedding inputs
   can be whole documents or base64 images and the responses are float vectors,
-  so bulk indexing jobs grow the audit store quickly. When body logging is on
+  so bulk indexing jobs grow the request log quickly. When body logging is on
   but this is off, embedding entries keep their metadata (model, provider,
   status, timing, user path, usage) and drop the request and response bodies.
   It defaults to `true`, which keeps the earlier behaviour.
@@ -405,7 +421,7 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   dashboard can display them. `LOGGING_LOG_IMAGE_BODIES_SCOPE` narrows this to
   `input` (uploads only) or `output` (results only); the default `all` stores
   both. It defaults to `false` because image payloads are large and grow the
-  audit store quickly. When body logging is on but this is off, image entries
+  request log quickly. When body logging is on but this is off, image entries
   keep everything except the pixels: the prompt and parameters, the response
   envelope (`usage`, `size`, `quality`), hosted URLs, and a sized
   `{role, content_type, bytes, stored: false}` placeholder per image.
@@ -468,6 +484,11 @@ workflow enforcement.
 | ------------------ | ---------------------------------------- | ---------- |
 | `METRICS_ENABLED`  | Enable Prometheus metrics (experimental) | `false`    |
 | `METRICS_ENDPOINT` | HTTP path for metrics                    | `/metrics` |
+| `METRICS_CALLER_USER_PATH` | Add the user path to the token and cost metrics, Prometheus and OpenTelemetry alike, and to the Prometheus per-caller request counter (see [Caller dimensions](/guides/prometheus-metrics#caller-dimensions)) | `false` |
+| `METRICS_CALLER_USER_PATH_DEPTH` | Leading user path segments kept on metrics; a value below 1 uses the default | `2` |
+| `METRICS_CALLER_AUTH_KEY` | Add the managed API key's name to those metrics | `false` |
+| `METRICS_CALLER_REQUEST_LABELS` | Add the request labels to those metrics | `false` |
+| `METRICS_CALLER_MAX_VALUES` | Distinct values kept per caller dimension; later ones, values over 256 bytes or not valid UTF-8, and reserved names are reported as `{other}` (`/{other}` for user paths). A value below 1 uses the default | `100` |
 | `OTEL_ENABLED`     | Export OpenTelemetry traces and metrics over OTLP (see [OpenTelemetry](/guides/opentelemetry)) | `false`    |
 
 #### Admin
@@ -476,30 +497,40 @@ workflow enforcement.
 | ------------------------------------- | ------------------------------------------------ | ------- |
 | `ADMIN_ENDPOINTS_ENABLED`             | Enable the admin REST API                        | `true`  |
 | `ADMIN_UI_ENABLED`                    | Enable the admin dashboard UI                    | `true`  |
-| `DASHBOARD_LIVE_LOGS_ENABLED`         | Stream realtime dashboard audit/usage previews   | `true`  |
+| `DASHBOARD_LIVE_LOGS_ENABLED`         | Stream realtime dashboard request/usage previews | `true`  |
 | `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | In-memory replay window for live dashboard events | `10000` |
 | `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Max events replayed to one reconnecting client   | `1000`  |
 | `DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS` | Idle stream heartbeat interval in seconds      | `15`    |
 
-Live dashboard logs are compact previews for the Audit Logs and Usage pages.
-They update rows before the async database flush finishes. The stored audit and
+Live dashboard logs are compact previews for the Requests and Usage pages.
+They update rows before the async database flush finishes. The stored request-log and
 usage tables remain the source of truth; if a browser reconnects with a cursor
 outside the replay window, the dashboard reloads from the normal REST APIs.
 
 #### HTTP Client
 
-These control timeouts for upstream API requests to LLM providers.
+These control timeouts and connection pooling for upstream API requests to LLM providers.
 
 | Variable                       | Description                                  | Default        |
 | ------------------------------ | -------------------------------------------- | -------------- |
 | `HTTP_TIMEOUT`                 | Overall request timeout in seconds           | `600` (10 min) |
 | `HTTP_RESPONSE_HEADER_TIMEOUT` | Time to wait for response headers in seconds | `600` (10 min) |
 | `HTTP_STREAM_IDLE_TIMEOUT`     | Longest silence in seconds a stream may keep once its first bytes arrived; `0` disables | `300` (5 min) |
+| `HTTP_MAX_IDLE_CONNS_PER_HOST` | Idle keep-alive connections each provider keeps open to its upstream; `0` or less uses the default | `512` |
 
 A stream that goes quiet for longer than `HTTP_STREAM_IDLE_TIMEOUT` is closed
 with a `504` provider error instead of hanging until `HTTP_TIMEOUT`. The wait
 for the first token does not count, so slow reasoning models are unaffected.
 Raise it only for a provider that legitimately pauses for minutes mid-stream.
+
+`HTTP_MAX_IDLE_CONNS_PER_HOST` matters for HTTP/1.1 upstreams such as self-hosted
+vLLM, Ollama, or llm-d, which use one connection per in-flight request. Past the
+limit, extra connections are closed after each response and reopened on the
+next one. Raise it if a single provider regularly serves more concurrent
+requests than the limit. HTTP/2 providers multiplex requests over a few
+connections and are unaffected; their connections are pinged after 15s of
+silence, so a connection that dies without a close is dropped instead of
+stalling requests.
 
 The standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` variables apply to
 every upstream connection, unless a provider sets its own
