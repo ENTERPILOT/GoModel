@@ -196,7 +196,7 @@ sqlite3 "$db_path" "ALTER TABLE mcp_servers ADD COLUMN display_name TEXT NOT NUL
 sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN user_path TEXT;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN labels JSON;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN dashboard_access INTEGER NOT NULL DEFAULT 0;" 2>/dev/null || true
-sqlite3 "$db_path" "ALTER TABLE audit_logs ADD COLUMN session_id TEXT;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE request_logs ADD COLUMN session_id TEXT;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE virtual_models ADD COLUMN session_affinity TEXT NOT NULL DEFAULT '';" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE budgets ADD COLUMN source TEXT NOT NULL DEFAULT '';" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE budgets ADD COLUMN last_reset_at INTEGER;" 2>/dev/null || true
@@ -307,7 +307,7 @@ CREATE TABLE IF NOT EXISTS usage (
   costs_calculation_caveat TEXT DEFAULT ''
 );
 
-CREATE TABLE IF NOT EXISTS audit_logs (
+CREATE TABLE IF NOT EXISTS request_logs (
   id TEXT PRIMARY KEY,
   timestamp DATETIME NOT NULL,
   duration_ns INTEGER DEFAULT 0,
@@ -332,9 +332,9 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   data JSON
 );
 
-CREATE TABLE IF NOT EXISTS audit_log_attempts (
+CREATE TABLE IF NOT EXISTS request_log_attempts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  audit_log_id TEXT NOT NULL,
+  request_log_id TEXT NOT NULL,
   seq INTEGER NOT NULL,
   kind TEXT NOT NULL,
   provider_type TEXT,
@@ -349,8 +349,8 @@ CREATE TABLE IF NOT EXISTS audit_log_attempts (
   response_headers TEXT,
   started_at DATETIME,
   duration_ns INTEGER DEFAULT 0,
-  UNIQUE(audit_log_id, seq),
-  FOREIGN KEY(audit_log_id) REFERENCES audit_logs(id) ON DELETE CASCADE
+  UNIQUE(request_log_id, seq),
+  FOREIGN KEY(request_log_id) REFERENCES request_logs(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS budgets (
@@ -504,13 +504,13 @@ CREATE INDEX IF NOT EXISTS idx_usage_provider_name ON usage(provider_name);
 CREATE INDEX IF NOT EXISTS idx_usage_user_path ON usage(user_path);
 CREATE INDEX IF NOT EXISTS idx_usage_cache_type ON usage(cache_type);
 CREATE INDEX IF NOT EXISTS idx_usage_session_id ON usage(session_id);
-CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp);
-CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_logs(request_id);
-CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path);
-CREATE INDEX IF NOT EXISTS idx_audit_user_path ON audit_logs(user_path);
-CREATE INDEX IF NOT EXISTS idx_audit_cache_type ON audit_logs(cache_type);
-CREATE INDEX IF NOT EXISTS idx_audit_session_timestamp ON audit_logs(session_id, timestamp);
-CREATE INDEX IF NOT EXISTS idx_audit_attempts_log_seq ON audit_log_attempts(audit_log_id, seq);
+CREATE INDEX IF NOT EXISTS idx_request_logs_timestamp ON request_logs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_request_logs_request_id ON request_logs(request_id);
+CREATE INDEX IF NOT EXISTS idx_request_logs_path ON request_logs(path);
+CREATE INDEX IF NOT EXISTS idx_request_logs_user_path ON request_logs(user_path);
+CREATE INDEX IF NOT EXISTS idx_request_logs_cache_type ON request_logs(cache_type);
+CREATE INDEX IF NOT EXISTS idx_request_logs_session_timestamp ON request_logs(session_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_request_log_attempts_log_seq ON request_log_attempts(request_log_id, seq);
 CREATE INDEX IF NOT EXISTS idx_budgets_subject ON budgets(scope, subject);
 CREATE INDEX IF NOT EXISTS idx_budgets_period_seconds ON budgets(period_seconds);
 CREATE INDEX IF NOT EXISTS idx_rate_limits_subject ON rate_limits(scope, subject);
@@ -528,8 +528,8 @@ CREATE INDEX IF NOT EXISTS idx_workflow_versions_active_created_at ON workflow_v
 
 BEGIN IMMEDIATE;
 
-DELETE FROM audit_log_attempts WHERE audit_log_id GLOB '${prefix}-*';
-DELETE FROM audit_logs WHERE id GLOB '${prefix}-*';
+DELETE FROM request_log_attempts WHERE request_log_id GLOB '${prefix}-*';
+DELETE FROM request_logs WHERE id GLOB '${prefix}-*';
 DELETE FROM usage WHERE id GLOB '${prefix}-*';
 DELETE FROM budgets WHERE source = '${prefix}';
 DELETE FROM rate_limits WHERE source = '${prefix}';
@@ -1200,7 +1200,7 @@ GROUP BY audit_id;
 
 CREATE UNIQUE INDEX temp.idx_demo_revision_arrays ON demo_revision_arrays(audit_id);
 
-INSERT INTO audit_logs (
+INSERT INTO request_logs (
   id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name,
   alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id,
   auth_method, client_ip, method, path, user_path, session_id, stream, error_type, data
@@ -1562,8 +1562,8 @@ FROM demo_generated LEFT JOIN demo_revision_arrays USING (audit_id);
 -- a primary attempt plus a cross-provider failover that also failed (the
 -- failover order matches the seeded 'resilient' virtual model); a slice of successful
 -- uncached entries shows a rate-limited primary followed by a clean retry.
-INSERT INTO audit_log_attempts (
-  audit_log_id, seq, kind, provider_type, provider_name, model,
+INSERT INTO request_log_attempts (
+  request_log_id, seq, kind, provider_type, provider_name, model,
   status_code, success, error_type, error_code, error_message,
   started_at, duration_ns
 )
@@ -1595,8 +1595,8 @@ WHERE request_outcome = 'provider_error'
   AND workflow_version_id != '${prefix}-wf-batch'
   AND (day != date(${seed_utc_epoch}, 'unixepoch') OR second_of_day < ${current_utc_second});
 
-INSERT INTO audit_log_attempts (
-  audit_log_id, seq, kind, provider_type, provider_name, model,
+INSERT INTO request_log_attempts (
+  request_log_id, seq, kind, provider_type, provider_name, model,
   status_code, success, error_type, error_code, error_message,
   started_at, duration_ns
 )
@@ -2133,16 +2133,16 @@ COMMIT;
 SELECT 'seed_prefix', '${prefix}';
 SELECT 'date_range', min(date(REPLACE(timestamp, 'T', ' '))), max(date(REPLACE(timestamp, 'T', ' '))) FROM usage WHERE id GLOB '${prefix}-*';
 SELECT 'usage_rows', count(*), coalesce(sum(total_tokens), 0) FROM usage WHERE id GLOB '${prefix}-*';
-SELECT 'audit_rows', count(*) FROM audit_logs WHERE id GLOB '${prefix}-*';
-SELECT 'session_threads', count(DISTINCT session_id), count(*) FROM audit_logs
+SELECT 'audit_rows', count(*) FROM request_logs WHERE id GLOB '${prefix}-*';
+SELECT 'session_threads', count(DISTINCT session_id), count(*) FROM request_logs
 WHERE id GLOB '${prefix}-*' AND session_id IS NOT NULL;
 SELECT 'session_thread_sizes', min(n), max(n), round(avg(n), 1)
 FROM (
-  SELECT count(*) AS n FROM audit_logs
+  SELECT count(*) AS n FROM request_logs
   WHERE id GLOB '${prefix}-*' AND session_id IS NOT NULL
   GROUP BY session_id
 );
-SELECT 'attempt_rows', count(*) FROM audit_log_attempts WHERE audit_log_id GLOB '${prefix}-*';
+SELECT 'attempt_rows', count(*) FROM request_log_attempts WHERE request_log_id GLOB '${prefix}-*';
 SELECT 'budget_rows', count(*) FROM budgets WHERE source = '${prefix}';
 SELECT 'budget_scope_mix', scope, count(*)
 FROM budgets WHERE source = '${prefix}' GROUP BY 2 ORDER BY 2;
@@ -2158,14 +2158,14 @@ SELECT 'guardrail_types', type, count(*) FROM guardrail_definitions
 WHERE description GLOB '${prefix}:*' GROUP BY 2 ORDER BY 2;
 SELECT 'workflow_rows', count(*), sum(active) FROM workflow_versions WHERE id GLOB '${prefix}-wf-*';
 SELECT 'workflow_traffic', workflow_version_id, count(*)
-FROM audit_logs WHERE id GLOB '${prefix}-*' GROUP BY 2 ORDER BY 3 DESC;
-SELECT 'request_revisions', count(*) FROM audit_logs
+FROM request_logs WHERE id GLOB '${prefix}-*' GROUP BY 2 ORDER BY 3 DESC;
+SELECT 'request_revisions', count(*) FROM request_logs
 WHERE id GLOB '${prefix}-*' AND json_extract(data, '$.request_revisions') IS NOT NULL;
 SELECT 'audit_status_mix', status_code, count(*)
-FROM audit_logs WHERE id GLOB '${prefix}-*' GROUP BY 2 ORDER BY 2;
+FROM request_logs WHERE id GLOB '${prefix}-*' GROUP BY 2 ORDER BY 2;
 SELECT 'blocked_requests', coalesce(json_extract(data, '$.error_code'), 'none'), count(*)
-FROM audit_logs WHERE id GLOB '${prefix}-*' AND status_code >= 400 GROUP BY 2 ORDER BY 2;
-SELECT 'alias_requests', count(*) FROM audit_logs WHERE id GLOB '${prefix}-*' AND alias_used = 1;
+FROM request_logs WHERE id GLOB '${prefix}-*' AND status_code >= 400 GROUP BY 2 ORDER BY 2;
+SELECT 'alias_requests', count(*) FROM request_logs WHERE id GLOB '${prefix}-*' AND alias_used = 1;
 SELECT 'cache_mix', coalesce(cache_type, CASE
   WHEN coalesce(json_extract(raw_data, '$.prompt_cached_tokens'), 0) > 0
     OR coalesce(json_extract(raw_data, '$.cached_tokens'), 0) > 0

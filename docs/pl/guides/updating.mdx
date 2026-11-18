@@ -168,6 +168,14 @@ zamiast tego przekształcają storage — gdy budżety i limity żądań zyskał
 tabele zostały przebudowane, a stare usunięte. Oba rodzaje są bezpieczne przy aktualizacji w przód,
 i właśnie dlatego kierunek odwrotny wymaga ostrożności.
 
+Po v0.2.5 storage logu requestów zmienił nazwę z `audit_logs` na `request_logs`: tabele i ich
+indeksy w SQLite i PostgreSQL, kolekcja w MongoDB. Zmiana nazwy odbywa się w miejscu i nie kopiuje
+żadnych wierszy. W PostgreSQL stare nazwy zostają jako widoki, więc repliki działające jeszcze na
+starszej wersji nadal czytają i zapisują log requestów podczas rolling upgrade'u, a wycofana wersja
+nadal się uruchamia; własne zapytania kieruj do `request_logs`. W SQLite i MongoDB starsza wersja
+uruchomiona po zmianie nazwy tworzy nowe, puste `audit_logs`, a następny start aktualnej wersji
+przenosi zapisane tam wpisy do `request_logs`.
+
 ## Przypinanie wersji
 
 Aktualizacje domyślnie instalują najnowszy release. Aby pozostać przy znanej wersji, przypnij ją:

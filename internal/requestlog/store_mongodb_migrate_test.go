@@ -1,0 +1,137 @@
+package requestlog
+
+import (
+	"context"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	"github.com/enterpilot/gomodel/internal/storage/mongotest"
+)
+
+// writeLegacyDocument inserts an entry the way v0.2.5 did: into audit_logs,
+// which MongoDB creates on the first insert.
+func writeLegacyDocument(t *testing.T, db *mongo.Database, id string, statusCode int) {
+	t.Helper()
+	_, err := db.Collection(legacyCollectionName).InsertOne(context.Background(), bson.D{
+		{Key: "_id", Value: id},
+		{Key: "timestamp", Value: time.Unix(1700000000, 0).UTC()},
+		{Key: "status_code", Value: statusCode},
+		{Key: "path", Value: "/v1/chat/completions"},
+	})
+	require.NoError(t, err)
+}
+
+func mongoEntry(t *testing.T, db *mongo.Database, id string) *LogEntry {
+	t.Helper()
+	reader, err := NewMongoDBReader(db)
+	require.NoError(t, err)
+	entry, err := reader.GetLogByID(context.Background(), id)
+	require.NoError(t, err)
+	return entry
+}
+
+func collectionNames(t *testing.T, db *mongo.Database) []string {
+	t.Helper()
+	names, err := requestLogCollectionNames(context.Background(), db)
+	require.NoError(t, err)
+	slices.Sort(names)
+	return names
+}
+
+func TestNewMongoDBStoreRenamesLegacyCollection(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		writeLegacyDocument(t, db, "written-before", 200)
+		_, err := db.Collection(legacyCollectionName).Indexes().CreateOne(ctx, mongo.IndexModel{
+			Keys: bson.D{{Key: "request_id", Value: 1}},
+		})
+		require.NoError(t, err)
+
+		// Twice: the second start finds the work done.
+		for range 2 {
+			store, err := NewMongoDBStore(db, 0)
+			require.NoError(t, err)
+			assert.Equal(t, requestLogCollectionName, store.collection.Name())
+		}
+
+		assert.Equal(t, []string{requestLogCollectionName}, collectionNames(t, db))
+		require.NotNil(t, mongoEntry(t, db, "written-before"))
+	})
+}
+
+// A replica still on v0.2.5, or a binary rolled back to it, keeps inserting
+// into audit_logs, which MongoDB creates again. The next start moves those
+// entries over.
+func TestNewMongoDBStoreAbsorbsARecreatedLegacyCollection(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(db, 0)
+		require.NoError(t, err)
+		at := time.Unix(1700000000, 0).UTC()
+		require.NoError(t, store.WriteBatch(ctx, []*LogEntry{testLogEntry("written-before", at), testLogEntry("in-both", at)}))
+
+		writeLegacyDocument(t, db, "written-by-older-replica", 200)
+		writeLegacyDocument(t, db, "in-both", 500)
+
+		_, err = NewMongoDBStore(db, 0)
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{requestLogCollectionName}, collectionNames(t, db))
+		for _, id := range []string{"written-before", "written-by-older-replica", "in-both"} {
+			require.NotNil(t, mongoEntry(t, db, id), id)
+		}
+		assert.Equal(t, 200, mongoEntry(t, db, "in-both").StatusCode, "an entry already present is left alone")
+	})
+}
+
+// A start interrupted between setting the legacy collection aside and merging
+// it leaves the staging collection behind; the next start finishes the move,
+// along with whatever an older replica has written since.
+func TestNewMongoDBStoreFinishesAnInterruptedAbsorb(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		_, err := NewMongoDBStore(db, 0)
+		require.NoError(t, err)
+
+		writeLegacyDocument(t, db, "staged", 200)
+		require.NoError(t, renameCollection(ctx, db, legacyCollectionName, legacyStagingCollection))
+		writeLegacyDocument(t, db, "written-since", 200)
+
+		_, err = NewMongoDBStore(db, 0)
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{requestLogCollectionName}, collectionNames(t, db))
+		require.NotNil(t, mongoEntry(t, db, "staged"))
+		require.NotNil(t, mongoEntry(t, db, "written-since"))
+	})
+}
+
+// With request logging turned off no store is created, and the reader still
+// has to find what an older release logged.
+func TestMongoDBReaderFindsLegacyCollectionWithoutAStore(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		writeLegacyDocument(t, db, "written-before", 200)
+		require.NotNil(t, mongoEntry(t, db, "written-before"))
+		assert.Equal(t, []string{requestLogCollectionName}, collectionNames(t, db))
+	})
+}
+
+func TestRenameCollectionReportsRaces(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		err := renameCollection(ctx, db, legacyCollectionName, requestLogCollectionName)
+		assert.True(t, isMongoError(err, mongoNamespaceNotFound), "missing source: %v", err)
+
+		writeLegacyDocument(t, db, "one", 200)
+		_, err = db.Collection(requestLogCollectionName).InsertOne(ctx, bson.D{{Key: "_id", Value: "two"}})
+		require.NoError(t, err)
+		err = renameCollection(ctx, db, legacyCollectionName, requestLogCollectionName)
+		assert.True(t, isMongoError(err, mongoNamespaceExists), "existing target: %v", err)
+	})
+}

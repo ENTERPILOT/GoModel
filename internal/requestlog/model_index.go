@@ -8,7 +8,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
-// requestLogIndex is one audit_logs index: its name and the column list it covers.
+// requestLogIndex is one request_logs index: its name and the column list it covers.
 type requestLogIndex struct {
 	name    string
 	columns string
@@ -17,7 +17,7 @@ type requestLogIndex struct {
 // legacyRequestedModelIndex is the single-column requested_model index the
 // model indexes replace; nothing compares that column under its default
 // collation.
-const legacyRequestedModelIndex = "idx_audit_requested_model"
+const legacyRequestedModelIndex = "idx_request_logs_requested_model"
 
 // modelIndexes serve the model prefix filter, which matches the requested or
 // the resolved model: each branch of that OR is a range on its own index, in
@@ -29,8 +29,8 @@ func modelIndexes(dialect sqlx.Dialect) []requestLogIndex {
 		requested, resolved = `requested_model COLLATE "C"`, `resolved_model COLLATE "C"`
 	}
 	return []requestLogIndex{
-		{name: "idx_audit_requested_model_timestamp", columns: requested + ", timestamp"},
-		{name: "idx_audit_resolved_model_timestamp", columns: resolved + ", timestamp"},
+		{name: "idx_request_logs_requested_model_timestamp", columns: requested + ", timestamp"},
+		{name: "idx_request_logs_resolved_model_timestamp", columns: resolved + ", timestamp"},
 	}
 }
 
@@ -39,7 +39,7 @@ func modelIndexes(dialect sqlx.Dialect) []requestLogIndex {
 func modelIndexStatements(dialect sqlx.Dialect) []string {
 	statements := make([]string, 0, 3)
 	for _, index := range modelIndexes(dialect) {
-		statements = append(statements, "CREATE INDEX IF NOT EXISTS "+index.name+" ON audit_logs("+index.columns+")")
+		statements = append(statements, "CREATE INDEX IF NOT EXISTS "+index.name+" ON request_logs("+index.columns+")")
 	}
 	return append(statements, "DROP INDEX IF EXISTS "+legacyRequestedModelIndex)
 }
@@ -79,7 +79,7 @@ func buildIndexConcurrently(ctx context.Context, db sqlx.DB, index requestLogInd
 		}
 	}
 	started := time.Now()
-	if _, err := db.Exec(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS "+index.name+" ON audit_logs("+index.columns+")"); err != nil {
+	if _, err := db.Exec(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS "+index.name+" ON request_logs("+index.columns+")"); err != nil {
 		return err
 	}
 	slog.Info("requestlog: built index", "index", index.name, "duration", time.Since(started).Round(time.Millisecond))

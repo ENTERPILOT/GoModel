@@ -66,10 +66,10 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 		return nil, fmt.Errorf("database is required")
 	}
 
-	collection := database.Collection("audit_logs")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	collection := requestLogCollection(ctx, database)
 
 	// Create indexes for common queries
 	indexes := []mongo.IndexModel{

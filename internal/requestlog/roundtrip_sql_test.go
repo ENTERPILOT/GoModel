@@ -50,7 +50,7 @@ func TestSQLStore_WriteBatch_NullDataPreservation(t *testing.T) {
 		require.NoError(t, err)
 
 		// Query to check NULL vs non-NULL
-		rows, err := db.Query(ctx, "SELECT id, data, data IS NULL as is_null FROM audit_logs ORDER BY id")
+		rows, err := db.Query(ctx, "SELECT id, data, data IS NULL as is_null FROM request_logs ORDER BY id")
 		require.NoError(t, err)
 
 		defer rows.Close()
@@ -85,7 +85,7 @@ func TestSQLStore_WriteBatch_EmptyEntries(t *testing.T) {
 
 		// Verify no entries in database
 		var count int
-		err = db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&count)
+		err = db.QueryRow(ctx, "SELECT COUNT(*) FROM request_logs").Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, 0, count)
 	})
@@ -114,7 +114,7 @@ func TestSQLStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 		require.NoError(t, err)
 
 		var count int
-		err = db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&count)
+		err = db.QueryRow(ctx, "SELECT COUNT(*) FROM request_logs").Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, numEntries, count)
 
@@ -129,7 +129,7 @@ func TestSQLStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 		}
 		err = store.WriteBatch(ctx, entries)
 		require.NoError(t, err)
-		err = db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&count)
+		err = db.QueryRow(ctx, "SELECT COUNT(*) FROM request_logs").Scan(&count)
 		require.NoError(t, err)
 
 		expectedTotal := numEntries + maxEntriesPerBatch + 1
@@ -219,7 +219,7 @@ func TestSQLStore_WriteBatch_PersistsProviderAttempts(t *testing.T) {
 		require.NoError(t, err)
 
 		var attemptRows int
-		err = db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_log_attempts WHERE audit_log_id = ?", entry.ID).Scan(&attemptRows)
+		err = db.QueryRow(ctx, "SELECT COUNT(*) FROM request_log_attempts WHERE request_log_id = ?", entry.ID).Scan(&attemptRows)
 		require.NoError(t, err)
 		require.Equal(t, 2, attemptRows)
 
@@ -273,7 +273,7 @@ func TestSQLReader_AllowsNullWorkflowVersionIDAndErrorType(t *testing.T) {
 
 		now := db.Dialect().TimestampArg(time.Now())
 		_, err = db.Exec(ctx, `
-			INSERT INTO audit_logs (
+			INSERT INTO request_logs (
 				id, timestamp, duration_ns, requested_model, resolved_model, provider, alias_used, workflow_version_id,
 				status_code, request_id, client_ip, method, path, stream, error_type, data
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -326,7 +326,7 @@ func TestSQLReader_GetLogsFiltersByUserPathSubtree(t *testing.T) {
 
 		now := db.Dialect().TimestampArg(time.Now())
 		_, err = db.Exec(ctx, `
-			INSERT INTO audit_logs (
+			INSERT INTO request_logs (
 				id, timestamp, duration_ns, requested_model, resolved_model, provider, alias_used, workflow_version_id,
 				status_code, request_id, client_ip, method, path, user_path, stream, error_type, data
 			) VALUES
@@ -392,7 +392,7 @@ func TestSQLReader_GetLogsRootUserPathIncludesLegacyNullRows(t *testing.T) {
 
 		now := db.Dialect().TimestampArg(time.Now())
 		_, err = db.Exec(ctx, `
-			INSERT INTO audit_logs (
+			INSERT INTO request_logs (
 				id, timestamp, duration_ns, requested_model, resolved_model, provider, alias_used, workflow_version_id,
 				status_code, request_id, client_ip, method, path, user_path, stream, error_type, data
 			) VALUES
@@ -472,13 +472,13 @@ func TestSQLStoreAndReader_PreserveCacheType(t *testing.T) {
 		require.NoError(t, err)
 
 		var exactCacheType *string
-		err = db.QueryRow(ctx, "SELECT cache_type FROM audit_logs WHERE id = ?", "cache-exact").Scan(&exactCacheType)
+		err = db.QueryRow(ctx, "SELECT cache_type FROM request_logs WHERE id = ?", "cache-exact").Scan(&exactCacheType)
 		require.NoError(t, err)
 		require.NotNil(t, exactCacheType)
 		require.Equal(t, CacheTypeExact, *exactCacheType)
 
 		var noneCacheType *string
-		err = db.QueryRow(ctx, "SELECT cache_type FROM audit_logs WHERE id = ?", "cache-none").Scan(&noneCacheType)
+		err = db.QueryRow(ctx, "SELECT cache_type FROM request_logs WHERE id = ?", "cache-none").Scan(&noneCacheType)
 		require.NoError(t, err)
 		require.Nil(t, noneCacheType)
 

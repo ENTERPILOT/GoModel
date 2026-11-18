@@ -178,10 +178,10 @@ func resetPostgreSQLStorage(t *testing.T) {
 	defer cancel()
 
 	tables := []string{
-		// audit_log_attempts has a FK to audit_logs, so it is listed first; the
+		// request_log_attempts has a FK to request_logs, so it is listed first; the
 		// CASCADE below also covers any future dependents.
-		"audit_log_attempts",
-		"audit_logs",
+		"request_log_attempts",
+		"request_logs",
 		"usage",
 		"budgets",
 		"budget_settings",
@@ -210,7 +210,7 @@ func resetMongoDBStorage(t *testing.T) {
 	defer cancel()
 
 	collections := []string{
-		"audit_logs",
+		"request_logs",
 		"usage",
 		"budgets",
 		"budget_settings",

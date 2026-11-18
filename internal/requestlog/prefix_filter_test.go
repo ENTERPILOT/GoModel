@@ -153,15 +153,15 @@ func TestSQLReader_PrefixFiltersUseIndexes(t *testing.T) {
 			params  LogQueryParams
 			indexes []string
 		}{
-			{name: "user path prefix", params: LogQueryParams{UserPathPrefix: "/team"}, indexes: []string{"idx_audit_user_path_timestamp"}},
-			{name: "model prefix", params: LogQueryParams{ModelPrefix: "gpt"}, indexes: []string{"idx_audit_requested_model_timestamp", "idx_audit_resolved_model_timestamp"}},
-			{name: "request id", params: LogQueryParams{RequestID: "req-1"}, indexes: []string{"idx_audit_request_id"}},
+			{name: "user path prefix", params: LogQueryParams{UserPathPrefix: "/team"}, indexes: []string{"idx_request_logs_user_path_timestamp"}},
+			{name: "model prefix", params: LogQueryParams{ModelPrefix: "gpt"}, indexes: []string{"idx_request_logs_requested_model_timestamp", "idx_request_logs_resolved_model_timestamp"}},
+			{name: "request id", params: LogQueryParams{RequestID: "req-1"}, indexes: []string{"idx_request_logs_request_id"}},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				conditions, args, err := reader.logFilters(ctx, tt.params)
 				require.NoError(t, err)
-				plan := explainRequestLogQuery(t, db, "SELECT COUNT(*) FROM audit_logs WHERE "+strings.Join(conditions, " AND "), args)
+				plan := explainRequestLogQuery(t, db, "SELECT COUNT(*) FROM request_logs WHERE "+strings.Join(conditions, " AND "), args)
 				for _, index := range tt.indexes {
 					assert.Contains(t, plan, index)
 				}
@@ -222,7 +222,7 @@ func TestMongoDBReader_ModelPrefixMatchesLegacyModelField(t *testing.T) {
 		store, err := NewMongoDBStore(db, 0)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = store.Close() })
-		_, err = db.Collection("audit_logs").InsertOne(ctx, bson.D{
+		_, err = db.Collection("request_logs").InsertOne(ctx, bson.D{
 			{Key: "_id", Value: "legacy"},
 			{Key: "timestamp", Value: time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC)},
 			{Key: "model", Value: "smart"},

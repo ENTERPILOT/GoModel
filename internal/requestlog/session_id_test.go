@@ -130,7 +130,7 @@ func TestSQLReader_GetInteractionParentAllowsLegacyNulls(t *testing.T) {
 		err = store.WriteBatch(ctx, []*LogEntry{entry})
 		require.NoError(t, err)
 		_, err = db.Exec(ctx,
-			"UPDATE audit_logs SET user_path = NULL, session_id = NULL WHERE id = ?", entry.ID)
+			"UPDATE request_logs SET user_path = NULL, session_id = NULL WHERE id = ?", entry.ID)
 		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
@@ -245,10 +245,10 @@ func TestSQLReader_GetSessionsOnLegacyUUIDSchema(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		// The audit_logs table exactly as the standalone PostgreSQL store
+		// The request_logs table exactly as the standalone PostgreSQL store
 		// created it; session_id is absent and arrives via migration.
 		err := db.Schema(ctx, `
-			CREATE TABLE audit_logs (
+			CREATE TABLE request_logs (
 				id UUID PRIMARY KEY,
 				timestamp TIMESTAMPTZ NOT NULL,
 				duration_ns BIGINT DEFAULT 0,
@@ -271,9 +271,9 @@ func TestSQLReader_GetSessionsOnLegacyUUIDSchema(t *testing.T) {
 				error_type TEXT,
 				data JSONB
 			)`, `
-			CREATE TABLE audit_log_attempts (
+			CREATE TABLE request_log_attempts (
 				id BIGSERIAL PRIMARY KEY,
-				audit_log_id UUID NOT NULL REFERENCES audit_logs(id) ON DELETE CASCADE,
+				request_log_id UUID NOT NULL REFERENCES request_logs(id) ON DELETE CASCADE,
 				seq INTEGER NOT NULL,
 				kind TEXT NOT NULL,
 				provider_type TEXT,
@@ -288,7 +288,7 @@ func TestSQLReader_GetSessionsOnLegacyUUIDSchema(t *testing.T) {
 				response_headers TEXT,
 				started_at TIMESTAMPTZ,
 				duration_ns BIGINT DEFAULT 0,
-				UNIQUE(audit_log_id, seq)
+				UNIQUE(request_log_id, seq)
 			)`)
 		require.NoError(t, err)
 
