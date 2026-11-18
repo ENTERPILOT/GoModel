@@ -1,10 +1,10 @@
 ---
 title: "GoModel Pro"
 sidebarTitle: "Übersicht"
-description: "GoModel Pro erweitert das GoModel Gateway um lizenzierte Prompt-Komprimierung, intelligentes Routing, OIDC SSO, Egress-Proxy-Pools und Secret-Manager-Vaults. 21 Tage kostenlos testen."
+description: "GoModel Pro erweitert das GoModel Gateway um lizenzierte Prompt-Komprimierung, Höflichkeitsantworten, intelligentes Routing, OIDC- und SAML-SSO, Egress-Proxy-Pools und Secret-Manager-Vaults. 21 Tage kostenlos testen."
 icon: "gem"
 tag: "Pro"
-keywords: ["GoModel Pro", "Prompt-Komprimierung", "prompt compression", "intelligentes Routing", "intelligent routing", "OIDC", "SSO", "Quota-Templates", "Egress-Proxy-Pools", "egress proxy pools", "Vaults", "vaults", "Lizenz", "license", "kostenlose Testversion", "free trial"]
+keywords: ["GoModel Pro", "Prompt-Komprimierung", "prompt compression", "intelligentes Routing", "intelligent routing", "OIDC", "SAML", "SSO", "Quota-Templates", "Egress-Proxy-Pools", "egress proxy pools", "Vaults", "vaults", "Lizenz", "license", "kostenlose Testversion", "free trial"]
 ---
 
 ## Was Pro ist
@@ -12,8 +12,8 @@ keywords: ["GoModel Pro", "Prompt-Komprimierung", "prompt compression", "intelli
 GoModel Pro ist die kommerzielle Distribution von GoModel. Sie verwendet
 dasselbe Gateway, dieselbe Konfiguration, dieselben Provider, dasselbe
 Dashboard und dieselben APIs wie das Open-Source-GoModel, ergänzt um
-lizenzierte Erweiterungen für Prompt-Komprimierung, intelligentes Routing,
-OIDC Single Sign-On, Egress-Proxy-Pools, Quota-Templates pro
+lizenzierte Erweiterungen für Prompt-Komprimierung, Höflichkeitsantworten, intelligentes Routing,
+Single Sign-On mit OIDC und SAML, Egress-Proxy-Pools, Quota-Templates pro
 untergeordnetem Pfad und Secret-Manager-Vaults.
 
 Ohne gültige Lizenz startet das Pro-Binary als Open-Source-Gateway und
@@ -30,9 +30,9 @@ nie unaufgelöst.
     Deterministisches Umschreiben von Requests nach dem Fail-open-Prinzip, das
     wiederholten Kontext entfernt, bevor er den Provider erreicht.
   </Card>
-  <Card title="OIDC Single Sign-On" icon="key-round" href="/de/pro/sso">
-    Schützen Sie das Dashboard mit Ihrem Identity-Provider über den
-    Authorization Code Flow mit PKCE.
+  <Card title="Single Sign-On" icon="key-round" href="/de/pro/sso">
+    Schützen Sie das Dashboard mit Ihrem OIDC- oder SAML-2.0-Identity-Provider
+    und ordnen Sie dessen Gruppen User-Paths zu.
   </Card>
   <Card title="Intelligentes Routing" icon="route" href="/de/pro/intelligent-routing">
     Einstufung jedes Requests als einfach oder schwer sowie adaptive,
@@ -41,6 +41,10 @@ nie unaufgelöst.
   <Card title="Egress-Proxy-Pools" icon="route" href="/de/pro/egress">
     Per Health Check überwachte Pools aus HTTP- oder SOCKS5-Proxys mit Failover
     und Regeln, die Provider bestimmten Pools zuweisen.
+  </Card>
+  <Card title="Höflichkeitsantworten" icon="hand-heart" href="/de/pro/courtesy-replies">
+    Dank und Abschied im Gateway beantworten, wenn der Prompt-Cache kalt ist,
+    statt die ganze Unterhaltung erneut abzurechnen.
   </Card>
 </CardGroup>
 

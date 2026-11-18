@@ -564,6 +564,12 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 		params.Interval = "daily"
 	}
 	params.CacheMode = c.QueryParam("cache_mode")
+	return parseUsageFilterParams(c, params)
+}
+
+// parseUsageFilterParams adds the data filters and the credential's user
+// path scope to params; it reads no date range, interval or cache mode.
+func parseUsageFilterParams(c *echo.Context, params usage.UsageQueryParams) (usage.UsageQueryParams, error) {
 	// Multi-value filters repeat the parameter (model=a&model=b). Values that
 	// cannot hold a comma also accept a comma-separated list, like endpoint
 	// always has; labels and user paths may contain commas, so they do not.

@@ -80,6 +80,22 @@ func TestCreateSpeech_UsesVoiceIDInPathAndDefaultsToMP3(t *testing.T) {
 	assert.Equal(t, []byte{0x49, 0x44, 0x33}, resp.Data)
 }
 
+// An OpenAI custom-voice object names the ElevenLabs voice by its id.
+func TestCreateSpeech_UsesVoiceObjectID(t *testing.T) {
+	url, client, capture := audioServer(t, "audio/mpeg")
+	provider := newTestProvider("elk_test", url, client, llmclient.Hooks{})
+
+	req, err := core.DecodeAudioSpeechRequest([]byte(
+		`{"model":"eleven_multilingual_v2","input":"hello","voice":{"id":"21m00Tcm4TlvDq8ikWAM","future":true}}`), nil)
+	require.NoError(t, err)
+	_, err = provider.CreateSpeech(context.Background(), req)
+	require.NoError(t, err)
+
+	recorded := capture.Last(t)
+	assert.Equal(t, "/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", recorded.Path)
+	assert.NotContains(t, string(recorded.Body), "voice")
+}
+
 func TestCreateSpeech_MapsResponseFormats(t *testing.T) {
 	tests := []struct {
 		name           string

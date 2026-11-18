@@ -22,6 +22,8 @@ type mongoBatchDocument struct {
 	Status    string `bson:"status"`
 	Data      []byte `bson:"data"`
 	UserPath  string `bson:"user_path"`
+	// UsageLoggedAt is part of the usage claim (see usage_claim.go).
+	UsageLoggedAt *int64 `bson:"usage_logged_at,omitempty"`
 }
 
 // MongoDBStore stores batches in MongoDB.
@@ -132,7 +134,7 @@ func (s *MongoDBStore) Get(ctx context.Context, id string) (*StoredBatch, error)
 	if err != nil {
 		return nil, fmt.Errorf("decode batch: %w", err)
 	}
-	return batch, nil
+	return withUsageLoggedAt(batch, doc.UsageLoggedAt), nil
 }
 
 // List returns batches ordered by created_at desc, id desc.
@@ -200,7 +202,7 @@ func (s *MongoDBStore) List(ctx context.Context, limit int, after, userPath stri
 		if err != nil {
 			return nil, fmt.Errorf("decode batch payload: %w", err)
 		}
-		items = append(items, batch)
+		items = append(items, withUsageLoggedAt(batch, doc.UsageLoggedAt))
 	}
 	if err := cursor.Err(); err != nil {
 		return nil, fmt.Errorf("iterate batches cursor: %w", err)
@@ -209,24 +211,79 @@ func (s *MongoDBStore) List(ctx context.Context, limit int, after, userPath stri
 	return items, nil
 }
 
-// Update updates a stored batch object.
+// Update updates a stored batch object. It leaves the usage claim alone, and
+// only ever sets the usage marker: one the batch carries is saved beside it
+// too, where an update of a copy read before it cannot drop it.
 func (s *MongoDBStore) Update(ctx context.Context, batch *StoredBatch) error {
 	payload, err := serializeBatch(batch)
 	if err != nil {
 		return err
 	}
 
-	result, err := s.collection.UpdateOne(ctx,
-		bson.M{"_id": batch.Batch.ID},
-		bson.M{"$set": bson.M{
-			"updated_at": time.Now().Unix(),
-			"status":     batch.Batch.Status,
-			"data":       payload,
-			"user_path":  strings.TrimSpace(batch.UserPath),
-		}},
-	)
+	set := bson.M{
+		"updated_at": time.Now().Unix(),
+		"status":     batch.Batch.Status,
+		"data":       payload,
+		"user_path":  strings.TrimSpace(batch.UserPath),
+	}
+	if batch.UsageLoggedAt != nil {
+		set["usage_logged_at"] = batch.UsageLoggedAt.UnixNano()
+	}
+	result, err := s.collection.UpdateOne(ctx, bson.M{"_id": batch.Batch.ID}, bson.M{"$set": set})
 	if err != nil {
 		return fmt.Errorf("update batch: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ClaimUsage grants the batch's usage claim with one conditional update, so
+// concurrent callers cannot both take it.
+func (s *MongoDBStore) ClaimUsage(ctx context.Context, id string, now time.Time, timeout time.Duration) (UsageClaim, error) {
+	// The read finds a missing batch and logged usage: the usage_logged_at
+	// field, or the marker an earlier release kept in the serialized batch.
+	// Neither can change back, so it need not be atomic with the claim.
+	stored, err := s.Get(ctx, id)
+	if err != nil {
+		return UsagePending, err
+	}
+	if stored.UsageLoggedAt != nil {
+		return UsageLogged, nil
+	}
+	// A nil filter value matches a field that is absent as well.
+	result, err := s.collection.UpdateOne(ctx,
+		bson.M{
+			"_id":             id,
+			"usage_logged_at": nil,
+			"$or": bson.A{
+				bson.M{"usage_claimed_at": nil},
+				bson.M{"usage_claimed_at": bson.M{"$lte": staleUsageClaim(now, timeout)}},
+			},
+		},
+		bson.M{"$set": bson.M{"usage_claimed_at": now.UnixNano()}},
+	)
+	if err != nil {
+		return UsagePending, fmt.Errorf("claim batch usage: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return UsagePending, nil
+	}
+	return UsageClaimed, nil
+}
+
+// CompleteUsage marks the batch's usage as logged and releases the claim.
+func (s *MongoDBStore) CompleteUsage(ctx context.Context, id string, loggedAt time.Time) error {
+	result, err := s.collection.UpdateOne(ctx,
+		bson.M{"_id": id},
+		bson.M{
+			"$set":   bson.M{"updated_at": time.Now().Unix(), "usage_logged_at": loggedAt.UnixNano()},
+			"$unset": bson.M{"usage_claimed_at": ""},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("complete batch usage: %w", err)
 	}
 	if result.MatchedCount == 0 {
 		return ErrNotFound

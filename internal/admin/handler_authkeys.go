@@ -244,6 +244,19 @@ func (h *Handler) virtualModelTargets(selectors []string) []string {
 	return out
 }
 
+type updateAuthKeyNameRequest struct {
+	Name string `json:"name"`
+}
+
+// UpdateAuthKeyName handles PUT /admin/auth-keys/:id/name. The name is
+// trimmed, must not be empty, and need not be unique.
+func (h *Handler) UpdateAuthKeyName(c *echo.Context) error {
+	var req updateAuthKeyNameRequest
+	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
+		return h.authKeys.UpdateName(ctx, id, req.Name)
+	})
+}
+
 type updateAuthKeyLabelsRequest struct {
 	Labels []string `json:"labels"`
 }
@@ -373,8 +386,8 @@ func allowedModelsOutOfScopeError() error {
 		WithCode(codeAllowedModelsOutOfScope)
 }
 
-// requireNotOwnAuthKey stops a managed key from changing its own labels,
-// model allowlist, or access flags, so it cannot lift restrictions placed on
+// requireNotOwnAuthKey stops a managed key from changing its own name,
+// labels, model allowlist, or access flags, so it cannot lift restrictions placed on
 // it. Deactivating itself stays allowed.
 func requireNotOwnAuthKey(c *echo.Context, id string) error {
 	if own := core.GetAuthKeyID(c.Request().Context()); own != "" && own == id {

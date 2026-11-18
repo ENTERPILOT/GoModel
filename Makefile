@@ -1,4 +1,4 @@
-.PHONY: all build run demo clean tidy mod-check frontend frontend-check frontend-stub test test-race test-dashboard test-e2e test-integration test-contract test-live test-all lint lint-fix fix fix-check record-api swagger docs-openapi helm-lint install-tools perf-check perf-bench fuzz infra image seed-demo-data build-plugins image-plugins example-plugins
+.PHONY: all build build-size-check run demo clean tidy mod-check frontend frontend-check frontend-stub test test-race test-dashboard test-e2e test-integration test-contract test-live test-all lint lint-fix fix fix-check record-api swagger docs-openapi helm-lint install-tools perf-check perf-bench fuzz infra image seed-demo-data build-plugins image-plugins example-plugins
 
 all: frontend build
 
@@ -22,6 +22,12 @@ LDFLAGS := -X "github.com/enterpilot/gomodel/internal/version.Version=$(VERSION)
            -X "github.com/enterpilot/gomodel/internal/version.Commit=$(COMMIT)" \
            -X "github.com/enterpilot/gomodel/internal/version.Date=$(DATE)"
 
+# grpcnotrace drops grpc's golang.org/x/net/trace support (grpc.EnableTracing,
+# which GoModel never calls). Its html/template import makes
+# reflect.Value.MethodByName reachable, which forces the linker to keep every
+# exported method of every reachable type: about 15 MB of the release binary.
+GO_BUILD_TAGS := grpcnotrace
+
 install-tools:
 	@installed_version="$$($(GOLANGCI_LINT) version 2>/dev/null || true)"; \
 	case "$$installed_version" in \
@@ -35,7 +41,22 @@ install-tools:
 # Compiles the gateway. The dashboard must be built first (see `frontend`);
 # the binary embeds internal/admin/dashboard/static/dist.
 build: frontend
-	go build -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
+	go build -trimpath -tags=$(GO_BUILD_TAGS) -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
+
+# Fails when a dependency makes reflect.Value.MethodByName reachable again,
+# which silently costs about 15 MB of binary size (see GO_BUILD_TAGS). Fix it
+# with that package's build tag or by dropping the import. CGO_ENABLED=0 as in
+# the release builds: a cgo build on macOS reports extra marks.
+build-size-check:
+	@deps=$$(CGO_ENABLED=0 go build -tags=$(GO_BUILD_TAGS) -ldflags=-dumpdep -o /dev/null ./cmd/gomodel 2>&1) || { \
+		printf '%s\n' "$$deps" | grep -v ' -> '; \
+		exit 1; \
+	}; \
+	if printf '%s\n' "$$deps" | grep '<ReflectMethod>'; then \
+		echo "reflect.Value.MethodByName is reachable from ./cmd/gomodel (see the <ReflectMethod> lines above)"; \
+		exit 1; \
+	fi
+
 # Run the application.
 #
 # Built and exec'd rather than `go run`: `go run` exits 1 when it is
@@ -44,7 +65,7 @@ build: frontend
 # recipe shell, which also puts the gateway directly under make's signal
 # handling instead of behind a supervisor.
 run:
-	go build -tags=swagger -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
+	go build -tags=swagger,$(GO_BUILD_TAGS) -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
 	LOG_LEVEL="$(LOG_LEVEL)" SWAGGER_ENABLED="$(SWAGGER_ENABLED)" exec ./bin/gomodel
 
 # Seed the local SQLite database and start GoModel with a populated dashboard.

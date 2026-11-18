@@ -9,6 +9,7 @@ They do not call external APIs in CI. Instead, they replay recorded provider pay
 - Real adapter parsing paths (`ChatCompletion`, `StreamChatCompletion`, `ListModels`, `Responses`, `StreamResponses`)
 - Streaming conversion behavior (`[DONE]`, chunk/event mapping)
 - Provider-specific conversion logic (for example Anthropic -> OpenAI-compatible / Responses output)
+- Audit capture: each recorded `*stream*.txt` must rebuild, in the audit log, into a non-empty reply that matches its golden under `golden/audit/` (`audit_stream_test.go`). A new stream recording joins this check automatically; the test lists, with a reason, the recordings the audit log never sees.
 
 ## How replay works
 
@@ -84,6 +85,7 @@ When recording fixtures manually with `cmd/recordapi`, available endpoint option
 
 - `chat`: `POST /v1/chat/completions`
 - `chat_stream`: `POST /v1/chat/completions` with `"stream": true`
+- `chat_usage_stream`: `chat_stream` plus `"stream_options": {"include_usage": true}`, as the gateway sends it
 - `models`: `GET /v1/models`
 - `responses`: `POST /v1/responses`
 - `responses_stream`: `POST /v1/responses` with `"stream": true`

@@ -116,9 +116,14 @@ func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg Co
 	// Resolved per request, not captured: with several keys configured this is
 	// what spreads successive calls across them.
 	headerSetter := func(req *http.Request) {
-		if cfg.SetHeaders != nil {
-			cfg.SetHeaders(req, p.keys.NextForContext(req.Context()))
+		if cfg.SetHeaders == nil {
+			return
 		}
+		key, pinned := req.Context().Value(pinnedKeyContextKey{}).(string)
+		if !pinned {
+			key = p.keys.NextForContext(req.Context())
+		}
+		cfg.SetHeaders(req, key)
 	}
 	// cfg wins over opts: a provider that sets one is doing it for a
 	// transport-level concern of its own, such as request signing.
@@ -128,6 +133,15 @@ func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg Co
 	}
 	p.client = llmclient.NewWithOptionalHTTPClient(httpClient, clientCfg, headerSetter)
 	return p
+}
+
+// pinnedKeyContextKey carries the API key a multi-request operation must keep
+// using, so key rotation cannot split it across keys.
+type pinnedKeyContextKey struct{}
+
+// withPinnedKey returns a context whose requests all use the next API key.
+func (p *CompatibleProvider) withPinnedKey(ctx context.Context) context.Context {
+	return context.WithValue(ctx, pinnedKeyContextKey{}, p.keys.NextForContext(ctx))
 }
 
 func (p *CompatibleProvider) SetBaseURL(url string) {
