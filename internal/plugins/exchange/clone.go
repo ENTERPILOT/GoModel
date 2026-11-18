@@ -52,7 +52,7 @@ func cloneContent(content any) any {
 	case []map[string]any:
 		out := make([]map[string]any, len(value))
 		for i, m := range value {
-			out[i] = cloneAnyMap(m)
+			out[i] = maps.Clone(m)
 		}
 		return out
 	default:
@@ -113,19 +113,10 @@ func cloneAnySlice(items []any) []any {
 	out := make([]any, len(items))
 	for i, item := range items {
 		if m, ok := item.(map[string]any); ok {
-			out[i] = cloneAnyMap(m)
+			out[i] = maps.Clone(m)
 			continue
 		}
 		out[i] = item
 	}
-	return out
-}
-
-func cloneAnyMap(m map[string]any) map[string]any {
-	if m == nil {
-		return nil
-	}
-	out := make(map[string]any, len(m))
-	maps.Copy(out, m)
 	return out
 }

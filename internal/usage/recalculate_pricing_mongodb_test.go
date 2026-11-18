@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/stretchr/testify/require"
@@ -22,7 +23,7 @@ type mockMongoPricingSession struct {
 	endSessionCalls      int
 }
 
-func (s *mockMongoPricingSession) WithTransaction(ctx context.Context, fn func(context.Context) (any, error)) (any, error) {
+func (s *mockMongoPricingSession) WithTransaction(ctx context.Context, fn func(context.Context) (any, error), _ ...options.Lister[options.TransactionOptions]) (any, error) {
 	s.withTransactionCalls++
 	if s.invokeTransaction {
 		nextCtx := context.WithValue(ctx, mongoPricingTestContextKey{}, "transaction")

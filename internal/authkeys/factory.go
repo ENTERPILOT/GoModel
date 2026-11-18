@@ -2,7 +2,6 @@ package authkeys
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -33,33 +32,29 @@ func (r *Result) Close() error {
 			r.stopRefresh = nil
 		}
 
-		var errs []error
 		if r.Store != nil {
 			if err := r.Store.Close(); err != nil {
-				errs = append(errs, fmt.Errorf("store close: %w", err))
+				r.closeErr = fmt.Errorf("store close: %w", err)
 			}
-		}
-		if len(errs) > 0 {
-			r.closeErr = fmt.Errorf("close errors: %w", errors.Join(errs...))
 		}
 	})
 	return r.closeErr
 }
 
 // New creates an auth key subsystem using an existing storage connection.
-func New(ctx context.Context, shared storage.Storage) (*Result, error) {
+func New(ctx context.Context, shared storage.Storage, opts ...Option) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
-	return newResult(ctx, shared)
+	return newResult(ctx, shared, opts)
 }
 
-func newResult(ctx context.Context, storeConn storage.Storage) (*Result, error) {
+func newResult(ctx context.Context, storeConn storage.Storage, opts []Option) (*Result, error) {
 	store, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
 	}
-	service, err := NewService(store)
+	service, err := NewService(store, opts...)
 	if err != nil {
 		return nil, err
 	}

@@ -101,6 +101,20 @@ func TestCreateSpeech_ForwardsNativeExtraFields(t *testing.T) {
 	assert.Equal(t, map[string]any{"type": "base64", "data": "UklGRh"}, sent["voice_ref"])
 }
 
+// audio.cpp takes a string voice, so an OpenAI custom-voice object travels as
+// its id.
+func TestCreateSpeech_SendsVoiceObjectAsID(t *testing.T) {
+	url, capture := wavServer(t)
+	provider := newTestProvider("", url, http.DefaultClient, llmclient.Hooks{})
+
+	req, err := core.DecodeAudioSpeechRequest([]byte(`{"model":"pocket-tts","input":"hi","voice":{"id":"alba"}}`), nil)
+	require.NoError(t, err)
+	_, err = provider.CreateSpeech(context.Background(), req)
+	require.NoError(t, err)
+
+	assert.Equal(t, "alba", capture.Last(t).JSON(t)["voice"])
+}
+
 func TestCreateSpeech_ValidatesRequest(t *testing.T) {
 	url, capture := wavServer(t)
 	provider := newTestProvider("", url, http.DefaultClient, llmclient.Hooks{})
