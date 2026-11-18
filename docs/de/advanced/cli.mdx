@@ -71,8 +71,10 @@ Gateway erkennen und neu starten.
 ## Readiness-Abfrage
 
 `--ready` fragt `/health/ready` ab. Dieser Endpunkt meldet, ob die Instanz
-Traffic erhalten soll. Anders als Liveness prüft Readiness die Abhängigkeiten,
-für die das Gateway selbst verantwortlich ist:
+Traffic erhalten soll. Die Abfrage geht an dieselbe Adresse wie `--health`,
+also auch an `SERVER_HOST`, wenn der Listener an eine bestimmte Adresse gebunden
+ist. Anders als Liveness prüft Readiness die Abhängigkeiten, für die das Gateway
+selbst verantwortlich ist:
 
 - **Storage** ist erforderlich. Ist das Backend (SQLite/PostgreSQL/MongoDB)
   nicht erreichbar, meldet Readiness `not_ready` (HTTP `503`).

@@ -68,8 +68,10 @@ gateway i go zrestartować.
 ## Sonda readiness
 
 `--ready` odpytuje `/health/ready`, który informuje, czy instancja powinna
-otrzymywać ruch. W przeciwieństwie do liveness readiness sprawdza zależności,
-za które odpowiada gateway:
+otrzymywać ruch. Sonda łączy się z tym samym adresem co `--health`, czyli także
+z adresem z `SERVER_HOST`, gdy serwer nasłuchuje na konkretnym adresie.
+W przeciwieństwie do liveness readiness sprawdza zależności, za które odpowiada
+gateway:
 
 - **Storage** jest wymagany. Jeśli backend (SQLite/PostgreSQL/MongoDB) jest
   nieosiągalny, readiness zgłasza `not_ready` (HTTP `503`).

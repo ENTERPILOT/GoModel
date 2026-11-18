@@ -68,8 +68,9 @@ unhealthy gateway.
 ## Readiness probe
 
 `--ready` probes `/health/ready`, which reports whether the instance should
-receive traffic. Unlike liveness, readiness checks the dependencies the gateway
-owns:
+receive traffic. It dials the same address as `--health`, including
+`SERVER_HOST` when the listener binds a specific one. Unlike liveness, readiness
+checks the dependencies the gateway owns:
 
 - **Storage** is required. If the backend (SQLite/PostgreSQL/MongoDB) is
   unreachable, readiness reports `not_ready` (HTTP `503`).
