@@ -17,7 +17,7 @@ Sprawdza się to w dwóch zastosowaniach:
 
 - **Odrzucanie nieuwierzytelnionego ruchu na brzegu sieci.** Requesty bez prawidłowego klucza
   nigdy nie docierają do gatewaya, więc skanery i źle skonfigurowani klienci nie otwierają
-  do niego połączeń ani nie trafiają do jego logu audytowego. GoModel nadal uwierzytelnia każdy
+  do niego połączeń ani nie trafiają do jego logu requestów. GoModel nadal uwierzytelnia każdy
   obsługiwany request; kontrola na brzegu to filtr przed nim, a nie zamiennik.
 - **Ochrona innych usług kluczami GoModel.** Wewnętrzny dashboard, strona z dokumentacją
   lub endpoint metryk na tym samym hoście mogą wymagać prawidłowego klucza GoModel

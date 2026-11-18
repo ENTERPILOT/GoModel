@@ -157,7 +157,7 @@ func (sc *streamConverter) Read(p []byte) (int, error) {
 		return sc.buffer.Read(p), nil
 	}
 	// End-of-stream is signalled by io.EOF only. Ownership of the underlying
-	// stream stays with Close so observers (audit, usage) still fire on
+	// stream stays with Close so observers (request log, usage) still fire on
 	// OnStreamClose; Read must never mark the converter closed.
 	if sc.finalized || sc.closed {
 		if sc.endErr != nil {

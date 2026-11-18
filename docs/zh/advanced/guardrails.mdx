@@ -264,7 +264,7 @@ GoModel 内置六种类型。每种都是一个内置插件；下表列出了它
 | `skip_content_prefix` | 否 | | 当去除首尾空白后的文本以此前缀开头时，跳过改写。 |
 | `prompt` | 否 | 内置匿名化提示词 | 自定义改写指令。 |
 
-改写在进程内通过常规的翻译请求路径执行，因此工作流选择、故障转移、用量、审计和缓存行为依然适用。
+改写在进程内通过常规的翻译请求路径执行，因此工作流选择、故障转移、用量、请求日志和缓存行为依然适用。
 内部请求使用：
 
 - 路径：`/v1/chat/completions`
@@ -302,7 +302,7 @@ GoModel 内置六种类型。每种都是一个内置插件；下表列出了它
 | `case_insensitive` | 否 | `false` | 匹配时忽略大小写。 |
 | `roles` | 否 | `["user"]` | 规则作用的提示词消息：`system`（包括 developer）、`user`、`assistant`、`tool`。在 response 阶段，目标始终是助手文本。 |
 | `on_match` | 否 | `replace` | `replace` 执行替换；`block` 以错误拒绝；`respond` 以 `message` 作为助手回复进行应答；`warn` 继续处理并记录匹配。只有 `replace` 会编辑文本。 |
-| `message` | 否 | `block` 和 `respond` 为 `Request blocked by policy`，`warn` 无默认值 | `block` 的错误消息、`respond` 的助手回复、`warn` 的审计备注。`warn` 只在设置了备注时才记录备注，因此该结果不会在控制台中被标记为拦截。 |
+| `message` | 否 | `block` 和 `respond` 为 `Request blocked by policy`，`warn` 无默认值 | `block` 的错误消息、`respond` 的助手回复、`warn` 的请求日志备注。`warn` 只在设置了备注时才记录备注，因此该结果不会在控制台中被标记为拦截。 |
 | `block_status` | 否 | 阶段默认值 | `block` 使用的单个 HTTP 状态码，范围为 400 到 599，例如 `403`。为空时，提示词被拦截返回 400，响应被拦截返回 502。 |
 | `stream_lookbehind` | 否 | `64` | 流式文本中暂扣的字符数，使跨两个分块的匹配仍能被改写；请至少设置为最长查找文本的长度。位于目前已流式输出文本末尾的匹配会被暂扣，直到它不再增长，因此像 `sk-[A-Za-z0-9_-]{20,}` 这样的开放式模式，在值不超过此长度时会被整体遮盖；更长的值会保留超出回看窗口的部分，因此请将其设置为高于预期最长密钥的长度。用于 `replace` 和 `warn`。 |
 
@@ -434,14 +434,14 @@ prompt 阶段只运行一次，因此故障转移尝试会收到相同的文本�
 | --- | -------- | ------- | ----------- |
 | `model` | 是 | | 评判模型：`provider/model`、别名或虚拟模型；可以是聊天模型或决策模型。其用量以来源 `plugin` 计入。 |
 | `engine` | 否 | `auto` | 评判模型的询问方式：`chat`、`decision` 或 `auto`。`auto` 对只回答决策的模型（任何 `jev` 模型、OpenRouter 的决策模型，或所有目标都属于此类的虚拟模型）使用 `decision`，其他情况使用 `chat`。 |
-| `user_path` | 否 | 当前请求的路径 | 评判调用在预算和审计上所归属的用户路径。 |
+| `user_path` | 否 | 当前请求的路径 | 评判调用在预算和请求日志上所归属的用户路径。 |
 | `prompt` | 否 | 内置策略 | 聊天引擎：评判模型的系统提示词。 |
 | `decision_question` | 否 | 内置策略 | 决策引擎：针对内容提出的“是或否”问题。“是”表示内容违反策略。 |
 | `block_threshold` | 否 | `0.5` | 决策引擎：“是”的概率（0 到 1），达到或超过该值时，内容视为 block 裁决。 |
 | `judge_images` | 否 | `false` | 决策引擎：同时发送被评判消息中的图像。 |
 | `target` | 否 | `auto` | prompt 阶段评判模型看到的内容：`auto` 或 `last_user`（最后一条用户消息）、`all_user`、`conversation`。在 response 阶段，它始终看到助手文本。 |
 | `action` | 否 | `block` | 裁决为 block 时：`block` 拒绝，`respond` 以 `respond_text` 应答，`warn` 继续处理并记录裁决。 |
-| `message` | 否 | `This request was blocked by policy` | `block` 的错误消息、`warn` 的审计备注。 |
+| `message` | 否 | `This request was blocked by policy` | `block` 的错误消息、`warn` 的请求日志备注。 |
 | `block_status` | 否 | 阶段默认值 | `block` 使用的单个 HTTP 状态码，范围为 400 到 599，例如 `403`。为空时，提示词被拦截返回 400，响应被拦截返回 502。 |
 | `respond_text` | 否 | `I can't help with that request.` | `respond` 的助手回复。 |
 | `on_unclear` | 否 | `block` | 当评判回复无法解析、被 `max_tokens` 截断，或全部用于推理时：`allow`、`warn` 或 `block`（应用 `action`）。只有 JSON 对象或单独的 `allow` / `block` 才算裁决，句子中出现的单词不算。 |
@@ -454,7 +454,7 @@ prompt 阶段只运行一次，因此故障转移尝试会收到相同的文本�
 
 使用决策模型时，评判会将被评判的文本直接作为 Decisions 输入发送（不加包裹标签），并提出一个谓词问题，即 `decision_question`。它不使用 `prompt`、`max_tokens` 或 `temperature`。概率达到或超过
 `block_threshold` 即为 block 裁决，并应用 `action`；概率较低则放行。该调用与
-[`POST /v1/decisions`](/zh/advanced/decisions-api) 经过相同的路由：虚拟模型、故障转移到支持 Decisions 的目标、精确响应缓存、用量和审计，并归属于该实例的用户路径。
+[`POST /v1/decisions`](/zh/advanced/decisions-api) 经过相同的路由：虚拟模型、故障转移到支持 Decisions 的目标、精确响应缓存、用量和请求日志，并归属于该实例的用户路径。
 
 每个裁决都会在决策详情中记录概率（`probability`），实例还会将其上报为直方图
 `plugin_llm_judge_decision_probability`。您可以据此按策略调整 `block_threshold`：调高它可只拦截明确的违规内容，调低它可捕获更多边界内容。
@@ -532,15 +532,15 @@ docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
 | `restore_roles` | 否 | `["user", "assistant", "tool"]` | 其值会被还原的提示词角色。在设置了此项的实例上生效（无论是 prompt 还是 response 阶段）；如果两者都设置了，角色必须同时出现在两个列表中。 |
 | `restore_tools` | 否 | 全部 | 调用参数中会还原值的工具（函数名）。其余工具保留占位符。 |
 | `restore_tools_exclude` | 否 | | 即使被 `restore_tools` 选中，调用参数仍保留占位符的工具。 |
-| `message` | 否 | `Request blocked: it contains personal data` | `block` 的错误消息、`respond` 的助手回复、`warn` 的审计备注。 |
+| `message` | 否 | `Request blocked: it contains personal data` | `block` 的错误消息、`respond` 的助手回复、`warn` 的请求日志备注。 |
 | `block_status` | 否 | 阶段默认值 | `block` 使用的单个 HTTP 状态码，范围为 400 到 599。为空时，提示词被拦截返回 400，响应被拦截返回 502。 |
 | `stream_chunk` | 否 | `256` | 在分析器运行前收集的流式文本（或工具调用参数）字符数，使其能看到完整句子，并且每个分块只运行一次。客户端每次最多等待这么多文本。 |
 | `stream_lookbehind` | 否 | `64` | 暂扣的流式文本（或工具调用参数）字符数，使跨两个分块的值或占位符仍能被处理。最大 4096。 |
 
-每个文本部分都会单独分析（每部分调用一次分析器，最多同时进行八个），因此分析器从不会把整段对话视为一个文本，分析器自身的限制按部分生效。审计详情记录实体类型和数量，从不记录值本身，分析器返回的错误也从不携带传给它的文本。分析器接收的是明文，因此请将其作为 Sidecar 运行在同一主机上，或通过 `https://` 或私有网络访问。
+每个文本部分都会单独分析（每部分调用一次分析器，最多同时进行八个），因此分析器从不会把整段对话视为一个文本，分析器自身的限制按部分生效。请求日志详情记录实体类型和数量，从不记录值本身，分析器返回的错误也从不携带传给它的文本。分析器接收的是明文，因此请将其作为 Sidecar 运行在同一主机上，或通过 `https://` 或私有网络访问。
 
 <Warning>
-  匿名化只对提供商隐藏这些值，不会对审计日志隐藏。`LOGGING_LOG_BODIES` 默认为 `true`，存储的 `request_body` 和 `response_body` 是客户端发送和收到的原始内容，其中的个人数据为明文；只有保存在 `request_revisions` 下的改写后请求体是匿名化的。如果审计存储不得保存个人数据，请设置 [`LOGGING_LOG_BODIES=false`](/zh/advanced/configuration#审计日志)。`LOGGING_LOG_REVISION_BODIES=false` 只会丢弃匿名化的副本，原始请求体仍会被存储。
+  匿名化只对提供商隐藏这些值，不会对请求日志隐藏。`LOGGING_LOG_BODIES` 默认为 `true`，存储的 `request_body` 和 `response_body` 是客户端发送和收到的原始内容，其中的个人数据为明文；只有保存在 `request_revisions` 下的改写后请求体是匿名化的。如果请求日志存储不得保存个人数据，请设置 [`LOGGING_LOG_BODIES=false`](/zh/advanced/configuration#请求日志)。`LOGGING_LOG_REVISION_BODIES=false` 只会丢弃匿名化的副本，原始请求体仍会被存储。
 </Warning>
 
 <Tip>
@@ -763,7 +763,7 @@ guardrails:
 
 prompt 阶段的护栏在查询缓存之前运行，因此 prompt 阶段的拦截或应答，也适用于原本会命中缓存的请求。护栏向其中还原了请求特定数据的响应，根本不会被缓存（参见 [`presidio`](#presidio) 下的 `restore`）。
 
-由于缓存命中时 response 链不会运行，命中请求的审计条目只记录 prompt 阶段的结果以及缓存类型。
+由于缓存命中时 response 链不会运行，命中请求的请求日志条目只记录 prompt 阶段的结果以及缓存类型。
 
 ## 决定、错误与拒绝
 
@@ -771,10 +771,10 @@ prompt 阶段的护栏在查询缓存之前运行，因此 prompt 阶段的拦�
 | --- | --- |
 | **block** | 以端点原生格式返回的错误：HTTP 400（prompt 阶段）或 502（response 和 stream 阶段），除非护栏设置了 `block_status`；错误代码为 `guardrail_blocked`，除非插件设置了自己的代码。 |
 | **respond** | 一条普通的助手回复，HTTP 200（流式请求则为单轮流）。 |
-| **warn** | 未经更改的响应，外加 `X-GoModel-Guardrail: warn; code=<code>` 响应头；详情存储在审计记录中。对于流，只有在首批字节发出之前就做出了 warn 决定时（即缓冲响应）才会发送该响应头；之后的 warn 仅记入审计。 |
-| **护栏失败**（`fail_mode: closed`） | HTTP 500，代码为 `plugin_failure`。护栏名称出现在日志和审计记录中，不会出现在客户端消息里。 |
+| **warn** | 未经更改的响应，外加 `X-GoModel-Guardrail: warn; code=<code>` 响应头；详情存储在请求日志中。对于流，只有在首批字节发出之前就做出了 warn 决定时（即缓冲响应）才会发送该响应头；之后的 warn 仅记入请求日志。 |
+| **护栏失败**（`fail_mode: closed`） | HTTP 500，代码为 `plugin_failure`。护栏名称出现在日志和请求日志条目中，不会出现在客户端消息里。 |
 
 被拦截的请求永远不会到达提供商；被拦截的响应永远不会到达客户端。关于多个护栏在同一 order 运行时决定如何合并，请参见 [插件](/zh/advanced/plugins#决策)。
 
-每个结果（包括静默放行）都会记录在请求审计条目的 `data.guardrails` 下，包含阶段、步骤、决定、护栏是否编辑了请求或响应，以及失败方式。控制台据此为审计条目工作流图中的护栏步骤着色：
-步骤通过或进行了编辑时为绿色，警告或 fail-open 错误为琥珀色，拦截、应答或 fail-closed 错误为红色，步骤从未运行时为灰暗色。字段说明参见 [插件](/zh/advanced/plugins#审计记录)。
+每个结果（包括静默放行）都会记录在该请求的请求日志条目的 `data.guardrails` 下，包含阶段、步骤、决定、护栏是否编辑了请求或响应，以及失败方式。控制台据此为请求日志条目工作流图中的护栏步骤着色：
+步骤通过或进行了编辑时为绿色，警告或 fail-open 错误为琥珀色，拦截、应答或 fail-closed 错误为红色，步骤从未运行时为灰暗色。字段说明参见 [插件](/zh/advanced/plugins#请求日志)。

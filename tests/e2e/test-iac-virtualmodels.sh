@@ -41,8 +41,9 @@ NEG_PORT="${IAC_NEG_PORT:-18096}"
 B="http://localhost:$PORT"
 
 PIDF="$WORK/gw.pid"
-# start_gw boots a gateway in unsafe mode (empty master key) with an in-memory
-# model cache, so EVERY boot validates managed config against a cold catalog. It
+# start_gw boots a gateway in unsafe mode (empty master key) with a new, empty
+# model cache directory (the default is the per-user cache, which other gateways
+# fill), so EVERY boot validates managed config against a cold catalog. It
 # waits for /health (startup validation passed) and then for the async model load
 # to finish ("model registry initialized") so resolve-time chats have a catalog.
 start_gw(){ # uses $VM_ENV (may be empty) and $WORK/config.yaml if present
@@ -51,6 +52,7 @@ start_gw(){ # uses $VM_ENV (may be empty) and $WORK/config.yaml if present
   ( cd "$WORK"
     nohup env GOMODEL_MASTER_KEY= PORT=$PORT BASE_PATH= STORAGE_TYPE=sqlite \
       SQLITE_PATH="$WORK/data/gomodel.db" CONFIGURED_PROVIDER_MODELS_MODE=fallback \
+      GOMODEL_CACHE_DIR="$(mktemp -d "$WORK/cache.XXXXXX")" \
       RESPONSE_CACHE_SIMPLE_ENABLED=false SEMANTIC_CACHE_ENABLED=false REDIS_URL= \
       VIRTUAL_MODELS="${VM_ENV:-}" "$BIN" >"$WORK/server.log" 2>&1 < /dev/null &
     echo $! >"$PIDF" )
@@ -137,7 +139,7 @@ stop_gw; rm -f "$WORK/config.yaml"
 ############ STRUCTURALLY invalid declaration aborts startup (negative) ############
 fail_start(){ # name, VM_ENV  -> expect the process to EXIT with a clear error
   for sp in $(lsof -nP -t -iTCP:$NEG_PORT -sTCP:LISTEN 2>/dev/null); do kill "$sp" 2>/dev/null; done
-  ( cd "$WORK"; nohup env GOMODEL_MASTER_KEY= PORT=$NEG_PORT BASE_PATH= STORAGE_TYPE=sqlite SQLITE_PATH="$WORK/data/neg.db" REDIS_URL= RESPONSE_CACHE_SIMPLE_ENABLED=false VIRTUAL_MODELS="$2" "$BIN" >"$WORK/neg.log" 2>&1 < /dev/null & echo $! >"$WORK/neg.pid" )
+  ( cd "$WORK"; nohup env GOMODEL_MASTER_KEY= PORT=$NEG_PORT BASE_PATH= STORAGE_TYPE=sqlite SQLITE_PATH="$WORK/data/neg.db" GOMODEL_CACHE_DIR="$(mktemp -d "$WORK/cache.XXXXXX")" REDIS_URL= RESPONSE_CACHE_SIMPLE_ENABLED=false VIRTUAL_MODELS="$2" "$BIN" >"$WORK/neg.log" 2>&1 < /dev/null & echo $! >"$WORK/neg.pid" )
   # Startup validation runs after the provider catalog warms up, and an
   # unreachable provider (a stopped local Ollama) stretches that warm-up past
   # any fixed sleep, so poll for the exit instead of guessing how long it takes.

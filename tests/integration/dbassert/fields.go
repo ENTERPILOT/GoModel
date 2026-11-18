@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
-// RequiredAuditLogFields are fields that must always be populated in an audit log entry.
-var RequiredAuditLogFields = []string{
+// RequiredRequestLogFields are fields that must always be populated in a request log entry.
+var RequiredRequestLogFields = []string{
 	"ID",
 	"Timestamp",
 	"StatusCode",
@@ -31,9 +31,9 @@ var RequiredUsageFields = []string{
 	"Endpoint",
 }
 
-// ExpectedAuditLog contains expected values for audit log assertions.
+// ExpectedRequestLog contains expected values for request log assertions.
 // Zero values are not checked, allowing partial matching.
-type ExpectedAuditLog struct {
+type ExpectedRequestLog struct {
 	Model      string
 	Provider   string
 	StatusCode int
@@ -56,15 +56,15 @@ type ExpectedUsage struct {
 	RequestID    string
 }
 
-// AssertAuditLogFieldCompleteness verifies that all required fields are populated.
-func AssertAuditLogFieldCompleteness(t *testing.T, entry AuditLogEntry) {
+// AssertRequestLogFieldCompleteness verifies that all required fields are populated.
+func AssertRequestLogFieldCompleteness(t *testing.T, entry RequestLogEntry) {
 	t.Helper()
 
-	assert.NotEmpty(t, entry.ID, "audit log ID should not be empty")
-	assert.False(t, entry.Timestamp.IsZero(), "audit log timestamp should not be zero")
-	assert.NotZero(t, entry.StatusCode, "audit log status code should not be zero")
-	assert.NotEmpty(t, entry.Method, "audit log method should not be empty")
-	assert.NotEmpty(t, entry.Path, "audit log path should not be empty")
+	assert.NotEmpty(t, entry.ID, "request log ID should not be empty")
+	assert.False(t, entry.Timestamp.IsZero(), "request log timestamp should not be zero")
+	assert.NotZero(t, entry.StatusCode, "request log status code should not be zero")
+	assert.NotEmpty(t, entry.Method, "request log method should not be empty")
+	assert.NotEmpty(t, entry.Path, "request log path should not be empty")
 }
 
 // AssertUsageFieldCompleteness verifies that all required fields are populated.
@@ -79,9 +79,9 @@ func AssertUsageFieldCompleteness(t *testing.T, entry UsageEntry) {
 	assert.NotEmpty(t, entry.Endpoint, "usage endpoint should not be empty")
 }
 
-// AssertAuditLogMatches verifies that the actual entry matches expected values.
+// AssertRequestLogMatches verifies that the actual entry matches expected values.
 // Only non-zero expected values are checked.
-func AssertAuditLogMatches(t *testing.T, expected ExpectedAuditLog, actual AuditLogEntry) {
+func AssertRequestLogMatches(t *testing.T, expected ExpectedRequestLog, actual RequestLogEntry) {
 	t.Helper()
 
 	if expected.Model != "" {
@@ -138,16 +138,16 @@ func AssertUsageMatches(t *testing.T, expected ExpectedUsage, actual UsageEntry)
 	}
 }
 
-// AssertAuditLogHasData verifies that the audit log entry has associated data.
-func AssertAuditLogHasData(t *testing.T, entry AuditLogEntry) {
+// AssertRequestLogHasData verifies that the request log entry has associated data.
+func AssertRequestLogHasData(t *testing.T, entry RequestLogEntry) {
 	t.Helper()
-	assert.NotNil(t, entry.Data, "audit log should have data field populated")
+	assert.NotNil(t, entry.Data, "request log should have data field populated")
 }
 
-// AssertAuditLogHasBody verifies that request and/or response bodies are logged.
-func AssertAuditLogHasBody(t *testing.T, entry AuditLogEntry, expectRequest, expectResponse bool) {
+// AssertRequestLogHasBody verifies that request and/or response bodies are logged.
+func AssertRequestLogHasBody(t *testing.T, entry RequestLogEntry, expectRequest, expectResponse bool) {
 	t.Helper()
-	require.NotNil(t, entry.Data, "audit log data should not be nil")
+	require.NotNil(t, entry.Data, "request log data should not be nil")
 
 	if expectRequest {
 		assert.NotNil(t, entry.Data.RequestBody, "expected request body to be logged")
@@ -157,10 +157,10 @@ func AssertAuditLogHasBody(t *testing.T, entry AuditLogEntry, expectRequest, exp
 	}
 }
 
-// AssertAuditLogHasHeaders verifies that headers are logged.
-func AssertAuditLogHasHeaders(t *testing.T, entry AuditLogEntry, expectRequest, expectResponse bool) {
+// AssertRequestLogHasHeaders verifies that headers are logged.
+func AssertRequestLogHasHeaders(t *testing.T, entry RequestLogEntry, expectRequest, expectResponse bool) {
 	t.Helper()
-	require.NotNil(t, entry.Data, "audit log data should not be nil")
+	require.NotNil(t, entry.Data, "request log data should not be nil")
 
 	if expectRequest {
 		assert.NotNil(t, entry.Data.RequestHeaders, "expected request headers to be logged")
@@ -189,21 +189,21 @@ func AssertUsageTokensConsistent(t *testing.T, entry UsageEntry) {
 }
 
 // AssertNoErrorType verifies that the entry has no error type set.
-func AssertNoErrorType(t *testing.T, entry AuditLogEntry) {
+func AssertNoErrorType(t *testing.T, entry RequestLogEntry) {
 	t.Helper()
 	assert.Empty(t, entry.ErrorType, "expected no error type, got: %s", entry.ErrorType)
 }
 
-// AssertAuditLogDurationPositive verifies that the duration is positive.
-func AssertAuditLogDurationPositive(t *testing.T, entry AuditLogEntry) {
+// AssertRequestLogDurationPositive verifies that the duration is positive.
+func AssertRequestLogDurationPositive(t *testing.T, entry RequestLogEntry) {
 	t.Helper()
 	assert.Positive(t, entry.DurationNs, "duration should be positive")
 }
 
-// unmarshalLogData unmarshals JSON bytes to auditlog.LogData.
-func unmarshalLogData(t *testing.T, data []byte) *auditlog.LogData {
+// unmarshalLogData unmarshals JSON bytes to requestlog.LogData.
+func unmarshalLogData(t *testing.T, data []byte) *requestlog.LogData {
 	t.Helper()
-	var logData auditlog.LogData
+	var logData requestlog.LogData
 	err := json.Unmarshal(data, &logData)
 	require.NoError(t, err, "failed to unmarshal log data")
 	return &logData

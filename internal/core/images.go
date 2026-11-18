@@ -7,7 +7,7 @@ import (
 )
 
 // ImageGenerationRequest is an OpenAI-compatible POST /v1/images/generations
-// request. Only the fields the gateway needs to route, validate, and audit are
+// request. Only the fields the gateway needs to route, validate, and log are
 // typed; every other field (quality, size, style, background, output_format,
 // moderation, ...) is preserved verbatim in ExtraFields and forwarded upstream
 // so new provider parameters work without a gateway change.

@@ -67,6 +67,18 @@ func HasServiceAccount(cfg Config) bool {
 		strings.TrimSpace(cfg.ServiceAccountFile) != ""
 }
 
+// UsesHostCredentials reports whether cfg authenticates with a credential
+// taken from the gateway's host: Application Default Credentials, or a
+// service-account key read from a file on the host. Only service-account JSON
+// carried in the configuration itself belongs to the provider.
+func UsesHostCredentials(cfg Config) bool {
+	if NormalizeAuthType(cfg.AuthType, HasServiceAccount(cfg)) == "gcp_adc" {
+		return true
+	}
+	return strings.TrimSpace(cfg.ServiceAccountJSONBase64) == "" &&
+		strings.TrimSpace(cfg.ServiceAccountJSON) == ""
+}
+
 // FindCredentials resolves a TokenSource and QuotaProjectID from either a
 // service-account credential (file, raw JSON, or base64 JSON) or Application
 // Default Credentials. The returned QuotaProjectID flows from ADC

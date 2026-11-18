@@ -26,6 +26,7 @@ GoModel 提供**兼容 OpenAI 的音频端点**，用于文本转语音（TTS）
 | `POST /v1/audio/speech` | 文本转语音。接收 JSON 请求体，并以请求的 `response_format` 返回**二进制音频**。 |
 | `POST /v1/audio/transcriptions` | 语音转文本。接收 `multipart/form-data` 上传，并根据 `response_format` 返回 JSON 或纯文本。 |
 | `POST /v1/audio/translations` | 语音转英文文本。上传格式与转录相同，但不含 `language` 和 `timestamp_granularities[]`。 |
+| `GET /v1/audio/voices?model=` | GoModel 扩展：TTS 模型提供的音色，请参阅[音色发现](/zh/advanced/api-endpoints#音色发现)。 |
 
 JSON 格式的转录和翻译响应体会被规范化为 OpenAI 的格式：Groq 特有的 `x_groq` 成员会从
 `json` 和 `verbose_json` 响应中移除，因此按 OpenAI 编写的客户端在任何地方看到的字段都相同。
@@ -94,6 +95,16 @@ await writeFile("speech.wav", Buffer.from(await speech.arrayBuffer()));
 （默认 `mp3`，另支持 `opus`、`aac`、`flac`、`wav`、`pcm`）和 `speed` 会转发给提供商。
 响应的 `Content-Type` 使用上游返回的值；若上游未返回，则回退为 `response_format`
 所对应的类型（例如 `wav` → `audio/wav`）。
+
+`voice` 也可以是带 `id` 的对象，即 OpenAI
+[自定义声音](https://developers.openai.com/api/docs/guides/custom-voices)使用的形式：
+`"voice": {"id": "voice_1234"}`。兼容 OpenAI 的提供商会原样收到该对象；ElevenLabs、
+MiniMax、Xiaomi 和 audio.cpp 则将其 `id` 用作声音。缺少非空白字符串 `id` 的对象会返回 `400`。
+不支持自定义声音的兼容提供商可能会拒绝该对象。
+
+OpenAI 只接受对象形式的自定义声音。因此，对于 OpenAI（`api.openai.com` 及其区域主机），
+GoModel 会把以 `voice_` 开头的字符串作为 `{"id": "voice_…"}` 发送，这样
+[音色发现](/zh/advanced/api-endpoints#音色发现)返回的 `id` 也可以直接作为字符串使用。
 
 合成的音频会**在提供商生成的同时进行中继**，详见[流式传输](#流式传输)。
 
@@ -232,7 +243,7 @@ Token 数计价，流式语音则根据实际传输的音频时长计价。两�
 `temperature`，以及 `timestamp_granularities[]` 和其不带方括号的别名
 `timestamp_granularities`）；二是转录上传中额外的**文件**部分，只有 `file` 中的音频会被发送。
 
-转发的值不会存储在[审计日志](/zh/advanced/admin-endpoints)中：由于它们是任意的客户端输入，
+转发的值不会存储在[请求日志](/zh/advanced/admin-endpoints)中：由于它们是任意的客户端输入，
 可能包含提供商凭据，日志条目只会在 `forwarded_fields` 下记录字段**名称**。
 
 <Note>
@@ -267,7 +278,7 @@ Token 数计价，流式语音则根据实际传输的音频时长计价。两�
 
 - **无故障转移、护栏或响应缓存**：这些阶段会被跳过。请求仍会经过授权、预算检查和计量
   （参见[成本追踪](#成本追踪)），并以其 `/v1/audio/*` 路径写入
-  [审计日志](/zh/advanced/admin-endpoints)。
+  [请求日志](/zh/advanced/admin-endpoints)。
 - **输入为 OpenAI 请求格式，输出为提供商的方言**：客户端始终发送 OpenAI 的音频格式。
   兼容 OpenAI 的上游会原样接收；Xiaomi MiMo、Cohere 和 MiniMax 的请求会被转换为
   各提供商的原生音频协议。除此之外的提供商不会在此端点背后进行适配。
@@ -277,11 +288,11 @@ Token 数计价，流式语音则根据实际传输的音频时长计价。两�
 如果提供商的原生音频 API 与 OpenAI 不同，请使用[透传 API](/zh/features/passthrough-api)
 （`/p/{provider}/v1/audio/...`），将字节原样转发到该上游。
 
-## 审计日志
+## 请求日志
 
-音频请求会像其他模型交互一样出现在审计日志中。由于音频负载是二进制数据且体积较大，
+音频请求会像其他模型交互一样出现在请求日志中。由于音频负载是二进制数据且体积较大，
 其请求体和响应体由专门的设置
-[`LOGGING_LOG_AUDIO_BODIES`](/zh/advanced/configuration#审计日志)（默认 `false`）控制。
+[`LOGGING_LOG_AUDIO_BODIES`](/zh/advanced/configuration#请求日志)（默认 `false`）控制。
 该设置是对 `LOGGING_LOG_BODIES` 的**细化**，只有在启用请求体日志时才会生效：
 
 - **请求体日志关闭**（`LOGGING_LOG_BODIES=false`）：无论此设置如何，都不会存储音频内容。
@@ -291,7 +302,7 @@ Token 数计价，流式语音则根据实际传输的音频时长计价。两�
   使**控制台能够渲染内嵌播放器**；`/v1/audio/transcriptions` 会存储上传的音频（同样可在
   控制台中播放）以及上传元数据（文件名、模型、参数）。
 
-音频字节会存入[媒体存储](/zh/advanced/configuration#媒体存储)，而不是审计数据库：
+音频字节会存入[媒体存储](/zh/advanced/configuration#媒体存储)，而不是请求日志数据库：
 日志条目携带一个 `media_id`，控制台通过 `GET /admin/media/{id}` 获取该文件。
-文件大小没有上限，流式响应会在中继的同时被存储。文件的保留时间与引用它们的审计条目相同
+文件大小没有上限，流式响应会在中继的同时被存储。文件的保留时间与引用它们的请求日志条目相同
 （`LOGGING_RETENTION_DAYS`）。

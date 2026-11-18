@@ -614,7 +614,7 @@ func TestAdminEndpoints_Enabled(t *testing.T) {
 		AdminHandler:          adminHandler,
 	})
 
-	for _, path := range []string{"/admin/models", "/admin/providers/status", "/admin/audit/log", "/admin/audit/conversation?log_id=abc"} {
+	for _, path := range []string{"/admin/models", "/admin/providers/status", "/admin/request-logs", "/admin/request-logs/conversation?log_id=abc"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -957,6 +957,56 @@ func TestAdminStaticAssets_EncodedOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, raw.Body.Bytes(), body)
 	assert.Equal(t, []string{"Accept-Encoding"}, rec.Header().Values("Vary"))
+}
+
+// Health checkers, link checkers and CDNs probe with HEAD; the dashboard page
+// and its assets answer it with the headers GET sends and no body.
+func TestAdminDashboard_AnswersHead(t *testing.T) {
+	srv := New(&mockProvider{}, &Config{
+		MasterKey:             "test-secret-key",
+		AdminEndpointsEnabled: true,
+		AdminUIEnabled:        true,
+		AdminHandler:          admin.NewHandler(nil, nil),
+		DashboardHandler:      newDashboardHandler(t),
+	})
+	tests := []struct {
+		name           string
+		target         string
+		acceptEncoding string
+		wantEncoding   string
+	}{
+		{name: "page", target: "/admin/dashboard"},
+		{name: "nested page", target: "/admin/dashboard/overview"},
+		{name: "asset", target: "/admin/static/favicon.svg", acceptEncoding: "identity"},
+		// The favicon shrinks under gzip in both the real and the stub bundle.
+		{name: "gzipped asset", target: "/admin/static/favicon.svg", acceptEncoding: "gzip", wantEncoding: "gzip"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serve := func(method string) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(method, tt.target, nil)
+				req.Header.Set("Accept-Encoding", tt.acceptEncoding)
+				rec := httptest.NewRecorder()
+				srv.ServeHTTP(rec, req)
+				return rec
+			}
+			get := serve(http.MethodGet)
+			require.Equal(t, http.StatusOK, get.Code)
+			require.NotEmpty(t, get.Header().Get("Content-Security-Policy"))
+			require.Equal(t, tt.wantEncoding, get.Header().Get("Content-Encoding"))
+
+			head := serve(http.MethodHead)
+
+			require.Equal(t, http.StatusOK, head.Code)
+			assert.Empty(t, head.Body.Bytes())
+			for _, name := range []string{
+				"Content-Type", "Content-Length", "Content-Encoding", "Vary", "Cache-Control",
+				"Content-Security-Policy", "X-Frame-Options", "X-Content-Type-Options", "Referrer-Policy",
+			} {
+				assert.Equal(t, get.Header().Values(name), head.Header().Values(name), name)
+			}
+		})
+	}
 }
 
 func TestHealthEndpointAlwaysAvailable(t *testing.T) {

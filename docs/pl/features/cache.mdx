@@ -19,7 +19,8 @@ i niestreamingowych na:
 Streamingowe i niestreamingowe warianty tego samego requestu są cache'owane
 niezależnie: streamingowy cache miss zapisuje surowe bajty SSE, a streamingowy
 cache hit odtwarza je bez zmian jako `text/event-stream`. Stream dłuższy niż
-4 MiB nadal w całości dociera do klienta, ale nie jest cache'owany.
+4 MiB nadal w całości dociera do klienta, ale nie jest cache'owany. Streamowane
+odpowiedzi `/v1/messages` nie są jeszcze cache'owane; niestreamowane są.
 
 Cache dokładnego dopasowania zwraca identyczne co do bajtu odpowiedzi z:
 
@@ -129,6 +130,15 @@ cache'u dokładnego. Równoczesne identyczne cache missy są też łączone w ob
 procesu: jeden request trafia do providera, a oczekujące requesty odtwarzają jego
 odpowiedź. Odpowiedzi zakończone błędem lub z innych powodów niecache'owalne nigdy
 nie są rozsyłane do oczekujących.
+
+Na `/v1/chat/completions` i `/v1/messages` pola identyfikujące wywołującego lub
+sterujące prompt cache u providera są pomijane w hashowanym body, bo nie
+zmieniają odpowiedzi: `user` (w API Anthropic `metadata.user_id`), `metadata`,
+`safety_identifier`, `prompt_cache_key` i `prompt_cache_retention`. Na przykład
+Claude Code wysyła w `metadata.user_id` nowy identyfikator sesji dla każdej
+sesji, a powtórzony niestreamowany request z nowej sesji nadal trafia w cache.
+Aby rozdzielić tenantów, włącz partycjonowanie cache'u według `user_path` (patrz
+niżej); wywołujący w obrębie tej samej ścieżki nadal współdzielą wpisy.
 
 ## Na czym opiera się klucz cache'u semantycznego
 

@@ -84,6 +84,29 @@ function applyResponseConversationOneOf(name) {
   properties.conversation = conversation;
 }
 
+// OpenAI takes a speech voice as a name or as a custom-voice object with an id.
+function applySpeechVoiceOneOf() {
+  const properties = schema("core.AudioSpeechRequest").properties;
+  if (!properties?.voice) {
+    throw new Error("missing voice property on schema: core.AudioSpeechRequest");
+  }
+
+  const voice = {};
+  if (properties.voice.description) {
+    voice.description = properties.voice.description;
+  }
+  voice.oneOf = [
+    { type: "string" },
+    {
+      type: "object",
+      required: ["id"],
+      properties: { id: { type: "string", pattern: "\\S" } },
+      additionalProperties: true,
+    },
+  ];
+  properties.voice = voice;
+}
+
 function ensureResponsesInputElementSchema() {
   const schemas = spec.components?.schemas;
   if (!schemas) {
@@ -363,14 +386,14 @@ function applyAudioTranscriptionTextSchema() {
   textResponse.schema = { type: "string" };
 }
 
-function applyUsageInvoiceCSVSchema() {
-  // swag emits one schema across every produced content type, so the CSV
-  // invoice is generated as the JSON Invoice object. The CSV body is text rows.
+function applyCSVExportSchema(path) {
+  // swag emits one schema across every produced content type, so a CSV
+  // export is generated as its JSON object. The CSV body is text rows.
   // Errors are always JSON, though swag lists every produced type on them.
-  const responses = spec.paths?.["/admin/usage/invoice"]?.get?.responses ?? {};
+  const responses = spec.paths?.[path]?.get?.responses ?? {};
   const csvResponse = responses["200"]?.content?.["text/csv"];
   if (!csvResponse) {
-    throw new Error("missing OpenAPI text/csv response: GET /admin/usage/invoice 200");
+    throw new Error(`missing OpenAPI text/csv response: GET ${path} 200`);
   }
   csvResponse.schema = { type: "string" };
   for (const [status, response] of Object.entries(responses)) {
@@ -511,6 +534,21 @@ function applyPathSidebarTitles() {
   }
 }
 
+// markDeprecatedSummaries appends "(deprecated)" to the summary of every
+// deprecated operation. A deprecated alias shares its handler, and so its
+// summary, with the route that replaces it; the suffix keeps the two API
+// Reference pages apart and tells readers which one to use.
+function markDeprecatedSummaries() {
+  for (const pathItem of Object.values(spec.paths || {})) {
+    if (!pathItem || typeof pathItem !== "object") continue;
+    for (const operation of Object.values(pathItem)) {
+      if (!operation || typeof operation !== "object" || operation.deprecated !== true) continue;
+      if (typeof operation.summary !== "string" || operation.summary.endsWith("(deprecated)")) continue;
+      operation.summary = `${operation.summary} (deprecated)`;
+    }
+  }
+}
+
 // applyMintlifyOperationMetadata gives every generated API page a concise,
 // unique search title and description without replacing the full operation
 // description rendered in the reference body. Several routes intentionally
@@ -583,13 +621,14 @@ applyAnthropicMessageSchemas();
 applyResponsesReplayStateSchema();
 applyAnthropicMessagesStreamSchema();
 applyAudioTranscriptionTextSchema();
-applyUsageInvoiceCSVSchema();
+applyCSVExportSchema("/admin/usage/invoice");
+applyCSVExportSchema("/admin/mcp-servers/catalog");
 applyRetrieveModelDialects();
 applyImageEditMultiImageSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("core.AudioSpeechRequest", "model");
+applySpeechVoiceOneOf();
 ensureRequiredProperty("core.AudioSpeechRequest", "input");
-ensureRequiredProperty("core.AudioSpeechRequest", "voice");
 ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
 ensureRequiredProperty("admin.upsertBudgetRequest", "amount");
 ensureRequiredProperty("admin.upsertBudgetRequest", "budget_key");
@@ -604,6 +643,7 @@ applyBudgetKeySchemaConstraints();
 applyStringArrayPropertyBounds("admin.upsertVirtualModelRequest", "user_paths", 100, 1024);
 applySlowdownSchemaConstraints();
 applyPricingSchemaConstraints();
+markDeprecatedSummaries();
 applyPathSidebarTitles();
 applyMintlifyOperationMetadata();
 

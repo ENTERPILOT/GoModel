@@ -44,6 +44,7 @@ GoModel 会根据常用的环境变量自动发现提供商。
 | `BASE_PATH`          | 挂载路径前缀，例如 `/g`                   | `/`                    |
 | `GOMODEL_MASTER_KEY` | 用于保护网关的认证密钥           | _（空，不安全模式）_ |
 | `MASTER_KEY_DISABLED` | 关闭主密钥认证，仅保留[托管密钥](/zh/features/users)和认证扩展作为凭据 | `false`                |
+| `AUTH_KEY_PREFIX`    | 新签发的[托管密钥](/zh/features/users)所用的前缀；已有密钥继续有效 | `sk_gom_`              |
 | `GOMODEL_DEMO_MODE`  | 在日志和控制台中启用公开演示警告  | `false`                |
 | `BODY_SIZE_LIMIT`    | 请求体大小上限（例如 `10M`、`1024K`、`500KB`），同时作用于压缩和解压后的大小 | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | 模型路由上的单次响应写入等待客户端读取的秒数；`0` 表示禁用 | `60`                   |
@@ -58,13 +59,13 @@ GoModel 会根据常用的环境变量自动发现提供商。
 | `AUTH_VERIFY_ENABLED` | 暴露 [`GET /v1/auth/verify`](/zh/advanced/api-endpoints#密钥验证)，用于报告请求携带的 API 密钥是否有效 | `false`                |
 | `PID_FILE`           | 运行中的网关为 `gomodel --reload` 记录进程 ID 的位置。修改后需要重启 | 存在 `./data` 目录时为其中的 `data/gomodel.pid`，否则为用户级数据目录 |
 
-请求体可以使用 `Content-Encoding: gzip`（或 `x-gzip`）或 `zstd` 压缩；TypeSafe SDK 默认会对 1 KiB 及以上的请求体进行 zstd 压缩。网关会在路由前解码请求体，因此护栏、审计和提供商看到的都是原始请求体，并且 `BODY_SIZE_LIMIT` 同时作用于压缩后和解码后的大小（任一超出时返回 `413`）。其他编码返回 `415`。网关只会在请求通过身份验证后才读取和解码请求体，因此不会读取没有有效凭据的请求的任何请求体，其审计条目中也不包含请求体。即使此类请求的请求体解码后会超出限制，它也会收到 `401`；只有声明的大小超出限制时仍返回 `413`。
+请求体可以使用 `Content-Encoding: gzip`（或 `x-gzip`）或 `zstd` 压缩；TypeSafe SDK 默认会对 1 KiB 及以上的请求体进行 zstd 压缩。网关会在路由前解码请求体，因此护栏、请求日志和提供商看到的都是原始请求体，并且 `BODY_SIZE_LIMIT` 同时作用于压缩后和解码后的大小（任一超出时返回 `413`）。其他编码返回 `415`。网关只会在请求通过身份验证后才读取和解码请求体，因此不会读取没有有效凭据的请求的任何请求体，其请求日志条目中也不包含请求体。即使此类请求的请求体解码后会超出限制，它也会收到 `401`；只有声明的大小超出限制时仍返回 `413`。
 
-`STREAM_STALL_TIMEOUT`（YAML 中为 `server.stream_stall_timeout`）用于防止客户端打开流式响应后停止读取，从而拖累网关。每次向客户端写入都会获得新的截止时间，因此只有当客户端的 socket 持续满载这么长时间时才会触发，而不会在慢速模型暂无输出时触发。触发后，连接会被关闭，发往上游提供商的请求会被取消，审计条目会记录 `client_stalled`，即使该流来自响应缓存也是如此。如果您的客户端确实会暂停读取流超过一分钟，请调大该值；设置为 `0` 可禁用。
+`STREAM_STALL_TIMEOUT`（YAML 中为 `server.stream_stall_timeout`）用于防止客户端打开流式响应后停止读取，从而拖累网关。每次向客户端写入都会获得新的截止时间，因此只有当客户端的 socket 持续满载这么长时间时才会触发，而不会在慢速模型暂无输出时触发。触发后，连接会被关闭，发往上游提供商的请求会被取消，请求日志条目会记录 `client_stalled`，即使该流来自响应缓存也是如此。如果您的客户端确实会暂停读取流超过一分钟，请调大该值；设置为 `0` 可禁用。
 
 #### 代理后的客户端地址
 
-GoModel 报告的所有客户端地址（审计条目、速率限制键、日志）都是连接到网关的那个连接的地址，因此在反向代理之后，它们都会显示为代理的地址。将 `SERVER_TRUSTED_PROXIES` 设置为您自己的代理所在的网络后，GoModel 会改为读取转发的客户端地址。在您明确列出之前，任何网络都不受信任，包括 loopback；修改这些设置需要重启。
+GoModel 报告的所有客户端地址（请求日志条目、速率限制键、日志）都是连接到网关的那个连接的地址，因此在反向代理之后，它们都会显示为代理的地址。将 `SERVER_TRUSTED_PROXIES` 设置为您自己的代理所在的网络后，GoModel 会改为读取转发的客户端地址。在您明确列出之前，任何网络都不受信任，包括 loopback；修改这些设置需要重启。
 
 ```bash
 SERVER_TRUSTED_PROXIES=10.42.0.0/16,loopback
@@ -94,7 +95,7 @@ SERVER_TRUSTED_PROXIES=10.42.0.0/16,loopback
 
 #### 禁用主密钥
 
-主密钥是单一的全局凭据：持有它的人同时就是网关的所有用户。签发托管网关 API 密钥后，可设置 `MASTER_KEY_DISABLED=true`（YAML 中为 `server.master_key_disabled`）来停用主密钥，只保留这些密钥以及您运行的任何认证扩展（例如 SSO）作为访问方式。此后，按密钥配置的用户路径、预算、速率限制和审计记录将作用于每个请求，包括 Admin API。
+主密钥是单一的全局凭据：持有它的人同时就是网关的所有用户。签发托管网关 API 密钥后，可设置 `MASTER_KEY_DISABLED=true`（YAML 中为 `server.master_key_disabled`）来停用主密钥，只保留这些密钥以及您运行的任何认证扩展（例如 SSO）作为访问方式。此后，按密钥配置的用户路径、预算、速率限制和请求日志将作用于每个请求，包括 Admin API。
 
 ```bash
 MASTER_KEY_DISABLED=true
@@ -103,6 +104,16 @@ MASTER_KEY_DISABLED=true
 GoModel 会在启动时忽略任何已配置的主密钥，因此没有任何地方接受它或基于它派生：它对网关、对 [`GET /v1/auth/verify`](/zh/advanced/api-endpoints#密钥验证) 以及对 `/admin` 都会失败。留在环境变量或 `config.yaml` 中的密钥不会生效，也不会报错，因此您可以在移除它之前安全地打开这个开关。
 
 禁用主密钥与将 `GOMODEL_MASTER_KEY` 留空不同：留空会让网关以免认证方式运行，并开放 `/admin/*`，以便控制台引导创建第一个托管密钥。除非配置了认证扩展，否则即使已存在托管密钥，`/admin/*` 仍保持开放，GoModel 会在启动时记录安全警告；因此一旦签发了第一个具有控制台访问权限的密钥，请立即设置主密钥或将其禁用。禁用主密钥则是失败即拒绝（fail closed）：每个请求都需要凭据，Admin API 只能通过具有控制台访问权限的凭据访问。请在打开开关之前签发该凭据：如果既没有主密钥、也没有托管密钥和认证扩展，网关会拒绝所有请求，并在启动时记录相应警告。
+
+#### 托管密钥前缀
+
+托管密钥默认以 `sk_gom_` 开头。设置 `AUTH_KEY_PREFIX`（YAML 中为 `server.auth_key_prefix`）可以为密钥使用自有品牌，或使其符合组织的密钥格式或密钥扫描工具识别的模式：
+
+```bash
+AUTH_KEY_PREFIX=sk-acme-
+```
+
+前缀最多 32 个字符，只能包含 ASCII 字母、数字、`_` 和 `-`；其他值会使启动失败，空值则保留默认值。只有之后签发的密钥使用新前缀。已有密钥（包括在之前的自定义前缀下签发的密钥）继续有效，并保留原来的脱敏显示值。
 
 #### 提供 HTTPS 服务
 
@@ -132,7 +143,7 @@ server:
 
 #### 日志
 
-运行时日志输出。关于持久化的 API 审计记录（请求/响应体、Header），请参阅下文的[审计日志](#审计日志)。
+运行时日志输出。关于持久化的 API 请求日志（请求/响应体、Header），请参阅下文的[请求日志](#请求日志)。
 
 | 变量     | 说明                                                                                                                                                                       | 默认值              |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
@@ -166,7 +177,7 @@ server:
 
 #### 存储
 
-存储由审计日志、用量追踪以及 IAM 等未来功能共享。
+存储由请求日志、用量追踪以及 IAM 等未来功能共享。
 
 | 变量             | 说明                                   | 默认值           |
 | -------------------- | --------------------------------------------- | ----------------- |
@@ -185,23 +196,23 @@ server:
 
 #### 媒体存储
 
-媒体文件（即开启 `LOGGING_LOG_AUDIO_BODIES` 或 `LOGGING_LOG_IMAGE_BODIES` 时为审计日志捕获的音频和图片）保存在数据库之外。其元数据保存在上述存储后端中；只有文件字节存放在这里，因此文件大小不受限制，数据库也能保持精简。请参阅 [ADR-0013](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0013-media-storage.md)。
+媒体文件（即开启 `LOGGING_LOG_AUDIO_BODIES` 或 `LOGGING_LOG_IMAGE_BODIES` 时为请求日志捕获的音频和图片）保存在数据库之外。其元数据保存在上述存储后端中；只有文件字节存放在这里，因此文件大小不受限制，数据库也能保持精简。请参阅 [ADR-0013](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0013-media-storage.md)。
 
 | 变量             | 说明                                                  | 默认值      |
 | -------------------- | ------------------------------------------------------------ | ------------ |
 | `MEDIA_STORAGE_TYPE` | Blob 后端：`filesystem` 或 `memory`（重启后丢失）     | `filesystem` |
 | `MEDIA_STORAGE_PATH` | 文件系统后端的目录                         | `data/media` |
 
-默认路径遵循与 SQLite 相同的规则：如果进程旁存在 `./data` 目录，则为 `./data/media`，否则为操作系统的用户级数据目录。在容器中请在该位置挂载卷；如果有多个副本，请使用共享挂载（EFS、S3 FUSE 挂载），使每个实例都能提供所有文件。文件的保留时间与引用它们的审计条目相同（`LOGGING_RETENTION_DAYS`），并由每小时执行一次的清理任务删除。
+默认路径遵循与 SQLite 相同的规则：如果进程旁存在 `./data` 目录，则为 `./data/media`，否则为操作系统的用户级数据目录。在容器中请在该位置挂载卷；如果有多个副本，请使用共享挂载（EFS、S3 FUSE 挂载），使每个实例都能提供所有文件。文件的保留时间与引用它们的请求日志条目相同（`LOGGING_RETENTION_DAYS`），并由每小时执行一次的清理任务删除。
 
-#### 审计日志
+#### 请求日志
 
 | 变量                          | 说明                                | 默认值 |
 | --------------------------------- | ------------------------------------------ | ------- |
-| `LOGGING_ENABLED`                 | 启用审计日志                       | `true`  |
+| `LOGGING_ENABLED`                 | 启用请求日志                       | `true`  |
 | `LOGGING_LOG_BODIES`              | 记录请求/响应体                | `true`  |
 | `LOGGING_LOG_REVISION_BODIES`     | 记录请求改写器和提示词护栏改写后的请求体 | `true`  |
-| `LOGGING_LOG_GUARDRAIL_STEPS`     | 每个编辑提示词的护栏生成一条审计修订（关闭时每条链生成一条） | `true`  |
+| `LOGGING_LOG_GUARDRAIL_STEPS`     | 每个编辑提示词的护栏生成一条请求修订（关闭时每条链生成一条） | `true`  |
 | `LOGGING_LOG_AUDIO_BODIES`        | 记录音频端点的输入/输出          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES`        | 记录图片端点的输入/输出          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | 存储哪些图片字节：`all`、`input`、`output` | `all` |
@@ -212,16 +223,16 @@ server:
 | `LOGGING_FLUSH_INTERVAL`          | 刷写间隔（秒）                  | `5`     |
 | `LOGGING_RETENTION_DAYS`          | N 天后自动删除（0 = 永久保留）     | `30`    |
 
-审计条目记录网关解析出的客户端地址。在反向代理之后，除非您在 `SERVER_TRUSTED_PROXIES` 中列出代理所在网络，否则记录的是代理地址。请参阅[代理后的客户端地址](#代理后的客户端地址)。
+请求日志条目记录网关解析出的客户端地址。在反向代理之后，除非您在 `SERVER_TRUSTED_PROXIES` 中列出代理所在网络，否则记录的是代理地址。请参阅[代理后的客户端地址](#代理后的客户端地址)。
 
-控制台实时预览和持久化审计日志是两个独立的功能。在 `DASHBOARD_LIVE_LOGS_ENABLED=true` 且 `LOGGING_ENABLED=false` 时，请求可以实时显示，但不会写入存储，刷新页面后即消失。启用审计日志时，写入是异步的，最多可能需要 `LOGGING_FLUSH_INTERVAL` 秒才能通过已存储日志 API 查询到。
+控制台实时预览和持久化请求日志是两个独立的功能。在 `DASHBOARD_LIVE_LOGS_ENABLED=true` 且 `LOGGING_ENABLED=false` 时，请求可以实时显示，但不会写入存储，刷新页面后即消失。启用请求日志时，写入是异步的，最多可能需要 `LOGGING_FLUSH_INTERVAL` 秒才能通过已存储日志 API 查询到。
 
 <Note>
-  在 PostgreSQL 上，审计日志的全文搜索使用内置 `pg_trgm` 扩展提供的三元组（trigram）索引。如果数据库角色具有相应权限，GoModel 会在启动时安装该扩展并构建索引；否则搜索仍然可用，但会扫描所选日期范围内的每一条记录。要在受限角色上启用它，请以超级用户身份执行一次 `CREATE EXTENSION pg_trgm;`，然后重启 GoModel。
+  在 PostgreSQL 上，请求日志的全文搜索使用内置 `pg_trgm` 扩展提供的三元组（trigram）索引。如果数据库角色具有相应权限，GoModel 会在启动时安装该扩展并构建索引；否则搜索仍然可用，但会扫描所选日期范围内的每一条记录。要在受限角色上启用它，请以超级用户身份执行一次 `CREATE EXTENSION pg_trgm;`，然后重启 GoModel。
 </Note>
 
 <Tip>
-  审计表较大时，请在仪表盘审计日志搜索框旁选择具体字段，而不是**所有字段**。**用户路径**和**模型**匹配以输入内容开头的值（区分大小写，因此 `voxina` 可以找到 `/voxinate/events/…`；**模型**同时检查请求的模型和解析后的模型，例如 `openai/gpt-5`）。**请求 ID** 和**会话 ID** 需要完全匹配。这些过滤器在 SQLite、PostgreSQL 和 MongoDB 上都会使用索引。API 参数分别为 `user_path_prefix`、`model_prefix`、`request_id` 和 `session_id`。
+  请求日志表较大时，请在仪表盘“请求”页面的搜索框旁选择具体字段，而不是**所有字段**。**用户路径**和**模型**匹配以输入内容开头的值（区分大小写，因此 `voxina` 可以找到 `/voxinate/events/…`；**模型**同时检查请求的模型和解析后的模型，例如 `openai/gpt-5`）。**请求 ID** 和**会话 ID** 需要完全匹配。这些过滤器在 SQLite、PostgreSQL 和 MongoDB 上都会使用索引。API 参数分别为 `user_path_prefix`、`model_prefix`、`request_id` 和 `session_id`。
 </Tip>
 
 <Warning>
@@ -229,20 +240,20 @@ server:
 </Warning>
 
 <Note>
-  `LOGGING_LOG_REVISION_BODIES` 是 `LOGGING_LOG_BODIES` 针对入口请求改写链的细化设置，只有在启用请求体记录时才生效。两者都开启时，每个修改了请求的改写器（例如 GoModel Pro 的 Token 压缩）以及每个编辑了提示词的提示词护栏，都会在审计条目中把其输出的请求与原始客户端请求体一同保存，以便逐步查看整条编辑链。`LOGGING_LOG_GUARDRAIL_STEPS` 控制这种逐步记录（请求体的编码在请求路径之外进行）：关闭后，整条链的编辑会记录为一条修订，携带最终转发的请求，而不保存逐步快照。
-  禁用 `LOGGING_LOG_REVISION_BODIES` 会保留修订元数据（改写器名称、字节大小、节省的 Token 数、变更详情），但不保存额外的请求体副本，使每个被改写请求的审计存储大约减半。
+  `LOGGING_LOG_REVISION_BODIES` 是 `LOGGING_LOG_BODIES` 针对入口请求改写链的细化设置，只有在启用请求体记录时才生效。两者都开启时，每个修改了请求的改写器（例如 GoModel Pro 的 Token 压缩）以及每个编辑了提示词的提示词护栏，都会在请求日志条目中把其输出的请求与原始客户端请求体一同保存，以便逐步查看整条编辑链。`LOGGING_LOG_GUARDRAIL_STEPS` 控制这种逐步记录（请求体的编码在请求路径之外进行）：关闭后，整条链的编辑会记录为一条修订，携带最终转发的请求，而不保存逐步快照。
+  禁用 `LOGGING_LOG_REVISION_BODIES` 会保留修订元数据（改写器名称、字节大小、节省的 Token 数、变更详情），但不保存额外的请求体副本，使每个被改写请求的请求日志存储大约减半。
 </Note>
 
 <Note>
-  `LOGGING_LOG_AUDIO_BODIES` 是 `LOGGING_LOG_BODIES` 针对音频端点的细化设置，只有在启用请求体记录时才生效。两者都开启时，`/v1/audio/speech` 会存储其文本输入和生成的音频（base64，上限 8 MB），以便在控制台中回放；`/v1/audio/transcriptions` 会存储上传的音频（base64，上限 8 MB，同样可回放）及其上传元数据。由于音频负载较大且会使审计存储快速增长，该设置默认为 `false`。启用请求体记录但关闭此项时，音频体（语音响应以及保留元数据的转写上传）会记录为一个轻量的 `{__audio__, content_type, bytes, stored: false}` 占位符；关闭请求体记录时，不会存储任何音频体。
+  `LOGGING_LOG_AUDIO_BODIES` 是 `LOGGING_LOG_BODIES` 针对音频端点的细化设置，只有在启用请求体记录时才生效。两者都开启时，`/v1/audio/speech` 会存储其文本输入和生成的音频（base64，上限 8 MB），以便在控制台中回放；`/v1/audio/transcriptions` 会存储上传的音频（base64，上限 8 MB，同样可回放）及其上传元数据。由于音频负载较大且会使请求日志存储快速增长，该设置默认为 `false`。启用请求体记录但关闭此项时，音频体（语音响应以及保留元数据的转写上传）会记录为一个轻量的 `{__audio__, content_type, bytes, stored: false}` 占位符；关闭请求体记录时，不会存储任何音频体。
 </Note>
 
 <Note>
-  `LOGGING_LOG_EMBEDDING_BODIES` 是 `LOGGING_LOG_BODIES` 针对 embeddings 的细化设置，只有在启用请求体记录时才生效。它适用于 `/v1/embeddings` 以及对提供商 embeddings 端点的透传调用（`/p/{provider}/.../embeddings`、llama.cpp 的 `/embedding`、Cohere 和 Ollama 的 `.../embed`、Gemini 的 `:embedContent` 和 `:batchEmbedContents`）。embedding 输入可能是整篇文档或 base64 图片，响应则是浮点向量，因此批量索引任务会使审计存储快速增长。启用请求体记录但关闭此项时，embedding 条目会保留元数据（模型、提供商、状态、耗时、用户路径、用量），并丢弃请求体和响应体。该设置默认为 `true`，保持原有行为。
+  `LOGGING_LOG_EMBEDDING_BODIES` 是 `LOGGING_LOG_BODIES` 针对 embeddings 的细化设置，只有在启用请求体记录时才生效。它适用于 `/v1/embeddings` 以及对提供商 embeddings 端点的透传调用（`/p/{provider}/.../embeddings`、llama.cpp 的 `/embedding`、Cohere 和 Ollama 的 `.../embed`、Gemini 的 `:embedContent` 和 `:batchEmbedContents`）。embedding 输入可能是整篇文档或 base64 图片，响应则是浮点向量，因此批量索引任务会使请求日志存储快速增长。启用请求体记录但关闭此项时，embedding 条目会保留元数据（模型、提供商、状态、耗时、用户路径、用量），并丢弃请求体和响应体。该设置默认为 `true`，保持原有行为。
 </Note>
 
 <Note>
-  `LOGGING_LOG_IMAGE_BODIES` 是 `LOGGING_LOG_BODIES` 针对 [Images API](/zh/advanced/images-api) 的细化设置，只有在启用请求体记录时才生效。两者都开启时，生成的图片（`/v1/images/generations`、`/v1/images/edits`）以及上传的编辑源图和蒙版会以 base64 存储（每条记录 8 MB，超出预算的图片会变为占位符），以便在控制台中显示。`LOGGING_LOG_IMAGE_BODIES_SCOPE` 可将范围缩小为 `input`（仅上传内容）或 `output`（仅结果）；默认值 `all` 同时存储两者。由于图片负载较大且会使审计存储快速增长，该设置默认为 `false`。启用请求体记录但关闭此项时，图片条目会保留除像素以外的所有内容：提示词和参数、响应封装（`usage`、`size`、`quality`）、托管 URL，以及每张图片一个带大小信息的 `{role, content_type, bytes, stored: false}` 占位符。
+  `LOGGING_LOG_IMAGE_BODIES` 是 `LOGGING_LOG_BODIES` 针对 [Images API](/zh/advanced/images-api) 的细化设置，只有在启用请求体记录时才生效。两者都开启时，生成的图片（`/v1/images/generations`、`/v1/images/edits`）以及上传的编辑源图和蒙版会以 base64 存储（每条记录 8 MB，超出预算的图片会变为占位符），以便在控制台中显示。`LOGGING_LOG_IMAGE_BODIES_SCOPE` 可将范围缩小为 `input`（仅上传内容）或 `output`（仅结果）；默认值 `all` 同时存储两者。由于图片负载较大且会使请求日志存储快速增长，该设置默认为 `false`。启用请求体记录但关闭此项时，图片条目会保留除像素以外的所有内容：提示词和参数、响应封装（`usage`、`size`、`quality`）、托管 URL，以及每张图片一个带大小信息的 `{role, content_type, bytes, stored: false}` 占位符。
 </Note>
 
 #### Token 用量追踪
@@ -285,6 +296,11 @@ server:
 | ------------------ | ---------------------------------------- | ---------- |
 | `METRICS_ENABLED`  | 启用 Prometheus 指标（实验性） | `false`    |
 | `METRICS_ENDPOINT` | 指标的 HTTP 路径                    | `/metrics` |
+| `METRICS_CALLER_USER_PATH` | 将用户路径加入 Token 和成本指标（Prometheus 与 OpenTelemetry 均适用），以及 Prometheus 中按调用方统计的请求计数器（请参阅[调用方维度](/zh/guides/prometheus-metrics#调用方维度)） | `false` |
+| `METRICS_CALLER_USER_PATH_DEPTH` | 指标上保留的用户路径前几段；小于 1 的值使用默认值 | `2` |
+| `METRICS_CALLER_AUTH_KEY` | 为这些指标加入托管 API Key 的名称 | `false` |
+| `METRICS_CALLER_REQUEST_LABELS` | 为这些指标加入请求标签 | `false` |
+| `METRICS_CALLER_MAX_VALUES` | 每个调用方维度保留的不同取值数量；之后的取值、超过 256 字节或不是有效 UTF-8 的取值，以及保留名称，上报为 `{other}`（用户路径为 `/{other}`）。小于 1 的值使用默认值 | `100` |
 | `OTEL_ENABLED`     | 通过 OTLP 导出 OpenTelemetry Trace 和指标（请参阅 [OpenTelemetry](/zh/guides/opentelemetry)） | `false`    |
 
 #### 管理
@@ -293,12 +309,12 @@ server:
 | ------------------------------------- | ------------------------------------------------ | ------- |
 | `ADMIN_ENDPOINTS_ENABLED`             | 启用管理 REST API                        | `true`  |
 | `ADMIN_UI_ENABLED`                    | 启用管理控制台 UI                    | `true`  |
-| `DASHBOARD_LIVE_LOGS_ENABLED`         | 推送控制台审计/用量实时预览   | `true`  |
+| `DASHBOARD_LIVE_LOGS_ENABLED`         | 推送控制台请求日志/用量实时预览   | `true`  |
 | `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | 控制台实时事件的内存回放窗口 | `10000` |
 | `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | 向单个重连客户端回放的最大事件数   | `1000`  |
 | `DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS` | 空闲流的心跳间隔（秒）      | `15`    |
 
-控制台实时日志是 Audit Logs 和 Usage 页面的精简预览。它们会在异步数据库刷写完成之前更新行。已存储的审计表和用量表仍是唯一可信的数据来源；如果浏览器重连时携带的游标超出了回放窗口，控制台会通过常规 REST API 重新加载数据。
+控制台实时日志是“请求”和 Usage 页面的精简预览。它们会在异步数据库刷写完成之前更新行。已存储的请求日志表和用量表仍是唯一可信的数据来源；如果浏览器重连时携带的游标超出了回放窗口，控制台会通过常规 REST API 重新加载数据。
 
 #### HTTP 客户端
 
