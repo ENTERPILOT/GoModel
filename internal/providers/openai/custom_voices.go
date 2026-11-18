@@ -51,7 +51,8 @@ const customVoicesTimeout = 10 * time.Second
 // a listing it could not read to the end, it returns the voices read so far.
 // One API key serves every page: with several keys configured, a cursor or a
 // permission of one key need not hold for another. timeout bounds the whole
-// lookup, credential resolution included.
+// lookup, credential resolution included. A failing lookup cannot open the
+// provider's circuit breaker: the router calls ListVoices outside it.
 func (p *Provider) customVoices(ctx context.Context, model string, timeout time.Duration) ([]core.AudioVoice, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
