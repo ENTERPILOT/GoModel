@@ -109,6 +109,12 @@ unchanged; ElevenLabs, MiniMax, Xiaomi and audio.cpp use its `id` as the voice.
 An object without a non-blank string `id` returns `400`. A compatible provider
 that does not support custom voices may reject the object.
 
+OpenAI accepts a custom voice only in the object form. For OpenAI
+(`api.openai.com` and its regional hosts) GoModel therefore sends a string
+that starts with `voice_` as `{"id": "voice_…"}`, so an `id` from
+[voice discovery](/advanced/api-endpoints#voice-discovery) also works as a
+plain string.
+
 Synthesized audio is **relayed as the provider produces it** — see
 [Streaming](#streaming).
 

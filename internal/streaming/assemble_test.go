@@ -73,6 +73,26 @@ func TestSynthesizeChatStream_Shape(t *testing.T) {
 	assert.Equal(t, "tool_calls", last["finish_reason"], "last chunk = %v", last)
 }
 
+// A truncated stream carries the same chunks without what ends a stream: no
+// finish chunk, not even for a choice that has a finish_reason, and no [DONE].
+func TestSynthesizeTruncatedChatStream_OmitsFinishAndDone(t *testing.T) {
+	for name, resp := range chatFixtureResponses() {
+		t.Run(name, func(t *testing.T) {
+			for _, includeUsage := range []bool{false, true} {
+				var want []string
+				for event := range strings.SplitAfterSeq(string(SynthesizeChatStream(resp, includeUsage)), "\n\n") {
+					if !strings.Contains(event, "[DONE]") && !strings.Contains(event, `"finish_reason":"`) {
+						want = append(want, event)
+					}
+				}
+				got := string(SynthesizeTruncatedChatStream(resp, includeUsage))
+				assert.Equal(t, strings.Join(want, ""), got)
+				assert.Equal(t, includeUsage, strings.Contains(got, `"usage"`))
+			}
+		})
+	}
+}
+
 func TestAssembleChatResponse_ProviderShapes(t *testing.T) {
 	tests := []struct {
 		name    string

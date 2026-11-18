@@ -71,9 +71,27 @@ func chatStreamDialect(includeUsage bool) streamDialect {
 			if err != nil {
 				return nil, err
 			}
+			// The edited text of a cut-off answer is replayed cut off too,
+			// with only the usage the provider reported.
+			if chatStreamTruncated(events, resp) {
+				return streaming.SynthesizeTruncatedChatStream(applied, usage != nil), nil
+			}
 			return streaming.SynthesizeChatStream(applied, includeUsage), nil
 		},
 	}
+}
+
+// chatStreamTruncated reports whether the provider stream resp was assembled
+// from stopped before its end: it carries neither [DONE] nor a finish_reason
+// for any choice, which is what the completion guard takes for a truncated
+// stream when the same events are relayed unchanged.
+func chatStreamTruncated(events []streaming.Event, resp *core.ChatResponse) bool {
+	for _, choice := range resp.Choices {
+		if choice.FinishReason != "" {
+			return false
+		}
+	}
+	return !slices.ContainsFunc(events, func(ev streaming.Event) bool { return ev.Kind == streaming.KindDone })
 }
 
 // messagesStreamDialect is the chat dialect behind a streamed /v1/messages

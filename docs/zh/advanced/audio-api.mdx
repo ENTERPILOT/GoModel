@@ -102,6 +102,10 @@ await writeFile("speech.wav", Buffer.from(await speech.arrayBuffer()));
 MiniMax、Xiaomi 和 audio.cpp 则将其 `id` 用作声音。缺少非空白字符串 `id` 的对象会返回 `400`。
 不支持自定义声音的兼容提供商可能会拒绝该对象。
 
+OpenAI 只接受对象形式的自定义声音。因此，对于 OpenAI（`api.openai.com` 及其区域主机），
+GoModel 会把以 `voice_` 开头的字符串作为 `{"id": "voice_…"}` 发送，这样
+[音色发现](/zh/advanced/api-endpoints#音色发现)返回的 `id` 也可以直接作为字符串使用。
+
 合成的音频会**在提供商生成的同时进行中继**，详见[流式传输](#流式传输)。
 
 ## 语音转文本
