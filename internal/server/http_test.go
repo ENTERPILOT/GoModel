@@ -969,24 +969,38 @@ func TestAdminDashboard_AnswersHead(t *testing.T) {
 		AdminHandler:          admin.NewHandler(nil, nil),
 		DashboardHandler:      newDashboardHandler(t),
 	})
-	serve := func(method, target string) *httptest.ResponseRecorder {
-		rec := httptest.NewRecorder()
-		srv.ServeHTTP(rec, httptest.NewRequest(method, target, nil))
-		return rec
+	tests := []struct {
+		name           string
+		target         string
+		acceptEncoding string
+		wantEncoding   string
+	}{
+		{name: "page", target: "/admin/dashboard"},
+		{name: "nested page", target: "/admin/dashboard/overview"},
+		{name: "asset", target: "/admin/static/favicon.svg", acceptEncoding: "identity"},
+		// The favicon shrinks under gzip in both the real and the stub bundle.
+		{name: "gzipped asset", target: "/admin/static/favicon.svg", acceptEncoding: "gzip", wantEncoding: "gzip"},
 	}
-
-	for _, target := range []string{"/admin/dashboard", "/admin/dashboard/overview", "/admin/static/favicon.svg"} {
-		t.Run(target, func(t *testing.T) {
-			get := serve(http.MethodGet, target)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serve := func(method string) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(method, tt.target, nil)
+				req.Header.Set("Accept-Encoding", tt.acceptEncoding)
+				rec := httptest.NewRecorder()
+				srv.ServeHTTP(rec, req)
+				return rec
+			}
+			get := serve(http.MethodGet)
 			require.Equal(t, http.StatusOK, get.Code)
 			require.NotEmpty(t, get.Header().Get("Content-Security-Policy"))
+			require.Equal(t, tt.wantEncoding, get.Header().Get("Content-Encoding"))
 
-			head := serve(http.MethodHead, target)
+			head := serve(http.MethodHead)
 
 			require.Equal(t, http.StatusOK, head.Code)
 			assert.Empty(t, head.Body.Bytes())
 			for _, name := range []string{
-				"Content-Type", "Content-Length", "Cache-Control",
+				"Content-Type", "Content-Length", "Content-Encoding", "Vary", "Cache-Control",
 				"Content-Security-Policy", "X-Frame-Options", "X-Content-Type-Options", "Referrer-Policy",
 			} {
 				assert.Equal(t, get.Header().Values(name), head.Header().Values(name), name)
