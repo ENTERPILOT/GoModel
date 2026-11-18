@@ -37,7 +37,7 @@ type RouteRequest struct {
 type RouteChoice struct {
 	// Qualified is the chosen candidate's "provider/model".
 	Qualified string
-	// Reason is recorded in the audit trail.
+	// Reason is recorded in the request log.
 	Reason string
 }
 

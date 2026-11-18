@@ -17,5 +17,5 @@ func TestPassthroughSemanticEnricher(t *testing.T) {
 	})
 	require.NotNil(t, got)
 	assert.Equal(t, "kilo.chat_completions", got.SemanticOperation)
-	assert.Equal(t, "/v1/chat/completions", got.AuditPath)
+	assert.Equal(t, "/v1/chat/completions", got.RequestLogPath)
 }

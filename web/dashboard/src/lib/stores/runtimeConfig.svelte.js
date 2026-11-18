@@ -98,7 +98,7 @@ class RuntimeConfigStore {
     );
   }
 
-  auditVisible() {
+  requestLogsVisible() {
     return this.booleanFlag("LOGGING_ENABLED", true);
   }
 

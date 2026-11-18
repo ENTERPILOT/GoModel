@@ -2,7 +2,6 @@ package usage
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -30,20 +29,16 @@ func (r *Result) Close() error {
 	if r.stopIndexBuild != nil {
 		r.stopIndexBuild()
 	}
-	var errs []error
 	if r.Logger != nil {
 		if err := r.Logger.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("logger close: %w", err))
+			return fmt.Errorf("logger close: %w", err)
 		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("close errors: %w", errors.Join(errs...))
 	}
 	return nil
 }
 
 // New creates a usage logger on the shared storage connection.
-// This is useful when you want to share the database connection with audit logging.
+// This is useful when you want to share the database connection with request logging.
 func New(ctx context.Context, cfg *config.Config, store storage.Storage) (*Result, error) {
 	// Return noop if usage tracking is disabled
 	if !cfg.Usage.Enabled {

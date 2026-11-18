@@ -121,9 +121,9 @@ resolves `model` (including [virtual models](/features/virtual-models) and
 pinned Jev versions), applies the caller's allowlist, rate limits, and
 budgets, runs prompt [guardrails](/advanced/guardrails) over the input,
 serves identical requests from the exact [response cache](/features/cache),
-fails over to the next target on availability errors, and records audit and
-usage under the model that answered. Filter the audit log by the **Decisions**
-request type.
+fails over to the next target on availability errors, and records the request
+log entry and usage under the model that answered. Filter the request log by
+the **Decisions** request type.
 
 Usage on `/v1/decisions` is costed for input tokens only, every one at the
 model's input rate, as OpenAI bills the Decisions API: output, cache-read, and

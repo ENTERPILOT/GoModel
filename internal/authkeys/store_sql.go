@@ -142,6 +142,22 @@ func (s *SQLStore) UpdateImported(ctx context.Context, key AuthKey) error {
 	return nil
 }
 
+func (s *SQLStore) UpdateName(ctx context.Context, id, name string, now time.Time) error {
+	affected, err := s.db.Exec(ctx, `
+		UPDATE auth_keys
+		SET name = ?,
+			updated_at = ?
+		WHERE id = ?
+	`, name, now.Unix(), normalizeID(id))
+	if err != nil {
+		return fmt.Errorf("update auth key name: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *SQLStore) UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error {
 	affected, err := s.db.Exec(ctx, `
 		UPDATE auth_keys

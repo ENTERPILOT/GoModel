@@ -11,7 +11,7 @@ import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { usageData } from "$lib/stores/usageData.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { toggleSearchValue } from "$lib/components/molecules/searchSelectLogic.js";
-import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
+import { liveLogs } from "../requests/liveLogs.svelte.js";
 import { emptySessionUsage, emptyUsageLog, emptyUsagePageSummary } from "./usage-helpers.js";
 import {
   endpointsSelected,
@@ -24,6 +24,7 @@ import { syncUsageUrl, usageApiQuery, usageFilterQueryStr, usagePivotQuery } fro
 import { usageFacets } from "./usageFacets.svelte.js";
 import { usageFilters } from "./usageFilters.svelte.js";
 import { usagePivot } from "./usagePivot.svelte.js";
+import { usageBenchmark } from "./usageBenchmark.svelte.js";
 
 class UsagePageState {
   usageMode = $state("tokens");
@@ -177,11 +178,15 @@ class UsagePageState {
   }
 
   // Refetch everything the page shows for the current window + filters.
-  async fetchUsagePage() {
+  // reload marks the page opening (or the API key changing): the benchmark,
+  // which ignores the window, otherwise refetches only when its own request
+  // changed.
+  async fetchUsagePage({ reload = false } = {}) {
     syncUsageUrl();
     await runtimeConfig.ensureLoaded();
     const requests = [
       usagePivot.fetch(usagePivotQuery()),
+      usageBenchmark.fetch({ force: reload }),
       this.fetchUsagePageSummary(),
       usageFacets.fetch(),
       this.fetchModelUsage(),

@@ -38,7 +38,7 @@ func userPathSegment(name string) string {
 
 // extensionInference adapts a plugin host scoped to extensions to
 // ext.Inference, so extension calls share the plugin path: origin "plugin",
-// no guardrails, usage and audit under the scoped user path.
+// no guardrails, usage and request logs under the scoped user path.
 type extensionInference struct {
 	pluginapi.Inference
 	pluginapi.Decisions

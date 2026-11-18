@@ -11,12 +11,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -67,7 +67,9 @@ func TestRequireGlobalScope(t *testing.T) {
 		{name: "scoped credential denied on reset all", method: http.MethodPost, path: "/admin/budgets/reset", scope: scopeAlpha, wantStatus: http.StatusForbidden, wantCode: codeAdminScopeDenied},
 		{name: "scoped credential denied on usage throughput", method: http.MethodGet, path: "/admin/usage/throughput", scope: scopeAlpha, wantStatus: http.StatusForbidden, wantCode: codeAdminScopeDenied},
 		{name: "scoped credential denied on key import", method: http.MethodPost, path: "/admin/auth-keys/import", scope: scopeAlpha, wantStatus: http.StatusForbidden, wantCode: codeAdminScopeDenied},
+		{name: "scoped credential denied on mcp tool catalog", method: http.MethodGet, path: "/admin/mcp-servers/catalog?format=csv", scope: scopeAlpha, wantStatus: http.StatusForbidden, wantCode: codeAdminScopeDenied},
 		// A zero-value handler answers 503 past the gate: the gate let it through.
+		{name: "global credential passes mcp tool catalog", method: http.MethodGet, path: "/admin/mcp-servers/catalog", wantStatus: http.StatusServiceUnavailable},
 		{name: "global credential passes gateway-wide route", method: http.MethodGet, path: "/admin/workflows", wantStatus: http.StatusServiceUnavailable},
 		{name: "scoped credential reaches tenant route", method: http.MethodGet, path: "/admin/auth-keys", scope: scopeAlpha, wantStatus: http.StatusServiceUnavailable},
 	}
@@ -121,8 +123,8 @@ func TestScopedUserPathFilter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			usageReader := &mockUsageReader{usageLog: &usage.UsageLogResult{}}
-			auditReader := &mockAuditReader{logResult: &auditlog.LogListResult{}}
-			h := NewHandler(usageReader, nil, WithAuditReader(auditReader))
+			requestLogReader := &mockRequestLogReader{logResult: &requestlog.LogListResult{}}
+			h := NewHandler(usageReader, nil, WithRequestLogReader(requestLogReader))
 
 			c, rec := scopedRequest(t, http.MethodGet, "/admin/usage/log?user_path="+tt.query, "", tt.scope)
 			require.NoError(t, h.UsageLog(c))
@@ -135,14 +137,14 @@ func TestScopedUserPathFilter(t *testing.T) {
 				assert.Equal(t, tt.wantPaths, usageReader.lastUsageLog.UserPaths)
 			}
 
-			c, rec = scopedRequest(t, http.MethodGet, "/admin/audit/log?user_path="+tt.query, "", tt.scope)
-			require.NoError(t, h.AuditLog(c))
+			c, rec = scopedRequest(t, http.MethodGet, "/admin/request-logs?user_path="+tt.query, "", tt.scope)
+			require.NoError(t, h.RequestLog(c))
 			if tt.wantCode != "" {
 				assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 				assert.Equal(t, tt.wantCode, errorCode(t, rec))
 			} else {
 				assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-				assert.Equal(t, tt.wantPath, auditReader.lastQuery.UserPath)
+				assert.Equal(t, tt.wantPath, requestLogReader.lastQuery.UserPath)
 			}
 		})
 	}
@@ -150,15 +152,15 @@ func TestScopedUserPathFilter(t *testing.T) {
 
 // A user path prefix only narrows results: a scoped key keeps its subtree as
 // the UserPath filter, so a prefix outside the scope cannot widen the view.
-func TestAuditLogUserPathPrefixKeepsScope(t *testing.T) {
-	auditReader := &mockAuditReader{logResult: &auditlog.LogListResult{}}
-	h := NewHandler(nil, nil, WithAuditReader(auditReader))
+func TestRequestLogUserPathPrefixKeepsScope(t *testing.T) {
+	requestLogReader := &mockRequestLogReader{logResult: &requestlog.LogListResult{}}
+	h := NewHandler(nil, nil, WithRequestLogReader(requestLogReader))
 
-	c, rec := scopedRequest(t, http.MethodGet, "/admin/audit/log?user_path_prefix=/org", "", "/team/alpha")
-	require.NoError(t, h.AuditLog(c))
+	c, rec := scopedRequest(t, http.MethodGet, "/admin/request-logs?user_path_prefix=/org", "", "/team/alpha")
+	require.NoError(t, h.RequestLog(c))
 	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.Equal(t, "/team/alpha", auditReader.lastQuery.UserPath)
-	assert.Equal(t, "/org", auditReader.lastQuery.UserPathPrefix)
+	assert.Equal(t, "/team/alpha", requestLogReader.lastQuery.UserPath)
+	assert.Equal(t, "/org", requestLogReader.lastQuery.UserPathPrefix)
 }
 
 func TestScopedUsageMultiUserPathFilter(t *testing.T) {
@@ -193,9 +195,9 @@ func TestScopedUsageMultiUserPathFilter(t *testing.T) {
 	}
 }
 
-func TestAuditDetailAndConversationHideOtherTenants(t *testing.T) {
-	entry := func(id, userPath string) auditlog.LogEntry {
-		return auditlog.LogEntry{ID: id, UserPath: userPath, Timestamp: time.Now(), Data: &auditlog.LogData{}}
+func TestRequestLogDetailAndConversationHideOtherTenants(t *testing.T) {
+	entry := func(id, userPath string) requestlog.LogEntry {
+		return requestlog.LogEntry{ID: id, UserPath: userPath, Timestamp: time.Now(), Data: &requestlog.LogData{}}
 	}
 	tests := []struct {
 		name       string
@@ -211,26 +213,26 @@ func TestAuditDetailAndConversationHideOtherTenants(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			anchor := entry("log-1", tt.entryPath)
-			reader := &mockAuditReader{
+			reader := &mockRequestLogReader{
 				logByID: &anchor,
-				conversationResult: &auditlog.ConversationResult{
+				conversationResult: &requestlog.ConversationResult{
 					AnchorID: "log-1",
-					Entries:  []auditlog.LogEntry{anchor, entry("log-2", "/team/beta"), entry("log-3", "/team/alpha")},
+					Entries:  []requestlog.LogEntry{anchor, entry("log-2", "/team/beta"), entry("log-3", "/team/alpha")},
 				},
 			}
-			h := NewHandler(nil, nil, WithAuditReader(reader))
+			h := NewHandler(nil, nil, WithRequestLogReader(reader))
 
-			c, rec := scopedRequest(t, http.MethodGet, "/admin/audit/detail?log_id=log-1", "", tt.scope)
-			require.NoError(t, h.AuditLogDetail(c))
+			c, rec := scopedRequest(t, http.MethodGet, "/admin/request-logs/detail?log_id=log-1", "", tt.scope)
+			require.NoError(t, h.RequestLogDetail(c))
 			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 
-			c, rec = scopedRequest(t, http.MethodGet, "/admin/audit/conversation?log_id=log-1", "", tt.scope)
-			require.NoError(t, h.AuditConversation(c))
+			c, rec = scopedRequest(t, http.MethodGet, "/admin/request-logs/conversation?log_id=log-1", "", tt.scope)
+			require.NoError(t, h.RequestLogConversation(c))
 			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 			if tt.wantStatus != http.StatusOK {
 				return
 			}
-			resp := echotest.Decode[auditConversationResponse](t, rec)
+			resp := echotest.Decode[requestLogConversationResponse](t, rec)
 			ids := make([]string, 0, len(resp.Entries))
 			for _, e := range resp.Entries {
 				ids = append(ids, e.ID)
@@ -348,6 +350,10 @@ func TestAuthKeysScoped(t *testing.T) {
 				h := newHandler(t)
 				c, rec := scopedRequest(t, http.MethodPut, "/admin/auth-keys/"+tt.id+"/labels", `{"labels":["x"]}`, scopeAlpha, echotest.WithPathValue("id", tt.id))
 				require.NoError(t, h.UpdateAuthKeyLabels(c))
+				assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+
+				c, rec = scopedRequest(t, http.MethodPut, "/admin/auth-keys/"+tt.id+"/name", `{"name":"renamed"}`, scopeAlpha, echotest.WithPathValue("id", tt.id))
+				require.NoError(t, h.UpdateAuthKeyName(c))
 				assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 
 				c, rec = scopedRequest(t, http.MethodPost, "/admin/auth-keys/"+tt.id+"/deactivate", "", scopeAlpha, echotest.WithPathValue("id", tt.id))
@@ -546,7 +552,7 @@ func TestRateLimitsScoped(t *testing.T) {
 	}
 }
 
-func TestAuditStatsScoped(t *testing.T) {
+func TestRequestLogStatsScoped(t *testing.T) {
 	tests := []struct {
 		name       string
 		scope      string
@@ -563,14 +569,14 @@ func TestAuditStatsScoped(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &mockAuditReader{statsResult: auditlog.EmptyRequestStats(auditlog.StatsIntervalDay)}
-			h := NewHandler(nil, nil, WithAuditReader(reader))
-			target := "/admin/audit/stats?days=7"
+			reader := &mockRequestLogReader{statsResult: requestlog.EmptyRequestStats(requestlog.StatsIntervalDay)}
+			h := NewHandler(nil, nil, WithRequestLogReader(reader))
+			target := "/admin/request-logs/stats?days=7"
 			if tt.filter != "" {
 				target += "&user_path=" + tt.filter
 			}
 			c, rec := scopedRequest(t, http.MethodGet, target, "", tt.scope)
-			require.NoError(t, h.AuditStats(c))
+			require.NoError(t, h.RequestLogStats(c))
 			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 			if tt.wantCode != "" {
 				assert.Equal(t, tt.wantCode, errorCode(t, rec))

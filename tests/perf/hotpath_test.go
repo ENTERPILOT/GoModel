@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/streaming"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -169,13 +169,13 @@ func (benchProvider) GetProviderType(_ string) string {
 	return "mock"
 }
 
-type benchAuditLogger struct {
-	cfg auditlog.Config
+type benchRequestLogger struct {
+	cfg requestlog.Config
 }
 
-func (l benchAuditLogger) Write(_ *auditlog.LogEntry) {}
-func (l benchAuditLogger) Config() auditlog.Config    { return l.cfg }
-func (l benchAuditLogger) Close() error               { return nil }
+func (l benchRequestLogger) Write(_ *requestlog.LogEntry) {}
+func (l benchRequestLogger) Config() requestlog.Config    { return l.cfg }
+func (l benchRequestLogger) Close() error                 { return nil }
 
 type benchUsageLogger struct {
 	cfg usage.Config
@@ -331,27 +331,27 @@ func BenchmarkOpenAIResponsesStreamConverter(b *testing.B) {
 	}
 }
 
-func BenchmarkSharedStreamingAuditAndUsageObservers(b *testing.B) {
-	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true, LogBodies: true}, sampleChatStream)
+func BenchmarkSharedStreamingRequestLogAndUsageObservers(b *testing.B) {
+	benchmarkSharedStreamingObservers(b, requestlog.Config{Enabled: true, LogBodies: true}, sampleChatStream)
 }
 
 // BenchmarkSharedStreamingObserversDefaultConfig runs the same pipeline with
-// audit body capture disabled, where the stream can skip decoding
+// request log body capture disabled, where the stream can skip decoding
 // content-delta chunks. Body capture is on by default (config.LogConfig), so
 // this measures deployments that turned it off.
 func BenchmarkSharedStreamingObserversDefaultConfig(b *testing.B) {
-	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true}, sampleChatStream)
+	benchmarkSharedStreamingObservers(b, requestlog.Config{Enabled: true}, sampleChatStream)
 }
 
 // BenchmarkSharedStreamingObserversIncludeUsage is the body-capture-off
 // pipeline over the stream shape OpenAI sends with include_usage forced on,
 // where every content chunk carries "usage":null.
 func BenchmarkSharedStreamingObserversIncludeUsage(b *testing.B) {
-	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true}, sampleChatStreamIncludeUsage)
+	benchmarkSharedStreamingObservers(b, requestlog.Config{Enabled: true}, sampleChatStreamIncludeUsage)
 }
 
-func benchmarkSharedStreamingObservers(b *testing.B, auditCfg auditlog.Config, sse string) {
-	auditLogger := benchAuditLogger{cfg: auditCfg}
+func benchmarkSharedStreamingObservers(b *testing.B, requestLogCfg requestlog.Config, sse string) {
+	requestLogger := benchRequestLogger{cfg: requestLogCfg}
 	usageLogger := benchUsageLogger{cfg: usage.Config{Enabled: true}}
 	// Labels mirror a tagged request so the guard exercises the labelled path.
 	labels := []string{"team-alpha", "prod"}
@@ -360,13 +360,13 @@ func benchmarkSharedStreamingObservers(b *testing.B, auditCfg auditlog.Config, s
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		entry := &auditlog.LogEntry{
-			ID:        "audit-bench",
+		entry := &requestlog.LogEntry{
+			ID:        "request-log-bench",
 			Timestamp: time.Unix(1700000000, 0),
 			RequestID: "req-bench",
 			Method:    http.MethodPost,
 			Path:      "/v1/chat/completions",
-			Data:      &auditlog.LogData{Labels: labels},
+			Data:      &requestlog.LogData{Labels: labels},
 		}
 
 		usageObserver := usage.NewStreamUsageObserver(
@@ -381,7 +381,7 @@ func benchmarkSharedStreamingObservers(b *testing.B, auditCfg auditlog.Config, s
 
 		stream := streaming.NewObservedSSEStream(
 			io.NopCloser(strings.NewReader(sse)),
-			auditlog.NewStreamLogObserver(auditLogger, entry, "/v1/chat/completions"),
+			requestlog.NewStreamLogObserver(requestLogger, entry, "/v1/chat/completions"),
 			usageObserver,
 		)
 
@@ -477,21 +477,21 @@ func TestHotPathPerfGuard(t *testing.T) {
 			maxBytes:  15232, // baseline ~14.3 KB
 		},
 		{
-			// Default-deployment shape: auth + audit (bodies/headers) + usage +
+			// Default-deployment shape: auth + request log (bodies/headers) + usage +
 			// session keeping + a configured rate limit, through the routed
 			// catalog. The bare cases above cannot see regressions in any of
 			// those subsystems; this one holds the line for the configuration
 			// deployments actually run.
 			name:      "gateway_chat_completion_production_shape",
 			bench:     BenchmarkGatewayHotPathProductionShape,
-			maxAllocs: 153,   // baseline 151 (audit bodies kept as raw JSON; selector-keyed lookups and memoized resolved-model strings)
+			maxAllocs: 153,   // baseline 151 (request log bodies kept as raw JSON; selector-keyed lookups and memoized resolved-model strings)
 			maxBytes:  21568, // baseline ~20.7 KB
 		},
 		{
 			// The same shape with live logs on and no dashboard connected,
 			// which is how a running gateway is configured by default. The
 			// broker builds and retains an event for every lifecycle step of
-			// every request; the case above uses a stub audit logger and so
+			// every request; the case above uses a stub request logger and so
 			// cannot see any of it. Against that case this is the standing
 			// price of live logs: ~17KB and 54 allocations per request, and
 			// the ceiling is what keeps it from growing back.
@@ -516,19 +516,19 @@ func TestHotPathPerfGuard(t *testing.T) {
 			maxBytes:  20480, // baseline ~19.1 KB (leaves headroom for pool cold-starts)
 		},
 		{
-			name:      "shared_stream_audit_and_usage_observers",
-			bench:     BenchmarkSharedStreamingAuditAndUsageObservers,
+			name:      "shared_stream_request_log_and_usage_observers",
+			bench:     BenchmarkSharedStreamingRequestLogAndUsageObservers,
 			maxAllocs: 157,  // baseline 155 (incl. request labels on both observers)
 			maxBytes:  9088, // baseline ~8.8 KB (incl. auth key id, markup and billed cost on the usage entry)
 		},
 		{
-			// Default configuration: audit body capture off, so the observed
+			// Default configuration: request log body capture off, so the observed
 			// stream must skip JSON decoding for content-delta chunks entirely.
 			// A regression that decodes every chunk again would blow this limit.
 			name:      "shared_stream_observers_default_config",
 			bench:     BenchmarkSharedStreamingObserversDefaultConfig,
 			maxAllocs: 62,   // baseline 60 (incl. request labels on both observers)
-			maxBytes:  3712, // baseline ~3.5 KB (audit entry carries the guardrail outcome trail)
+			maxBytes:  3712, // baseline ~3.5 KB (request log entry carries the guardrail outcome trail)
 		},
 		{
 			// include_usage stream shape: every content chunk carries

@@ -62,7 +62,7 @@ func (r *RequestModelResolution) ResolvedQualifiedModel() string {
 	return r.ResolvedSelector.QualifiedModel()
 }
 
-// ResolvedRouteModel returns the executed route selector recorded in audit
+// ResolvedRouteModel returns the executed route selector recorded in request
 // logs: the resolved model qualified by the configured provider instance name
 // when known, falling back to the selector's own provider prefix.
 func (r *RequestModelResolution) ResolvedRouteModel() string {
