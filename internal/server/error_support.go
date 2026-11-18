@@ -84,6 +84,10 @@ func writeGatewayError(c *echo.Context, gatewayErr *core.GatewayError) error {
 	return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 }
 
+// escapedErrorHandledKey holds the escaped error the central handler last
+// dealt with on a request.
+const escapedErrorHandledKey = "gomodel.escaped-error-handled"
+
 // gatewayErrorHandler renders every error that escapes a handler — a recovered
 // panic, a response body the JSON serializer could not encode, or an
 // echo.HTTPError raised by middleware — in the caller's wire dialect, and logs
@@ -95,9 +99,25 @@ func gatewayErrorHandler(c *echo.Context, err error) {
 	if err == nil {
 		return
 	}
+	// echo's default request logger hands an error here and then returns it,
+	// so the server delivers the same error a second time. A different error
+	// later on the same request, such as a panic, is still handled.
+	if handled, ok := c.Get(escapedErrorHandledKey).(error); ok && isSameError(err, handled) {
+		return
+	}
+	c.Set(escapedErrorHandledKey, err)
+	// Once the response has started it cannot become an error response, so a
+	// failure while writing it is a broken relay (most often the client hanging
+	// up), not a gateway 500. A panic is still reported as one. Only the log is
+	// written: the request log middleware has already queued the request's entry, so
+	// a relay that wants the failure on the request log row records it before
+	// returning (recordResponseFailure).
+	committed := responseCommitted(c)
+	if _, panicked := errors.AsType[*middleware.PanicStackError](err); committed && !panicked {
+		logStreamFailure(c, responseTerminatedMessage, classifyStreamError(c.Request().Context(), err), err)
+		return
+	}
 	gatewayErr := escapedGatewayError(err)
-	// Log before checking whether the response can still be changed: a panic
-	// after the first streamed chunk must still reach the operator.
 	logHandledError(c, gatewayErr)
 	// Finalize as handleError does, so an error that never passed through it —
 	// a panic, a rate-limit error returned rather than rendered — still lands
@@ -113,12 +133,41 @@ func gatewayErrorHandler(c *echo.Context, err error) {
 
 	// Once the status line and body are on the wire nothing can be changed;
 	// the response stands as the handler left it.
-	if response, unwrapErr := echo.UnwrapResponse(c.Response()); unwrapErr == nil && response.Committed {
+	if committed {
 		return
 	}
 	if writeErr := writeGatewayError(c, gatewayErr); writeErr != nil {
 		slog.Error("failed to send error response", "error", writeErr)
 	}
+}
+
+const responseTerminatedMessage = "response terminated abnormally"
+
+// recordResponseFailure records a response body that broke after the status
+// line was sent, on the request log entry and in the log. Nothing can be rendered
+// any more, so the caller returns nil.
+func recordResponseFailure(c *echo.Context, err error) {
+	if !requestlog.HasRecordedError(c) {
+		enrichRequestLogEntryWithProviderAttempts(c)
+	}
+	recordStreamFailure(c, nil, responseTerminatedMessage, err)
+}
+
+// isSameError reports whether err is, or wraps, handled. Comparing two error
+// values of an uncomparable type panics; those count as different errors.
+func isSameError(err, handled error) (same bool) {
+	defer func() {
+		if recover() != nil {
+			same = false
+		}
+	}()
+	return errors.Is(err, handled)
+}
+
+// responseCommitted reports whether the status line is already on the wire.
+func responseCommitted(c *echo.Context) bool {
+	response, err := echo.UnwrapResponse(c.Response())
+	return err == nil && response.Committed
 }
 
 // escapedGatewayError classifies an error that reached the central handler. A

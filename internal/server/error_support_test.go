@@ -6,9 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -381,9 +385,130 @@ func TestGatewayErrorHandler_LeavesCommittedResponseAlone(t *testing.T) {
 	require.Contains(t, buf.String(), "failed after the first chunk")
 }
 
+// A failure after the response started is a broken relay, not a gateway 500:
+// a client that hung up is routine, anything else is a warning, and only a
+// panic is still an error. The request log entry is already queued for writing by
+// then, so a relay failure is logged without touching it.
+func TestGatewayErrorHandler_ClassifiesFailuresOnCommittedResponses(t *testing.T) {
+	tests := []struct {
+		name               string
+		cancelRequest      bool
+		err                error
+		wantLevel          string
+		wantLogType        string
+		wantRequestLogType string
+	}{
+		{
+			name:          "client hung up",
+			cancelRequest: true,
+			err:           context.Canceled,
+			wantLevel:     "DEBUG",
+			wantLogType:   "client_disconnected",
+		},
+		{
+			name:        "client connection broke on a write",
+			err:         &net.OpError{Op: "write", Net: "tcp", Err: syscall.EPIPE},
+			wantLevel:   "DEBUG",
+			wantLogType: "client_disconnected",
+		},
+		{
+			name:        "provider connection reset while reading",
+			err:         &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET},
+			wantLevel:   "WARN",
+			wantLogType: "stream_error",
+		},
+		{
+			name:        "provider body cut short",
+			err:         io.ErrUnexpectedEOF,
+			wantLevel:   "WARN",
+			wantLogType: "stream_error",
+		},
+		{
+			name:               "panic",
+			err:                &middleware.PanicStackError{Err: errors.New("relay blew up"), Stack: []byte("goroutine 1")},
+			wantLevel:          "ERROR",
+			wantLogType:        string(core.ErrorTypeInternal),
+			wantRequestLogType: string(core.ErrorTypeInternal),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			original := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			t.Cleanup(func() { slog.SetDefault(original) })
+
+			c, rec := echotest.Post(t, "/v1/messages", nil)
+			entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+			c.Set(string(requestlog.LogEntryKey), entry)
+			if tc.cancelRequest {
+				ctx, cancel := context.WithCancel(c.Request().Context())
+				cancel()
+				c.SetRequest(c.Request().WithContext(ctx))
+			}
+			require.NoError(t, c.String(http.StatusOK, "partial"))
+
+			gatewayErrorHandler(c, tc.err)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, "partial", rec.Body.String())
+			assert.Equal(t, tc.wantRequestLogType, entry.ErrorType)
+			assert.Equal(t, 1, strings.Count(logs.String(), `"level":`), logs.String())
+			assert.Contains(t, logs.String(), `"level":"`+tc.wantLevel+`"`)
+			assert.Contains(t, logs.String(), `"`+tc.wantLogType+`"`)
+		})
+	}
+}
+
 // The direct gatewayErrorHandler tests stub the error; this one drives the real
 // server so the goccy serializer, echo's dispatch and the handler are all in
 // the path — the shape that produced the opaque 500 in #881.
+// echo's default request logger delivers an escaped error twice; it is handled
+// once. A different error or a panic that follows on the same request is still
+// reported, and a panic delivered twice is reported once.
+func TestGatewayErrorHandler_HandlesARepeatedErrorOnce(t *testing.T) {
+	var logs bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	c, rec := echotest.Post(t, "/v1/messages", nil)
+	require.NoError(t, c.String(http.StatusOK, "partial"))
+
+	relayErr := io.ErrUnexpectedEOF
+	gatewayErrorHandler(c, relayErr)
+	gatewayErrorHandler(c, relayErr)
+	assert.Equal(t, 1, strings.Count(logs.String(), `"msg":"response terminated abnormally"`), logs.String())
+
+	gatewayErrorHandler(c, errors.New("cleanup failed"))
+	assert.Contains(t, logs.String(), `"error":"cleanup failed"`)
+
+	panicErr := &middleware.PanicStackError{Err: errors.New("middleware blew up"), Stack: []byte("goroutine 1")}
+	gatewayErrorHandler(c, panicErr)
+	gatewayErrorHandler(c, panicErr)
+
+	assert.Equal(t, 1, strings.Count(logs.String(), `"panic":"middleware blew up"`), logs.String())
+	assert.Contains(t, logs.String(), `"stack":"goroutine 1"`)
+	assert.Equal(t, "partial", rec.Body.String())
+}
+
+// uncomparableError is an error value Go cannot compare with ==.
+type uncomparableError []string
+
+func (e uncomparableError) Error() string { return strings.Join(e, "; ") }
+
+// An extension may return an error value that cannot be compared; telling it
+// apart from the previous error must not panic.
+func TestGatewayErrorHandler_ToleratesUncomparableErrors(t *testing.T) {
+	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
+	err := struct{ error }{uncomparableError{"first", "second"}}
+
+	gatewayErrorHandler(c, err)
+	require.NotPanics(t, func() { gatewayErrorHandler(c, err) })
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
 func TestGatewayErrorHandler_UnencodableResponseThroughRealServer(t *testing.T) {
 	logs := &bytes.Buffer{}
 	original := slog.Default()

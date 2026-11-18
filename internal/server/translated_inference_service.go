@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -347,7 +348,7 @@ func handleWithCache[R any](
 				return dispatch(c, req, workflow)
 			})
 			if replayErr, ok := errors.AsType[*responsecache.ReplayError](err); ok {
-				recordCachedStreamError(c, replayErr.Err)
+				recordStreamFailure(c, nil, "cached stream terminated abnormally", replayErr.Err)
 				return nil
 			}
 			return err
@@ -757,7 +758,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 
 	c.Response().WriteHeader(http.StatusOK)
 	if err := flushStream(c.Response(), wrappedStream); err != nil {
-		recordStreamingError(streamEntry, model, provider, c.Request().URL.Path, requestID, c.Request().Context(), err)
+		recordStreamFailure(c, streamEntry, "stream terminated abnormally", err, "model", model, "provider", provider)
 	}
 	return nil
 }
@@ -781,6 +782,11 @@ func classifyStreamError(ctx context.Context, err error) string {
 	switch {
 	case errors.Is(err, ErrClientStall):
 		return "client_stalled"
+	case isNetworkReadError(err):
+		// The gateway reads only from the provider while relaying, so the
+		// failed connection is the provider's even if the client has since
+		// gone away too.
+		return "stream_error"
 	case errors.Is(err, streaming.ErrStreamIncomplete) && (ctx == nil || ctx.Err() != context.Canceled):
 		// The provider stream failed while being read, so a connection reset
 		// it wraps is the provider's, not the client's.
@@ -791,52 +797,53 @@ func classifyStreamError(ctx context.Context, err error) string {
 	return "stream_error"
 }
 
-// recordCachedStreamError records a cache-served stream the client stopped
-// reading or abandoned, so the request log entry does not show a clean 200 for a
-// stalled client just because the response happened to be cached.
-func recordCachedStreamError(c *echo.Context, err error) {
-	errorType := classifyStreamError(c.Request().Context(), err)
-	requestlog.EnrichEntryWithError(c, errorType, err.Error(), "")
-	slog.Warn("cached stream terminated abnormally",
-		"error", err,
-		"error_type", errorType,
-		"path", c.Request().URL.Path,
-		"request_id", requestIDFromContextOrHeader(c.Request()),
-	)
+// isNetworkReadError reports a network read that failed.
+func isNetworkReadError(err error) bool {
+	opErr, ok := errors.AsType[*net.OpError](err)
+	return ok && opErr.Op == "read"
 }
 
-func recordStreamingError(streamEntry *requestlog.LogEntry, model, provider, path, requestID string, ctx context.Context, err error) {
-	errorType := classifyStreamError(ctx, err)
-
-	// The nil-err branch in isClientDisconnect is reachable for callers that
-	// only have a canceled context to report. Fall back to the context error
-	// in that case so we never dereference a nil error.
-	logErr := err
-	errorMessage := ""
-	switch {
-	case err != nil:
-		errorMessage = err.Error()
-	case ctx != nil && ctx.Err() != nil:
-		logErr = ctx.Err()
-		errorMessage = logErr.Error()
+// recordStreamFailure records a response that broke after it had started, so
+// the request log row does not show a clean 200. The classified error lands on
+// streamEntry when the stream owns its request log row and on the request's entry
+// otherwise, where an error recorded earlier is kept as the real cause. It
+// must run before the handler returns: the request log middleware queues the
+// request's entry for writing as soon as the handler is done.
+func recordStreamFailure(c *echo.Context, streamEntry *requestlog.LogEntry, msg string, err error, attrs ...any) {
+	if err == nil {
+		// A caller with only a canceled context to report.
+		err = c.Request().Context().Err()
 	}
+	if err == nil {
+		return
+	}
+	errorType := classifyStreamError(c.Request().Context(), err)
 
-	if streamEntry != nil {
+	switch {
+	case streamEntry != nil:
 		streamEntry.ErrorType = errorType
 		if streamEntry.Data == nil {
 			streamEntry.Data = &requestlog.LogData{}
 		}
-		streamEntry.Data.ErrorMessage = errorMessage
+		streamEntry.Data.ErrorMessage = err.Error()
+	case !requestlog.HasRecordedError(c):
+		requestlog.EnrichEntryWithError(c, errorType, err.Error(), "")
 	}
+	logStreamFailure(c, msg, errorType, err, attrs...)
+}
 
-	slog.Warn("stream terminated abnormally",
-		"error", logErr,
-		"error_type", errorType,
-		"model", model,
-		"provider", provider,
-		"path", path,
-		"request_id", requestID,
-	)
+// logStreamFailure logs a response that broke after it had started. A client
+// that hung up is routine and logged at debug, like a request canceled before
+// the response started.
+func logStreamFailure(c *echo.Context, msg, errorType string, err error, attrs ...any) {
+	req := c.Request()
+	level := slog.LevelWarn
+	if errorType == "client_disconnected" {
+		level = slog.LevelDebug
+	}
+	attrs = append([]any{"error", err, "error_type", errorType}, attrs...)
+	attrs = append(attrs, "path", req.URL.Path, "request_id", requestIDFromContextOrHeader(req))
+	slog.Log(req.Context(), level, msg, attrs...)
 }
 
 // isClientDisconnect classifies write-phase streaming errors (errors returned
