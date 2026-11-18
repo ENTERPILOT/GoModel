@@ -10,9 +10,9 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/tidwall/gjson"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // mcpService adapts Echo requests to the MCP gateway. It stays a thin
@@ -24,7 +24,7 @@ type mcpService struct {
 	budgetChecker BudgetChecker
 	rateLimiter   RateLimiter
 	enabled       bool
-	// logBodies mirrors the audit logger config. /mcp is not ingress-managed,
+	// logBodies mirrors the request logger config. /mcp is not ingress-managed,
 	// so JSON-RPC request bodies have no snapshot to be captured from, and the
 	// SDK answers POSTs as SSE, which the middleware's response capture skips —
 	// both are captured here instead when body logging is on.
@@ -42,7 +42,7 @@ func (s *mcpService) handle(c *echo.Context, pinnedServer string) error {
 	// notification stream) and DELETE (session teardown) stay free.
 	if c.Request().Method == http.MethodPost {
 		sessionID := strings.TrimSpace(c.Request().Header.Get("Mcp-Session-Id"))
-		enrichMCPAuditEntry(c, s.logBodies, func(name, target string) string {
+		enrichMCPRequestLogEntry(c, s.logBodies, func(name, target string) string {
 			return s.gateway.ToolCallLabel(sessionID, name, target)
 		})
 		release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRoute{})
@@ -71,13 +71,13 @@ func (s *mcpService) handle(c *echo.Context, pinnedServer string) error {
 	return nil
 }
 
-// enrichMCPAuditEntry labels the audit entry (and its live-log preview) with
+// enrichMCPRequestLogEntry labels the request log entry (and its live-log preview) with
 // the JSON-RPC method carried by this POST — the tool name for tools/call —
 // so MCP rows in the request log read as more than a bare path, and captures
 // the JSON-RPC frame as the request body when body logging is on. The body is
 // restored for the gateway handler; the body-limit middleware has already
 // bounded its size.
-func enrichMCPAuditEntry(c *echo.Context, logBodies bool, resolveTool func(name, target string) string) {
+func enrichMCPRequestLogEntry(c *echo.Context, logBodies bool, resolveTool func(name, target string) string) {
 	req := c.Request()
 	if req.Body == nil {
 		return
@@ -89,20 +89,20 @@ func enrichMCPAuditEntry(c *echo.Context, logBodies bool, resolveTool func(name,
 		return
 	}
 
-	if label := mcpAuditLabel(body, resolveTool); label != "" {
-		auditlog.EnrichEntry(c, label, "mcp")
+	if label := mcpRequestLogLabel(body, resolveTool); label != "" {
+		requestlog.EnrichEntry(c, label, "mcp")
 	}
 	if logBodies {
-		auditlog.EnrichEntryWithRawRequestBody(c, body)
+		requestlog.EnrichEntryWithRawRequestBody(c, body)
 	}
 }
 
-// mcpAuditLabel derives the request-log label from one JSON-RPC frame: the
+// mcpRequestLogLabel derives the request-log label from one JSON-RPC frame: the
 // tool/prompt name for calls, otherwise the method. resolveTool (optional)
 // receives a tools/call name and its arguments.name and returns the tool the
 // session actually runs, matching usage entries. Empty means unlabelable (a
 // bare response or malformed frame).
-func mcpAuditLabel(body []byte, resolveTool func(name, target string) string) string {
+func mcpRequestLogLabel(body []byte, resolveTool func(name, target string) string) string {
 	method := strings.TrimSpace(gjson.GetBytes(body, "method").String())
 	if method == "" {
 		return ""
@@ -118,10 +118,10 @@ func mcpAuditLabel(body []byte, resolveTool func(name, target string) string) st
 }
 
 // mcpResponseCapture tees an MCP POST response so its SSE-framed JSON-RPC
-// reply can be audit-logged. The middleware's own capture deliberately skips
+// reply can be recorded in the request log. The middleware's own capture deliberately skips
 // text/event-stream (chat streams belong to the stream observer), so without
-// this tee MCP responses would never reach the audit entry. Capture is capped
-// at the audit body limit; overflow only sets the truncation flag.
+// this tee MCP responses would never reach the request log entry. Capture is capped
+// at the request log body limit; overflow only sets the truncation flag.
 type mcpResponseCapture struct {
 	http.ResponseWriter
 	body      bytes.Buffer
@@ -130,7 +130,7 @@ type mcpResponseCapture struct {
 
 func (r *mcpResponseCapture) Write(b []byte) (int, error) {
 	if !r.truncated {
-		remaining := auditlog.MaxBodyCapture - r.body.Len()
+		remaining := requestlog.MaxBodyCapture - r.body.Len()
 		switch {
 		case remaining >= len(b):
 			r.body.Write(b)
@@ -153,7 +153,7 @@ func (r *mcpResponseCapture) Flush() {
 
 func (r *mcpResponseCapture) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
-// enrich records the captured SSE reply on the audit entry. Non-SSE responses
+// enrich records the captured SSE reply on the request log entry. Non-SSE responses
 // (202 accepts, JSON errors) are left to the middleware's own capture, which
 // handles them already — enriching those here would double-capture.
 func (r *mcpResponseCapture) enrich(c *echo.Context) {
@@ -161,14 +161,14 @@ func (r *mcpResponseCapture) enrich(c *echo.Context) {
 	if contentType != "text/event-stream" {
 		return
 	}
-	auditlog.EnrichEntryWithCapturedResponseBody(c, mcpSSEAuditBody(r.body.Bytes()), r.truncated)
+	requestlog.EnrichEntryWithCapturedResponseBody(c, mcpSSERequestLogBody(r.body.Bytes()), r.truncated)
 }
 
-// mcpSSEAuditBody decodes the JSON-RPC messages out of a buffered SSE body:
+// mcpSSERequestLogBody decodes the JSON-RPC messages out of a buffered SSE body:
 // one message per data line. A single message is stored bare, several as a
 // list; a payload that does not decode (e.g. cut by the capture cap) falls
 // back to its raw text.
-func mcpSSEAuditBody(raw []byte) any {
+func mcpSSERequestLogBody(raw []byte) any {
 	var frames []any
 	for line := range strings.Lines(string(raw)) {
 		payload, ok := strings.CutPrefix(strings.TrimRight(line, "\r\n"), "data:")

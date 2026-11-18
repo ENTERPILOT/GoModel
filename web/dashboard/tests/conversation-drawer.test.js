@@ -28,14 +28,14 @@ import {
   normalizedConversationRequestStep,
   renderBodyWithConversationHighlights,
   shouldHydrateConversation,
-} from "../src/pages/audit-logs/conversation-helpers.js";
-import { liveLogsMethods } from "../src/pages/audit-logs/live-logs-logic.js";
+} from "../src/pages/requests/conversation-helpers.js";
+import { liveLogsMethods } from "../src/pages/requests/live-logs-logic.js";
 
 const live = liveLogsMethods();
 
 function liveEntry(overrides = {}) {
   return {
-    id: "audit-1",
+    id: "request-log-1",
     _live: true,
     _live_pending: true,
     _live_state: "audit.updated",
@@ -49,17 +49,17 @@ function liveEntry(overrides = {}) {
 }
 
 test("live entries render locally: pending live state skips the persisted fetch", () => {
-  // openConversation branches on auditEntryLiveDetailPending: a live entry
+  // openConversation branches on requestEntryLiveDetailPending: a live entry
   // still streaming renders from preview data; flushed/persisted entries
-  // hydrate from /admin/audit/conversation.
-  assert.equal(live.auditEntryLiveDetailPending(liveEntry()), true);
-  assert.equal(live.auditEntryLiveDetailPending(liveEntry({ _live_state: "audit.failed" })), true);
-  assert.equal(live.auditEntryLiveDetailPending(liveEntry({
+  // hydrate from /admin/request-logs/conversation.
+  assert.equal(live.requestEntryLiveDetailPending(liveEntry()), true);
+  assert.equal(live.requestEntryLiveDetailPending(liveEntry({ _live_state: "audit.failed" })), true);
+  assert.equal(live.requestEntryLiveDetailPending(liveEntry({
     _live_state: "audit.flushed",
     _live_pending: false,
-    _audit_flushed: true,
+    _request_log_flushed: true,
   })), false);
-  assert.equal(live.auditEntryLiveDetailPending({ id: "audit-2", path: "/v1/chat/completions" }), false);
+  assert.equal(live.requestEntryLiveDetailPending({ id: "request-log-2", path: "/v1/chat/completions" }), false);
 
   const entry = liveEntry();
   const messages = buildConversationMessages([entry], entry.id);
@@ -85,8 +85,8 @@ test("streaming chunks re-render as partial assistant messages", () => {
   assert.equal(messages[1].role, "assistant");
 
   // The spinner logic: a streaming state is not settled, completed is.
-  assert.equal(live.liveAuditStateSettled("audit.stream"), false);
-  assert.equal(live.liveAuditStateSettled("audit.completed"), true);
+  assert.equal(live.liveRequestLogStateSettled("audit.stream"), false);
+  assert.equal(live.liveRequestLogStateSettled("audit.completed"), true);
 });
 
 test("chat-completions threads shape system, tool and assistant turns", () => {
@@ -464,9 +464,9 @@ test("request prompt-cache highlights include tool-call names and arguments", ()
     promptCacheHighlight: { characters: 200, segments },
   });
   for (const text of ["get_weather", "store_weather", "city", "Rome"]) {
-    assert.ok(rendered.includes(`<span class="audit-prompt-cache-highlight">${text}</span>`));
+    assert.ok(rendered.includes(`<span class="request-log-prompt-cache-highlight">${text}</span>`));
   }
-  assert.match(rendered, /<span class="audit-prompt-cache-highlight">\{\\&quot;city\\&quot;:\\&quot;Paris\\&quot;\}<\/span>/);
+  assert.match(rendered, /<span class="request-log-prompt-cache-highlight">\{\\&quot;city\\&quot;:\\&quot;Paris\\&quot;\}<\/span>/);
 });
 
 test("entries with errors append an error message extracted from nested payloads", () => {
@@ -738,7 +738,7 @@ test("follow-up endpoint gate supports only chat, responses, and messages", () =
   assert.equal(followUpEndpointKind("/custom/chat"), "");
 });
 
-test("follow-ups use the selected audit record instead of the latest session record", () => {
+test("follow-ups use the selected request log record instead of the latest session record", () => {
   const entries = [
     { id: "selected", timestamp: "2026-07-06T11:00:00Z", path: "/v1/responses" },
     { id: "latest", timestamp: "2026-07-06T12:00:00Z", path: "/v1/chat/completions" },
@@ -776,7 +776,7 @@ test("empty hydration never erases known live conversation records", () => {
   ]), ["older", "persisted-anchor"]);
 });
 
-test("equal timestamps are ordered deterministically by audit id", () => {
+test("equal timestamps are ordered deterministically by request log id", () => {
   const timestamp = "2026-07-06T12:00:00Z";
   const first = {
     id: "log-a",
@@ -1127,7 +1127,7 @@ test("follow-up headers replace a captured parent instead of duplicating it", ()
 
 function revisionedEntry(overrides = {}) {
   return {
-    id: "audit-rev",
+    id: "request-log-rev",
     path: "/v1/chat/completions",
     timestamp: "2026-07-06T12:00:00Z",
     data: {
@@ -1252,7 +1252,7 @@ test("the drawer renders the anchor's selected request step, defaulting to the f
 test("step preview never changes branch membership: lineage stays on the original body", () => {
   const anchor = revisionedEntry();
   const followUp = {
-    id: "audit-rev-2",
+    id: "request-log-rev-2",
     path: "/v1/chat/completions",
     timestamp: "2026-07-06T12:01:00Z",
     data: {
@@ -1272,11 +1272,11 @@ test("step preview never changes branch membership: lineage stays on the origina
   });
   // The follow-up extends the anchor's original lineage, so it must stay in
   // the branch even while the anchor previews its compressed shape.
-  assert.deepEqual(view.entryIDs, ["audit-rev", "audit-rev-2"]);
+  assert.deepEqual(view.entryIDs, ["request-log-rev", "request-log-rev-2"]);
   assert.ok(view.messages.some((msg) => msg.text === "Follow-up"));
 });
 
-test("opening from an audit pane maps its step onto selectable step ids", () => {
+test("opening from a request log pane maps its step onto selectable step ids", () => {
   const entry = revisionedEntry();
   const steps = conversationRequestSteps(entry);
   // The final revision is addressed as "final" so a growing step list keeps

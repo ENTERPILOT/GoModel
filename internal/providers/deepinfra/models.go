@@ -73,29 +73,23 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		return nil, err
 	}
 
-	result := &core.ModelsResponse{Object: "list", Data: make([]core.Model, 0, len(upstream.Data))}
-	for _, model := range upstream.Data {
-		id := strings.TrimSpace(model.ID)
-		if id == "" {
-			continue
-		}
-		metadata, servable := model.Metadata.toCore()
-		if !servable {
-			continue
-		}
-		object := strings.TrimSpace(model.Object)
-		if object == "" {
-			object = "model"
-		}
-		result.Data = append(result.Data, core.Model{
-			ID:       id,
-			Object:   object,
-			OwnedBy:  strings.TrimSpace(model.OwnedBy),
-			Created:  model.Created,
-			Metadata: metadata,
-		})
+	return providers.ModelList(upstream.Data, modelInfo.toCore), nil
+}
+
+// toCore normalizes one listing entry, returning the zero model when its tags
+// name only kinds the gateway does not serve.
+func (m modelInfo) toCore() core.Model {
+	metadata, servable := m.Metadata.toCore()
+	if !servable {
+		return core.Model{}
 	}
-	return result, nil
+	return core.Model{
+		ID:       strings.TrimSpace(m.ID),
+		Object:   providers.ModelObject(m.Object),
+		OwnedBy:  strings.TrimSpace(m.OwnedBy),
+		Created:  m.Created,
+		Metadata: metadata,
+	}
 }
 
 // toCore normalizes DeepInfra's listing metadata. It reports false when the
@@ -151,11 +145,11 @@ func (p *modelPricing) toCore() *core.ModelPricing {
 	}
 	pricing := &core.ModelPricing{
 		Currency:           "USD",
-		InputPerMtok:       cloneFloat(p.InputTokens),
-		OutputPerMtok:      cloneFloat(p.OutputTokens),
-		CachedInputPerMtok: cloneFloat(p.CacheReadTokens),
-		PerSecondInput:     cloneFloat(p.InputSeconds),
-		PerImage:           cloneFloat(p.PerImageUnit),
+		InputPerMtok:       p.InputTokens,
+		OutputPerMtok:      p.OutputTokens,
+		CachedInputPerMtok: p.CacheReadTokens,
+		PerSecondInput:     p.InputSeconds,
+		PerImage:           p.PerImageUnit,
 	}
 	if p.InputCharacters != nil {
 		pricing.PerCharacterInput = new(*p.InputCharacters / 1_000_000)
@@ -165,13 +159,4 @@ func (p *modelPricing) toCore() *core.ModelPricing {
 		return nil
 	}
 	return pricing
-}
-
-// cloneFloat copies optional prices so the normalized model does not retain upstream pointers.
-func cloneFloat(value *float64) *float64 {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	return &cloned
 }

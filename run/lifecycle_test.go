@@ -129,7 +129,7 @@ func TestServeGeneration_StopsWaitingWhenShutdownTimesOut(t *testing.T) {
 
 // The drain window and the shutdown budget live in different packages, so the
 // comment tying them together is only as good as this check: the budget has to
-// cover the quiesce that precedes the drain, the drain, and the usage and audit
+// cover the quiesce that precedes the drain, the drain, and the usage and request log
 // flushes that follow it.
 func TestGracefulDrainFitsInsideTheShutdownBudget(t *testing.T) {
 	stopping := server.QuiesceTimeout + server.GracefulDrainTimeout
@@ -140,7 +140,7 @@ func TestGracefulDrainFitsInsideTheShutdownBudget(t *testing.T) {
 
 // servingApp mirrors the ordering that matters in the real App:
 // StartWithListener blocks until Shutdown stops the server, and Shutdown keeps
-// working afterwards — flushing buffered usage and audit records, closing the
+// working afterwards — flushing buffered usage and request log records, closing the
 // database — before it returns.
 type servingApp struct {
 	serverStopped chan struct{} // closed by Shutdown, releases StartWithListener

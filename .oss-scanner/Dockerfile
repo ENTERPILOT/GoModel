@@ -4,7 +4,7 @@
 #
 # Dependabot bumps both images with the root Dockerfile. Keep Go at the go.mod version (the golang image sets
 # GOTOOLCHAIN=local, so an older image fails the build) and Node at the version CI uses.
-FROM node:22.23.4-bookworm@sha256:7702d8aa4d5910871692af4480eb3ba86f23047a6417a44d857d06c95d060d3f AS node
+FROM node:22.23.5-bookworm@sha256:e13726ca604184d7a91fcacab1fc09eefd642dc28e79ac34e85540dd93b78cfb AS node
 
 FROM golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
 

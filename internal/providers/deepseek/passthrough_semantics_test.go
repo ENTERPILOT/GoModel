@@ -28,31 +28,31 @@ func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {
 		rawEndpoint        string
 		normalizedEndpoint string
 		wantSemanticOp     string
-		wantAuditPath      string
+		wantRequestLogPath string
 	}{
 		{
-			name:           "chat completions",
-			rawEndpoint:    "/chat/completions",
-			wantSemanticOp: "deepseek.chat_completions",
-			wantAuditPath:  "/v1/chat/completions",
+			name:               "chat completions",
+			rawEndpoint:        "/chat/completions",
+			wantSemanticOp:     "deepseek.chat_completions",
+			wantRequestLogPath: "/v1/chat/completions",
 		},
 		{
-			name:           "FIM completions",
-			rawEndpoint:    "/beta/completions",
-			wantSemanticOp: "deepseek.fim_completions",
-			wantAuditPath:  "/beta/completions",
+			name:               "FIM completions",
+			rawEndpoint:        "/beta/completions",
+			wantSemanticOp:     "deepseek.fim_completions",
+			wantRequestLogPath: "/beta/completions",
 		},
 		{
-			name:          "unknown endpoint gets prefixed audit path",
-			rawEndpoint:   "/v1/models",
-			wantAuditPath: "/p/deepseek/v1/models",
+			name:               "unknown endpoint gets prefixed request log path",
+			rawEndpoint:        "/v1/models",
+			wantRequestLogPath: "/p/deepseek/v1/models",
 		},
 		{
 			name:               "NormalizedEndpoint takes precedence over RawEndpoint",
 			rawEndpoint:        "/ignored",
 			normalizedEndpoint: "/chat/completions",
 			wantSemanticOp:     "deepseek.chat_completions",
-			wantAuditPath:      "/v1/chat/completions",
+			wantRequestLogPath: "/v1/chat/completions",
 		},
 	}
 
@@ -67,7 +67,7 @@ func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {
 			if tc.wantSemanticOp != "" {
 				assert.Equal(t, tc.wantSemanticOp, got.SemanticOperation)
 			}
-			assert.Equal(t, tc.wantAuditPath, got.AuditPath)
+			assert.Equal(t, tc.wantRequestLogPath, got.RequestLogPath)
 		})
 	}
 }

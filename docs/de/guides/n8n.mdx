@@ -1,6 +1,6 @@
 ---
 title: "GoModel & n8n"
-description: "Leiten Sie jeden Aufruf der n8n-Nodes AI Agent, LLM Chain und OpenAI mit einem einzigen Credential über GoModel und erhalten Sie Audit-Logs, Kostenerfassung und Metriken für alle Ihre Workflows."
+description: "Leiten Sie jeden Aufruf der n8n-Nodes AI Agent, LLM Chain und OpenAI mit einem einzigen Credential über GoModel und erhalten Sie Request-Logs, Kostenerfassung und Metriken für alle Ihre Workflows."
 icon: "workflow"
 keywords: ["n8n", "AI Agent", "OpenAI-Credential", "OpenAI credential", "Base URL", "base URL", "Workflow-Automatisierung", "workflow automation", "LLM-Observability", "LLM observability", "Einrichtungsanleitung", "setup guide"]
 ---
@@ -19,7 +19,7 @@ Ablauf:
 
 Was Sie erhalten:
 
-- Vollständige Request- und Response-Bodys für jeden KI-Aufruf im Audit-Log von GoModel.
+- Vollständige Request- und Response-Bodys für jeden KI-Aufruf im Request-Log von GoModel.
 - Token-Nutzung und Kosten pro Modell, pro API-Key und pro Label.
 - Prometheus-Metriken und OpenTelemetry-Traces für den KI-Traffic.
 - Failover, Caching, Rate-Limits und Budgets für den n8n-Traffic.
@@ -102,7 +102,7 @@ Liste von GoModel stammt, können Sie im selben Node, der bisher nur OpenAI unte
 `anthropic/claude-haiku-4-5-20251001` oder `gemini/gemini-2.5-flash` auswählen. Sowohl die IDs mit
 Provider-Präfix aus der Auswahl als auch einfache IDs wie `gpt-5-mini` funktionieren. Führen Sie
 den Workflow aus und öffnen Sie anschließend das GoModel-Dashboard: Der Aufruf erscheint im
-Audit-Log mit dem vollständigen Prompt, den von n8n angehängten Tool-Definitionen, der Response,
+Request-Log mit dem vollständigen Prompt, den von n8n angehängten Tool-Definitionen, der Response,
 den Tokens und den Kosten.
 
 <Note>

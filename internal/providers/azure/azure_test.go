@@ -49,6 +49,21 @@ func TestCreateSpeech_FillsDefaultVoice(t *testing.T) {
 	assert.Equal(t, openai.DefaultSpeechVoice, sent.JSON(t)["voice"])
 }
 
+// TestListVoices_AsksUpstream checks Azure keeps the shared adapter's voice
+// listing (OpenAI's static built-in list is for api.openai.com only): it asks
+// the upstream and reports a 404 as unsupported.
+func TestListVoices_AsksUpstream(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusNotFound, `{"error":{"code":"404","message":"Resource not found"}}`)
+	provider := newTestProvider(server.Client(), server.URL)
+
+	_, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: "tts"})
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+	assert.Contains(t, gatewayErr.Message, "does not support listing voices")
+	assert.Equal(t, "/audio/voices", capture.Last(t).Path)
+}
+
 func TestChatCompletion_UsesAzureAuthAndDefaultAPIVersion(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, chatCompletionJSON)
 	provider := newTestProvider(server.Client(), server.URL)

@@ -88,7 +88,7 @@ func TestSpeechDurationMeter_MatchesBufferedMeasurement(t *testing.T) {
 // type exists for: a response larger than any buffer the gateway keeps is still
 // priced by its duration, because only the header is retained.
 func TestSpeechDurationMeter_MeasuresPastTheHeaderCapture(t *testing.T) {
-	// 200 s at 48 kB/s is 9.6 MB — past speechHeaderCapture and past the audit
+	// 200 s at 48 kB/s is 9.6 MB — past speechHeaderCapture and past the request log
 	// capture ceiling both.
 	audio := buildWAV(t, 24000, 1, 16, 200)
 	require.Greater(t, len(audio), speechHeaderCapture)
@@ -236,9 +236,9 @@ func TestTranscriptUsageCollector(t *testing.T) {
 	}
 }
 
-// TestTranscriptUsageCollector_PricesPastTheAuditCeiling is the transcript half
+// TestTranscriptUsageCollector_PricesPastTheRequestLogCeiling is the transcript half
 // of the same regression: an enormous transcript still carries its own usage.
-func TestTranscriptUsageCollector_PricesPastTheAuditCeiling(t *testing.T) {
+func TestTranscriptUsageCollector_PricesPastTheRequestLogCeiling(t *testing.T) {
 	const cap = 64 * 1024
 	const usageJSON = `{"type":"tokens","input_tokens":196,"output_tokens":52,"total_tokens":248}`
 	body := transcriptEvents(20000, usageJSON) // comfortably past the cap
