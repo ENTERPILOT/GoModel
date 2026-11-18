@@ -1,0 +1,244 @@
+package requestlog
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/core"
+)
+
+// PopulateRequestData copies the configured request capture fields into the log entry.
+// Streaming handlers call this before creating the detached stream entry so request
+// metadata is preserved even though the middleware finishes later.
+func PopulateRequestData(entry *LogEntry, req *http.Request, cfg Config) {
+	if entry == nil || req == nil {
+		return
+	}
+
+	if cfg.LogHeaders {
+		PopulateRequestHeaders(entry, req.Header)
+	}
+
+	if req.URL != nil {
+		cfg = cfg.ForPath(req.URL.Path)
+	}
+	if !cfg.LogBodies {
+		return
+	}
+
+	populateRequestBodyFromSnapshot(entry, core.GetRequestSnapshot(req.Context()))
+}
+
+func populateRequestBodyFromSnapshot(entry *LogEntry, snapshot *core.RequestSnapshot) {
+	if entry == nil || snapshot == nil {
+		return
+	}
+	data := ensureLogData(entry)
+	if data.RequestBody != nil || data.RequestBodyTooBigToHandle {
+		return
+	}
+
+	switch body := snapshot.CapturedBodyView(); {
+	case snapshot.BodyNotCaptured:
+		data.RequestBodyTooBigToHandle = true
+	case body != nil:
+		captureLoggedRequestBody(entry, body)
+	}
+}
+
+// PopulateRequestHeaders copies redacted request headers into the log entry.
+func PopulateRequestHeaders(entry *LogEntry, headers http.Header) {
+	if entry == nil || headers == nil {
+		return
+	}
+
+	data := ensureLogData(entry)
+	data.RequestHeaders = extractHeaders(headers)
+}
+
+// PopulateResponseHeaders copies response headers into the log entry when header logging is enabled.
+func PopulateResponseHeaders(entry *LogEntry, headers http.Header) {
+	if entry == nil || headers == nil {
+		return
+	}
+
+	data := ensureLogData(entry)
+	data.ResponseHeaders = extractHeaders(headers)
+}
+
+// PopulateResponseData copies the configured response capture fields into the
+// log entry from already-buffered response bytes.
+func PopulateResponseData(entry *LogEntry, headers http.Header, body []byte, bodyTruncated bool, cfg Config) {
+	if entry == nil {
+		return
+	}
+
+	if cfg.LogHeaders {
+		PopulateResponseHeaders(entry, headers)
+	}
+	if !cfg.LogBodies {
+		return
+	}
+
+	data := ensureLogData(entry)
+	if bodyTruncated {
+		data.ResponseBodyTooBigToHandle = true
+	}
+	if len(body) == 0 {
+		return
+	}
+	captureLoggedResponseBody(entry, body)
+}
+
+// CaptureInternalJSONExchange applies normal request log capture policy to an
+// internal JSON request/response pair without requiring the caller to
+// synthesize HTTP transport details in the server layer.
+func CaptureInternalJSONExchange(
+	entry *LogEntry,
+	ctx context.Context,
+	method,
+	path string,
+	requestBody,
+	responseBody any,
+	responseErr error,
+	cfg Config,
+) {
+	if entry == nil {
+		return
+	}
+	cfg = cfg.ForPath(path)
+
+	if req := internalJSONLoggedRequest(ctx, method, path, requestIDForEntry(entry), requestBody, cfg.LogBodies); req != nil {
+		PopulateRequestData(entry, req, cfg)
+	}
+	headers, body, truncated := internalJSONRequestLogResponse(ctx, responseBody, responseErr, requestIDForEntry(entry), cfg.LogBodies)
+	PopulateResponseData(entry, headers, body, truncated, cfg)
+}
+
+func ensureLogData(entry *LogEntry) *LogData {
+	if entry.Data == nil {
+		entry.Data = &LogData{}
+	}
+	return entry.Data
+}
+
+func requestIDForEntry(entry *LogEntry) string {
+	if entry == nil {
+		return ""
+	}
+	return strings.TrimSpace(entry.RequestID)
+}
+
+func internalJSONLoggedRequest(ctx context.Context, method, path, requestID string, bodyValue any, logBodies bool) *http.Request {
+	headers := internalJSONRequestLogHeaders(ctx, requestID)
+	req := &http.Request{
+		Method: method,
+		URL:    &url.URL{Path: path},
+		Header: headers,
+	}
+	reqCtx := ctx
+	if logBodies {
+		capturedBody, bodyTooBig := internalJSONLoggedRequestBody(bodyValue)
+		snapshot := core.NewRequestSnapshot(
+			method,
+			path,
+			nil,
+			nil,
+			headers,
+			headers.Get("Content-Type"),
+			capturedBody,
+			bodyTooBig,
+			requestID,
+			nil,
+			core.UserPathFromContext(ctx),
+		)
+		reqCtx = core.WithRequestSnapshot(ctx, snapshot)
+	}
+	return req.WithContext(reqCtx)
+}
+
+func internalJSONLoggedRequestBody(bodyValue any) ([]byte, bool) {
+	if bodyValue == nil {
+		return nil, false
+	}
+
+	body, err := json.Marshal(bodyValue)
+	if err != nil {
+		return nil, false
+	}
+
+	return boundedRequestLogBody(body, false)
+}
+
+func internalJSONRequestLogResponse(ctx context.Context, bodyValue any, responseErr error, requestID string, logBodies bool) (http.Header, []byte, bool) {
+	headers := internalJSONRequestLogHeaders(ctx, requestID)
+
+	if !logBodies {
+		return headers, nil, false
+	}
+
+	var (
+		body []byte
+		err  error
+	)
+	switch {
+	case responseErr != nil:
+		var gatewayErr *core.GatewayError
+		if errors.As(responseErr, &gatewayErr) && gatewayErr != nil {
+			body, err = json.Marshal(gatewayErr.ToJSON())
+		} else {
+			body, err = json.Marshal(core.NewProviderError("", http.StatusInternalServerError, responseErr.Error(), responseErr).ToJSON())
+		}
+	case bodyValue != nil:
+		body, err = json.Marshal(bodyValue)
+	default:
+		return headers, nil, false
+	}
+	if err != nil {
+		return headers, nil, false
+	}
+	capturedBody, truncated := boundedRequestLogBody(body, true)
+	return headers, capturedBody, truncated
+}
+
+func internalJSONRequestLogHeaders(ctx context.Context, requestID string) http.Header {
+	headers := make(http.Header)
+	headers.Set("Content-Type", "application/json")
+	if requestID != "" {
+		headers.Set(core.RequestIDHeader, requestID)
+	}
+	if userPath := strings.TrimSpace(core.UserPathFromContext(ctx)); userPath != "" {
+		headers.Set(core.UserPathHeaderNameFromContext(ctx), userPath)
+	}
+	if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
+		snapshotHeaders := snapshot.HeadersView()
+		for _, key := range []string{"Traceparent", "Tracestate", "Baggage"} {
+			for _, value := range snapshotHeaders[key] {
+				headers.Add(key, value)
+			}
+		}
+	}
+	return headers
+}
+
+func boundedRequestLogBody(body []byte, truncate bool) ([]byte, bool) {
+	if body == nil {
+		return []byte{}, false
+	}
+	if len(body) <= MaxBodyCapture {
+		cloned := make([]byte, len(body))
+		copy(cloned, body)
+		return cloned, false
+	}
+	if !truncate {
+		return nil, true
+	}
+	cloned := make([]byte, MaxBodyCapture)
+	copy(cloned, body[:MaxBodyCapture])
+	return cloned, true
+}

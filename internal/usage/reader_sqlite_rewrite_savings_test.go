@@ -13,7 +13,7 @@ import (
 
 // Covers the rewrite-savings columns on both usage log read paths: the
 // paginated GetUsageLog SELECT and the GetUsageByRequestIDs lookup that backs
-// the audit API's per-request usage summary must surface rewrite_tokens_saved
+// the request log API's per-request usage summary must surface rewrite_tokens_saved
 // and the nullable rewrite_cost_saved.
 func TestSQLiteReader_UsageLogCarriesRewriteSavings(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")

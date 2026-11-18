@@ -89,11 +89,11 @@ func TestPassthroughFormFields_SkipsReservedNames(t *testing.T) {
 	assert.Nil(t, passthroughFormFields(nil))
 }
 
-// TestAudioTranscriptionAuditInput_RecordsFieldNamesOnly keeps arbitrary
-// client input out of the audit record: a forwarded field may carry a
+// TestAudioTranscriptionRequestLogInput_RecordsFieldNamesOnly keeps arbitrary
+// client input out of the request log record: a forwarded field may carry a
 // provider-native credential, so only its name is stored.
-func TestAudioTranscriptionAuditInput_RecordsFieldNamesOnly(t *testing.T) {
-	meta := audioTranscriptionAuditInput(&core.AudioTranscriptionRequest{
+func TestAudioTranscriptionRequestLogInput_RecordsFieldNamesOnly(t *testing.T) {
+	meta := audioTranscriptionRequestLogInput(&core.AudioTranscriptionRequest{
 		Model:    "gpt-4o-transcribe",
 		Filename: "speech.wav",
 		File:     []byte("audio"),
@@ -111,7 +111,7 @@ func TestAudioTranscriptionAuditInput_RecordsFieldNamesOnly(t *testing.T) {
 
 	for key, value := range meta {
 		if str, isString := value.(string); isString {
-			assert.NotContains(t, str, "super-secret", "audit meta %q leaked a forwarded value", key)
+			assert.NotContains(t, str, "super-secret", "request log meta %q leaked a forwarded value", key)
 		}
 	}
 	_, present := meta["x_api_key"]

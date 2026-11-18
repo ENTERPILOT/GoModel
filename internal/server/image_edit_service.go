@@ -10,8 +10,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -38,11 +38,11 @@ func (s *imageService) CreateImageEdit(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	// The upload is multipart, so the audit middleware has no JSON body to
+	// The upload is multipart, so the request log middleware has no JSON body to
 	// capture; record the edit parameters and the uploads instead. Image
 	// bytes are stored only when logImageInputs is on.
 	if s.logBodies {
-		auditlog.EnrichEntryWithRequestBody(c, auditlog.BuildImageUploadBody(s.inputCapture(c), req.Images, req.Mask, imageEditAuditMeta(req)))
+		requestlog.EnrichEntryWithRequestBody(c, requestlog.BuildImageUploadBody(s.inputCapture(c), req.Images, req.Mask, imageEditRequestLogMeta(req)))
 	}
 	if err := core.ValidateImageEditRequest(req); err != nil {
 		return handleError(c, err)
@@ -147,17 +147,17 @@ func readImageFile(header *multipart.FileHeader) (core.ImageFile, error) {
 	}, nil
 }
 
-// imageEditAuditMeta builds the parameter metadata attached to a logged edit
+// imageEditRequestLogMeta builds the parameter metadata attached to a logged edit
 // request: the user-facing fields, never routing hints. The uploads themselves
 // are recorded as image items alongside it.
-func imageEditAuditMeta(req *core.ImageEditRequest) map[string]any {
+func imageEditRequestLogMeta(req *core.ImageEditRequest) map[string]any {
 	meta := map[string]any{
 		"model":  req.Model,
 		"prompt": req.Prompt,
 	}
 	for _, field := range req.Fields {
 		if existing, ok := meta[field.Name]; ok {
-			meta[field.Name] = appendAuditValue(existing, field.Value)
+			meta[field.Name] = appendRequestLogValue(existing, field.Value)
 			continue
 		}
 		meta[field.Name] = field.Value
@@ -165,7 +165,7 @@ func imageEditAuditMeta(req *core.ImageEditRequest) map[string]any {
 	return meta
 }
 
-func appendAuditValue(existing any, value string) []string {
+func appendRequestLogValue(existing any, value string) []string {
 	switch v := existing.(type) {
 	case []string:
 		return append(v, value)

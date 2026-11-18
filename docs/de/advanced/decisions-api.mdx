@@ -121,8 +121,8 @@ löst der Endpunkt `model` auf (einschließlich [virtueller Modelle](/de/feature
 fest angegebener Jev-Versionen), wendet Allowlist, Rate-Limits und
 Budgets des Aufrufers an, führt Prompt-[Guardrails](/de/advanced/guardrails) über den Input aus,
 beantwortet identische Requests aus dem exakten [Response-Cache](/de/features/cache),
-weicht bei Verfügbarkeitsfehlern per Failover auf das nächste Ziel aus und erfasst Audit und
-Nutzung unter dem Modell, das geantwortet hat. Filtern Sie das Audit-Log nach dem Request-Typ
+weicht bei Verfügbarkeitsfehlern per Failover auf das nächste Ziel aus und erfasst Request-Log und
+Nutzung unter dem Modell, das geantwortet hat. Filtern Sie das Request-Log nach dem Request-Typ
 **Decisions**.
 
 Die Nutzung auf `/v1/decisions` wird nur für Input-Tokens berechnet, jedes zum

@@ -4,7 +4,7 @@ sidebarTitle: "OIDC SSO"
 description: "Schützen Sie das GoModel Dashboard mit Ihrem OIDC-Identity-Provider über den Authorization Code Flow mit PKCE und ordnen Sie Gruppen des Identity-Providers User-Paths zu."
 icon: "key-round"
 tag: "Pro"
-keywords: ["GoModel Pro", "OIDC", "SSO", "Single Sign-On", "PKCE", "Dashboard-Authentifizierung", "dashboard authentication", "Gruppen-Mapping", "group mapping", "user_path", "Audit-Gründe", "audit reasons"]
+keywords: ["GoModel Pro", "OIDC", "SSO", "Single Sign-On", "PKCE", "Dashboard-Authentifizierung", "dashboard authentication", "Gruppen-Mapping", "group mapping", "user_path", "Ablehnungsgründe", "rejected login reasons"]
 ---
 
 ## Übersicht
@@ -21,7 +21,7 @@ eine Authentifizierungsgrenze nicht unbemerkt verschwinden.
 Für die Anmeldung mit SAML 2.0 siehe [SAML SSO](/de/pro/saml). Alles auf
 dieser Seite außer den OIDC-Client-Einstellungen gilt für beide Protokolle:
 User-Paths, [Gruppen-Mapping](#gruppen-mapping), Sessions, Abmeldung und
-Audit.
+Anmeldeereignisse.
 
 ## SSO konfigurieren
 
@@ -122,7 +122,7 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
   [Zugriffsbereich](/de/features/user-path#zugriffsbereich) der Session. Eine
   an `/eng/platform` gebundene Person würde daher das gesamte Team
   verwalten. Jedes Mitglied sieht nur die eigene Nutzung, die eigenen
-  Audit-Einträge und die eigenen Keys.
+  Request-Log-Einträge und die eigenen Keys.
 - **Eine Anmeldung, deren Pfad einen Knoten abdecken würde, wird
   abgelehnt.** Würde der Claim-Wert den Pfad einem gemappten Knoten oder
   `user_path_prefix` gleichsetzen oder ihn oberhalb davon platzieren,
@@ -258,10 +258,10 @@ Storage-Backend bei der Abmeldung nicht erreichbar, gilt der Widerruf trotzdem
 auf der bearbeitenden Replica, eine Warnung wird protokolliert, und diese
 Replica versucht es weiter, bis die anderen Replicas den Widerruf sehen.
 
-## Audit und Zugriffskontrolle
+## Anmeldeereignisse und Zugriffskontrolle
 
 Erfolgreiche Anmeldungen, abgelehnte Richtlinien und Abmeldungen werden als
-bereinigte Audit-Events erfasst. Tokens, Autorisierungscodes, Cookies,
+bereinigte Authentifizierungs-Events im Request-Log erfasst. Tokens, Autorisierungscodes, Cookies,
 Roh-Claims und Fehlerdetails des Identity-Providers werden nicht gespeichert.
 
 - **Methode.** Anmelde-, Ablehnungs- und Abmelde-Events erfassen das
@@ -270,10 +270,10 @@ Roh-Claims und Fehlerdetails des Identity-Providers werden nicht gespeichert.
 - **Principal.** Eine Anmeldung, die abgelehnt wird, nachdem die Antwort des
   Identity-Providers verifiziert wurde (eine Ablehnung bei der Zulassung und
   bei SAML ein abgelehntes Subject oder eine erneut gesendete Assertion), wird
-  unter dem genannten Principal auditiert und, sofern bekannt, unter dem
+  unter dem genannten Principal im Request-Log erfasst und, sofern bekannt, unter dem
   User-Path, den sie erhalten hätte. Eine Anmeldung, die abgelehnt wird, weil
   ihr Pfad ein konfigurierter Knoten wäre, wird nicht unter diesem Pfad
-  auditiert, denn er gehört keiner Person; das Log nennt ihn als
+  erfasst, denn er gehört keiner Person; das Log nennt ihn als
   `refused_path`.
 - **Logs.** Jede Anmeldung wird zusätzlich unter derselben `request_id`
   protokolliert. `GoModel Pro: SSO login succeeded` nennt das Gruppen-Mapping,
@@ -288,7 +288,7 @@ und gelten nicht für SSO-Sessions.
 
 ### Gründe für abgelehnte Anmeldungen
 
-Eine abgelehnte Anmeldung wird mit genau einem festen Grund auditiert, und das
+Eine abgelehnte Anmeldung wird mit genau einem festen Grund im Request-Log erfasst, und das
 Gateway protokolliert `GoModel Pro: SSO login rejected` mit demselben `reason`
 und einer `request_id`. Die Person sieht nur eine allgemeine Fehlerseite mit
 dieser ID als Referenz.

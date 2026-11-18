@@ -10,7 +10,7 @@ keywords: ["Langfuse", "LLM 可观测性", "LLM observability", "链路追踪", 
 Langfuse 是一个开源的 LLM 工程平台，提供 Trace、Token 与成本分析、提示词管理和评估（eval）功能。它可以通过两种互补的方式与 GoModel 搭配使用：
 
 - **网关 Trace。** GoModel 的 [OpenTelemetry 导出器](/zh/guides/opentelemetry)会为每个请求向 Langfuse 的 OTLP 端点发送一个 Trace。网关的所有客户端都会被覆盖，无需修改应用代码；每个 Trace 都会显示模型、实际提供服务的提供商、延迟、Token 用量和成本、状态，以及每一次重试或故障转移。只有在您开启内容采集后，才会附加提示词和补全内容。
-- **应用 Trace。** 使用 Langfuse SDK 的 OpenAI 即插即用封装，并将其 Base URL 指向 GoModel。Langfuse 记录完整的提示词、补全内容和 Token 用量；GoModel 在底层提供路由、故障转移、缓存，以及其自身的[审计日志](/zh/advanced/configuration#审计日志)和成本追踪。
+- **应用 Trace。** 使用 Langfuse SDK 的 OpenAI 即插即用封装，并将其 Base URL 指向 GoModel。Langfuse 记录完整的提示词、补全内容和 Token 用量；GoModel 在底层提供路由、故障转移、缓存，以及其自身的[请求日志](/zh/advanced/configuration#请求日志)和成本追踪。
 
 您可以单独使用其中任意一种，也可以同时使用两者：借助 W3C Trace 上下文传播，每个请求会合并为 Langfuse 中的单个 Trace（参阅[端到端单一 Trace](#3-端到端单一-trace)）。
 
@@ -78,7 +78,7 @@ OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
 开启后，每个 generation 会将请求消息显示为输入，将响应显示为输出，包括工具调用和工具结果。图片和文件仅显示其类型，过长的文本会被截断；参阅[提示词和补全内容采集](/zh/guides/opentelemetry#提示词与补全内容捕获)。
 
 <Warning>
-  内容采集会将每个被采样的提示词和补全内容发送到 Langfuse。如果这些数据不得离开网关，请保持关闭；[审计日志](/zh/advanced/configuration#审计日志)会将其记录在您自己的存储中。
+  内容采集会将每个被采样的提示词和补全内容发送到 Langfuse。如果这些数据不得离开网关，请保持关闭；[请求日志](/zh/advanced/configuration#请求日志)会将其记录在您自己的存储中。
 </Warning>
 
 ## 2. 使用 Langfuse SDK 从应用侧追踪
@@ -102,7 +102,7 @@ response = client.chat.completions.create(
 )
 ```
 
-Langfuse 会记录每次调用（包括流式调用）的消息、补全内容和 Token 用量，并根据其模型目录定价。由于 Base URL 指向 GoModel，一个客户端即可通过带提供商前缀的模型 ID（`openai/gpt-5-mini`、`gemini/gemini-2.5-flash`、[虚拟模型](/zh/features/virtual-models)）访问所有已配置的提供商，且每次调用仍可享受 GoModel 的故障转移、缓存、预算和审计记录。[JS/TS 封装](https://langfuse.com/integrations/model-providers/openai-js)的用法相同。
+Langfuse 会记录每次调用（包括流式调用）的消息、补全内容和 Token 用量，并根据其模型目录定价。由于 Base URL 指向 GoModel，一个客户端即可通过带提供商前缀的模型 ID（`openai/gpt-5-mini`、`gemini/gemini-2.5-flash`、[虚拟模型](/zh/features/virtual-models)）访问所有已配置的提供商，且每次调用仍可享受 GoModel 的故障转移、缓存、预算和请求日志。[JS/TS 封装](https://langfuse.com/integrations/model-providers/openai-js)的用法相同。
 
 ## 3. 端到端单一 Trace
 

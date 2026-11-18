@@ -16,8 +16,8 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/ext"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
@@ -62,7 +62,7 @@ func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Cont
 
 // dispatchMessagesNative forwards the original Anthropic Messages body to the
 // resolved Anthropic provider and relays the provider-native response (JSON or
-// SSE) unchanged, with admission, audit, and streaming usage accounting.
+// SSE) unchanged, with admission, request logging, and streaming usage accounting.
 func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req *core.ChatRequest, workflow *core.Workflow) error {
 	passthroughProvider, ok := s.provider.(core.RoutablePassthrough)
 	if !ok {
@@ -111,7 +111,7 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 		return handleError(c, err)
 	}
 
-	auditlog.EnrichEntryWithWorkflow(c, workflow)
+	requestlog.EnrichEntryWithWorkflow(c, workflow)
 	info := &core.PassthroughRouteInfo{
 		Provider:           anthropicProviderType,
 		ProviderName:       providerName,
@@ -119,7 +119,7 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 		SemanticOperation:  "anthropic.messages",
 		GenAIOperation:     "chat",
 		Stream:             req.Stream,
-		AuditPath:          "/v1/messages",
+		RequestLogPath:     "/v1/messages",
 		Model:              req.Model,
 	}
 	// Request rewriters (ext extensions) that asked for response feedback

@@ -157,6 +157,7 @@ func buildDefaultConfig() *Config {
 				"llamacpp",
 				"llmd",
 				"deepseek",
+				"hetzner",
 				"edenai",
 				"jev",
 			},
@@ -239,6 +240,7 @@ func buildDefaultConfig() *Config {
 			Timeout:               600,
 			ResponseHeaderTimeout: 600,
 			StreamIdleTimeout:     300,
+			MaxIdleConnsPerHost:   512,
 		},
 		Failover: FailoverConfig{
 			Enabled:     true,
