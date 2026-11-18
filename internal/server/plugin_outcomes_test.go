@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
@@ -34,25 +34,25 @@ func outcomeChains(t *testing.T, definitions []outcomeDefinition, steps ...guard
 }
 
 // runGuardrailOutcomes runs one chat request through the chains and returns
-// the guardrail outcome trail of the audit entry as it is written.
-func runGuardrailOutcomes(t *testing.T, body string, chains *plugins.Chains) (int, []auditlog.GuardrailOutcomeSnapshot) {
+// the guardrail outcome trail of the request log entry as it is written.
+func runGuardrailOutcomes(t *testing.T, body string, chains *plugins.Chains) (int, []requestlog.GuardrailOutcomeSnapshot) {
 	t.Helper()
-	auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true}}
-	handler := phaseHandlerWithLogger(t, phaseProvider(), auditLogger, chains)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c, rec := chatContext(t, body, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	requestLogger := &capturingRequestLogger{config: requestlog.Config{Enabled: true}}
+	handler := phaseHandlerWithLogger(t, phaseProvider(), requestLogger, chains)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c, rec := chatContext(t, body, echotest.WithValue(string(requestlog.LogEntryKey), entry))
 	err := handler.ChatCompletion(c)
 	require.NoError(t, err)
 
-	if len(auditLogger.entries) > 0 {
+	if len(requestLogger.entries) > 0 {
 		// A streamed request is written by the stream observer.
-		return rec.Code, auditLogger.entries[0].Data.Guardrails
+		return rec.Code, requestLogger.entries[0].Data.Guardrails
 	}
 	entry.Complete()
 	return rec.Code, entry.Data.Guardrails
 }
 
-// Every guardrail that ran leaves an outcome in the audit entry, silent
+// Every guardrail that ran leaves an outcome in the request log entry, silent
 // allows included, in execution order across phases, with what it decided,
 // whether it edited, and how it failed.
 func TestChatCompletion_GuardrailOutcomes(t *testing.T) {
@@ -190,7 +190,7 @@ func TestChatCompletion_GuardrailOutcomes(t *testing.T) {
 				assert.Equal(t, want.edited, got.Edited)
 				assert.Equal(t, want.target, got.Target)
 				assert.Equal(t, want.failMode, got.FailMode, "outcome %d = %+v, want edited %v target %q fail mode %q", i, got, want.edited, want.target, want.failMode)
-				assert.Equal(t, got.Error != "", got.Action == auditlog.GuardrailActionFailure, "outcome %d = %+v: a failure carries its error and nothing else does", i, got)
+				assert.Equal(t, got.Error != "", got.Action == requestlog.GuardrailActionFailure, "outcome %d = %+v: a failure carries its error and nothing else does", i, got)
 				assert.Equal(t, want.replaced, got.ReplacedEvents > 0, "outcome %d = %+v, want replaced events %v", i, got, want.replaced)
 
 				if got.Phase == "stream" {
@@ -215,7 +215,7 @@ func TestGuardrailOutcomesFromRecords(t *testing.T) {
 		{Phase: pluginapi.KindResponse, Instance: "c", Decision: pluginapi.Decision{}},
 	}
 	got := guardrailOutcomes(records)
-	want := []auditlog.GuardrailOutcomeSnapshot{
+	want := []requestlog.GuardrailOutcomeSnapshot{
 		{Phase: "prompt", Instance: "a", Type: "t", Step: 2, Action: "warn", Code: "pii", Message: "found", Detail: map[string]int{"hits": 1}, Edited: true, Target: "request"},
 		{Phase: "stream", Instance: "b", Action: "failure", Error: "failed", FailMode: "closed", Edited: true, Target: "response", ReplacedEvents: 2, DroppedEvents: 1},
 		{Phase: "response", Instance: "c", Action: "allow"},

@@ -31,7 +31,7 @@
         <h3>{m.mcp_catalog_title()}</h3>
         <p class="form-hint mcp-catalog-subtitle">
           <code class="mono">{mcpServers.catalog.server}</code>
-          <span class="audit-status-badge {mcpServerStatusClass(mcpServers.catalog)}"
+          <span class="request-log-status-badge {mcpServerStatusClass(mcpServers.catalog)}"
             >{mcpServerStatus(mcpServers.catalog)}</span
           >
         </p>

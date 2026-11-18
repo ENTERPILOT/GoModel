@@ -20,7 +20,7 @@ import (
 const maxZstdWindowBytes = 8 << 20
 
 // requestDecompression decodes request bodies sent with Content-Encoding gzip
-// (or x-gzip) or zstd, so every handler, the audit capture, and passthrough
+// (or x-gzip) or zstd, so every handler, the request log capture, and passthrough
 // see the JSON the client meant. The TypeSafe SDKs compress bodies of 1 KiB
 // or more with zstd by default. The decoded body is held to limit as well
 // (413): the body limit middleware only sees the compressed bytes, and a

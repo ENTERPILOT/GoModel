@@ -45,24 +45,11 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		return nil, err
 	}
 
-	result := &core.ModelsResponse{Object: "list"}
-	result.Data = make([]core.Model, 0, len(upstream.Data))
-	for _, model := range upstream.Data {
-		if strings.TrimSpace(model.ID) == "" {
-			continue
-		}
-		result.Data = append(result.Data, model.toCore())
-	}
-	return result, nil
+	return providers.ModelList(upstream.Data, modelInfo.toCore), nil
 }
 
 // toCore normalizes a Chutes catalog entry into GoModel's provider-neutral model shape.
 func (m modelInfo) toCore() core.Model {
-	object := strings.TrimSpace(m.Object)
-	if object == "" {
-		object = "model"
-	}
-
 	modes := []string{"chat", "responses"}
 	metadata := &core.ModelMetadata{
 		Modes:        modes,
@@ -79,7 +66,7 @@ func (m modelInfo) toCore() core.Model {
 
 	return core.Model{
 		ID:       strings.TrimSpace(m.ID),
-		Object:   object,
+		Object:   providers.ModelObject(m.Object),
 		OwnedBy:  strings.TrimSpace(m.OwnedBy),
 		Created:  m.Created,
 		Metadata: metadata,
@@ -105,17 +92,8 @@ func (p *modelPricing) toCore() *core.ModelPricing {
 	}
 	return &core.ModelPricing{
 		Currency:           "USD",
-		InputPerMtok:       cloneFloat(p.Prompt),
-		OutputPerMtok:      cloneFloat(p.Completion),
-		CachedInputPerMtok: cloneFloat(p.InputCacheRead),
+		InputPerMtok:       p.Prompt,
+		OutputPerMtok:      p.Completion,
+		CachedInputPerMtok: p.InputCacheRead,
 	}
-}
-
-// cloneFloat copies optional prices so the normalized model does not retain upstream pointers.
-func cloneFloat(value *float64) *float64 {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	return &cloned
 }
