@@ -267,6 +267,8 @@ applyAnthropicMessageSchemas();
 applyResponsesReplayStateSchema();
 applyRetrieveModelDialects();
 applyVoiceListShapes();
+// Told apart from OpenAI's own voice list by the member only it carries.
+ensureRequiredProperty("core.AudioVoicesResponse", "voices");
 applySpeechVoiceOneOf();
 ensureRequiredProperty("core.ResponsesConversationRef", "id");
 

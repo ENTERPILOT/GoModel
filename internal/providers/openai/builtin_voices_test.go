@@ -415,6 +415,7 @@ func TestListCustomVoices_ForwardsOnePage(t *testing.T) {
 func TestListCustomVoices_EmptyOrganization(t *testing.T) {
 	provider, capture := newNativeVoicesProvider(t, "", voicesHandler(http.StatusOK, noCustomVoices))
 
+	assert.True(t, provider.ServesCustomVoices())
 	resp, err := provider.ListCustomVoices(context.Background(), core.AudioCustomVoicesParams{})
 	require.NoError(t, err)
 	assert.Equal(t, &core.AudioCustomVoicesResponse{Object: "list", Data: []core.AudioCustomVoice{}}, resp)
@@ -452,6 +453,7 @@ func TestListCustomVoices_CustomBaseURLIsUnsupported(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"voices":["alba"]}`)
 	provider := New(providers.ProviderConfig{APIKey: "sk-local", BaseURL: server.URL + "/v1"}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
+	assert.False(t, provider.ServesCustomVoices())
 	_, err := provider.ListCustomVoices(context.Background(), core.AudioCustomVoicesParams{})
 	require.ErrorIs(t, err, core.ErrAudioCustomVoicesUnsupported)
 	assert.Zero(t, capture.Count())

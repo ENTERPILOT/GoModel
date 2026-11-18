@@ -207,7 +207,9 @@ curl "http://localhost:8080/v1/audio/voices?limit=20" \
   providera, tak jak przy wywołaniu passthrough bez modelu.
 - Lista zawiera też głosy wygenerowane z promptu, których `/v1/audio/speech`
   nie przyjmuje. `?model=` zwraca tylko głosy, których może użyć model speech.
-- Bez takiego providera żądanie bez `model` zwraca `400` (`model is required`).
+- Bez takiego providera żądanie bez `model` zwraca `400`: `model is required`
+  albo `provider "…" does not support listing custom voices`, gdy podano
+  `provider`.
 
 ### Weryfikacja klucza
 

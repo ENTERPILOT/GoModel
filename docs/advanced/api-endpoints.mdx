@@ -208,8 +208,9 @@ curl "http://localhost:8080/v1/audio/voices?limit=20" \
   provider, as for a passthrough call that names no model.
 - It includes prompt-generated voices, which `/v1/audio/speech` does not
   accept. `?model=` lists only the voices a speech model can use.
-- Without such a provider, a request without `model` returns `400`
-  (`model is required`).
+- Without such a provider, a request without `model` returns `400`:
+  `model is required`, or `provider "…" does not support listing custom voices`
+  when `provider` is set.
 
 ### Key verification
 

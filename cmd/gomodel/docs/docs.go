@@ -11740,7 +11740,10 @@ const docTemplate = `{
                         "$ref": "#/definitions/core.AudioVoice"
                     }
                 }
-            }
+            },
+            "required": [
+                "voices"
+            ]
         },
         "core.BatchError": {
             "type": "object",

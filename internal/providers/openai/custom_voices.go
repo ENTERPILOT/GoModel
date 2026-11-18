@@ -62,12 +62,18 @@ func (p *Provider) fetchCustomVoices(ctx context.Context, model string, params c
 	return &page, nil
 }
 
+// ServesCustomVoices reports whether this provider talks to OpenAI's own API,
+// which has the custom voice list. A provider pointed at a custom base URL (a
+// self-hosted server) does not.
+func (p *Provider) ServesCustomVoices() bool {
+	return isOpenAIHost(p.GetBaseURL())
+}
+
 // ListCustomVoices serves OpenAI's own voice list: one cursor page of the
 // organization's custom voices, as GET /audio/voices returns it, prompt-
-// generated voices included. A provider pointed at a custom base URL does not
-// have that list.
+// generated voices included.
 func (p *Provider) ListCustomVoices(ctx context.Context, params core.AudioCustomVoicesParams) (*core.AudioCustomVoicesResponse, error) {
-	if !isOpenAIHost(p.GetBaseURL()) {
+	if !p.ServesCustomVoices() {
 		return nil, core.NewAudioCustomVoicesUnsupportedError(p.providerName)
 	}
 	page, err := p.fetchCustomVoices(ctx, "", params)

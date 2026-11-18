@@ -1,9 +1,9 @@
 package server
 
 import (
-	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -85,35 +85,28 @@ func (s *audioService) ListVoices(c *echo.Context) error {
 
 // listCustomVoices handles GET /v1/audio/voices without a model, which is
 // OpenAI's own voice list: one cursor page of an account's custom voices. It
-// goes to the provider named by the provider parameter, or to the first one
-// that serves the list. The request acts on the whole provider account, so the
-// caller must be granted the whole provider, as on a model-less passthrough
-// call. Without a provider that serves the list, a model is what the request
-// lacks.
+// goes to the first provider instance that serves the list, or to the one the
+// provider parameter names by instance name or type. The request acts on the
+// whole provider account, so the caller must be granted the whole provider, as
+// on a model-less passthrough call. Without an instance that serves the list,
+// a model is what the request lacks.
 func (s *audioService) listCustomVoices(c *echo.Context, query url.Values) error {
-	modelRequired := core.NewInvalidRequestError("model is required", nil).WithParam("model")
 	router, ok := s.provider.(core.AudioCustomVoicesRoutableProvider)
 	if !ok {
-		return handleError(c, modelRequired)
+		return handleError(c, core.NewInvalidRequestError("model is required", nil).WithParam("model"))
 	}
 	requested := strings.TrimSpace(query.Get("provider"))
-	target := requested
-	if target == "" {
-		types := router.AudioCustomVoiceProviderTypes()
-		if len(types) == 0 {
-			return handleError(c, modelRequired)
+	providerName, ok := s.customVoicesProvider(router.AudioCustomVoiceProviders(), requested)
+	if !ok {
+		if requested != "" {
+			return handleError(c, core.NewAudioCustomVoicesUnsupportedError(requested))
 		}
-		target = types[0]
-	}
-	resolved := resolvePassthroughProvider(s.provider, target)
-	providerType, providerName := resolved.ProviderType, resolved.ProviderName
-	if providerName == "" {
-		providerName = target
+		return handleError(c, core.NewInvalidRequestError("model is required", nil).WithParam("model"))
 	}
 
 	ctx, _ := requestContextWithRequestID(c.Request())
 	c.SetRequest(c.Request().WithContext(ctx))
-	requestlog.EnrichEntryWithResolvedRoute(c, "", providerType, providerName)
+	requestlog.EnrichEntryWithResolvedRoute(c, "", s.providerTypeForName(providerName), providerName)
 	if s.modelAuthorizer != nil {
 		if err := s.modelAuthorizer.ValidateProviderAccess(ctx, providerName); err != nil {
 			return handleError(c, err)
@@ -126,13 +119,10 @@ func (s *audioService) listCustomVoices(c *echo.Context, query url.Values) error
 	defer release()
 
 	resp, err := router.ListCustomVoices(ctx, providerName, core.AudioCustomVoicesParams{
-		Limit: strings.TrimSpace(query.Get("limit")),
-		After: strings.TrimSpace(query.Get("after")),
+		Limit: query.Get("limit"),
+		After: query.Get("after"),
 	})
 	if err != nil {
-		if requested == "" && errors.Is(err, core.ErrAudioCustomVoicesUnsupported) {
-			return handleError(c, modelRequired)
-		}
 		return handleError(c, err)
 	}
 	if resp == nil {
@@ -145,4 +135,32 @@ func (s *audioService) listCustomVoices(c *echo.Context, query url.Values) error
 		resp.Data = []core.AudioCustomVoice{}
 	}
 	return c.JSON(http.StatusOK, resp)
+}
+
+// customVoicesProvider picks the instance to list from among those that serve
+// the list: the first one, or the one requested names by instance name or by
+// provider type.
+func (s *audioService) customVoicesProvider(serving []string, requested string) (string, bool) {
+	if requested == "" {
+		if len(serving) == 0 {
+			return "", false
+		}
+		return serving[0], true
+	}
+	if slices.Contains(serving, requested) {
+		return requested, true
+	}
+	for _, name := range serving {
+		if s.providerTypeForName(name) == requested {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+func (s *audioService) providerTypeForName(providerName string) string {
+	if resolver, ok := s.provider.(core.ProviderNameTypeResolver); ok {
+		return strings.TrimSpace(resolver.GetProviderTypeForName(providerName))
+	}
+	return ""
 }

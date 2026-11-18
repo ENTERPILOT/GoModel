@@ -140,11 +140,14 @@ func TestRouterListVoices_Errors(t *testing.T) {
 
 type mockCustomVoicesProvider struct {
 	*mockProvider
+	notServing bool
 	resp       *core.AudioCustomVoicesResponse
 	lastParams *core.AudioCustomVoicesParams
 	// call, when set, runs with the context the router dispatched with.
 	call func(ctx context.Context) error
 }
+
+func (m *mockCustomVoicesProvider) ServesCustomVoices() bool { return !m.notServing }
 
 func (m *mockCustomVoicesProvider) ListCustomVoices(ctx context.Context, params core.AudioCustomVoicesParams) (*core.AudioCustomVoicesResponse, error) {
 	m.lastParams = &params
@@ -156,21 +159,25 @@ func (m *mockCustomVoicesProvider) ListCustomVoices(ctx context.Context, params 
 	return m.resp, m.err
 }
 
+// A self-hosted server registered as type openai ahead of OpenAI itself must
+// not take the list: instances are asked, not provider types.
 func TestRouterListCustomVoices(t *testing.T) {
+	selfHosted := &mockCustomVoicesProvider{mockProvider: &mockProvider{name: "kokoro"}, notServing: true}
 	openAI := &mockCustomVoicesProvider{
 		mockProvider: &mockProvider{name: "openai"},
 		resp:         &core.AudioCustomVoicesResponse{Object: "list", Data: []core.AudioCustomVoice{{ID: "voice_1", Name: "Narrator"}}},
 	}
-	lookup := newMockLookup()
-	lookup.addModel("openai/tts-1", openAI, "openai")
-	lookup.addModel("groq/whisper", &mockProvider{name: "groq"}, "groq")
-	router, err := NewRouter(lookup)
+	router, err := NewRouter(newTestRegistryWithModels(
+		registryModelEntry{provider: selfHosted, providerName: "kokoro-local", providerType: "openai", modelID: "kokoro"},
+		registryModelEntry{provider: openAI, providerName: "openai-main", providerType: "openai", modelID: "tts-1"},
+		registryModelEntry{provider: &mockProvider{name: "groq"}, providerName: "groq", providerType: "groq", modelID: "whisper"},
+	))
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"openai"}, router.AudioCustomVoiceProviderTypes())
+	assert.Equal(t, []string{"openai-main"}, router.AudioCustomVoiceProviders())
 
 	params := core.AudioCustomVoicesParams{Limit: "5", After: "voice_0"}
-	for _, provider := range []string{"openai", " openai "} {
+	for _, provider := range []string{"openai-main", " openai-main "} {
 		openAI.lastParams = nil
 		resp, err := router.ListCustomVoices(context.Background(), provider, params)
 		require.NoError(t, err)
@@ -178,10 +185,11 @@ func TestRouterListCustomVoices(t *testing.T) {
 		assert.Equal(t, &params, openAI.lastParams)
 	}
 
-	for _, provider := range []string{"groq", "missing", ""} {
+	for _, provider := range []string{"kokoro-local", "groq", "missing", ""} {
 		_, err := router.ListCustomVoices(context.Background(), provider, params)
 		require.ErrorIs(t, err, core.ErrAudioCustomVoicesUnsupported, "provider %q", provider)
 	}
+	assert.Nil(t, selfHosted.lastParams)
 }
 
 // OpenAI's own voice list is a control-plane read like the per-model listing,
@@ -206,9 +214,9 @@ func TestRouterListCustomVoices_BypassesCircuitBreaker(t *testing.T) {
 			return err
 		},
 	}
-	lookup := newMockLookup()
-	lookup.addModel("openai/tts-1", lister, "openai")
-	router, err := NewRouter(lookup)
+	router, err := NewRouter(newTestRegistryWithModels(
+		registryModelEntry{provider: lister, providerName: "openai", providerType: "openai", modelID: "tts-1"},
+	))
 	require.NoError(t, err)
 
 	for range 3 {

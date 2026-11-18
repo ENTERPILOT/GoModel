@@ -16415,7 +16415,10 @@
               "$ref": "#/components/schemas/core.AudioVoice"
             }
           }
-        }
+        },
+        "required": [
+          "voices"
+        ]
       },
       "core.BatchError": {
         "type": "object",

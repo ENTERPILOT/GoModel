@@ -669,6 +669,8 @@ applyCSVExportSchema("/admin/usage/invoice");
 applyCSVExportSchema("/admin/mcp-servers/catalog");
 applyRetrieveModelDialects();
 applyVoiceListShapes();
+// Told apart from OpenAI's own voice list by the member only it carries.
+ensureRequiredProperty("core.AudioVoicesResponse", "voices");
 applyImageEditMultiImageSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("core.AudioSpeechRequest", "model");

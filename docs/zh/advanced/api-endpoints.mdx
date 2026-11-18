@@ -180,7 +180,7 @@ curl "http://localhost:8080/v1/audio/voices?limit=20" \
 - 列表来自指向 OpenAI 官方 API 的 `openai` 提供商。配置了多个时，用 `provider=<名称>` 选择其中一个。
 - 请求没有指定模型，因此 API 密钥必须被授予整个提供商的访问权限，与不指定模型的透传调用相同。
 - 列表包含由提示词生成的音色，而 `/v1/audio/speech` 不接受它们。`?model=` 只列出语音模型可以使用的音色。
-- 没有这样的提供商时，不带 `model` 的请求返回 `400`（`model is required`）。
+- 没有这样的提供商时，不带 `model` 的请求返回 `400`：`model is required`；指定了 `provider` 时则为 `provider "…" does not support listing custom voices`。
 
 ### 密钥验证
 
