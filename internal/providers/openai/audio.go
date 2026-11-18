@@ -29,9 +29,15 @@ func WithDefaultSpeechVoice(req *core.AudioSpeechRequest) *core.AudioSpeechReque
 	return &withVoice
 }
 
-// CreateSpeech fills OpenAI's required voice before synthesizing.
+// CreateSpeech fills OpenAI's required voice before synthesizing. Against
+// OpenAI's own API it also sends a custom voice ID in the object form OpenAI
+// requires; a self-hosted server may use such a name for a plain voice.
 func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
-	return p.CompatibleProvider.CreateSpeech(ctx, WithDefaultSpeechVoice(req))
+	req = WithDefaultSpeechVoice(req)
+	if isOpenAIHost(p.GetBaseURL()) {
+		req = withCustomVoiceObject(req)
+	}
+	return p.CompatibleProvider.CreateSpeech(ctx, req)
 }
 
 // CreateSpeech implements OpenAI text-to-speech (POST /audio/speech). The upstream

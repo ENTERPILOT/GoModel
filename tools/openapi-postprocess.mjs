@@ -84,6 +84,29 @@ function applyResponseConversationOneOf(name) {
   properties.conversation = conversation;
 }
 
+// OpenAI takes a speech voice as a name or as a custom-voice object with an id.
+function applySpeechVoiceOneOf() {
+  const properties = schema("core.AudioSpeechRequest").properties;
+  if (!properties?.voice) {
+    throw new Error("missing voice property on schema: core.AudioSpeechRequest");
+  }
+
+  const voice = {};
+  if (properties.voice.description) {
+    voice.description = properties.voice.description;
+  }
+  voice.oneOf = [
+    { type: "string" },
+    {
+      type: "object",
+      required: ["id"],
+      properties: { id: { type: "string", pattern: "\\S" } },
+      additionalProperties: true,
+    },
+  ];
+  properties.voice = voice;
+}
+
 function ensureResponsesInputElementSchema() {
   const schemas = spec.components?.schemas;
   if (!schemas) {
@@ -363,14 +386,14 @@ function applyAudioTranscriptionTextSchema() {
   textResponse.schema = { type: "string" };
 }
 
-function applyUsageInvoiceCSVSchema() {
-  // swag emits one schema across every produced content type, so the CSV
-  // invoice is generated as the JSON Invoice object. The CSV body is text rows.
+function applyCSVExportSchema(path) {
+  // swag emits one schema across every produced content type, so a CSV
+  // export is generated as its JSON object. The CSV body is text rows.
   // Errors are always JSON, though swag lists every produced type on them.
-  const responses = spec.paths?.["/admin/usage/invoice"]?.get?.responses ?? {};
+  const responses = spec.paths?.[path]?.get?.responses ?? {};
   const csvResponse = responses["200"]?.content?.["text/csv"];
   if (!csvResponse) {
-    throw new Error("missing OpenAPI text/csv response: GET /admin/usage/invoice 200");
+    throw new Error(`missing OpenAPI text/csv response: GET ${path} 200`);
   }
   csvResponse.schema = { type: "string" };
   for (const [status, response] of Object.entries(responses)) {
@@ -583,13 +606,14 @@ applyAnthropicMessageSchemas();
 applyResponsesReplayStateSchema();
 applyAnthropicMessagesStreamSchema();
 applyAudioTranscriptionTextSchema();
-applyUsageInvoiceCSVSchema();
+applyCSVExportSchema("/admin/usage/invoice");
+applyCSVExportSchema("/admin/mcp-servers/catalog");
 applyRetrieveModelDialects();
 applyImageEditMultiImageSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("core.AudioSpeechRequest", "model");
+applySpeechVoiceOneOf();
 ensureRequiredProperty("core.AudioSpeechRequest", "input");
-ensureRequiredProperty("core.AudioSpeechRequest", "voice");
 ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
 ensureRequiredProperty("admin.upsertBudgetRequest", "amount");
 ensureRequiredProperty("admin.upsertBudgetRequest", "budget_key");

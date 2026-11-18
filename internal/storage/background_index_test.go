@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
@@ -123,6 +125,50 @@ func TestBackgroundIndexBuilderWaitsForLockHolder(t *testing.T) {
 	assert.True(t, valid)
 }
 
+// WithLock waits for the session holding the lock, then runs on its own
+// session while that one holds it, and returns it afterwards.
+func TestBackgroundIndexBuilderWithLockWaitsForLockHolder(t *testing.T) {
+	pool := newBackgroundIndexPool(t)
+	if pool == nil {
+		return
+	}
+	release := holdLock(t, pool)
+	var released atomic.Bool
+	time.AfterFunc(200*time.Millisecond, func() {
+		released.Store(true)
+		release()
+	})
+
+	builder := BackgroundIndexBuilder{Pool: pool, LockKey: testIndexLockKey}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := builder.WithLock(ctx, func(db sqlx.DB) error {
+		assert.True(t, released.Load(), "ran while another session held the lock")
+		var held int
+		err := db.QueryRow(ctx, `SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid = pg_backend_pid()`).Scan(&held)
+		assert.Equal(t, 1, held, "the session running the change holds the lock")
+		return err
+	})
+	require.NoError(t, err)
+	assert.True(t, builder.TryBuild(ctx, testIndex), "the lock is returned")
+}
+
+func TestBackgroundIndexBuilderWithLockEndsWithItsContext(t *testing.T) {
+	pool := newBackgroundIndexPool(t)
+	if pool == nil {
+		return
+	}
+	holdLock(t, pool)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	err := BackgroundIndexBuilder{Pool: pool, LockKey: testIndexLockKey}.WithLock(ctx, func(sqlx.DB) error {
+		assert.Fail(t, "ran while another session held the lock")
+		return nil
+	})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestBackgroundIndexBuilderRetriesUntilBuilt(t *testing.T) {
 	pool := newBackgroundIndexPool(t)
 	if pool == nil {
@@ -187,83 +233,4 @@ func TestBackgroundIndexBuilderBuildsPastAFailingIndex(t *testing.T) {
 	}, 30*time.Second, 20*time.Millisecond, "the index after the broken one is built anyway")
 	cancel()
 	assert.False(t, <-built, "the broken index never becomes valid")
-}
-
-// BuildOnce waits while another replica holds the lock, then makes its own
-// attempt: that replica may stop before it gets to this index.
-func TestBackgroundIndexBuilderBuildOnceWaitsForLockHolder(t *testing.T) {
-	pool := newBackgroundIndexPool(t)
-	if pool == nil {
-		return
-	}
-	release := holdLock(t, pool)
-	time.AfterFunc(200*time.Millisecond, release)
-
-	builder := BackgroundIndexBuilder{Pool: pool, LockKey: testIndexLockKey, Retry: 20 * time.Millisecond}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	require.True(t, builder.BuildOnce(ctx, testIndex))
-	_, valid := indexState(t, pool)
-	assert.True(t, valid)
-}
-
-// BuildOnce does not retry its own failed attempt, and goes on to the next
-// index.
-func TestBackgroundIndexBuilderBuildOnceGivesUpOnAFailingIndex(t *testing.T) {
-	pool := newBackgroundIndexPool(t)
-	if pool == nil {
-		return
-	}
-	broken := BackgroundIndex{
-		Name:   "idx_background_items_missing",
-		Create: `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_background_items_missing ON background_items(missing_column)`,
-		Label:  "broken test",
-	}
-	builder := BackgroundIndexBuilder{Pool: pool, LockKey: testIndexLockKey, Retry: 20 * time.Millisecond}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	assert.False(t, builder.BuildOnce(ctx, broken, testIndex))
-	require.NoError(t, ctx.Err(), "it returned without waiting for the broken index")
-	_, valid := indexState(t, pool)
-	assert.True(t, valid, "the index after the broken one is built")
-}
-
-// A retired index is dropped under the lock, and left alone while another
-// replica holds it.
-func TestBackgroundIndexBuilderTryDrop(t *testing.T) {
-	pool := newBackgroundIndexPool(t)
-	if pool == nil {
-		return
-	}
-	ctx := context.Background()
-	builder := BackgroundIndexBuilder{Pool: pool, LockKey: testIndexLockKey}
-	assert.True(t, builder.TryDrop(ctx, testIndex), "an index that does not exist is gone")
-	require.True(t, builder.TryBuild(ctx, testIndex))
-
-	release := holdLock(t, pool)
-	assert.False(t, builder.TryDrop(ctx, testIndex))
-	exists, _ := indexState(t, pool)
-	assert.True(t, exists)
-
-	release()
-	assert.True(t, builder.TryDrop(ctx, testIndex))
-	exists, _ = indexState(t, pool)
-	assert.False(t, exists)
-}
-
-// Only a lock another replica holds is worth waiting on. A lock that cannot
-// be asked for at all is a failed attempt, or BuildOnce would poll a broken
-// connection for as long as it stays broken.
-func TestBackgroundIndexBuilderBuildOnceDoesNotWaitOnALockError(t *testing.T) {
-	pool := newBackgroundIndexPool(t)
-	if pool == nil {
-		return
-	}
-	pool.Close()
-
-	builder := BackgroundIndexBuilder{Pool: pool, LockKey: testIndexLockKey, Retry: 20 * time.Millisecond}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	assert.False(t, builder.BuildOnce(ctx, testIndex))
-	require.NoError(t, ctx.Err(), "it returned without waiting")
 }

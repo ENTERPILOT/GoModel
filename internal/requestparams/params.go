@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -189,6 +190,56 @@ func FromAny(values map[string]any) (Set, error) {
 		set[key] = raw
 	}
 	return set, nil
+}
+
+// ToAny decodes a set into the object FromAny encodes, for writing it out as
+// configuration. An integer stays an integer rather than becoming a float,
+// and a nil value, which strips its key, stays nil.
+func ToAny(set Set) (map[string]any, error) {
+	if len(set) == 0 {
+		return nil, nil
+	}
+	values := make(map[string]any, len(set))
+	for key, raw := range set {
+		if raw == nil {
+			values[key] = nil
+			continue
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil, fmt.Errorf("parameter %q: %w", key, err)
+		}
+		values[key] = plainNumbers(value)
+	}
+	return values, nil
+}
+
+// plainNumbers replaces each json.Number in a decoded value with an int64 or
+// uint64 when it is an integer that fits one, and a float64 otherwise. YAML
+// reads no wider integer back exactly, so a float64 is the closest it keeps.
+func plainNumbers(value any) any {
+	switch v := value.(type) {
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return i
+		}
+		if u, err := strconv.ParseUint(v.String(), 10, 64); err == nil {
+			return u
+		}
+		f, _ := v.Float64()
+		return f
+	case map[string]any:
+		for key, item := range v {
+			v[key] = plainNumbers(item)
+		}
+	case []any:
+		for i, item := range v {
+			v[i] = plainNumbers(item)
+		}
+	}
+	return value
 }
 
 // Normalize validates a configured set and returns it in canonical form:

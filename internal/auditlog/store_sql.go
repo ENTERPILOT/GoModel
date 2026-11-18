@@ -167,14 +167,60 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
+	// Under the lock the index builds below take: see withSchemaLock.
+	if err := withSchemaLock(ctx, db, func(session sqlx.DB) error { return ensureSQLSchema(ctx, session) }); err != nil {
+		return nil, err
+	}
+
+	store := &SQLStore{
+		db:            db,
+		retentionDays: retentionDays,
+		stopCleanup:   make(chan struct{}),
+	}
+	// The written_at, model and trigram search indexes can take minutes to
+	// build on a large existing PostgreSQL table, so they are built off the
+	// startup path (and CONCURRENTLY, so writes keep flowing); readers pick
+	// each up as soon as it exists. They are built one after the other, since
+	// PostgreSQL runs one concurrent build per table at a time. The written_at
+	// index gets one attempt first and its retries last, so one that keeps
+	// failing holds up neither of the others.
+	buildCtx, cancel := context.WithCancel(context.Background())
+	store.cancelIndexBuild = cancel
+	store.indexBuild.Go(func() {
+		writtenAt, ok := writtenAtIndexBuilder(db)
+		built := !ok || writtenAt.TryBuild(buildCtx, writtenAtBackgroundIndex)
+		if buildCtx.Err() != nil {
+			return
+		}
+		err := withSchemaLock(buildCtx, db, func(session sqlx.DB) error {
+			ensureModelIndexesConcurrently(buildCtx, session)
+			ensureTrigramSearchIndex(buildCtx, session, postgresErrorMessage)
+			return nil
+		})
+		if err != nil && buildCtx.Err() == nil {
+			slog.Warn("auditlog: failed to build model and search indexes", "error", err)
+		}
+		if !built {
+			writtenAt.Build(buildCtx, writtenAtBackgroundIndex)
+		}
+	})
+	if retentionDays > 0 {
+		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
+	}
+	return store, nil
+}
+
+// ensureSQLSchema creates the audit tables, brings older ones up to date and
+// creates the indexes built at startup.
+func ensureSQLSchema(ctx context.Context, db sqlx.DB) error {
 	if err := db.Schema(ctx, sqlTables...); err != nil {
-		return nil, fmt.Errorf("failed to create audit log tables: %w", err)
+		return fmt.Errorf("failed to create audit log tables: %w", err)
 	}
 	if err := renameAuditColumn(ctx, db, auditLogTable, "model", "requested_model"); err != nil {
-		return nil, fmt.Errorf("failed to rename audit_logs.model to requested_model: %w", err)
+		return fmt.Errorf("failed to rename audit_logs.model to requested_model: %w", err)
 	}
 	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
-		return nil, err
+		return err
 	}
 	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
 	indexes = append(indexes, writtenAtIndexes(db.Dialect())...)
@@ -186,23 +232,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 			slog.Warn("failed to create index", "error", err)
 		}
 	}
-
-	store := &SQLStore{
-		db:            db,
-		retentionDays: retentionDays,
-		stopCleanup:   make(chan struct{}),
-	}
-	// The written_at, model and trigram search indexes can take minutes to
-	// build on a large existing PostgreSQL table, so they are built off the
-	// startup path (and CONCURRENTLY, so writes keep flowing); readers pick
-	// each up as soon as it exists.
-	buildCtx, cancel := context.WithCancel(context.Background())
-	store.cancelIndexBuild = cancel
-	store.indexBuild.Go(func() { buildBackgroundIndexes(buildCtx, db) })
-	if retentionDays > 0 {
-		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
-	}
-	return store, nil
+	return nil
 }
 
 // userPathIndexes serve the user-path filter: the exact-match term and the

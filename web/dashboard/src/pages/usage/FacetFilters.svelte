@@ -4,6 +4,7 @@
   // Every dropdown picks several values: any of them matches within a
   // filter, and all filters apply together.
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
+  import InactiveToggle from "$lib/components/molecules/InactiveToggle.svelte";
   import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import { debounced } from "$lib/utils/debounce.js";
   import { access } from "$lib/stores/access.svelte.js";
@@ -81,11 +82,20 @@
       ariaLabel={m.usage_filter_auth_key()}
     />
   {/if}
+  <!-- Each toggle shows only when it changes something, so a gateway with no
+       inactive keys or stale paths keeps the bar as it was. -->
+  {#if usageFacets.showInactiveKeys || usageFacets.hiddenAuthKeyCount() > 0}
+    <InactiveToggle
+      bind:checked={usageFacets.showInactiveKeys}
+      label={m.usage_show_inactive_auth_keys()}
+      count={usageFacets.hiddenAuthKeyCount()}
+    />
+  {/if}
   <!-- A scoped key's server-side default is its scope root: show it as the
        placeholder so an empty filter reads as that subtree. -->
   <div class="usage-page-filters-user-path">
     <UserPathTreeSelect
-      paths={usageFacets.options.userPaths}
+      paths={usageFacets.userPathOptions()}
       bind:values={usagePage.filters.userPaths}
       onchange={onPicksChange}
       placeholder={access.scoped ? access.userPath : m.usage_all_user_paths()}
@@ -93,6 +103,13 @@
       ariaLabel={m.usage_filter_user_path()}
     />
   </div>
+  {#if usageFacets.showInactivePaths || usageFacets.hiddenUserPathCount() > 0}
+    <InactiveToggle
+      bind:checked={usageFacets.showInactivePaths}
+      label={m.usage_show_inactive_user_paths()}
+      count={usageFacets.hiddenUserPathCount()}
+    />
+  {/if}
   <FilterInput
     class="usage-page-filters-session"
     placeholder={m.usage_filter_session_placeholder()}

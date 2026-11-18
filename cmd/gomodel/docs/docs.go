@@ -1195,6 +1195,88 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/mcp-servers/catalog": {
+            "get": {
+                "description": "Lists every tool the MCP servers report, one row per tool with its server, for security reviews and audits. name is the name that reaches the tool on the aggregated endpoint (/mcp, or /mcp/{virtual_server} with virtual_server) and upstream_name the server's own name for the tool, which /mcp/{server} serves. exposed is false for a tool the server's allowed_tools / disallowed_tools hide. shadowed_by names the server that owns the tool's /mcp name when two servers produce the same one: the gateway keeps the first in slug order, so that name reaches the other server's tool, and this one stays callable only on /mcp/{server}. name is empty for a tool that is not exposed or is shadowed. read_only and destructive are true only when the upstream set the hint. Each row repeats its server's transport, enabled flag, status, and user-path scope. virtual_server and user_path describe the endpoint: they narrow the servers, combine, and decide name ownership among the servers left; without them ownership is decided across all servers. An empty user_path does not filter. server only keeps that server's rows. The export reads the catalogs the gateway already holds: a disabled server, or one that never connected, is listed under servers with its status and no tools, and a degraded server that connected before keeps its last catalog and its tools. In CSV, a server without tools is one row with empty tool columns, and user paths are separated by line breaks.",
+                "produces": [
+                    "application/json",
+                    "text/csv"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Export every MCP tool across all servers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Export format: json (default) or csv (as an attachment)",
+                        "name": "format",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Keep the rows of one MCP server, by slug",
+                        "name": "server",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Keep the members of one virtual MCP server",
+                        "name": "virtual_server",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Keep the servers a caller with this user path can see, e.g. /team/x",
+                        "name": "user_path",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mcpgateway.ToolCatalog"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/mcp-servers/{name}": {
             "delete": {
                 "produces": [
@@ -2617,6 +2699,171 @@ const docTemplate = `{
                     },
                     "503": {
                         "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/usage/benchmark": {
+            "get": {
+                "description": "Treats each direct child of parent as one user, summing its whole subtree, and returns per calendar month the number of active users (at least one request in the month, response-cache hits included), their total cost and the mean, median (p50), p90 and maximum cost per active user. Percentiles interpolate linearly between closest ranks. A user's cost is the one the invoice export reports for it; unpriced_users counts users whose cost is wholly unknown (counted at 0) and partly_priced_users those counted at a known part of it. Every user is counted; nothing is folded into an \"other\" bucket. Usage recorded on parent itself is reported as unattributed_cost. Months are read in the time zone of the X-GoModel-Timezone header (UTC without it); the current month is flagged partial and has no change percentages. A range covers at most 12 months; start_date, end_date and days, which the other usage endpoints take, are ignored. The response holds no user paths unless top_users asks for the highest-cost users of each month.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Benchmark the monthly cost per active user of a group",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "IANA time zone months are read in, e.g. Europe/Warsaw (default UTC)",
+                        "name": "X-GoModel-Timezone",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Group whose direct children are the users, e.g. /eng (default: the credential's scope root, or /)",
+                        "name": "parent",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Number of months ending at end_month, 1-12 (default 7: six complete months plus the current one); ignored with start_month",
+                        "name": "months",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "First month (YYYY-MM, default: months before end_month)",
+                        "name": "start_month",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Last month (YYYY-MM, default and latest: the current month)",
+                        "name": "end_month",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "provider (default) or billed; billed requires pricing.markups_enabled",
+                        "name": "cost_basis",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "List each month's N highest-cost users (0-50, default 0: aggregates only)",
+                        "name": "top_users",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
+                        "name": "user_path",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usage.Benchmark"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -5630,6 +5877,70 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/audio/voices": {
+            "get": {
+                "description": "GoModel extension, not part of the OpenAI API. Returns the voices the provider behind model offers; each id is a valid voice for POST /v1/audio/speech.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "audio"
+                ],
+                "summary": "List voices for a text-to-speech model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "model",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Provider routing hint",
+                        "name": "provider",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/core.AudioVoicesResponse"
                         }
                     },
                     "400": {
@@ -10255,7 +10566,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "proxy_url": {
-                    "description": "ProxyURL may be sent back exactly as the view rendered it (password\nmasked) to keep the stored proxy credentials.",
+                    "description": "ProxyURL may be sent back with the password masked, as the view rendered\nit, to keep the stored proxy password, also when the rest of the URL is\nedited.",
                     "type": "string"
                 },
                 "service_account_file": {
@@ -10389,6 +10700,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
                     "type": "string"
                 },
                 "weight": {
@@ -11209,7 +11523,49 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "voice": {
-                    "type": "string"
+                    "description": "Voice is a voice name or ID. It may be sent as a string (\"alloy\") or as\nan OpenAI custom-voice object ({\"id\": \"voice_1234\"}).",
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "object",
+                            "required": [
+                                "id"
+                            ],
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "pattern": "\\S"
+                                }
+                            },
+                            "additionalProperties": true
+                        }
+                    ]
+                }
+            }
+        },
+        "core.AudioVoice": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "example": "af_bella"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Bella"
+                }
+            }
+        },
+        "core.AudioVoicesResponse": {
+            "type": "object",
+            "properties": {
+                "voices": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.AudioVoice"
+                    }
                 }
             }
         },
@@ -13160,6 +13516,111 @@ const docTemplate = `{
                 "StatusDegraded"
             ]
         },
+        "mcpgateway.ToolCatalog": {
+            "type": "object",
+            "properties": {
+                "servers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mcpgateway.ToolCatalogServer"
+                    }
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mcpgateway.ToolCatalogTool"
+                    }
+                }
+            }
+        },
+        "mcpgateway.ToolCatalogServer": {
+            "type": "object",
+            "properties": {
+                "disallowed_user_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "server": {
+                    "type": "string"
+                },
+                "server_name": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/mcpgateway.ServerStatus"
+                },
+                "transport": {
+                    "type": "string"
+                },
+                "user_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "mcpgateway.ToolCatalogTool": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "destructive": {
+                    "type": "boolean"
+                },
+                "disallowed_user_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "exposed": {
+                    "description": "Exposed is false for a tool the server's allowed_tools /\ndisallowed_tools hide from clients. It says nothing about shadowing.",
+                    "type": "boolean"
+                },
+                "name": {
+                    "description": "Name is the name that reaches this tool on the aggregated endpoint\n(/mcp, or the virtual server in the filter). It is empty when no such\nname exists: the tool is not exposed, or it is shadowed.",
+                    "type": "string"
+                },
+                "read_only": {
+                    "type": "boolean"
+                },
+                "server": {
+                    "type": "string"
+                },
+                "server_name": {
+                    "type": "string"
+                },
+                "shadowed_by": {
+                    "description": "ShadowedBy names the server that owns this tool's aggregated name:\ntwo servers produced the same name and the gateway keeps the first\nin slug order, so that name reaches the other server's tool. The tool\nstays callable on /mcp/{server} under UpstreamName.",
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/mcpgateway.ServerStatus"
+                },
+                "transport": {
+                    "type": "string"
+                },
+                "upstream_name": {
+                    "type": "string"
+                },
+                "user_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "pricingoverrides.Pricing": {
             "type": "object",
             "properties": {
@@ -13591,6 +14052,106 @@ const docTemplate = `{
                 },
                 "prefix": {
                     "description": "Prefix is optionally trimmed from the front of each label. Trimming only\naffects the extracted label, never the forwarded header value.",
+                    "type": "string"
+                }
+            }
+        },
+        "usage.Benchmark": {
+            "type": "object",
+            "properties": {
+                "cost_basis": {
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "months": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.BenchmarkMonth"
+                    }
+                },
+                "parent": {
+                    "type": "string"
+                },
+                "time_zone": {
+                    "type": "string"
+                }
+            }
+        },
+        "usage.BenchmarkMonth": {
+            "type": "object",
+            "properties": {
+                "active_users": {
+                    "type": "integer"
+                },
+                "max": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "mean": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "mean_change_percent": {
+                    "description": "MeanChangePercent and P50ChangePercent compare with the previous month;\nnil for the first month, the partial current month, a month without\nactive users, or a previous month whose value is not positive.",
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "month": {
+                    "type": "string"
+                },
+                "p50": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "p50_change_percent": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "p90": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "partial": {
+                    "type": "boolean"
+                },
+                "partly_priced_users": {
+                    "type": "integer"
+                },
+                "top_users": {
+                    "description": "TopUsers is set only when requested.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.BenchmarkUser"
+                    }
+                },
+                "total_cost": {
+                    "type": "number"
+                },
+                "unattributed_cost": {
+                    "description": "UnattributedCost is usage recorded on the parent path itself, which no\nuser carries; it is not part of TotalCost.",
+                    "type": "number"
+                },
+                "unpriced_users": {
+                    "type": "integer"
+                }
+            }
+        },
+        "usage.BenchmarkUser": {
+            "type": "object",
+            "properties": {
+                "cost": {
+                    "type": "number"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "user": {
                     "type": "string"
                 }
             }
@@ -14504,6 +15065,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
                     "type": "string"
                 },
                 "weight": {

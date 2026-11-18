@@ -84,15 +84,29 @@ const backgroundIndexLockKey int64 = 0x676d2d6175646974
 // backgroundIndexRetry is the pause between build attempts; tests shorten it.
 var backgroundIndexRetry = storage.BackgroundIndexRetry
 
-// backgroundIndexBuilder returns the builder of the PostgreSQL background
-// indexes. It reports false on SQLite, which builds its indexes inline, and
-// on a DB without a pool to hold the build lock on.
-func backgroundIndexBuilder(db sqlx.DB) (storage.BackgroundIndexBuilder, bool) {
+// writtenAtIndexBuilder returns the builder of the PostgreSQL written_at
+// index. It reports false on SQLite, which builds the index inline, and on a
+// DB without a pool to hold the build lock on.
+func writtenAtIndexBuilder(db sqlx.DB) (storage.BackgroundIndexBuilder, bool) {
 	pool := sqlx.PostgreSQLPool(db)
 	if pool == nil {
 		return storage.BackgroundIndexBuilder{}, false
 	}
 	return storage.BackgroundIndexBuilder{Pool: pool, LockKey: backgroundIndexLockKey, Retry: backgroundIndexRetry}, true
+}
+
+// withSchemaLock runs fn while holding the lock the audit index builds take,
+// on the session that holds it. Every schema change to the audit tables goes
+// through it, so replicas starting together change them one at a time and
+// none of them waits on a table another one is building an index on (see
+// storage.BackgroundIndexBuilder.WithLock). Without a pool to hold the lock
+// on, as on SQLite, fn runs on db.
+func withSchemaLock(ctx context.Context, db sqlx.DB, fn func(sqlx.DB) error) error {
+	builder, ok := writtenAtIndexBuilder(db)
+	if !ok {
+		return fn(db)
+	}
+	return builder.WithLock(ctx, fn)
 }
 
 // RecentWrites implements RecentWriteReader.
