@@ -39,10 +39,13 @@ func (s *benchRateLimitStore) DeleteRule(context.Context, ratelimit.RuleScope, s
 func (s *benchRateLimitStore) ReplaceConfigRules(context.Context, []ratelimit.Rule) error {
 	return nil
 }
-func (s *benchRateLimitStore) LoadCounters(context.Context, int64) ([]ratelimit.WindowSnapshot, error) {
+func (s *benchRateLimitStore) LoadCounters(context.Context, int64, string) ([]ratelimit.WindowSnapshot, error) {
 	return nil, nil
 }
 func (s *benchRateLimitStore) SaveCounters(context.Context, []ratelimit.WindowSnapshot) error {
+	return nil
+}
+func (s *benchRateLimitStore) PruneCounters(context.Context) error {
 	return nil
 }
 func (s *benchRateLimitStore) ResetCounter(context.Context, ratelimit.RuleScope, string, int64) error {
