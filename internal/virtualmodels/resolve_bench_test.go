@@ -33,7 +33,7 @@ func benchService(b *testing.B) *Service {
 	if err != nil {
 		b.Fatal(err)
 	}
-	three := []Target{{Model: "openai/gpt-4o"}, {Model: "anthropic/claude"}, {Model: "groq/llama"}}
+	three := benchTargets()
 	for _, vm := range []VirtualModel{
 		{Source: "alias", Targets: []Target{{Model: "openai/gpt-4o"}}},
 		{Source: "flat", Strategy: StrategyRoundRobin, Targets: three},
@@ -47,6 +47,10 @@ func benchService(b *testing.B) *Service {
 		}
 	}
 	return svc
+}
+
+func benchTargets() []Target {
+	return []Target{{Model: "openai/gpt-4o"}, {Model: "anthropic/claude"}, {Model: "groq/llama"}}
 }
 
 // BenchmarkResolveModel measures one request's redirect resolution per
@@ -64,6 +68,56 @@ func BenchmarkResolveModel(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// BenchmarkResolveRequestOverrides measures the per-attempt override lookup
+// for a failover redirect: with nothing configured, with an effort on the
+// redirect, and with an effort per target, for the first attempt and for a
+// failover leg.
+func BenchmarkResolveRequestOverrides(b *testing.B) {
+	perTarget := []Target{
+		{Model: "openai/gpt-4o", ReasoningEffort: "high"},
+		{Model: "anthropic/claude", ReasoningEffort: "low"},
+		{Model: "groq/llama", ReasoningEffort: "medium"},
+	}
+	shapes := []struct {
+		name string
+		vm   VirtualModel
+	}{
+		{name: "none"},
+		{name: "redirect", vm: VirtualModel{Source: "effort", Strategy: StrategyFailover, Targets: benchTargets(), ReasoningEffort: "high", Enabled: true}},
+		{name: "per_target", vm: VirtualModel{Source: "effort", Strategy: StrategyFailover, Targets: perTarget, Enabled: true}},
+	}
+	for _, shape := range shapes {
+		svc := benchService(b)
+		source := "priority"
+		if shape.vm.Source != "" {
+			source = shape.vm.Source
+			if err := svc.Upsert(context.Background(), shape.vm); err != nil {
+				b.Fatal(err)
+			}
+		}
+		ctx := context.Background()
+		requested := core.NewRequestedModelSelector(source, "")
+		resolved, path, applied, err := svc.ResolveModelRouteForUserPath(ctx, requested)
+		if err != nil || !applied {
+			b.Fatalf("ResolveModelRouteForUserPath() = %v, %v, %v", resolved, applied, err)
+		}
+		resolution := &core.RequestModelResolution{Requested: requested, ResolvedSelector: resolved, AliasApplied: applied, VirtualModelPath: path}
+		resolution.CacheDerivedSelectors()
+		attempts := map[string]core.ModelSelector{
+			"first":    resolved,
+			"failover": {Provider: "groq", Model: "llama"},
+		}
+		for attemptName, attempt := range attempts {
+			b.Run(shape.name+"/"+attemptName, func(b *testing.B) {
+				b.ReportAllocs()
+				for range b.N {
+					_ = svc.ResolveRequestOverrides(ctx, resolution, attempt)
+				}
+			})
+		}
 	}
 }
 

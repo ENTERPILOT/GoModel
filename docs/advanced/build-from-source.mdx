@@ -33,10 +33,15 @@ curl -fsSLO "https://github.com/ENTERPILOT/GoModel/releases/download/v${VERSION}
 grep " gomodel_${VERSION}_dashboard.tar.gz\$" checksums.txt | sha256sum -c -
 tar -xzf "gomodel_${VERSION}_dashboard.tar.gz"
 
-CGO_ENABLED=0 go build \
+CGO_ENABLED=0 go build -trimpath -tags=grpcnotrace \
   -ldflags "-s -w -X github.com/enterpilot/gomodel/internal/version.Version=${VERSION}" \
   -o gomodel ./cmd/gomodel
 ```
+
+The `grpcnotrace` tag drops gRPC's built-in request tracing, which GoModel
+never uses, and makes the binary about 15 MB smaller. `-trimpath` removes your
+build machine's paths from it. Both are optional: without them the binary
+works the same, it is just larger. `make build` sets them for you.
 
 Package recipes can pin the archive's SHA-256 next to the source checksum.
 

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"net"
@@ -923,6 +925,74 @@ func TestAdminStaticAssets_SkipAuth(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+// The dashboard handler gzips its own assets; no server middleware may
+// compress them a second time.
+func TestAdminStaticAssets_EncodedOnce(t *testing.T) {
+	srv := New(&mockProvider{}, &Config{
+		MasterKey:             "test-secret-key",
+		AdminEndpointsEnabled: true,
+		AdminUIEnabled:        true,
+		AdminHandler:          admin.NewHandler(nil, nil),
+		DashboardHandler:      newDashboardHandler(t),
+	})
+	serve := func(acceptEncoding string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/admin/static/favicon.svg", nil)
+		req.Header.Set("Accept-Encoding", acceptEncoding)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		return rec
+	}
+
+	raw := serve("identity")
+	rec := serve("gzip")
+
+	// The favicon shrinks under gzip in both the real and the stub bundle.
+	require.Equal(t, []string{"gzip"}, rec.Header().Values("Content-Encoding"))
+	zr, err := gzip.NewReader(bytes.NewReader(rec.Body.Bytes()))
+	require.NoError(t, err)
+	body, err := io.ReadAll(zr)
+	require.NoError(t, err)
+	assert.Equal(t, raw.Body.Bytes(), body)
+	assert.Equal(t, []string{"Accept-Encoding"}, rec.Header().Values("Vary"))
+}
+
+// Health checkers, link checkers and CDNs probe with HEAD; the dashboard page
+// and its assets answer it with the headers GET sends and no body.
+func TestAdminDashboard_AnswersHead(t *testing.T) {
+	srv := New(&mockProvider{}, &Config{
+		MasterKey:             "test-secret-key",
+		AdminEndpointsEnabled: true,
+		AdminUIEnabled:        true,
+		AdminHandler:          admin.NewHandler(nil, nil),
+		DashboardHandler:      newDashboardHandler(t),
+	})
+	serve := func(method, target string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(method, target, nil))
+		return rec
+	}
+
+	for _, target := range []string{"/admin/dashboard", "/admin/dashboard/overview", "/admin/static/favicon.svg"} {
+		t.Run(target, func(t *testing.T) {
+			get := serve(http.MethodGet, target)
+			require.Equal(t, http.StatusOK, get.Code)
+			require.NotEmpty(t, get.Header().Get("Content-Security-Policy"))
+
+			head := serve(http.MethodHead, target)
+
+			require.Equal(t, http.StatusOK, head.Code)
+			assert.Empty(t, head.Body.Bytes())
+			for _, name := range []string{
+				"Content-Type", "Content-Length", "Cache-Control",
+				"Content-Security-Policy", "X-Frame-Options", "X-Content-Type-Options", "Referrer-Policy",
+			} {
+				assert.Equal(t, get.Header().Values(name), head.Header().Values(name), name)
+			}
+		})
+	}
 }
 
 func TestHealthEndpointAlwaysAvailable(t *testing.T) {

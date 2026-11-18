@@ -52,7 +52,7 @@ func TestSQLStoreReopenKeepsRows(t *testing.T) {
 			Name:          "labelled",
 			Labels:        []string{"team-a"},
 			AllowedModels: []string{"openai/"},
-			RedactedValue: TokenPrefix + "...abcd",
+			RedactedValue: DefaultTokenPrefix + "...abcd",
 			SecretHash:    "hash-labelled",
 			Enabled:       true,
 			CreatedAt:     now,
@@ -92,7 +92,7 @@ func TestStore_PassthroughAccessBackfill(t *testing.T) {
 		require.NotEqual(t, sqlTable, legacyTable)
 		require.NoError(t, db.Schema(ctx, legacyTable))
 		_, err := db.Exec(ctx, `INSERT INTO auth_keys (id, name, redacted_value, secret_hash, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?)`, "key-legacy", "legacy", TokenPrefix+"...old", "hash-legacy", storeTestNow.Unix(), storeTestNow.Unix())
+			VALUES (?, ?, ?, ?, ?, ?)`, "key-legacy", "legacy", DefaultTokenPrefix+"...old", "hash-legacy", storeTestNow.Unix(), storeTestNow.Unix())
 		require.NoError(t, err)
 
 		store, err := NewSQLStore(ctx, db)
@@ -107,7 +107,7 @@ func TestStore_PassthroughAccessBackfill(t *testing.T) {
 		_, err := db.Collection("auth_keys").InsertOne(ctx, bson.D{
 			{Key: "_id", Value: "key-legacy"},
 			{Key: "name", Value: "legacy"},
-			{Key: "redacted_value", Value: TokenPrefix + "...old"},
+			{Key: "redacted_value", Value: DefaultTokenPrefix + "...old"},
 			{Key: "secret_hash", Value: "hash-legacy"},
 			{Key: "enabled", Value: true},
 			{Key: "created_at", Value: storeTestNow},

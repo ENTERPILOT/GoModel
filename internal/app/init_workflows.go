@@ -84,7 +84,7 @@ func (b *bootstrap) initWorkflows() error {
 		app.secretRotation.watchEntities(guardrails.DefinitionSecretEntity+".", guardrailSecrets{guardrails: app.guardrails.Service, workflows: workflowResult.Service})
 	}
 
-	authKeyResult, err := authkeys.New(b.ctx, app.storage)
+	authKeyResult, err := authkeys.New(b.ctx, app.storage, authkeys.WithTokenPrefix(appCfg.Server.AuthKeyPrefix))
 	if err != nil {
 		return fmt.Errorf("failed to initialize auth keys: %w", err)
 	}
