@@ -8,22 +8,22 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
-// auditEntryWithBodies is an in-flight entry carrying request metadata and
-// both bodies, so every audit preview variant has something to strip.
-func auditEntryWithBodies(headerValue string) *auditlog.LogEntry {
-	return &auditlog.LogEntry{
-		ID:         "audit-1",
+// requestLogEntryWithBodies is an in-flight entry carrying request metadata and
+// both bodies, so every request log preview variant has something to strip.
+func requestLogEntryWithBodies(headerValue string) *requestlog.LogEntry {
+	return &requestlog.LogEntry{
+		ID:         "request-log-1",
 		RequestID:  "req-1",
 		Timestamp:  time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC),
 		StatusCode: 200,
-		Data: &auditlog.LogData{
+		Data: &requestlog.LogData{
 			RequestHeaders:  map[string]string{"Authorization": "[REDACTED]", "X-Trace": headerValue},
-			RequestBody:     auditlog.CaptureLoggedBody([]byte(`{"model":"gpt-test"}`)),
+			RequestBody:     requestlog.CaptureLoggedBody([]byte(`{"model":"gpt-test"}`)),
 			ResponseHeaders: map[string]string{"X-Request-ID": "req-1"},
-			ResponseBody:    auditlog.CaptureLoggedBody([]byte(`{"id":"chatcmpl-test"}`)),
+			ResponseBody:    requestlog.CaptureLoggedBody([]byte(`{"id":"chatcmpl-test"}`)),
 		},
 	}
 }
@@ -39,7 +39,7 @@ func TestBrokerRetainsSameEventsWithoutSubscribers(t *testing.T) {
 		{name: "bodies stripped", headerValue: "short"},
 		{name: "bodies stripped and compacted", headerValue: strings.Repeat("x", maxRetainedEventBytes)},
 	}
-	events := []string{EventAuditStarted, EventAuditUpdated, EventAuditCompleted}
+	events := []string{EventRequestLogStarted, EventRequestLogUpdated, EventRequestLogCompleted}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,8 +50,8 @@ func TestBrokerRetainsSameEventsWithoutSubscribers(t *testing.T) {
 			defer sub.Close()
 
 			for _, eventType := range events {
-				idle.PublishAuditEvent(eventType, auditEntryWithBodies(tc.headerValue))
-				watched.PublishAuditEvent(eventType, auditEntryWithBodies(tc.headerValue))
+				idle.PublishRequestLogEvent(eventType, requestLogEntryWithBodies(tc.headerValue))
+				watched.PublishRequestLogEvent(eventType, requestLogEntryWithBodies(tc.headerValue))
 				<-sub.Events
 			}
 
@@ -81,7 +81,7 @@ func TestBrokerFansOutBodiesOnlyToSubscribers(t *testing.T) {
 	require.NotNil(t, sub)
 	defer sub.Close()
 
-	b.PublishAuditEvent(EventAuditCompleted, auditEntryWithBodies("short"))
+	b.PublishRequestLogEvent(EventRequestLogCompleted, requestLogEntryWithBodies("short"))
 
 	live := eventPayload(t, <-sub.Events)
 	liveData, ok := live["data"].(map[string]any)
@@ -114,7 +114,7 @@ func TestBrokerSubscriberCountTracksEveryExit(t *testing.T) {
 		sub := b.Subscribe(0)
 		require.NotNil(t, sub)
 		for range 3 {
-			b.PublishAuditEvent(EventAuditUpdated, auditEntryWithBodies("short"))
+			b.PublishRequestLogEvent(EventRequestLogUpdated, requestLogEntryWithBodies("short"))
 		}
 		assert.False(t, b.HasLiveSubscribers(), "a dropped subscriber must not keep bodies encoding")
 	})

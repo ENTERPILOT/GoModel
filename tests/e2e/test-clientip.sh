@@ -9,7 +9,7 @@
 #
 # They cover the whole path from configuration to a recorded address: the
 # policy compiles at startup, reaches echo's IP extractor, and lands in the
-# audit entry's client_ip. config/clientip_test.go covers the parsing in
+# request log entry's client_ip. config/clientip_test.go covers the parsing in
 # isolation and internal/server/clientip_test.go the extractor; nothing else
 # checks that a configured policy actually changes what a running gateway
 # records.
@@ -45,8 +45,8 @@ DIRECT="127.0.0.1"
 PIDF="$WORK/gw.pid"
 
 # start_gw boots a gateway with the SERVER_* policy passed as name=value
-# arguments. The master key is left empty so the admin audit reader is
-# reachable without a credential, and audit logging covers every path so the
+# arguments. The master key is left empty so the admin request log reader is
+# reachable without a credential, and request logging covers every path so the
 # probe can be a free GET /v1/models.
 start_gw(){
   for sp in $(lsof -nP -t -iTCP:$PORT -sTCP:LISTEN 2>/dev/null); do kill "$sp" 2>/dev/null; done
@@ -54,7 +54,7 @@ start_gw(){
   ( cd "$WORK"
     nohup env GOMODEL_MASTER_KEY= PORT=$PORT BASE_PATH= STORAGE_TYPE=sqlite \
       SQLITE_PATH="$WORK/data/gomodel.db" LOGGING_ENABLED=true \
-      LOGGING_ONLY_MODEL_INTERACTIONS=false \
+      LOGGING_ONLY_MODEL_INTERACTIONS=false GOMODEL_CACHE_DIR="$WORK/cache" \
       RESPONSE_CACHE_SIMPLE_ENABLED=false SEMANTIC_CACHE_ENABLED=false REDIS_URL= \
       "$@" "$BIN" >"$WORK/server.log" 2>&1 < /dev/null &
     echo $! >"$PIDF" )
@@ -75,7 +75,7 @@ probe(){
   curl -fsS -o /dev/null "$B/v1/models" -H "X-Request-ID: $rid" "$@" || { echo REQFAIL; return; }
   local ip=""
   for _ in $(seq 1 10); do
-    ip="$(curl -fsS "$B/admin/audit/log?search=$rid&limit=3" | jq -r --arg r "$rid" 'first(.entries[]? | select(.request_id==$r) | .client_ip) // empty')"
+    ip="$(curl -fsS "$B/admin/request-logs?search=$rid&limit=3" | jq -r --arg r "$rid" 'first(.entries[]? | select(.request_id==$r) | .client_ip) // empty')"
     [ -n "$ip" ] && break
     sleep 1
   done

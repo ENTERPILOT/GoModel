@@ -1,0 +1,25 @@
+# Paths that decide what gets built, released, or run on a user's machine.
+# A change here needs a code owner's review once branch protection on main
+# requires it.
+
+# CI, release, and repository automation
+/.github/ @ENTERPILOT/maintainers
+
+# Build and release definitions
+Dockerfile* @ENTERPILOT/maintainers
+/.dockerignore @ENTERPILOT/maintainers
+/docker-compose.yaml @ENTERPILOT/maintainers
+/.goreleaser.yaml @ENTERPILOT/maintainers
+/Makefile @ENTERPILOT/maintainers
+/helm/ @ENTERPILOT/maintainers
+
+# Dependency manifests and lockfiles
+/go.mod @ENTERPILOT/maintainers
+/go.sum @ENTERPILOT/maintainers
+/web/dashboard/package.json @ENTERPILOT/maintainers
+/web/dashboard/package-lock.json @ENTERPILOT/maintainers
+
+# Installer scripts: served from main and piped straight into a shell
+/docs/install/ @ENTERPILOT/maintainers
+
+/SECURITY.md @ENTERPILOT/maintainers

@@ -12,7 +12,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-// A failed attempt must notify the observer immediately (so the live audit
+// A failed attempt must notify the observer immediately (so the live request log
 // preview can surface a failed primary while failover is still in flight),
 // while a successful attempt must not — keeping the success path free of extra
 // live publishes.
@@ -30,7 +30,7 @@ func TestRecordProviderAttemptNotifiesObserverOnFailureOnly(t *testing.T) {
 }
 
 // An attempt records whether its error message came from the provider, so
-// the audit layer can withhold it with the body.
+// the request log can withhold it with the body.
 func TestProviderAttemptFromResultMarksUpstreamMessages(t *testing.T) {
 	tests := []struct {
 		name string

@@ -9,15 +9,15 @@ import "github.com/enterpilot/gomodel/internal/providers"
 // one of the standard GenAI operations, so none is claimed.
 var passthroughSemanticEnricher = providers.NewSemanticEnricher("jev", map[string]providers.PassthroughEndpointSemantics{
 	"/systemone": {
-		Operation: "jev.systemone",
-		AuditPath: "/v1/systemone",
+		Operation:      "jev.systemone",
+		RequestLogPath: "/v1/systemone",
 	},
 	"/systemone/permute": {
-		Operation: "jev.systemone_permute",
-		AuditPath: "/v1/systemone/permute",
+		Operation:      "jev.systemone_permute",
+		RequestLogPath: "/v1/systemone/permute",
 	},
 	"/systemone/separate": {
-		Operation: "jev.systemone_separate",
-		AuditPath: "/v1/systemone/separate",
+		Operation:      "jev.systemone_separate",
+		RequestLogPath: "/v1/systemone/separate",
 	},
 })

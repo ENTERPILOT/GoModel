@@ -291,7 +291,7 @@ func TestChatResponseFromResponses_StatusMapping(t *testing.T) {
 		var gwErr *core.GatewayError
 		require.ErrorAs(t, err, &gwErr)
 		assert.Contains(t, gwErr.Message, "boom")
-		assert.True(t, gwErr.MessageFromUpstream(), "the provider's text is marked for the audit log")
+		assert.True(t, gwErr.MessageFromUpstream(), "the provider's text is marked for the request log")
 	})
 	t.Run("failed without a message keeps the gateway's", func(t *testing.T) {
 		_, err := chatResponseFromResponses(&core.ResponsesResponse{Status: "failed"}, "openai")

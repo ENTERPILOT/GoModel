@@ -14,7 +14,7 @@ import (
 
 // UsageQueryParams specifies the query parameters for usage data retrieval.
 // The optional filters apply uniformly to every reader method, so summaries,
-// breakdowns, and the request log all describe the same filtered slice of
+// breakdowns, and the usage log all describe the same filtered slice of
 // traffic. Every set filter narrows the result (AND across filters); a
 // multi-value filter keeps rows matching any of its values (OR within it).
 type UsageQueryParams struct {
@@ -368,7 +368,7 @@ type UsageLogParams struct {
 	Offset           int    // pagination offset
 }
 
-// UsageLogEntry represents a single usage record in the request log.
+// UsageLogEntry represents a single usage record in the usage log.
 //
 // The cached_input_tokens, uncached_input_tokens, cache_write_input_tokens,
 // and cached_input_ratio fields are derived from RawData at read time by
@@ -523,6 +523,11 @@ type UsageReader interface {
 	// model/provider line items per customer user path, with subtotals and a
 	// grand total. Nothing is folded away.
 	GetUsageInvoice(ctx context.Context, params InvoiceParams) (*Invoice, error)
+
+	// GetUsageBenchmark returns, per calendar month, the active users among
+	// a group's direct children and statistics of their cost. Every user is
+	// counted; nothing is folded away.
+	GetUsageBenchmark(ctx context.Context, params BenchmarkParams) (*Benchmark, error)
 
 	// GetUsageBySession returns a bounded page of per-session aggregates.
 	// Usage rows without a detected session are omitted. Request and token

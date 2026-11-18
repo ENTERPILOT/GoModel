@@ -64,14 +64,14 @@ and sign in with `GOMODEL_MASTER_KEY`. Go to
 3. Leave **Dashboard access** disabled.
 4. Create the key and copy the `sk_gom_...` value. It is shown only once.
 
-The bound user path gives Kimi its own usage and audit scope. Managed keys bind
+The bound user path gives Kimi its own usage and request log scope. Managed keys bind
 directly to a user path, while model restrictions are configured separately as
 gateway-wide [model access policies](/features/user-path#model-access). If you
 use those policies, allow only the selectors Kimi needs for `/agents/kimi`.
 
 <Warning>
   Use this managed key in Kimi, not `GOMODEL_MASTER_KEY`. A managed key without
-  dashboard access can call model endpoints but cannot read audit logs, create
+  dashboard access can call model endpoints but cannot read request logs, create
   keys, or change gateway settings. The master key bypasses that restriction.
 </Warning>
 
@@ -166,11 +166,11 @@ tool-ok
 
 ## 6. Check the traffic in GoModel
 
-Open the GoModel dashboard audit logs:
+Open the Requests page in the GoModel dashboard:
 
-[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+[http://localhost:8080/admin/dashboard/requests](http://localhost:8080/admin/dashboard/requests)
 
-Use the audit trail to confirm that Kimi is sending streaming requests to
+Use the request log to confirm that Kimi is sending streaming requests to
 `POST /v1/chat/completions` and that GoModel is routing them to the selected
 provider. Sign in with the master key or a separate managed key that has
 dashboard access; the Kimi key intentionally cannot open this page.

@@ -22,7 +22,7 @@ type attemptRecorderKey struct{}
 type attemptObserverKey struct{}
 
 // AttemptObserver is invoked after a failed provider attempt is recorded, so the
-// audit/live layer can surface it before the overall request finishes (e.g. a
+// request log/live layer can surface it before the overall request finishes (e.g. a
 // failed primary while failover is still in flight).
 type AttemptObserver func()
 
@@ -47,7 +47,7 @@ func attemptObserverFromContext(ctx context.Context) AttemptObserver {
 }
 
 // ProviderAttempt describes one external provider call made while serving a
-// logical request. It is intentionally storage-agnostic; server/audit layers
+// logical request. It is intentionally storage-agnostic; server/request log layers
 // decide how to persist it.
 type ProviderAttempt struct {
 	Seq          int
@@ -63,8 +63,8 @@ type ProviderAttempt struct {
 	StartedAt    time.Time
 	DurationNs   int64
 	// ResponseBody and ResponseHeaders hold the raw upstream error response for
-	// a failed attempt. They are persisted only when audit body/header logging
-	// is enabled; the audit layer parses and redacts them before storage.
+	// a failed attempt. They are persisted only when request log body/header logging
+	// is enabled; the request log layer parses and redacts them before storage.
 	ResponseBody    []byte
 	ResponseHeaders http.Header
 	// UpstreamErrorMessage reports that ErrorMessage was taken from the

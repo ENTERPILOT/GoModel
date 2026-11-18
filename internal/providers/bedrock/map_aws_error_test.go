@@ -12,7 +12,7 @@ import (
 )
 
 // An AWS API error carries the service's own message, so the gateway error
-// marks it as upstream text for the audit log; other errors keep theirs.
+// marks it as upstream text for the request log; other errors keep theirs.
 func TestMapAWSErrorMarksServiceMessages(t *testing.T) {
 	tests := []struct {
 		name string

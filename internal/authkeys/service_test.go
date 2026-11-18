@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,6 +54,17 @@ func (s *testStore) UpdateImported(_ context.Context, key AuthKey) error {
 		return ErrNotFound
 	}
 	s.keys[key.ID] = key
+	return nil
+}
+
+func (s *testStore) UpdateName(_ context.Context, id, name string, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return ErrNotFound
+	}
+	key.Name = name
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
 	return nil
 }
 
@@ -128,8 +140,8 @@ func TestServiceCreateAuthenticateAndDeactivate(t *testing.T) {
 	issued, err := service.Create(context.Background(), CreateInput{Name: "primary"})
 	require.NoError(t, err)
 	require.NotNil(t, issued)
-	require.Greater(t, len(issued.Value), len(TokenPrefix))
-	require.Equal(t, TokenPrefix, issued.Value[:len(TokenPrefix)])
+	require.Greater(t, len(issued.Value), len(DefaultTokenPrefix))
+	require.Equal(t, DefaultTokenPrefix, issued.Value[:len(DefaultTokenPrefix)])
 	require.True(t, service.Enabled())
 
 	authKeyID, err := service.Authenticate(context.Background(), issued.Value)
@@ -150,7 +162,7 @@ func TestServiceAuthenticateExpiredKey(t *testing.T) {
 	key := AuthKey{
 		ID:            "key-expired",
 		Name:          "expired",
-		RedactedValue: TokenPrefix + "...zzzz",
+		RedactedValue: DefaultTokenPrefix + "...zzzz",
 		SecretHash:    hashSecret("secret"),
 		Enabled:       true,
 		ExpiresAt:     &expiredAt,
@@ -161,7 +173,7 @@ func TestServiceAuthenticateExpiredKey(t *testing.T) {
 	require.NoError(t, err)
 	err = service.Refresh(context.Background())
 	require.NoError(t, err)
-	_, err = service.Authenticate(context.Background(), TokenPrefix+"secret")
+	_, err = service.Authenticate(context.Background(), DefaultTokenPrefix+"secret")
 	require.ErrorIs(t, err, ErrExpired)
 }
 
@@ -170,7 +182,7 @@ func TestServiceAuthenticateRechecksStaleActiveSnapshot(t *testing.T) {
 	key := AuthKey{
 		ID:            "key-expired",
 		Name:          "expired",
-		RedactedValue: TokenPrefix + "...zzzz",
+		RedactedValue: DefaultTokenPrefix + "...zzzz",
 		SecretHash:    hashSecret("secret"),
 		Enabled:       true,
 		ExpiresAt:     &expiredAt,
@@ -186,7 +198,7 @@ func TestServiceAuthenticateRechecksStaleActiveSnapshot(t *testing.T) {
 		bySecretHash: map[string]AuthKey{key.SecretHash: key},
 		activeByHash: map[string]AuthKey{key.SecretHash: key},
 	}
-	_, err = service.Authenticate(context.Background(), TokenPrefix+"secret")
+	_, err = service.Authenticate(context.Background(), DefaultTokenPrefix+"secret")
 	require.ErrorIs(t, err, ErrExpired)
 }
 
@@ -209,7 +221,7 @@ func TestServiceWriteOperationsIgnoreRefreshReconciliationFailures(t *testing.T)
 		key := AuthKey{
 			ID:            "key-1",
 			Name:          "primary",
-			RedactedValue: TokenPrefix + "...abcd",
+			RedactedValue: DefaultTokenPrefix + "...abcd",
 			SecretHash:    hashSecret("secret"),
 			Enabled:       true,
 			CreatedAt:     time.Now().UTC().Add(-time.Hour),
@@ -224,8 +236,26 @@ func TestServiceWriteOperationsIgnoreRefreshReconciliationFailures(t *testing.T)
 		store.listErr = errors.New("transient list failure")
 		err = service.Deactivate(context.Background(), key.ID)
 		require.NoError(t, err)
-		_, err = service.Authenticate(context.Background(), TokenPrefix+"secret")
+		_, err = service.Authenticate(context.Background(), DefaultTokenPrefix+"secret")
 		require.ErrorIs(t, err, ErrInactive)
+	})
+
+	t.Run("rename updates the cache when refresh reconciliation fails", func(t *testing.T) {
+		store := newTestStore()
+		service, err := NewService(store)
+		require.NoError(t, err)
+		issued, err := service.Create(context.Background(), CreateInput{Name: "primary"})
+		require.NoError(t, err)
+
+		store.listErr = errors.New("transient list failure")
+		view, err := service.UpdateName(context.Background(), issued.ID, "renamed")
+		require.NoError(t, err)
+		assert.Equal(t, "renamed", view.Name)
+		cached, err := service.View(issued.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "renamed", cached.Name)
+		_, err = service.Authenticate(context.Background(), issued.Value)
+		require.NoError(t, err, "the token keeps working")
 	})
 }
 
@@ -362,6 +392,67 @@ func TestServicePassthroughAccessLifecycle(t *testing.T) {
 
 	_, err = service.UpdatePassthroughAccess(ctx, "missing", true)
 	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestServiceUpdateName(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore()
+	service, err := NewService(store)
+	require.NoError(t, err)
+	notified := 0
+	service.SetChangeNotifier(func(context.Context) { notified++ })
+
+	issued, err := service.Create(ctx, CreateInput{Name: "ci-deploy"})
+	require.NoError(t, err)
+	other, err := service.Create(ctx, CreateInput{Name: "other"})
+	require.NoError(t, err)
+	notified = 0
+
+	tests := []struct {
+		name     string
+		id       string
+		input    string
+		wantName string
+		wantErr  error
+		invalid  bool
+	}{
+		{name: "trims the new name", id: issued.ID, input: "  ci-deploy-old ", wantName: "ci-deploy-old"},
+		{name: "allows a name another key has", id: issued.ID, input: "other", wantName: "other"},
+		{name: "keeps case", id: issued.ID, input: "CI", wantName: "CI"},
+		{name: "rejects an empty name", id: issued.ID, input: "   ", invalid: true},
+		{name: "rejects an empty id", id: " ", input: "x", invalid: true},
+		{name: "unknown id", id: "missing", input: "x", wantErr: ErrNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := notified
+			view, err := service.UpdateName(ctx, tt.id, tt.input)
+			switch {
+			case tt.invalid:
+				require.Error(t, err)
+				assert.True(t, IsValidationError(err), "error %v is not a validation error", err)
+				assert.Equal(t, before, notified, "a rejected rename announces nothing")
+				return
+			case tt.wantErr != nil:
+				require.ErrorIs(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantName, view.Name)
+			assert.Equal(t, tt.wantName, store.keys[issued.ID].Name, "persisted")
+			cached, err := service.View(issued.ID)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantName, cached.Name, "cached")
+			assert.Equal(t, before+1, notified, "other instances are told to reload")
+		})
+	}
+
+	// The token keeps working, and the other key keeps its name.
+	_, err = service.Authenticate(ctx, issued.Value)
+	require.NoError(t, err)
+	otherView, err := service.View(other.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "other", otherView.Name)
 }
 
 func TestServiceUpdateLabelsUnknownKeyReturnsNotFound(t *testing.T) {

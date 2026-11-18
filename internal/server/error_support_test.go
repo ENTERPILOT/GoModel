@@ -6,9 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -17,9 +21,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 func TestHandleError_RendersDialectSpecificEnvelope(t *testing.T) {
@@ -103,10 +107,10 @@ func TestHandleError_LogsServerErrorsAtErrorLevel(t *testing.T) {
 	require.Contains(t, logOutput, `"message":"provider timeout"`)
 }
 
-func TestHandleError_EnrichesAuditEntryWithGatewayErrorCode(t *testing.T) {
+func TestHandleError_EnrichesRequestLogEntryWithGatewayErrorCode(t *testing.T) {
 	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 
 	err := core.NewRateLimitError("budget", "budget exceeded").WithCode("budget_exceeded")
 	handleErr := handleError(c, err)
@@ -118,17 +122,17 @@ func TestHandleError_EnrichesAuditEntryWithGatewayErrorCode(t *testing.T) {
 }
 
 // An upstream error message is part of the provider's response body, so the
-// audit entry stores it only where bodies are logged. The client still
+// request log entry stores it only where bodies are logged. The client still
 // receives it, and the entry keeps the error type, code and status.
-func TestHandleError_AuditedUpstreamErrorMessageFollowsBodyLogging(t *testing.T) {
+func TestHandleError_LoggedUpstreamErrorMessageFollowsBodyLogging(t *testing.T) {
 	const upstreamMessage = "Invalid input: the user's prompt"
 	tests := []struct {
 		name string
-		cfg  auditlog.Config
+		cfg  requestlog.Config
 		want string
 	}{
-		{name: "bodies off", cfg: auditlog.Config{Enabled: true}, want: auditlog.UpstreamErrorMessageWithheld},
-		{name: "bodies on", cfg: auditlog.Config{Enabled: true, LogBodies: true}, want: upstreamMessage},
+		{name: "bodies off", cfg: requestlog.Config{Enabled: true}, want: requestlog.UpstreamErrorMessageWithheld},
+		{name: "bodies on", cfg: requestlog.Config{Enabled: true, LogBodies: true}, want: upstreamMessage},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -136,9 +140,9 @@ func TestHandleError_AuditedUpstreamErrorMessageFollowsBodyLogging(t *testing.T)
 			upstream := core.ParseProviderError("openai", http.StatusBadRequest,
 				[]byte(`{"error":{"message":"`+upstreamMessage+`","code":"invalid_value"}}`), nil)
 
-			var entry *auditlog.LogEntry
-			handler := auditlog.Middleware(&requestModelLiveLogger{cfg: tt.cfg})(func(c *echo.Context) error {
-				entry, _ = c.Get(string(auditlog.LogEntryKey)).(*auditlog.LogEntry)
+			var entry *requestlog.LogEntry
+			handler := requestlog.Middleware(&requestModelLiveLogger{cfg: tt.cfg})(func(c *echo.Context) error {
+				entry, _ = c.Get(string(requestlog.LogEntryKey)).(*requestlog.LogEntry)
 				return handleError(c, upstream)
 			})
 			require.NoError(t, handler(c))
@@ -207,8 +211,8 @@ func TestHandleError_ClassifiesClientCancellation(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			c, rec := echotest.Post(t, tc.path, nil)
-			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-			c.Set(string(auditlog.LogEntryKey), entry)
+			entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+			c.Set(string(requestlog.LogEntryKey), entry)
 			if tc.cancelRequest {
 				ctx, cancel := context.WithCancel(c.Request().Context())
 				cancel()
@@ -223,14 +227,14 @@ func TestHandleError_ClassifiesClientCancellation(t *testing.T) {
 	}
 }
 
-func TestHandleError_AuditMiddlewareRecordsClientCancellationStatus(t *testing.T) {
-	logger := &capturingAuditLogger{config: auditlog.Config{Enabled: true}}
+func TestHandleError_RequestLogMiddlewareRecordsClientCancellationStatus(t *testing.T) {
+	logger := &capturingRequestLogger{config: requestlog.Config{Enabled: true}}
 	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
 	ctx, cancel := context.WithCancel(c.Request().Context())
 	cancel()
 	c.SetRequest(c.Request().WithContext(ctx))
 
-	handler := auditlog.Middleware(logger)(func(c *echo.Context) error {
+	handler := requestlog.Middleware(logger)(func(c *echo.Context) error {
 		return handleError(c, fmt.Errorf("send request: %w", context.Canceled))
 	})
 
@@ -276,8 +280,8 @@ func TestHandleRouteNotFound_OpenAIDialect(t *testing.T) {
 
 func TestHandleError_RecordsUpstreamProviderOfError(t *testing.T) {
 	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 
 	upstream := core.ParseProviderError("openai", http.StatusUnauthorized, []byte(`{"error":{"message":"Incorrect API key provided"}}`), nil)
 	handleErr := handleError(c, upstream)
@@ -293,8 +297,8 @@ func TestHandleError_RecordsUpstreamProviderOfError(t *testing.T) {
 
 	// The gateway's own authentication failure names no provider.
 	c, rec = echotest.Post(t, "/v1/chat/completions", nil)
-	entry = &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry = &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 	handleErr = handleError(c, core.NewAuthenticationError("", "invalid API key"))
 	require.NoError(t, handleErr)
 	require.Empty(t, entry.Data.ErrorProvider)
@@ -419,9 +423,130 @@ func TestGatewayErrorHandler_LeavesCommittedResponseAlone(t *testing.T) {
 	require.Contains(t, buf.String(), "failed after the first chunk")
 }
 
+// A failure after the response started is a broken relay, not a gateway 500:
+// a client that hung up is routine, anything else is a warning, and only a
+// panic is still an error. The request log entry is already queued for writing by
+// then, so a relay failure is logged without touching it.
+func TestGatewayErrorHandler_ClassifiesFailuresOnCommittedResponses(t *testing.T) {
+	tests := []struct {
+		name               string
+		cancelRequest      bool
+		err                error
+		wantLevel          string
+		wantLogType        string
+		wantRequestLogType string
+	}{
+		{
+			name:          "client hung up",
+			cancelRequest: true,
+			err:           context.Canceled,
+			wantLevel:     "DEBUG",
+			wantLogType:   "client_disconnected",
+		},
+		{
+			name:        "client connection broke on a write",
+			err:         &net.OpError{Op: "write", Net: "tcp", Err: syscall.EPIPE},
+			wantLevel:   "DEBUG",
+			wantLogType: "client_disconnected",
+		},
+		{
+			name:        "provider connection reset while reading",
+			err:         &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET},
+			wantLevel:   "WARN",
+			wantLogType: "stream_error",
+		},
+		{
+			name:        "provider body cut short",
+			err:         io.ErrUnexpectedEOF,
+			wantLevel:   "WARN",
+			wantLogType: "stream_error",
+		},
+		{
+			name:               "panic",
+			err:                &middleware.PanicStackError{Err: errors.New("relay blew up"), Stack: []byte("goroutine 1")},
+			wantLevel:          "ERROR",
+			wantLogType:        string(core.ErrorTypeInternal),
+			wantRequestLogType: string(core.ErrorTypeInternal),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			original := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			t.Cleanup(func() { slog.SetDefault(original) })
+
+			c, rec := echotest.Post(t, "/v1/messages", nil)
+			entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+			c.Set(string(requestlog.LogEntryKey), entry)
+			if tc.cancelRequest {
+				ctx, cancel := context.WithCancel(c.Request().Context())
+				cancel()
+				c.SetRequest(c.Request().WithContext(ctx))
+			}
+			require.NoError(t, c.String(http.StatusOK, "partial"))
+
+			gatewayErrorHandler(c, tc.err)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, "partial", rec.Body.String())
+			assert.Equal(t, tc.wantRequestLogType, entry.ErrorType)
+			assert.Equal(t, 1, strings.Count(logs.String(), `"level":`), logs.String())
+			assert.Contains(t, logs.String(), `"level":"`+tc.wantLevel+`"`)
+			assert.Contains(t, logs.String(), `"`+tc.wantLogType+`"`)
+		})
+	}
+}
+
 // The direct gatewayErrorHandler tests stub the error; this one drives the real
 // server so the goccy serializer, echo's dispatch and the handler are all in
 // the path — the shape that produced the opaque 500 in #881.
+// echo's default request logger delivers an escaped error twice; it is handled
+// once. A different error or a panic that follows on the same request is still
+// reported, and a panic delivered twice is reported once.
+func TestGatewayErrorHandler_HandlesARepeatedErrorOnce(t *testing.T) {
+	var logs bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	c, rec := echotest.Post(t, "/v1/messages", nil)
+	require.NoError(t, c.String(http.StatusOK, "partial"))
+
+	relayErr := io.ErrUnexpectedEOF
+	gatewayErrorHandler(c, relayErr)
+	gatewayErrorHandler(c, relayErr)
+	assert.Equal(t, 1, strings.Count(logs.String(), `"msg":"response terminated abnormally"`), logs.String())
+
+	gatewayErrorHandler(c, errors.New("cleanup failed"))
+	assert.Contains(t, logs.String(), `"error":"cleanup failed"`)
+
+	panicErr := &middleware.PanicStackError{Err: errors.New("middleware blew up"), Stack: []byte("goroutine 1")}
+	gatewayErrorHandler(c, panicErr)
+	gatewayErrorHandler(c, panicErr)
+
+	assert.Equal(t, 1, strings.Count(logs.String(), `"panic":"middleware blew up"`), logs.String())
+	assert.Contains(t, logs.String(), `"stack":"goroutine 1"`)
+	assert.Equal(t, "partial", rec.Body.String())
+}
+
+// uncomparableError is an error value Go cannot compare with ==.
+type uncomparableError []string
+
+func (e uncomparableError) Error() string { return strings.Join(e, "; ") }
+
+// An extension may return an error value that cannot be compared; telling it
+// apart from the previous error must not panic.
+func TestGatewayErrorHandler_ToleratesUncomparableErrors(t *testing.T) {
+	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
+	err := struct{ error }{uncomparableError{"first", "second"}}
+
+	gatewayErrorHandler(c, err)
+	require.NotPanics(t, func() { gatewayErrorHandler(c, err) })
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
 func TestGatewayErrorHandler_UnencodableResponseThroughRealServer(t *testing.T) {
 	logs := &bytes.Buffer{}
 	original := slog.Default()
@@ -455,10 +580,10 @@ func TestGatewayErrorHandler_UnencodableResponseThroughRealServer(t *testing.T) 
 	assert.Contains(t, logs.String(), "year outside of range")
 }
 
-func TestGatewayErrorHandler_FinalizesHeadersAndAudit(t *testing.T) {
+func TestGatewayErrorHandler_FinalizesHeadersAndRequestLog(t *testing.T) {
 	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 
 	gatewayErrorHandler(c, &gatewayErrorWithResponseHeaders{
 		GatewayError: core.NewRateLimitError("budget", "budget exceeded").WithCode("budget_exceeded"),
@@ -471,10 +596,10 @@ func TestGatewayErrorHandler_FinalizesHeadersAndAudit(t *testing.T) {
 	assert.Equal(t, "budget_exceeded", entry.Data.ErrorCode)
 }
 
-func TestGatewayErrorHandler_KeepsTheOriginalAuditedError(t *testing.T) {
+func TestGatewayErrorHandler_KeepsTheOriginalLoggedError(t *testing.T) {
 	c, _ := echotest.Post(t, "/v1/chat/completions", nil)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 
 	// handleError records the real cause and returns its own write failure,
 	// which then escapes here; that follow-up must not overwrite the cause.

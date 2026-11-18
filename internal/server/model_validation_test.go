@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
 
@@ -376,7 +376,7 @@ func TestWorkflowResolution_StoresPassthroughRouteInfo(t *testing.T) {
 			assert.Equal(t, "openai", capturedWorkflow.Passthrough.Provider)
 			assert.Equal(t, "responses", capturedWorkflow.Passthrough.RawEndpoint)
 			assert.Equal(t, "gpt-5-mini", capturedWorkflow.Passthrough.Model)
-			assert.Equal(t, "/p/openai/responses", capturedWorkflow.Passthrough.AuditPath)
+			assert.Equal(t, "/p/openai/responses", capturedWorkflow.Passthrough.RequestLogPath)
 		}
 	}
 }
@@ -452,9 +452,9 @@ func TestWorkflowResolution_PopulatesPassthroughProviderFromPathFallback(t *test
 		OperationType: string(core.OperationProviderPassthrough),
 	}
 	core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{
-		RawEndpoint: "responses",
-		Model:       "gpt-5-mini",
-		AuditPath:   "/p/openai/responses",
+		RawEndpoint:    "responses",
+		Model:          "gpt-5-mini",
+		RequestLogPath: "/p/openai/responses",
 	})
 	ctx := core.WithRequestSnapshot(c.Request().Context(), frame)
 	ctx = core.WithWhiteBoxPrompt(ctx, env)
@@ -614,7 +614,7 @@ func TestModelValidation_RegistryNotInitializedReturnsGatewayError(t *testing.T)
 	assert.Contains(t, rec.Body.String(), "model registry not initialized")
 }
 
-func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t *testing.T) {
+func TestModelValidation_EnrichesRequestLogEntryWithRequestedModelOnResolutionError(t *testing.T) {
 	store := newAliasesTestStore(redirectVM("smart", "gpt-4o", "openai", false))
 	catalog := &aliasesTestCatalog{
 		supported: map[string]bool{
@@ -646,8 +646,8 @@ func TestModelValidation_EnrichesAuditEntryWithRequestedModelOnResolutionError(t
 	})
 
 	c, rec := echotest.Post(t, "/v1/responses", `{"model":"smart","input":"hello"}`)
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c.Set(string(requestlog.LogEntryKey), entry)
 
 	err = handler(c)
 	require.NoError(t, err)
