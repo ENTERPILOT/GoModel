@@ -33,8 +33,8 @@ func TestSQLiteConcurrentWriteSafety(t *testing.T) {
 
 	db := store.DB()
 
-	// Create two tables to simulate audit log and usage tracking writing concurrently.
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS test_audit (id TEXT PRIMARY KEY, data TEXT)`)
+	// Create two tables to simulate request log and usage tracking writing concurrently.
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS test_request_log (id TEXT PRIMARY KEY, data TEXT)`)
 	require.NoError(t, err)
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS test_usage (id TEXT PRIMARY KEY, data TEXT)`)
@@ -46,12 +46,12 @@ func TestSQLiteConcurrentWriteSafety(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, goroutines*insertsPerGoroutine*2)
 
-	// Half the goroutines write to test_audit, half to test_usage — mirrors real workload.
+	// Half the goroutines write to test_request_log, half to test_usage — mirrors real workload.
 	for i := range goroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			table := "test_audit"
+			table := "test_request_log"
 			if id%2 == 1 {
 				table = "test_usage"
 			}
@@ -75,14 +75,14 @@ func TestSQLiteConcurrentWriteSafety(t *testing.T) {
 	}
 
 	// Verify all rows were inserted.
-	var auditCount, usageCount int
-	err = db.QueryRow("SELECT COUNT(*) FROM test_audit").Scan(&auditCount)
+	var requestLogCount, usageCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM test_request_log").Scan(&requestLogCount)
 	require.NoError(t, err)
 	err = db.QueryRow("SELECT COUNT(*) FROM test_usage").Scan(&usageCount)
 	require.NoError(t, err)
 
 	expectedPerTable := (goroutines / 2) * insertsPerGoroutine
-	assert.Equal(t, expectedPerTable, auditCount)
+	assert.Equal(t, expectedPerTable, requestLogCount)
 	assert.Equal(t, expectedPerTable, usageCount)
 }
 

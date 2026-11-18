@@ -31,8 +31,8 @@ type TestServerConfig struct {
 	// DBType is either "postgresql" or "mongodb"
 	DBType string
 
-	// AuditLogEnabled enables audit logging
-	AuditLogEnabled bool
+	// RequestLogEnabled enables request logging
+	RequestLogEnabled bool
 
 	// UsageEnabled enables usage tracking
 	UsageEnabled bool
@@ -46,10 +46,10 @@ type TestServerConfig struct {
 	// BudgetUserPaths seeds configured budget limits.
 	BudgetUserPaths []config.BudgetUserPathConfig
 
-	// LogBodies enables body logging in audit logs
+	// LogBodies enables body logging in request logs
 	LogBodies bool
 
-	// LogHeaders enables header logging in audit logs
+	// LogHeaders enables header logging in request logs
 	LogHeaders bool
 
 	// OnlyModelInteractions limits logging to model endpoints only
@@ -299,7 +299,7 @@ func buildAppConfig(t *testing.T, cfg TestServerConfig, mockLLMURL string, port 
 			Storage: config.MediaStorageConfig{Type: config.MediaStorageMemory},
 		},
 		Logging: config.LogConfig{
-			Enabled:               cfg.AuditLogEnabled,
+			Enabled:               cfg.RequestLogEnabled,
 			LogBodies:             cfg.LogBodies,
 			LogHeaders:            cfg.LogHeaders,
 			BufferSize:            100,

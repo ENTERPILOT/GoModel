@@ -54,7 +54,7 @@ const maxClientRequestIDLength = 128
 
 // clientRequestID returns the caller-supplied request ID when it is a plain
 // token: 1..maxClientRequestIDLength visible ASCII characters. The ID is echoed
-// into logs, audit entries, and response headers, so anything else (spaces,
+// into logs, request log entries, and response headers, so anything else (spaces,
 // control characters, non-ASCII) is treated as absent and a fresh ID is
 // generated instead.
 func clientRequestID(header http.Header) string {

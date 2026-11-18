@@ -201,8 +201,8 @@ func (p *Workflow) CacheEnabled() bool {
 	return p.featureEnabled(func(features WorkflowFeatures) bool { return features.Cache })
 }
 
-// AuditEnabled reports whether audit logging is enabled for the request.
-func (p *Workflow) AuditEnabled() bool {
+// RequestLogEnabled reports whether request logging is enabled for the request.
+func (p *Workflow) RequestLogEnabled() bool {
 	return p.featureEnabled(func(features WorkflowFeatures) bool { return features.Audit })
 }
 

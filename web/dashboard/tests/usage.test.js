@@ -12,11 +12,17 @@ import {
 } from "../src/pages/usage/usage-helpers.js";
 import {
   authKeyDisplayName,
+  authKeyInactiveIDs,
   authKeyNameMap,
   authKeyOptionList,
   facetOptionList,
+  hiddenAuthKeyCount,
+  hiddenUserPathCount,
+  knownUserPaths,
   usageLogHasAuthKeys,
+  userPathOptionList,
 } from "../src/pages/usage/usage-filter-options.js";
+import { buildUserPathTree } from "../src/pages/usage/user-path-tree.js";
 import { labelColor, usageLogHasLabels } from "../src/pages/usage/usage-labels.js";
 import {
   billedCostTitle,
@@ -215,7 +221,7 @@ test("usageFiltersEmpty checks every filter in the table", () => {
 
 // --- Request types ---
 
-test("usageTypeForOperation folds operations into the audit log's request types", () => {
+test("usageTypeForOperation folds operations into the request log's request types", () => {
   assert.equal(usageTypeForOperation("chat_completions"), "chat");
   assert.equal(usageTypeForOperation("audio_transcriptions"), "audio");
   assert.equal(usageTypeForOperation("conversations"), "responses");
@@ -330,6 +336,20 @@ test("authKeyNameMap maps ids to names, falling back to the id", () => {
   assert.deepEqual(authKeyNameMap(null), {});
 });
 
+test("same-name keys stay distinguishable in the API key filter and log column", () => {
+  const names = authKeyNameMap([
+    { id: "k1", name: "ci-deploy", redacted_value: "sk_gom_...abcd" },
+    { id: "k2", name: "ci-deploy", redacted_value: "sk_gom_...wxyz" },
+    { id: "k3", name: "batch", redacted_value: "sk_gom_...q1q1" },
+  ]);
+  assert.deepEqual(
+    authKeyOptionList(names, []).map((option) => option.label),
+    ["batch", "ci-deploy (sk_gom_...abcd)", "ci-deploy (sk_gom_...wxyz)"],
+  );
+  assert.equal(authKeyDisplayName("k2", names), "ci-deploy (sk_gom_...wxyz)");
+  assert.equal(authKeyDisplayName("k3", names), "batch");
+});
+
 test("authKeyDisplayName prefers the key name, then a short id", () => {
   const names = { k1: "CI" };
   assert.equal(authKeyDisplayName("k1", names), "CI");
@@ -351,6 +371,70 @@ test("authKeyOptionList sorts by name and keeps an unknown active key", () => {
     ["k1", "gone", "k2"],
   );
   assert.deepEqual(authKeyOptionList({}, []), []);
+});
+
+test("authKeyInactiveIDs marks deactivated and expired keys", () => {
+  const now = Date.parse("2026-06-01T00:00:00Z");
+  const keys = [
+    { id: "live", active: true },
+    { id: "off", active: false, deactivated_at: "2026-05-01T00:00:00Z" },
+    { id: "old", active: true, expires_at: "2026-05-31T00:00:00Z" },
+    { id: "later", active: true, expires_at: "2026-07-01T00:00:00Z" },
+  ];
+  assert.deepEqual(authKeyInactiveIDs(keys, now), { off: true, old: true });
+  assert.deepEqual(authKeyInactiveIDs(null, now), {});
+});
+
+test("authKeyOptionList hides inactive keys unless shown or selected", () => {
+  const names = { k1: "Alpha", k2: "Beta", k3: "Gamma" };
+  const inactive = { k2: true, k3: true };
+  const ids = (active, options) => authKeyOptionList(names, active, options).map((option) => option.id);
+
+  assert.deepEqual(ids([], { inactive }), ["k1"]);
+  assert.deepEqual(ids([], { inactive, showInactive: true }), ["k1", "k2", "k3"]);
+  assert.deepEqual(ids(["k3"], { inactive }), ["k1", "k3"]);
+  assert.deepEqual(ids([]), ["k1", "k2", "k3"]);
+
+  assert.equal(hiddenAuthKeyCount(names, [], inactive), 2);
+  assert.equal(hiddenAuthKeyCount(names, ["k3"], inactive), 1);
+  assert.equal(hiddenAuthKeyCount(names, [], {}), 0);
+});
+
+test("knownUserPaths keeps paths with a policy or an active key", () => {
+  const known = knownUserPaths([
+    { user_path: "/team", configured: false, key_count: 0, active_key_count: 0 },
+    { user_path: "/team/alice", configured: true, key_count: 0, active_key_count: 0 },
+    { user_path: "/team/bob", configured: false, key_count: 2, active_key_count: 1 },
+    { user_path: "/team/carol", configured: false, key_count: 1, active_key_count: 0 },
+  ]);
+  assert.deepEqual([...known].sort(), ["/team/alice", "/team/bob"]);
+});
+
+test("userPathOptionList hides unknown paths unless shown or selected", () => {
+  const paths = ["/team/alice", "/team/alice/laptop", "/team/carol", "/old"];
+  const known = new Set(["/team/alice"]);
+
+  assert.deepEqual(userPathOptionList(paths, [], { known }), ["/team/alice"]);
+  assert.deepEqual(userPathOptionList(paths, [], { known, showInactive: true }), paths);
+  assert.deepEqual(userPathOptionList(paths, ["/old"], { known }), ["/team/alice", "/old"]);
+  assert.equal(hiddenUserPathCount(paths, [], known), 3);
+  assert.equal(hiddenUserPathCount(paths, ["/old"], known), 2);
+});
+
+test("userPathOptionList fails open without a known path set", () => {
+  const paths = ["/team/alice", "/old"];
+  assert.deepEqual(userPathOptionList(paths, [], { known: null }), paths);
+  assert.deepEqual(userPathOptionList(paths, []), paths);
+  assert.equal(hiddenUserPathCount(paths, [], null), 0);
+});
+
+test("hidden user paths keep the ancestors and scope root of known paths", () => {
+  const paths = ["/team", "/team/alice/laptop", "/team/carol"];
+  const visible = userPathOptionList(paths, [], { known: new Set(["/team/alice/laptop"]) });
+  const tree = buildUserPathTree(visible, "/team");
+  assert.equal(tree[0].path, "/team");
+  assert.deepEqual(tree[0].children.map((node) => node.path), ["/team/alice"]);
+  assert.deepEqual(tree[0].children[0].children.map((node) => node.path), ["/team/alice/laptop"]);
 });
 
 test("usageLogHasAuthKeys shows the column for keyed entries or an active filter", () => {

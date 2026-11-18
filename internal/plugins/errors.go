@@ -8,7 +8,7 @@ import (
 
 // PluginError reports a fail-closed instance failure (error, panic, or
 // timeout). The server renders it as HTTP 500 with code plugin_failure and
-// records the instance name in the audit trail only.
+// records the instance name in the request log only.
 type PluginError struct {
 	Instance string
 	Phase    pluginapi.Kind

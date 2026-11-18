@@ -12,7 +12,7 @@ const (
 	// ActionRespond short-circuits: Decision.Response is sent to the client as
 	// the completion with HTTP 200 (as a single-chunk stream when streaming).
 	ActionRespond Action = "respond"
-	// ActionWarn continues and records Decision.Detail in the audit trail and
+	// ActionWarn continues and records Decision.Detail in the request log and
 	// the X-GoModel-Guardrail response headers.
 	ActionWarn Action = "warn"
 )
@@ -32,7 +32,7 @@ type Decision struct {
 	Message string
 	// Response is the synthetic completion for [ActionRespond].
 	Response *Completion
-	// Detail is a JSON-serializable summary stored in the audit trail. It
+	// Detail is a JSON-serializable summary stored in the request log. It
 	// must not contain secrets.
 	Detail any
 	// NoStore asks GoModel not to store the response of this request in the
@@ -72,7 +72,7 @@ func Respond(text string) Decision {
 }
 
 // Warn returns a Decision that lets the exchange continue while recording
-// code, message, and detail in the audit trail and response headers.
+// code, message, and detail in the request log and response headers.
 func Warn(code, message string, detail any) Decision {
 	return Decision{Action: ActionWarn, Code: code, Message: message, Detail: detail}
 }
