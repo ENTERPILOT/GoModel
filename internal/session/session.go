@@ -1,5 +1,5 @@
 // Package session identifies the client session a request belongs to, so the
-// gateway can route one conversation consistently and group its audit entries.
+// gateway can route one conversation consistently and group its request log entries.
 package session
 
 import (

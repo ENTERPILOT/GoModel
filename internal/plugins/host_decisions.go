@@ -10,7 +10,7 @@ import (
 )
 
 // Decider runs a gateway-internal Decisions request: model resolution,
-// failover, usage, and audit apply as on POST /v1/decisions. The body and
+// failover, usage, and request logging apply as on POST /v1/decisions. The body and
 // the answer are OpenAI's Decisions wire format.
 type Decider interface {
 	Decide(ctx context.Context, body []byte) ([]byte, error)

@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -365,14 +365,14 @@ func TestSystemOne_UnavailableBeforeModelResolution(t *testing.T) {
 	}
 }
 
-// Through the full middleware stack a System One call is audited under its
+// Through the full middleware stack a System One call is logged under its
 // own path with the requested and resolved routes, and its usage recorded.
-func TestSystemOne_AuditsAndRecordsUsageThroughServer(t *testing.T) {
+func TestSystemOne_LogsAndRecordsUsageThroughServer(t *testing.T) {
 	provider := newSystemOneProvider(systemOneAnswer)
-	auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: true}}
+	requestLogger := &capturingRequestLogger{config: requestlog.Config{Enabled: true, LogBodies: true}}
 	usageLogger := &collectingUsageLogger{config: usage.Config{Enabled: true}}
 	srv := New(provider, &Config{
-		AuditLogger:   auditLogger,
+		RequestLogger: requestLogger,
 		UsageLogger:   usageLogger,
 		ModelResolver: systemOneAliases,
 	})
@@ -380,8 +380,8 @@ func TestSystemOne_AuditsAndRecordsUsageThroughServer(t *testing.T) {
 	rec := postJSON(t, srv, "/v1/systemone", systemOneBody("decider"))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	require.Len(t, auditLogger.entries, 1)
-	entry := auditLogger.entries[0]
+	require.Len(t, requestLogger.entries, 1)
+	entry := requestLogger.entries[0]
 	assert.Equal(t, "/v1/systemone", entry.Path)
 	assert.Equal(t, http.StatusOK, entry.StatusCode)
 	assert.Equal(t, "decider", entry.RequestedModel)

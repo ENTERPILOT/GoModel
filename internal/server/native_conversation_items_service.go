@@ -15,7 +15,7 @@ import (
 // CreateConversationItems handles POST /v1/conversations/{id}/items.
 func (s *conversationService) CreateConversationItems(c *echo.Context) error {
 	ctx, _ := requestContextWithRequestID(c.Request())
-	auditConversationEntry(c)
+	requestLogConversationEntry(c)
 	id, err := conversationIDFromRequest(c)
 	if err != nil {
 		return handleError(c, err)
@@ -58,7 +58,7 @@ func (s *conversationService) CreateConversationItems(c *echo.Context) error {
 // ListConversationItems handles GET /v1/conversations/{id}/items.
 func (s *conversationService) ListConversationItems(c *echo.Context) error {
 	ctx, _ := requestContextWithRequestID(c.Request())
-	auditConversationEntry(c)
+	requestLogConversationEntry(c)
 	id, err := conversationIDFromRequest(c)
 	if err != nil {
 		return handleError(c, err)
@@ -81,7 +81,7 @@ func (s *conversationService) ListConversationItems(c *echo.Context) error {
 // GetConversationItem handles GET /v1/conversations/{id}/items/{item_id}.
 func (s *conversationService) GetConversationItem(c *echo.Context) error {
 	ctx, _ := requestContextWithRequestID(c.Request())
-	auditConversationEntry(c)
+	requestLogConversationEntry(c)
 	id, err := conversationIDFromRequest(c)
 	if err != nil {
 		return handleError(c, err)
@@ -105,7 +105,7 @@ func (s *conversationService) GetConversationItem(c *echo.Context) error {
 // DeleteConversationItem handles DELETE /v1/conversations/{id}/items/{item_id}.
 func (s *conversationService) DeleteConversationItem(c *echo.Context) error {
 	ctx, _ := requestContextWithRequestID(c.Request())
-	auditConversationEntry(c)
+	requestLogConversationEntry(c)
 	id, err := conversationIDFromRequest(c)
 	if err != nil {
 		return handleError(c, err)

@@ -7,7 +7,7 @@ import {
   conversationOpensFullscreen,
   conversationPanelBounds,
   conversationPanelWidthFromPointer,
-} from "../src/pages/audit-logs/conversation-panel.js";
+} from "../src/pages/requests/conversation-panel.js";
 
 test("desktop panel bounds preserve usable content and panel widths", () => {
   assert.deepEqual(conversationPanelBounds(1440, 246), { min: 320, max: 834 });

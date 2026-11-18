@@ -75,7 +75,7 @@
             </td>
             <td class="font-size-md">
               {#if virtual.conflict}
-                <span class="audit-status-badge status-warning">{m.mcp_virtual_not_served()}</span>
+                <span class="request-log-status-badge status-warning">{m.mcp_virtual_not_served()}</span>
                 <div class="mcp-virtual-sub">{virtual.conflict}</div>
               {:else}
                 <span class="mono">{mcpVirtualServerEndpoint(gatewayEndpoint, virtual.name)}</span>

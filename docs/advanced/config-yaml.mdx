@@ -286,7 +286,12 @@ any string under a key naming a credential (`token`, `api_key`, `password`,
 about model tokens, such as `max_tokens`, do not. So does any other text
 holding a secret's value, a `Bearer` or `Basic` credential, a
 `user:password@host:port` (or `@tcp(host)/db`) connection string, or a credential assignment such as
-`password=...`.
+`password=...`. In plugin settings and under `extensions:`, the value
+of a `Name: value` header line is one when the name names a credential
+(`X-Proxy-Key: ...`) or the value is a `Bearer` token or `Basic` credentials,
+as in a `header_edit` rule's `upstream_set`, commented out with `#` or not.
+Each such line gets its own variable; the header name and the other lines are
+kept.
 
 <Note>
 Free-form text, such as a description typed into the dashboard, is checked

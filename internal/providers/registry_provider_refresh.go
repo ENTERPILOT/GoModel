@@ -66,6 +66,9 @@ func (r *ModelRegistry) RefreshProviderModels(ctx context.Context, providerSelec
 		providerNames,
 		configuredProviderModels,
 		configuredProviderModelsModes,
+		// Callers bound a targeted refresh themselves (the on-demand refresh
+		// and the failed-provider recheck).
+		0,
 	)
 	dropEmptyFetchedInventories(&fetched)
 

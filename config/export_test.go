@@ -426,6 +426,7 @@ var credentialFieldName = regexp.MustCompile(`(?i)(key|token|secret|password|cre
 // credential but whose values are not secrets.
 var plainCredentialLookalikes = map[string]bool{
 	"server.user_path_header":                           true,
+	"server.auth_key_prefix":                            true,
 	"server.client_ip_header":                           true,
 	"cache.model.redis.key":                             true,
 	"cache.response.simple.redis.key":                   true,
