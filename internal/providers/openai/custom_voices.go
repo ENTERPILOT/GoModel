@@ -50,10 +50,13 @@ const customVoicesTimeout = 10 * time.Second
 // through GET /audio/voices, following its cursor. On an error, which includes
 // a listing it could not read to the end, it returns the voices read so far.
 // One API key serves every page: with several keys configured, a cursor or a
-// permission of one key need not hold for another.
-func (p *Provider) customVoices(ctx context.Context, model string) ([]core.AudioVoice, error) {
-	ctx, cancel := context.WithTimeout(p.withPinnedKey(ctx), customVoicesTimeout)
+// permission of one key need not hold for another. timeout bounds the whole
+// lookup, credential resolution included.
+func (p *Provider) customVoices(ctx context.Context, model string, timeout time.Duration) ([]core.AudioVoice, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	// Pinned under the deadline: resolving a federated credential can block.
+	ctx = p.withPinnedKey(ctx)
 	var voices []core.AudioVoice
 	seen := map[string]struct{}{}
 	after := ""

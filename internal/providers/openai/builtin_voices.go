@@ -51,7 +51,7 @@ func (p *Provider) ListVoices(ctx context.Context, req *core.AudioVoicesRequest)
 	if voices == nil {
 		return nil, core.NewAudioVoicesUnsupportedError(req.Model)
 	}
-	custom, err := p.customVoices(ctx, req.Model)
+	custom, err := p.customVoices(ctx, req.Model, customVoicesTimeout)
 	if err != nil {
 		slog.Log(ctx, customVoicesFailureLevel(err), "openai custom voice listing failed; returning the voices read so far",
 			"provider", p.providerName, "custom_voices", len(custom), "error", err)

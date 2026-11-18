@@ -153,7 +153,7 @@ func TestListVoices_NativeOpenAIStopsAtCustomVoicePageCap(t *testing.T) {
 	assert.Len(t, resp.Voices, len(legacyBuiltinVoices)+maxCustomVoicePages)
 	assert.Equal(t, maxCustomVoicePages, capture.Count())
 
-	custom, err := provider.customVoices(context.Background(), "tts-1")
+	custom, err := provider.customVoices(context.Background(), "tts-1", customVoicesTimeout)
 	require.ErrorContains(t, err, "more than 5 pages")
 	assert.Len(t, custom, maxCustomVoicePages)
 }
@@ -164,7 +164,7 @@ func TestCustomVoices_MorePagesWithoutCursorIsAnError(t *testing.T) {
 	provider, capture := newNativeVoicesProvider(t, "", voicesHandler(http.StatusOK,
 		`{"data":[{"id":"voice_a","name":"A"}],"last_id":null,"has_more":true}`))
 
-	custom, err := provider.customVoices(context.Background(), "tts-1")
+	custom, err := provider.customVoices(context.Background(), "tts-1", customVoicesTimeout)
 	require.ErrorIs(t, err, core.ErrUnrecognizedVoices)
 	assert.Equal(t, []core.AudioVoice{{ID: "voice_a", Name: "A"}}, custom)
 	assert.Equal(t, 1, capture.Count())
@@ -200,7 +200,7 @@ func TestCustomVoices_StalledCursorIsAnError(t *testing.T) {
 	provider, capture := newNativeVoicesProvider(t, "", voicesHandler(http.StatusOK,
 		`{"data":[{"id":"voice_a","name":"A"}],"last_id":"voice_a","has_more":true}`))
 
-	custom, err := provider.customVoices(context.Background(), "tts-1")
+	custom, err := provider.customVoices(context.Background(), "tts-1", customVoicesTimeout)
 	require.ErrorIs(t, err, core.ErrUnrecognizedVoices)
 	assert.Equal(t, []core.AudioVoice{{ID: "voice_a", Name: "A"}}, custom)
 	assert.Equal(t, 2, capture.Count())
@@ -223,7 +223,7 @@ func TestCustomVoices_PinsOneKeyPerListing(t *testing.T) {
 	provider := New(providers.ProviderConfig{}, opts).(*Provider)
 
 	for range 2 {
-		_, err := provider.customVoices(context.Background(), "tts-1")
+		_, err := provider.customVoices(context.Background(), "tts-1", customVoicesTimeout)
 		require.NoError(t, err)
 	}
 
@@ -234,17 +234,17 @@ func TestCustomVoices_PinsOneKeyPerListing(t *testing.T) {
 	assert.NotEqual(t, requests[0].Header.Get("Authorization"), requests[2].Header.Get("Authorization"), "rotation still advances between listings")
 }
 
-// A stalled upstream costs the caller the custom voices, not the built-in ones.
-func TestListVoices_NativeOpenAIKeepsBuiltinVoicesWhenCustomListingStalls(t *testing.T) {
+// A stalled upstream is cut off by the lookup's own deadline, so it costs the
+// caller the custom voices, not the built-in ones.
+func TestCustomVoices_StalledUpstreamHitsTheLookupDeadline(t *testing.T) {
 	provider, _ := newNativeVoicesProvider(t, "", func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
 
-	resp, err := provider.ListVoices(ctx, &core.AudioVoicesRequest{Model: "tts-1"})
-	require.NoError(t, err)
-	assert.Equal(t, legacyBuiltinVoices, resp.Voices)
+	custom, err := provider.customVoices(context.Background(), "tts-1", 50*time.Millisecond)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Empty(t, custom)
 }
 
 // A key restricted from reading voices is a standing condition, not worth a
@@ -266,7 +266,7 @@ func TestCustomVoicesFailureLevel(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			provider, _ := newNativeVoicesProvider(t, "", voicesHandler(tt.status, tt.body))
 
-			_, err := provider.customVoices(context.Background(), "tts-1")
+			_, err := provider.customVoices(context.Background(), "tts-1", customVoicesTimeout)
 			require.Error(t, err)
 			assert.Equal(t, tt.want, customVoicesFailureLevel(err))
 		})
