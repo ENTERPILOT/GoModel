@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // voicesMockProvider adds voice listing to the audio fake.
@@ -68,15 +68,15 @@ func TestAudioVoices_HappyPath(t *testing.T) {
 	assert.Equal(t, "kokoro-local", mock.captured.Provider)
 }
 
-// The audit row names the provider that served the listing, as speech does.
-func TestAudioVoices_AuditEntryCarriesResolvedRoute(t *testing.T) {
+// The request log row names the provider that served the listing, as speech does.
+func TestAudioVoices_RequestLogEntryCarriesResolvedRoute(t *testing.T) {
 	mock := newVoicesMock(core.AudioVoice{ID: "af_bella", Name: "Bella"})
 	mock.providerTypes = map[string]string{"kokoro-local/kokoro": "openai"}
 	mock.providerNames = map[string]string{"kokoro-local/kokoro": "kokoro-local"}
 	svc := &audioService{provider: mock}
-	entry := &auditlog.LogEntry{}
+	entry := &requestlog.LogEntry{}
 
-	c, rec := echotest.Get(t, "/v1/audio/voices?model=kokoro", echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	c, rec := echotest.Get(t, "/v1/audio/voices?model=kokoro", echotest.WithValue(string(requestlog.LogEntryKey), entry))
 	require.NoError(t, svc.ListVoices(c))
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())

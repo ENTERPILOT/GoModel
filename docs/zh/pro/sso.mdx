@@ -4,7 +4,7 @@ sidebarTitle: "OIDC SSO"
 description: "使用您的 OIDC 身份提供商，通过带 PKCE 的授权码流程保护 GoModel 控制台，并将身份提供商的组映射到用户路径。"
 icon: "key-round"
 tag: "Pro"
-keywords: ["GoModel Pro", "OIDC", "SSO", "单点登录", "single sign-on", "PKCE", "控制台认证", "dashboard authentication", "组映射", "group mapping", "user_path", "审计原因", "audit reasons"]
+keywords: ["GoModel Pro", "OIDC", "SSO", "单点登录", "single sign-on", "PKCE", "控制台认证", "dashboard authentication", "组映射", "group mapping", "user_path", "拒绝原因", "rejected login reasons"]
 ---
 
 ## 概览
@@ -14,7 +14,7 @@ OIDC SSO 用于保护控制台，支持带 PKCE 的授权码（Authorization Cod
 
 与其他 Pro 功能不同，显式启用的 SSO 配置采用失败即拒绝（fail closed）策略：当缺少 `sso` 授权或配置无效时，启动会中止，以确保认证边界不会悄无声息地消失。
 
-如需改用 SAML 2.0 登录，请参阅 [SAML SSO](/zh/pro/saml)。除 OIDC 客户端设置外，本页的全部内容对两种协议都适用：用户路径、[组映射](#组映射)、会话、退出登录和审计。
+如需改用 SAML 2.0 登录，请参阅 [SAML SSO](/zh/pro/saml)。除 OIDC 客户端设置外，本页的全部内容对两种协议都适用：用户路径、[组映射](#组映射)、会话、退出登录和登录事件。
 
 ## 配置 SSO
 
@@ -79,7 +79,7 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
 - **匹配是精确且区分大小写的。** `group` 会与 `groups_claim` 按原样发送的各个值进行比较：无论声明是列表还是单个字符串，都不会去除空白，空字符串表示没有组。Entra ID 发送的是组的对象 ID 而不是名称，因此请填写对象 ID。
 - **第一个声明的匹配项生效。** 请按从最具体到最宽泛的顺序排列列表；一个人始终只有一个用户路径。
 - **路径为 `<user_path>/<user>`。** `<user>` 是 `user_path_claim` 的值，因此 `eng-platform` 组中的 `alice@example.com` 会以 `/eng/platform/alice@example.com` 登录。`user_path_prefix` 只适用于未匹配任何映射的登录。
-- **映射得到的是每个用户各自的叶子，而不是节点本身。** 用户路径同时也是会话的[访问作用域](/zh/features/user-path#访问作用域)，因此绑定到 `/eng/platform` 的人将能管理整个团队。每位成员只能看到自己的用量、审计条目和密钥。
+- **映射得到的是每个用户各自的叶子，而不是节点本身。** 用户路径同时也是会话的[访问作用域](/zh/features/user-path#访问作用域)，因此绑定到 `/eng/platform` 的人将能管理整个团队。每位成员只能看到自己的用量、请求日志条目和密钥。
 - **路径会覆盖某个节点的登录将被拒绝。** 如果声明的值会使路径等于某个已映射的节点或 `user_path_prefix`，或位于其中之一的上层，登录会以 `claim_mapping_failed` 失败。例如，存在节点 `/eng` 和 `/eng/platform` 时，映射到 `/eng` 的组中声明值为 `platform` 的成员会被拒绝。
 - **不检查在其他地方配置的路径。** 该规则只知道 SSO 配置的节点（映射的用户路径和 `user_path_prefix`），不知道[用户](/zh/features/users)策略、预算或速率限制中指定的路径。指向此类路径的 `user_path_claim` 值会使会话获得该路径及其下所有内容的访问作用域：`/users` 下值为 `contractors` 的 `preferred_username` 会使此人以 `/users/contractors` 登录，并拥有其下所有人的访问作用域。默认的 `email` 声明同样如此。它的值始终是此人自己已验证的邮箱，因此 `/users/alice@example.com` 这样的路径通常就是 Alice 自己的策略，这是预期行为。风险在于以邮箱命名、其下还有其他用户或密钥的路径；请不要把它们放在那里。
 
@@ -119,12 +119,12 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
 
 使用 SQLite 时请只运行一个副本：每个 SQLite 实例都有自己的数据库，其他副本永远看不到吊销记录，重放的 Cookie 在这些副本上会一直有效，直到过期。如果退出登录时存储后端不可达，吊销仍会在处理该请求的副本上生效，并记录一条警告，该副本会持续重试，直到其他副本能够看到它。
 
-## 审计与访问控制
+## 登录事件与访问控制
 
-成功登录、被策略拒绝的登录以及退出登录都会被记录为经过脱敏的审计事件。Token、授权码、Cookie、原始声明（claims）以及身份提供商的错误详情均不会被存储。
+成功登录、被策略拒绝的登录以及退出登录都会作为经过脱敏的认证事件记录在请求日志中。Token、授权码、Cookie、原始声明（claims）以及身份提供商的错误详情均不会被存储。
 
 - **方法。** 登录、拒绝和退出登录事件以 `auth_method` 记录协议：`oidc` 或 `saml`。使用 SSO 会话发出的请求（包括 `/v1/auth/verify`）记录为 `sso`。
-- **主体。** 在身份提供商的应答通过校验之后被拒绝的登录（准入被拒，以及 SAML 中被拒绝的主体或重放的断言）会以其指明的主体写入审计；如果已知，还会附上它本应获得的用户路径。因路径会成为已配置节点而被拒绝的登录，不会以该路径写入审计，因为该路径不属于任何人；日志以 `refused_path` 记录它。
+- **主体。** 在身份提供商的应答通过校验之后被拒绝的登录（准入被拒，以及 SAML 中被拒绝的主体或重放的断言）会以其指明的主体写入请求日志；如果已知，还会附上它本应获得的用户路径。因路径会成为已配置节点而被拒绝的登录，不会以该路径写入请求日志，因为该路径不属于任何人；日志以 `refused_path` 记录它。
 - **日志。** 每次登录还会以相同的 `request_id` 记录日志。`GoModel Pro: SSO login succeeded` 会注明放置此次登录的组映射（`matched_group` 和 `node`）（如有）。
 
 SSO 会话与托管 API 密钥一样携带 `user_path`，因此 [用户](/zh/features/users) 页面上组级和用户级的模型允许列表，同样适用于通过 SSO 会话发出的请求。按密钥设置的 `allowed_models` 是托管
@@ -132,7 +132,7 @@ API 密钥的设置，不适用于 SSO 会话。
 
 ### 登录被拒绝的原因
 
-被拒绝的登录会带着一个固定的原因写入审计，网关同时会记录日志 `GoModel Pro: SSO login rejected`，其中包含相同的 `reason` 和一个 `request_id`。用户只会看到一个通用的失败页面，并以该 ID 作为参考编号。
+被拒绝的登录会带着一个固定的原因写入请求日志，网关同时会记录日志 `GoModel Pro: SSO login rejected`，其中包含相同的 `reason` 和一个 `request_id`。用户只会看到一个通用的失败页面，并以该 ID 作为参考编号。
 
 | 原因 | 协议 | 含义 |
 | --- | --- | --- |

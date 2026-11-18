@@ -4,7 +4,7 @@ sidebarTitle: "OIDC SSO"
 description: "Protect the GoModel Dashboard with your OIDC identity provider using Authorization Code flow with PKCE, and map identity-provider groups to user paths."
 icon: "key-round"
 tag: "Pro"
-keywords: ["GoModel Pro", "OIDC", "SSO", "single sign-on", "PKCE", "dashboard authentication", "group mapping", "user_path", "audit reasons"]
+keywords: ["GoModel Pro", "OIDC", "SSO", "single sign-on", "PKCE", "dashboard authentication", "group mapping", "user_path", "rejected login reasons"]
 ---
 
 ## Overview
@@ -20,7 +20,7 @@ silently.
 
 To sign in with SAML 2.0 instead, see [SAML SSO](/pro/saml). Everything on
 this page except the OIDC client settings applies to both protocols: user
-paths, [group mapping](#group-mapping), sessions, sign-out, and audit.
+paths, [group mapping](#group-mapping), sessions, sign-out, and sign-in events.
 
 ## Configure SSO
 
@@ -111,7 +111,7 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
 - **A mapping gives a per-user leaf, never the node itself.** The user path
   is also the [access scope](/features/user-path#access-scope) of the
   session, so a person bound to `/eng/platform` would administer the whole
-  team. Each member sees only their own usage, audit entries, and keys.
+  team. Each member sees only their own usage, request log entries, and keys.
 - **A login whose path would cover a node is refused.** If the claim value
   would make the path equal to a mapped node or to `user_path_prefix`, or
   place it above one of them, sign-in fails with `claim_mapping_failed`. For
@@ -232,20 +232,20 @@ there until it expires. If the storage backend is unreachable during sign-out,
 the revocation still applies on the replica that handled it, a warning is
 logged, and that replica keeps retrying until the other replicas can see it.
 
-## Audit and access control
+## Sign-in events and access control
 
 Successful logins, rejected policies, and logouts are recorded as sanitized
-audit events. Tokens, authorization codes, cookies, raw claims, and provider
-error details are not stored.
+authentication events in the request log. Tokens, authorization codes, cookies,
+raw claims, and provider error details are not stored.
 
 - **Method.** Login, rejection, and logout events record the protocol as
   `auth_method`: `oidc` or `saml`. Requests made with an SSO session,
   including `/v1/auth/verify`, are recorded as `sso`.
 - **Principal.** A login refused after the identity provider's answer was
   verified (an admission refusal, and for SAML a refused subject or a
-  replayed assertion) is audited under the principal it names and, when it is
+  replayed assertion) is recorded under the principal it names and, when it is
   known, the user path it would have had. A login refused because its path
-  would be a configured node is not audited under that path, which is no
+  would be a configured node is not recorded under that path, which is no
   person's; the log names it as `refused_path`.
 - **Logs.** Each login is also logged under the same `request_id`.
   `GoModel Pro: SSO login succeeded` names the group mapping that placed the
@@ -258,7 +258,7 @@ API key setting and do not apply to SSO sessions.
 
 ### Rejected login reasons
 
-A rejected login is audited with one fixed reason, and the gateway logs
+A rejected login is recorded with one fixed reason, and the gateway logs
 `GoModel Pro: SSO login rejected` with the same `reason` and a `request_id`.
 The person sees only a generic failure page with that ID as its reference.
 

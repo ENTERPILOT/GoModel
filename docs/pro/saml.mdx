@@ -11,7 +11,7 @@ keywords: ["GoModel Pro", "SAML", "SAML 2.0", "SSO", "single sign-on", "identity
 
 `protocol: saml` makes the gateway a SAML 2.0 service provider instead of an
 OIDC client. Sessions, user paths, [group mapping](/pro/sso#group-mapping),
-sign-out, and audit work exactly as described for [OIDC SSO](/pro/sso); only
+sign-out, and sign-in events work exactly as described for [OIDC SSO](/pro/sso); only
 the way a login is proved changes.
 
 - **One protocol, one identity provider per gateway.** With `protocol: saml`,
@@ -19,7 +19,7 @@ the way a login is proved changes.
   `redirect_url`) must be unset, in YAML and in the environment. With
   `protocol: oidc`, every `saml` setting must be unset. Startup stops
   otherwise.
-- **Switching protocol changes every principal ID.** The ID stored in audit
+- **Switching protocol changes every principal ID.** The ID stored in request log
   entries is derived from the protocol, the identity provider, and the
   subject, so the same person appears under a new principal after the switch.
 
@@ -211,7 +211,7 @@ extensions:
 ## What is checked on every response
 
 A login succeeds only when all of the following hold. Each failure has its
-own [audit reason](/pro/sso#rejected-login-reasons).
+own [rejection reason](/pro/sso#rejected-login-reasons).
 
 - **It answers a login this browser started.** The signed transaction cookie
   (valid for 10 minutes), `RelayState`, and `InResponseTo` must match.

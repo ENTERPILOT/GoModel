@@ -40,10 +40,10 @@ docker run --rm -p 8080:8080 \
 3. 保持 **Dashboard access** 为禁用状态。
 4. 创建密钥并复制 `sk_gom_...` 值。该值只显示一次。
 
-绑定的用户路径为 omp 提供独立的用量和审计范围。如果您使用了网关级别的[模型访问策略](/zh/features/user-path#模型访问)，请为 `/agents/omp` 放行 omp 所需的选择器。
+绑定的用户路径为 omp 提供独立的用量和请求日志范围。如果您使用了网关级别的[模型访问策略](/zh/features/user-path#模型访问)，请为 `/agents/omp` 放行 omp 所需的选择器。
 
 <Warning>
-  请在 omp 中使用此托管密钥，而不是 `GOMODEL_MASTER_KEY`。没有控制台访问权限的托管密钥可以调用模型端点，但无法读取审计日志、创建密钥或修改网关设置。
+  请在 omp 中使用此托管密钥，而不是 `GOMODEL_MASTER_KEY`。没有控制台访问权限的托管密钥可以调用模型端点，但无法读取请求日志、创建密钥或修改网关设置。
 </Warning>
 
 ## 3. 配置 omp
@@ -139,13 +139,13 @@ providers:
         maxTokens: 128000
 ```
 
-两种路径使用相同的网关密钥、预算和审计记录。推荐默认使用带模型发现的兼容 OpenAI 路径；只有在您明确需要端到端的 Messages API 语义时，才使用 Anthropic 协议。
+两种路径使用相同的网关密钥、预算和请求日志。推荐默认使用带模型发现的兼容 OpenAI 路径；只有在您明确需要端到端的 Messages API 语义时，才使用 Anthropic 协议。
 
 ## 6. 在 GoModel 中检查流量
 
-打开 GoModel 控制台的审计日志：
+打开 GoModel 控制台的“请求”页面：
 
-[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+[http://localhost:8080/admin/dashboard/requests](http://localhost:8080/admin/dashboard/requests)
 
 确认 omp 发往 `POST /v1/chat/completions` 的流式请求出现在 `/agents/omp` 用户路径下，并且 GoModel 将其路由到了预期的提供商。请使用主密钥登录；omp 密钥被有意设计为无法打开此页面。
 

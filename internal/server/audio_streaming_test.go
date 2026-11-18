@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -44,7 +44,7 @@ func (w *flushRecordingWriter) Flush() {
 }
 
 // newStreamingSpeechRequest builds a speech call whose provider relays chunks.
-func newStreamingSpeechRequest(t *testing.T, flushes *flushRecordingWriter) (*echo.Context, *httptest.ResponseRecorder, *auditlog.LogEntry) {
+func newStreamingSpeechRequest(t *testing.T, flushes *flushRecordingWriter) (*echo.Context, *httptest.ResponseRecorder, *requestlog.LogEntry) {
 	t.Helper()
 	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}`
 	c, rec := echotest.Post(t, "/v1/audio/speech", body,
@@ -52,8 +52,8 @@ func newStreamingSpeechRequest(t *testing.T, flushes *flushRecordingWriter) (*ec
 			flushes.ResponseWriter = w
 			return flushes
 		}))
-	entry := &auditlog.LogEntry{}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{}
+	c.Set(string(requestlog.LogEntryKey), entry)
 	return c, rec, entry
 }
 
@@ -109,10 +109,10 @@ func TestAudioSpeech_StreamedResponseCosted(t *testing.T) {
 	assert.Empty(t, captured.CostsCalculationCaveat)
 }
 
-// TestAudioSpeech_StreamedResponseAudited verifies a relayed body is stored
-// for playback as it streams: the audit entry references the media object
+// TestAudioSpeech_StreamedResponseLogged verifies a relayed body is stored
+// for playback as it streams: the request log entry references the media object
 // once the relay finishes, and the object holds every chunk.
-func TestAudioSpeech_StreamedResponseAudited(t *testing.T) {
+func TestAudioSpeech_StreamedResponseLogged(t *testing.T) {
 	media, store := newTestMediaCapturer(t)
 	svc := &audioService{
 		provider:       streamingSpeechMock([][]byte{[]byte("synthetic-"), []byte("audio")}, "audio/mpeg"),
@@ -124,7 +124,7 @@ func TestAudioSpeech_StreamedResponseAudited(t *testing.T) {
 
 	require.NoError(t, svc.CreateSpeech(c))
 	require.Equal(t, http.StatusOK, rec.Code)
-	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
+	respBody, ok := entry.Data.ResponseBody.(requestlog.AudioBodyLog)
 	require.True(t, ok, "response body not captured as audio, got %T", entry.Data.ResponseBody)
 	require.True(t, respBody.Stored)
 	assert.Equal(t, int64(len("synthetic-audio")), respBody.Bytes)
@@ -144,7 +144,7 @@ func TestAudioSpeech_StreamedResponsePlaceholderWhenAudioDisabled(t *testing.T) 
 
 	require.NoError(t, svc.CreateSpeech(c))
 	require.Equal(t, http.StatusOK, rec.Code)
-	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
+	respBody, ok := entry.Data.ResponseBody.(requestlog.AudioBodyLog)
 	require.True(t, ok, "response body not captured as audio, got %T", entry.Data.ResponseBody)
 	assert.False(t, respBody.Stored)
 	assert.Empty(t, respBody.MediaID)
@@ -154,7 +154,7 @@ func TestAudioSpeech_StreamedResponsePlaceholderWhenAudioDisabled(t *testing.T) 
 
 // newStreamingTranscriptionRequest builds a stream=true transcription call whose
 // provider answers with server-sent events.
-func newStreamingTranscriptionRequest(t *testing.T, flushes *flushRecordingWriter) (*echo.Context, *httptest.ResponseRecorder, *auditlog.LogEntry) {
+func newStreamingTranscriptionRequest(t *testing.T, flushes *flushRecordingWriter) (*echo.Context, *httptest.ResponseRecorder, *requestlog.LogEntry) {
 	t.Helper()
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
@@ -172,8 +172,8 @@ func newStreamingTranscriptionRequest(t *testing.T, flushes *flushRecordingWrite
 			flushes.ResponseWriter = rw
 			return flushes
 		}))
-	entry := &auditlog.LogEntry{}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	entry := &requestlog.LogEntry{}
+	c.Set(string(requestlog.LogEntryKey), entry)
 	return c, rec, entry
 }
 
@@ -223,10 +223,10 @@ func TestAudioTranscription_StreamedUsageFromDoneEvent(t *testing.T) {
 	assert.Equal(t, 10, captured.TotalTokens)
 }
 
-// TestAudioTranscription_StreamedTranscriptAudited verifies the relayed events
-// are recorded on the audit entry: the audit middleware skips a response that
+// TestAudioTranscription_StreamedTranscriptLogged verifies the relayed events
+// are recorded on the request log entry: the request log middleware skips a response that
 // announces itself as a stream, so the service captures it.
-func TestAudioTranscription_StreamedTranscriptAudited(t *testing.T) {
+func TestAudioTranscription_StreamedTranscriptLogged(t *testing.T) {
 	svc := &audioService{provider: streamingTranscriptionMock(), logBodies: true}
 	c, rec, entry := newStreamingTranscriptionRequest(t, &flushRecordingWriter{})
 
@@ -268,7 +268,7 @@ func (r *closeTrackingReadCloser) Close() error {
 // with a cost caveat, and the media store keeps the whole body since nothing
 // caps it any more.
 func TestAudioSpeech_LongStreamStoredWholeAndCosted(t *testing.T) {
-	// 200 s of 24 kHz mono 16-bit audio is 9.6 MB, past the old 8 MB audit cap.
+	// 200 s of 24 kHz mono 16-bit audio is 9.6 MB, past the old 8 MB request log cap.
 	const seconds = 200.0
 	wav := wavBytes(24000, 1, 16, seconds)
 	require.Greater(t, len(wav), 8*1024*1024)
@@ -301,7 +301,7 @@ func TestAudioSpeech_LongStreamStoredWholeAndCosted(t *testing.T) {
 	assert.InDelta(t, seconds*0.00025, *captured.TotalCost, 1e-9)
 	assert.Empty(t, captured.CostsCalculationCaveat)
 
-	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
+	respBody, ok := entry.Data.ResponseBody.(requestlog.AudioBodyLog)
 	require.True(t, ok, "response body not captured as audio, got %T", entry.Data.ResponseBody)
 	require.True(t, respBody.Stored)
 	assert.Equal(t, int64(len(wav)), respBody.Bytes)

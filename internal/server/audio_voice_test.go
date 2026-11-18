@@ -13,7 +13,7 @@ import (
 )
 
 // TestAudioSpeech_VoiceObject covers OpenAI's custom-voice object form: it is
-// accepted, its id is what providers and the audit log read, and it is
+// accepted, its id is what providers and the request log read, and it is
 // forwarded upstream as the object.
 func TestAudioSpeech_VoiceObject(t *testing.T) {
 	mock := &audioMockProvider{
@@ -28,7 +28,7 @@ func TestAudioSpeech_VoiceObject(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.NotNil(t, mock.capturedSpeech)
 	assert.Equal(t, "voice_1234", mock.capturedSpeech.Voice)
-	assert.Equal(t, "voice_1234", audioSpeechAuditInput(mock.capturedSpeech)["voice"])
+	assert.Equal(t, "voice_1234", audioSpeechRequestLogInput(mock.capturedSpeech)["voice"])
 
 	encoded, err := json.Marshal(mock.capturedSpeech)
 	require.NoError(t, err)

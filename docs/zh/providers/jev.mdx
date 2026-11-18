@@ -155,7 +155,7 @@ console.log(result.answers.billing.noul);
 ## System One API
 
 `POST /v1/systemone` 是一个网关端点，而不是原始代理：它会应用虚拟模型、针对 `state` 的护栏、响应缓存、
-故障转移、审计和用量统计，并以原生方式转发请求而不做转换。Kev 的 `/v1/systemone/permute` 和
+故障转移、请求日志和用量统计，并以原生方式转发请求而不做转换。Kev 的 `/v1/systemone/permute` 和
 `/v1/systemone/separate` 也以同样的方式工作。完整行为请参阅 [System One API](/zh/advanced/systemone-api)，
 其中也包括同样以原生方式提供 Jev 的 OpenRouter。
 

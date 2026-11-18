@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 const requestSnapshotInlineBodyLimit int64 = 64 * 1024
@@ -283,7 +283,7 @@ func snapshotBodyNotCaptured(req *http.Request, bodyMode core.BodyMode) bool {
 	}
 	switch bodyMode {
 	case core.BodyModeJSON, core.BodyModeOpaque:
-		return req.ContentLength > auditlog.MaxBodyCapture
+		return req.ContentLength > requestlog.MaxBodyCapture
 	default:
 		return false
 	}
@@ -310,7 +310,7 @@ func requestBodyBytes(c *echo.Context) ([]byte, error) {
 		return []byte{}, nil
 	}
 
-	// A body the session middleware materialized past the audit capture limit
+	// A body the session middleware materialized past the request log capture limit
 	// is replayed from memory; hand that buffer out instead of copying it.
 	if replay, ok := req.Body.(*bytesReadCloser); ok {
 		if body, ok := replay.unread(); ok {
@@ -331,7 +331,7 @@ func requestBodyBytes(c *echo.Context) ([]byte, error) {
 }
 
 // storeRequestBodySnapshot records the fully read body on the request snapshot
-// and refreshes the white-box prompt semantics from it. The audit capture on
+// and refreshes the white-box prompt semantics from it. The request log capture on
 // the shared snapshot stops at MaxBodyCapture; the returned snapshot always
 // carries the complete body so callers such as session detection can read an
 // oversized one. It returns nil when the request has no snapshot.
@@ -345,7 +345,7 @@ func storeRequestBodySnapshot(c *echo.Context, bodyBytes []byte) *core.RequestSn
 		return nil
 	}
 
-	bodyNotCaptured := int64(len(bodyBytes)) > auditlog.MaxBodyCapture
+	bodyNotCaptured := int64(len(bodyBytes)) > requestlog.MaxBodyCapture
 	capturedBody := bodyBytes
 	if bodyNotCaptured {
 		capturedBody = nil

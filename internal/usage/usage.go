@@ -41,7 +41,7 @@ type UsageEntry struct {
 	// ID is a unique identifier for this usage entry (UUID)
 	ID string `json:"id" bson:"_id"`
 
-	// RequestID links to the audit log entry (from X-Request-ID header)
+	// RequestID links to the request log entry (from X-Request-ID header)
 	RequestID string `json:"request_id" bson:"request_id"`
 
 	// ProviderID is the provider's response ID (e.g., "chatcmpl-abc123", "msg_xyz")

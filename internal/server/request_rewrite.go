@@ -10,8 +10,8 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/ext"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // RequestRewriteMiddleware invokes registered ext.RequestRewriter extensions
@@ -21,9 +21,9 @@ import (
 // "model" field, affect routing, failover, guardrails, budgets, and caching).
 //
 // Rewriter errors fail the request (fail-closed). When a rewriter changes
-// the body, the audit entry is pinned to the original client body first so
+// the body, the request log entry is pinned to the original client body first so
 // operators always see what the client actually sent.
-func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger auditlog.LoggerInterface) echo.MiddlewareFunc {
+func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, requestLogger requestlog.LoggerInterface) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			endpoint, ok := rewriteEndpoint(c.Request())
@@ -67,12 +67,12 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 				}
 				if res == nil || res.Body == nil {
 					// The rewriter ran and left the request alone. Record the
-					// step anyway so the audit trail distinguishes "compression
+					// step anyway so the request log distinguishes "compression
 					// found nothing" from "compression never ran".
-					recordUnchangedRequestRevision(c, auditLogger, rw.Name(), len(in.Body), res)
+					recordUnchangedRequestRevision(c, requestLogger, rw.Name(), len(in.Body), res)
 					continue
 				}
-				recordRequestRevision(c, auditLogger, rw.Name(), len(in.Body), res)
+				recordRequestRevision(c, requestLogger, rw.Name(), len(in.Body), res)
 				in.Body = res.Body
 				changed = true
 				if res.TokensSaved > 0 {
@@ -81,7 +81,7 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 			}
 
 			if changed {
-				pinOriginalAuditRequestBody(c, auditLogger)
+				pinOriginalRequestLogRequestBody(c, requestLogger)
 				applyRewrittenBody(c, in.Body)
 				if tokensSaved > 0 {
 					req := c.Request()
@@ -115,7 +115,7 @@ func safelyWantsResponseFeedback(name string, filter ext.ResponseFeedbackFilter,
 // redactCredentialHeaders clones the request headers with credential values
 // (Authorization, cookies, API keys, ...) masked. Rewriters run post-auth and
 // get UserPath for identity, so they never need raw credentials — and this
-// keeps secrets out of anything a rewriter might echo into its audit detail.
+// keeps secrets out of anything a rewriter might echo into its request log detail.
 func redactCredentialHeaders(header http.Header) http.Header {
 	out := header.Clone()
 	for key := range out {
@@ -154,41 +154,41 @@ func applyRewrittenBody(c *echo.Context, body []byte) {
 	storeRequestBodySnapshot(c, body)
 }
 
-// recordRequestRevision appends one entry to the audit trail's
+// recordRequestRevision appends one entry to the request log's
 // request-revision chain: rewriter name, body sizes, the rewriter-provided
 // change detail, and — only when body logging is enabled and the body is
 // within the capture limit — the rewritten body itself.
-func recordRequestRevision(c *echo.Context, auditLogger auditlog.LoggerInterface, name string, bytesBefore int, res *ext.Result) {
-	if !auditCaptureEnabled(auditLogger) {
+func recordRequestRevision(c *echo.Context, requestLogger requestlog.LoggerInterface, name string, bytesBefore int, res *ext.Result) {
+	if !requestLogCaptureEnabled(requestLogger) {
 		return
 	}
-	cfg := auditLogger.Config()
+	cfg := requestLogger.Config()
 
-	revision := auditlog.RequestRevisionSnapshot{
+	revision := requestlog.RequestRevisionSnapshot{
 		Rewriter:    name,
 		BytesBefore: bytesBefore,
 		BytesAfter:  len(res.Body),
 		TokensSaved: res.TokensSaved,
 		Detail:      res.Detail,
 	}
-	if cfg.LogBodies && cfg.LogRevisionBodies && int64(len(res.Body)) <= auditlog.MaxBodyCapture {
-		revision.Body = auditlog.CaptureLoggedBody(res.Body)
+	if cfg.LogBodies && cfg.LogRevisionBodies && int64(len(res.Body)) <= requestlog.MaxBodyCapture {
+		revision.Body = requestlog.CaptureLoggedBody(res.Body)
 	}
-	auditlog.EnrichEntryWithRequestRevision(c, revision)
+	requestlog.EnrichEntryWithRequestRevision(c, revision)
 }
 
-// recordUnchangedRequestRevision appends a no-change entry to the audit
-// trail's request-revision chain: the rewriter ran, inspected the request and
+// recordUnchangedRequestRevision appends a no-change entry to the request
+// log's request-revision chain: the rewriter ran, inspected the request and
 // forwarded it byte-identical. The entry carries no body — there is no new one
 // — and exists so operators can tell a rewriter that found nothing to do from
 // one that never ran at all. res is nil when the rewriter declined outright;
 // when it returned a result without a body, its Detail is kept, since that is
 // where a rewriter explains why it changed nothing.
-func recordUnchangedRequestRevision(c *echo.Context, auditLogger auditlog.LoggerInterface, name string, bytes int, res *ext.Result) {
-	if !auditCaptureEnabled(auditLogger) {
+func recordUnchangedRequestRevision(c *echo.Context, requestLogger requestlog.LoggerInterface, name string, bytes int, res *ext.Result) {
+	if !requestLogCaptureEnabled(requestLogger) {
 		return
 	}
-	revision := auditlog.RequestRevisionSnapshot{
+	revision := requestlog.RequestRevisionSnapshot{
 		Rewriter:    name,
 		BytesBefore: bytes,
 		BytesAfter:  bytes,
@@ -197,31 +197,31 @@ func recordUnchangedRequestRevision(c *echo.Context, auditLogger auditlog.Logger
 	if res != nil {
 		revision.Detail = res.Detail
 	}
-	auditlog.EnrichEntryWithRequestRevision(c, revision)
+	requestlog.EnrichEntryWithRequestRevision(c, revision)
 }
 
-// auditCaptureEnabled reports whether an audit logger is present and enabled.
-func auditCaptureEnabled(auditLogger auditlog.LoggerInterface) bool {
-	return auditLogger != nil && auditLogger.Config().Enabled
+// requestLogCaptureEnabled reports whether a request logger is present and enabled.
+func requestLogCaptureEnabled(requestLogger requestlog.LoggerInterface) bool {
+	return requestLogger != nil && requestLogger.Config().Enabled
 }
 
-// pinOriginalAuditRequestBody captures the pre-rewrite request into the live
-// audit entry so audit logs always record what the client sent. It respects
-// the audit logger's header/body capture configuration and is a no-op when
+// pinOriginalRequestLogRequestBody captures the pre-rewrite request into the live
+// request log entry so request logs always record what the client sent. It respects
+// the request logger's header/body capture configuration and is a no-op when
 // the entry already holds a request body.
-func pinOriginalAuditRequestBody(c *echo.Context, auditLogger auditlog.LoggerInterface) {
-	if auditLogger == nil {
+func pinOriginalRequestLogRequestBody(c *echo.Context, requestLogger requestlog.LoggerInterface) {
+	if requestLogger == nil {
 		return
 	}
-	cfg := auditLogger.Config()
+	cfg := requestLogger.Config()
 	if !cfg.Enabled {
 		return
 	}
-	entry, ok := c.Get(string(auditlog.LogEntryKey)).(*auditlog.LogEntry)
+	entry, ok := c.Get(string(requestlog.LogEntryKey)).(*requestlog.LogEntry)
 	if !ok || entry == nil {
 		return
 	}
-	auditlog.PopulateRequestData(entry, c.Request(), cfg)
+	requestlog.PopulateRequestData(entry, c.Request(), cfg)
 }
 
 func applyRewriteResponseHeaders(c *echo.Context, headers http.Header) {
