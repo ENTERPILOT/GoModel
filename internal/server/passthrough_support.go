@@ -378,7 +378,7 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		// returned: the central error handler could only log it a second time,
 		// as a gateway 500, when it is usually the client hanging up.
 		if err := flushStream(c.Response(), wrappedStream); err != nil {
-			recordStreamingError(streamEntry, model, providerType, c.Request().URL.Path, requestID, c.Request().Context(), err)
+			recordStreamFailure(c, streamEntry, "stream terminated abnormally", err, "model", model, "provider", providerType)
 		}
 		return nil
 	}

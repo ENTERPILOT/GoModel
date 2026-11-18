@@ -1,9 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -144,6 +147,53 @@ func TestMessages_NativeNonStreamingBodyErrorSkipsUsage(t *testing.T) {
 
 	require.Error(t, handler.Messages(c))
 	require.Empty(t, usageLogger.entries)
+}
+
+// The same failure through the real server: the response has started, so the
+// central error handler reports a broken relay once and not a gateway 500,
+// under both request loggers (echo's default one hands the error over twice).
+func TestMessages_NativeNonStreamingBodyErrorIsNotLoggedAsServerError(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+	}{
+		{name: "model interaction request logger", cfg: &Config{LogOnlyModelInteractions: true}},
+		{name: "default request logger"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			original := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			t.Cleanup(func() { slog.SetDefault(original) })
+
+			provider := &mockProvider{
+				supportedModels: []string{"claude-fable-5"},
+				providerTypes:   map[string]string{"claude-fable-5": "anthropic"},
+				passthroughResponse: &core.PassthroughResponse{
+					StatusCode: http.StatusOK,
+					Headers:    map[string][]string{"Content-Type": {"application/json"}},
+					Body: io.NopCloser(io.MultiReader(
+						strings.NewReader(anthropicNonStreamingJSON[:40]),
+						&failingReader{},
+					)),
+				},
+			}
+			srv := New(provider, tc.cfg)
+
+			reqBody := `{"model":"claude-fable-5","max_tokens":64,"messages":[{"role":"user","content":"Hi"}]}`
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Equal(t, anthropicNonStreamingJSON[:40], rec.Body.String())
+			assert.Equal(t, 1, strings.Count(logs.String(), `"msg":"response terminated abnormally"`), logs.String())
+			assert.Contains(t, logs.String(), `"error_type":"stream_error"`)
+			assert.NotContains(t, logs.String(), `"msg":"request failed"`)
+		})
+	}
 }
 
 type failingReader struct{}

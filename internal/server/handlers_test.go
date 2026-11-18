@@ -9,6 +9,7 @@ import (
 	"io"
 	"maps"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -2085,7 +2086,7 @@ func TestHandleStreamingResponse_UpstreamResetIsNotClassifiedAsClientDisconnect(
 	}
 }
 
-func TestRecordStreamingError_ClassifiesClientDisconnect(t *testing.T) {
+func TestRecordStreamFailure_ClassifiesClientDisconnect(t *testing.T) {
 	canceledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -2138,9 +2139,22 @@ func TestRecordStreamingError_ClassifiesClientDisconnect(t *testing.T) {
 			wantType: "stream_error",
 		},
 		{
-			// Exercises the err==nil branch of isClientDisconnect and the
-			// matching nil-guard fallback in recordStreamingError. Must not
-			// panic and must record the context error as the message.
+			// The gateway reads only from the provider while relaying, so a
+			// reset on a read is the provider's connection.
+			name:     "provider connection reset while reading",
+			ctx:      context.Background(),
+			err:      &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET},
+			wantType: "stream_error",
+		},
+		{
+			name:     "client connection reset while writing",
+			ctx:      context.Background(),
+			err:      &net.OpError{Op: "write", Net: "tcp", Err: syscall.ECONNRESET},
+			wantType: "client_disconnected",
+		},
+		{
+			// Exercises the nil-guard fallback in recordStreamFailure. Must
+			// not panic and must record the context error as the message.
 			name:     "canceled ctx with nil err",
 			ctx:      canceledCtx,
 			err:      nil,
@@ -2165,7 +2179,9 @@ func TestRecordStreamingError_ClassifiesClientDisconnect(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-			recordStreamingError(entry, "gpt-4o-mini", "openai", "/v1/chat/completions", "req-"+tt.name, tt.ctx, tt.err)
+			c, _ := echotest.Post(t, "/v1/chat/completions", nil)
+			c.SetRequest(c.Request().WithContext(tt.ctx))
+			recordStreamFailure(c, entry, "stream terminated abnormally", tt.err, "model", "gpt-4o-mini", "provider", "openai")
 			require.Equal(t, tt.wantType, entry.ErrorType)
 
 			wantMessage := ""

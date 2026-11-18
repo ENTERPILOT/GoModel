@@ -84,6 +84,10 @@ func writeGatewayError(c *echo.Context, gatewayErr *core.GatewayError) error {
 	return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 }
 
+// escapedErrorHandledKey marks a request whose escaped error the central
+// handler has already dealt with.
+const escapedErrorHandledKey = "gomodel.escaped-error-handled"
+
 // gatewayErrorHandler renders every error that escapes a handler — a recovered
 // panic, a response body the JSON serializer could not encode, or an
 // echo.HTTPError raised by middleware — in the caller's wire dialect, and logs
@@ -95,9 +99,21 @@ func gatewayErrorHandler(c *echo.Context, err error) {
 	if err == nil {
 		return
 	}
+	// echo's default request logger hands an error here and then returns it,
+	// so the server delivers the same error a second time.
+	if handled, _ := c.Get(escapedErrorHandledKey).(bool); handled {
+		return
+	}
+	c.Set(escapedErrorHandledKey, true)
+	// Once the response has started it cannot become an error response, so a
+	// failure while writing it is a broken relay (most often the client hanging
+	// up), not a gateway 500. A panic is still reported as one.
+	committed := responseCommitted(c)
+	if _, panicked := errors.AsType[*middleware.PanicStackError](err); committed && !panicked {
+		recordStreamFailure(c, nil, "response terminated abnormally", err)
+		return
+	}
 	gatewayErr := escapedGatewayError(err)
-	// Log before checking whether the response can still be changed: a panic
-	// after the first streamed chunk must still reach the operator.
 	logHandledError(c, gatewayErr)
 	// Finalize as handleError does, so an error that never passed through it —
 	// a panic, a rate-limit error returned rather than rendered — still lands
@@ -113,12 +129,18 @@ func gatewayErrorHandler(c *echo.Context, err error) {
 
 	// Once the status line and body are on the wire nothing can be changed;
 	// the response stands as the handler left it.
-	if response, unwrapErr := echo.UnwrapResponse(c.Response()); unwrapErr == nil && response.Committed {
+	if committed {
 		return
 	}
 	if writeErr := writeGatewayError(c, gatewayErr); writeErr != nil {
 		slog.Error("failed to send error response", "error", writeErr)
 	}
+}
+
+// responseCommitted reports whether the status line is already on the wire.
+func responseCommitted(c *echo.Context) bool {
+	response, err := echo.UnwrapResponse(c.Response())
+	return err == nil && response.Committed
 }
 
 // escapedGatewayError classifies an error that reached the central handler. A

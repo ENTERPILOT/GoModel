@@ -6,9 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -379,6 +383,77 @@ func TestGatewayErrorHandler_LeavesCommittedResponseAlone(t *testing.T) {
 
 	// The response is untouchable, but the operator still needs to know.
 	require.Contains(t, buf.String(), "failed after the first chunk")
+}
+
+// A failure after the response started is a broken relay, not a gateway 500:
+// a client that hung up is routine, anything else is a warning, and only a
+// panic is still an error.
+func TestGatewayErrorHandler_ClassifiesFailuresOnCommittedResponses(t *testing.T) {
+	tests := []struct {
+		name          string
+		cancelRequest bool
+		err           error
+		wantLevel     string
+		wantErrorType string
+	}{
+		{
+			name:          "client hung up",
+			cancelRequest: true,
+			err:           context.Canceled,
+			wantLevel:     "DEBUG",
+			wantErrorType: "client_disconnected",
+		},
+		{
+			name:          "client connection broke on a write",
+			err:           &net.OpError{Op: "write", Net: "tcp", Err: syscall.EPIPE},
+			wantLevel:     "DEBUG",
+			wantErrorType: "client_disconnected",
+		},
+		{
+			name:          "provider connection reset while reading",
+			err:           &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET},
+			wantLevel:     "WARN",
+			wantErrorType: "stream_error",
+		},
+		{
+			name:          "provider body cut short",
+			err:           io.ErrUnexpectedEOF,
+			wantLevel:     "WARN",
+			wantErrorType: "stream_error",
+		},
+		{
+			name:          "panic",
+			err:           &middleware.PanicStackError{Err: errors.New("relay blew up"), Stack: []byte("goroutine 1")},
+			wantLevel:     "ERROR",
+			wantErrorType: string(core.ErrorTypeInternal),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			original := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			t.Cleanup(func() { slog.SetDefault(original) })
+
+			c, rec := echotest.Post(t, "/v1/messages", nil)
+			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+			c.Set(string(auditlog.LogEntryKey), entry)
+			if tc.cancelRequest {
+				ctx, cancel := context.WithCancel(c.Request().Context())
+				cancel()
+				c.SetRequest(c.Request().WithContext(ctx))
+			}
+			require.NoError(t, c.String(http.StatusOK, "partial"))
+
+			gatewayErrorHandler(c, tc.err)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, "partial", rec.Body.String())
+			assert.Equal(t, tc.wantErrorType, entry.ErrorType)
+			assert.Equal(t, 1, strings.Count(logs.String(), `"level":`), logs.String())
+			assert.Contains(t, logs.String(), `"level":"`+tc.wantLevel+`"`)
+		})
+	}
 }
 
 // The direct gatewayErrorHandler tests stub the error; this one drives the real
