@@ -15,6 +15,12 @@ import {
   rowAccessSelector,
 } from "./displayRows.js";
 import {
+  applyFallbackSuggestions,
+  fallbackSuggestionsNote,
+  suggestFallbackTargets,
+  vmFormOffersFallbackSuggestions,
+} from "./fallbackSuggestions.js";
+import {
   GLOBAL_OVERRIDE_SELECTOR,
   qualifiedModelName,
 } from "./modelIdentity.js";
@@ -66,6 +72,8 @@ class VirtualModelEditorStore {
   // Set to the moved row's new index after a keyboard move so focus follows;
   // VmTargetRow focuses the handle and clears it.
   vmFocusHandle = $state(null);
+  // What the last "Suggest fallbacks" click added (or that it found nothing).
+  vmFallbackNote = $state("");
 
   addVmTarget() {
     if (!Array.isArray(this.vmForm.targets)) {
@@ -77,6 +85,30 @@ class VirtualModelEditorStore {
       weight: 1,
       reasoning_effort: "",
     });
+  }
+
+  // vmOffersFallbackSuggestions gates the "Suggest fallbacks" action: only a
+  // catalog model's own failover chain gets suggestions.
+  vmOffersFallbackSuggestions() {
+    return vmFormOffersFallbackSuggestions(this.vmForm, modelsStore.models);
+  }
+
+  // suggestVmFallbacks appends suggested fallbacks to the target rows and
+  // says what it added; nothing is saved until the form is submitted. It
+  // reports whether the form changed.
+  suggestVmFallbacks() {
+    const suggestions = suggestFallbackTargets(
+      this.vmForm,
+      modelsStore.models,
+      virtualModels.aliases,
+    );
+    if (suggestions.length === 0) {
+      this.vmFallbackNote = m.models_suggest_fallbacks_none();
+      return false;
+    }
+    applyFallbackSuggestions(this.vmForm, suggestions);
+    this.vmFallbackNote = fallbackSuggestionsNote(suggestions);
+    return true;
   }
 
   removeVmTarget(index) {
@@ -252,6 +284,7 @@ class VirtualModelEditorStore {
     this.vmDragIndex = null;
     this.vmDropIndex = null;
     this.vmFocusHandle = null;
+    this.vmFallbackNote = "";
     this.vmForm = defaultVirtualModelForm();
   }
 

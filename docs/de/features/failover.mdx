@@ -49,6 +49,15 @@ aus. Wenn Sie die festgelegte Zeile entfernen, wird der Eintrag zu einer
 einfachen Redirect: Requests für das Modell gehen dann an die übrigen
 Ziele.
 
+Sie wissen nicht, worauf Sie ausweichen sollen? **Suggest fallbacks** füllt die
+Liste für Sie: zuerst dasselbe Modell bei Ihren anderen Anbietern, dann bis zu
+drei Textmodelle von Anbietern, die noch nicht in der Liste stehen, deren Preis
+zwischen der Hälfte und dem Doppelten des Modellpreises (Input plus Output)
+liegt, das günstigste zuerst. Deaktivierte Modelle, bereits aufgeführte Ziele
+und Modelle, die ein virtuelles Modell woandershin umleitet, werden
+übersprungen. Die Vorschläge sind gewöhnliche Zielzeilen – ordnen Sie sie um
+oder entfernen Sie sie und speichern Sie dann.
+
 Als Code (`config.yaml` oder die Umgebungsvariable `VIRTUAL_MODELS`):
 
 ```yaml

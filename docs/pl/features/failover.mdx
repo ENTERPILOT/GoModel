@@ -42,6 +42,14 @@ Wagi i utrzymywanie sesji nie mają zastosowania w tej strategii, więc
 edytor je ukrywa. Usunięcie przypiętego wiersza zamienia wpis w zwykłe
 przekierowanie: requesty do tego modelu trafiają wtedy do pozostałych celów.
 
+Nie wiesz, na co się przełączać? **Suggest fallbacks** wypełnia listę za Ciebie:
+najpierw ten sam model u pozostałych dostawców, potem maksymalnie trzy modele
+tekstowe od dostawców, których nie ma jeszcze na liście, w cenie od połowy do
+dwukrotności ceny modelu (input plus output), od najtańszego. Pomija modele
+wyłączone, cele już obecne na liście oraz modele, które model wirtualny
+przekierowuje gdzie indziej. Propozycje to zwykłe wiersze celów — zmień ich
+kolejność lub usuń je, a potem zapisz.
+
 W kodzie (`config.yaml` lub zmienna środowiskowa `VIRTUAL_MODELS`):
 
 ```yaml

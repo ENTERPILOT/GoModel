@@ -20,7 +20,7 @@
     REASONING_EFFORT_LEVELS,
   } from "./vmForm.js";
   import VmTargetRow from "./VmTargetRow.svelte";
-  import { Plus, Save } from "lucide";
+  import { Lightbulb, Plus, Save } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const vm = virtualModelEditor;
@@ -134,7 +134,7 @@
         onremove={() => vm.removeVmTarget(index)}
       />
     {/each}
-    <div>
+    <div class="vm-target-actions">
       <button
         type="button"
         class="btn btn-with-icon"
@@ -144,7 +144,28 @@
         <Icon icon={Plus} class="form-action-icon" />
         <span>{m.models_add_target()}</span>
       </button>
+      {#if vm.vmOffersFallbackSuggestions()}
+        <button
+          type="button"
+          class="btn btn-with-icon"
+          title={m.models_suggest_fallbacks_help()}
+          disabled={vm.vmFormManaged}
+          onclick={(event) => {
+            // The rows are filled programmatically, so report them as a
+            // change for the dialog's unsaved-changes guard.
+            if (vm.suggestVmFallbacks()) {
+              event.currentTarget.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          }}
+        >
+          <Icon icon={Lightbulb} class="form-action-icon" />
+          <span>{m.models_suggest_fallbacks()}</span>
+        </button>
+      {/if}
     </div>
+    {#if vm.vmFallbackNote}
+      <p class="form-hint vm-fallback-note" role="status">{vm.vmFallbackNote}</p>
+    {/if}
   </div>
 
   {@const summary = vm.vmRoutingSummary()}
@@ -375,7 +396,14 @@
     cursor: pointer;
   }
 
-  .vm-routing-summary {
+  .vm-target-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .vm-routing-summary,
+  .vm-fallback-note {
     margin: 0;
   }
 
