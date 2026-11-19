@@ -364,8 +364,8 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 		}
 		sc.openMessageAfterImage(content != "", extra)
 		sc.setMessageExtraContent(extra)
-		if chunks, ok := delta[MistralContentChunksField].([]any); ok {
-			sc.output.AppendAssistantContentChunks(rawJSONValues(chunks))
+		if _, ok := delta[MistralContentChunksField]; ok {
+			sc.output.AppendAssistantContentChunks(rawDeltaContentChunks(data))
 		}
 		reasoning, _ := delta["reasoning_content"].(string)
 		if reasoning == "" {
@@ -395,16 +395,21 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 	}
 }
 
-// rawJSONValues re-encodes generically parsed values, skipping any that do not
-// encode.
-func rawJSONValues(values []any) []json.RawMessage {
-	encoded := make([]json.RawMessage, 0, len(values))
-	for _, value := range values {
-		if raw, err := json.Marshal(value); err == nil {
-			encoded = append(encoded, raw)
-		}
+// rawDeltaContentChunks decodes only the MistralContentChunksField member of
+// a chunk's first delta. The tolerant path uses it instead of the generic
+// map, which would round a reference id above 2^53 to a float.
+func rawDeltaContentChunks(data []byte) []json.RawMessage {
+	var chunk struct {
+		Choices []struct {
+			Delta struct {
+				ContentChunks []json.RawMessage `json:"mistral_content_chunks"`
+			} `json:"delta"`
+		} `json:"choices"`
 	}
-	return encoded
+	if err := json.Unmarshal(data, &chunk); err != nil || len(chunk.Choices) == 0 {
+		return nil
+	}
+	return chunk.Choices[0].Delta.ContentChunks
 }
 
 // chunkToolCallsFromAny converts generically parsed tool-call deltas into the
@@ -548,7 +553,10 @@ func (sc *OpenAIResponsesStreamConverter) appendTerminalEvents() {
 		eventName = "response.incomplete"
 	}
 	sc.buffer.AppendString(sc.output.FinishReasoningOutput(reasoningOutputIndex, status))
-	if sc.extraAwaitsMessage {
+	// Content chunks that arrived without any text still need a message item
+	// to ride on. It is reserved here, not on arrival, so it cannot take the
+	// reasoning item's slot.
+	if sc.extraAwaitsMessage || sc.output.HasAssistantContentChunks() {
 		sc.reserveAssistantOutput()
 	}
 	sc.buffer.AppendString(sc.output.FinishAssistantOutput(sc.assistantOutputIndex, status))

@@ -338,9 +338,14 @@ func (s *ResponsesOutputEventState) assistantItemExtraContent() json.RawMessage 
 // item. They arrive between text deltas and have no stream event of their
 // own, so they are rendered in the extra_content of every message item
 // written from here on: its output_item.done event and the terminal output.
-// A turn that never opens a message item has nowhere to carry them.
 func (s *ResponsesOutputEventState) AppendAssistantContentChunks(chunks []json.RawMessage) {
 	s.assistantContentChunks = append(s.assistantContentChunks, chunks...)
+}
+
+// HasAssistantContentChunks reports whether content chunks are waiting for
+// the current message item. A turn without text has to open one for them.
+func (s *ResponsesOutputEventState) HasAssistantContentChunks() bool {
+	return len(s.assistantContentChunks) > 0
 }
 
 // SetAssistantExtraContent attaches provider replay state to the assistant

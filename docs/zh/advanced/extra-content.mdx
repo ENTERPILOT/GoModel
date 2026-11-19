@@ -31,7 +31,7 @@ GoModel 不存储任何内容。状态随响应传给客户端，再随客户端
 | API | 位置 |
 | --- | --- |
 | Chat Completions | `tool_calls[].extra_content`；对于整轮级别的状态（如思考块），位于助手消息上；流式传输的 `tool_calls` 和消息增量（delta）中同样存在 |
-| Responses | `function_call` 输出项；`reasoning` 输出项；在流式传输过程中收到文本轮次签名时，以及对于 Mistral 引用分块，位于助手 `message` 项上 |
+| Responses | `function_call` 输出项；`reasoning` 输出项；在流式传输过程中收到文本轮次签名时，位于助手 `message` 项上；Mistral 引用分块也位于助手 `message` 项上 |
 | Anthropic Messages | `tool_use` 内容块。思考块则使用该协议自身的 `signature` 和 `data` 字段。 |
 
 状态放在与提供商的单个部分（part）相对应的单元上。一个工具调用对应一个 Gemini `part`，因此每个调用的签名位于该工具调用上。思考块属于整个助手轮次，因此位于消息上。

@@ -109,6 +109,29 @@ func TestBuildResponsesOutputItems_KeepsMistralContentChunks(t *testing.T) {
 	}
 }
 
+// A tool-call turn without text has no message item of its own. Content
+// chunks open one, so they are not lost with it.
+func TestBuildResponsesOutputItems_MistralContentChunksWithoutText(t *testing.T) {
+	toolCall := core.ToolCall{ID: "call_1", Type: "function", Function: core.FunctionCall{Name: "lookup", Arguments: "{}"}}
+	items := BuildResponsesOutputItems(core.ResponseMessage{Role: "assistant", ToolCalls: []core.ToolCall{toolCall}})
+	require.Len(t, items, 1)
+	require.Equal(t, "function_call", items[0].Type)
+
+	items = BuildResponsesOutputItems(core.ResponseMessage{
+		Role:      "assistant",
+		ToolCalls: []core.ToolCall{toolCall},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			MistralContentChunksField: json.RawMessage(`[{"type":"reference","reference_ids":[9007199254740993]}]`),
+		}),
+	})
+	require.Len(t, items, 2)
+	require.Equal(t, "message", items[0].Type)
+	require.Equal(t, "function_call", items[1].Type)
+	assert.JSONEq(t, `{"mistral":{"content_chunks":[{"type":"reference","reference_ids":[9007199254740993]}]}}`,
+		string(items[0].ExtraFields.Lookup(core.ExtraContentField)))
+	assert.Contains(t, string(items[0].ExtraFields.Lookup(core.ExtraContentField)), "9007199254740993")
+}
+
 // A reasoning item belongs to the assistant turn that follows it. When no
 // assistant turn does — the history moves straight on to a user message — the
 // replay state must be dropped, not held over and pinned to whatever assistant

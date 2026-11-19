@@ -158,7 +158,10 @@ func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputI
 	}
 	contentItems := buildResponsesMessageContent(msg.Content)
 	images := imageGenerationCallItems(msg.ExtraFields)
-	if len(contentItems) > 0 || (len(msg.ToolCalls) == 0 && len(images) == 0) {
+	// Content chunks need a message item to ride on, even in a turn that has
+	// no text next to its tool calls.
+	messageExtra := messageItemExtraFields(msg.ExtraFields)
+	if len(contentItems) > 0 || !messageExtra.IsEmpty() || (len(msg.ToolCalls) == 0 && len(images) == 0) {
 		if len(contentItems) == 0 {
 			contentItems = []core.ResponsesContentItem{
 				{
@@ -174,7 +177,7 @@ func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputI
 			Role:        "assistant",
 			Status:      "completed",
 			Content:     contentItems,
-			ExtraFields: messageItemExtraFields(msg.ExtraFields),
+			ExtraFields: messageExtra,
 		})
 	}
 	output = append(output, images...)

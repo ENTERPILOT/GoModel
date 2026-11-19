@@ -40,7 +40,7 @@ klienci zbudowani pod niego działają bez zmian.
 | API | Lokalizacja |
 | --- | --- |
 | Chat Completions | `tool_calls[].extra_content`; na wiadomości asystenta dla stanu dotyczącego całej tury, np. bloków thinking; również na streamowanych `tool_calls` i deltach wiadomości |
-| Responses | elementy wyjściowe `function_call`; elementy wyjściowe `reasoning`; element `message` asystenta, gdy podpis tury tekstowej nadejdzie podczas streamingu, oraz dla fragmentów cytowań Mistrala |
+| Responses | elementy wyjściowe `function_call`; elementy wyjściowe `reasoning`; element `message` asystenta, gdy podpis tury tekstowej nadejdzie podczas streamingu; element `message` asystenta z fragmentami cytowań Mistrala |
 | Anthropic Messages | bloki treści `tool_use`. Bloki thinking używają zamiast tego własnych pól dialektu: `signature` i `data`. |
 
 Stan znajduje się na jednostce, która odpowiada jednej części po stronie providera.

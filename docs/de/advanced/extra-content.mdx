@@ -40,7 +40,7 @@ entwickelt wurden, unverändert funktionieren.
 | API | Ort |
 | --- | --- |
 | Chat Completions | `tool_calls[].extra_content`; auf der Assistant-Nachricht für Turn-weiten Zustand wie Thinking-Blöcke; außerdem auf gestreamten `tool_calls` und Nachrichten-Deltas |
-| Responses | `function_call`-Output-Items; `reasoning`-Output-Items; das Assistant-`message`-Item, wenn beim Streaming eine Signatur für einen Text-Turn eintrifft, sowie für Mistral-Zitat-Chunks |
+| Responses | `function_call`-Output-Items; `reasoning`-Output-Items; das Assistant-`message`-Item, wenn beim Streaming eine Signatur für einen Text-Turn eintrifft; das Assistant-`message`-Item für Mistral-Zitat-Chunks |
 | Anthropic Messages | `tool_use`-Content-Blöcke. Thinking-Blöcke verwenden stattdessen die eigenen Felder `signature` und `data` des Dialekts. |
 
 Der Zustand sitzt auf der Einheit, die genau einem Provider-Part entspricht. Ein Tool Call wird zu

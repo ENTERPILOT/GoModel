@@ -16,16 +16,18 @@ import (
 //   - translation layers copy the member through untouched;
 //   - the router drops every vendor the selected provider does not own;
 //   - only the owning provider adapter reads or writes inside its object.
+//     ExtraContentVendorMistral is the one exception.
 const ExtraContentField = "extra_content"
 
 // Vendors that own an extra_content object.
 const (
 	ExtraContentVendorGoogle    = "google"
 	ExtraContentVendorAnthropic = "anthropic"
-	// ExtraContentVendorMistral is written on Responses output only, by the
-	// chat-to-Responses translation, from what the mistral adapter left on
-	// the chat message. Mistral reads nothing back, so the router drops it
-	// from every request.
+	// ExtraContentVendorMistral is written on Responses output only, and not
+	// by the mistral adapter: the chat-to-Responses translation copies there
+	// the content chunks the adapter left on the chat message, because the
+	// adapter never sees the Responses items. Mistral reads nothing back, so
+	// the router drops it from every request.
 	ExtraContentVendorMistral = "mistral"
 )
 

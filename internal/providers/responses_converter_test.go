@@ -1197,21 +1197,100 @@ data: [DONE]
 }
 
 // The tolerant decode path, taken for off-spec chunks, must carry the member
-// as well.
+// as well, byte for byte: a reference id above 2^53 must not be rounded by a
+// trip through float64.
 func TestOpenAIResponsesStreamConverter_MistralContentChunksTolerantPath(t *testing.T) {
-	mockStream := `data: {"choices":[{"delta":{"content":"Paris","reasoning_content":7,"mistral_content_chunks":[{"type":"reference","reference_ids":[0]}]},"finish_reason":"stop"}]}
+	const chunks = `[{"type":"reference","reference_ids":[9007199254740993]}]`
+	for name, member := range map[string]string{
+		"typed path":    `"content":"Paris"`,
+		"tolerant path": `"content":"Paris","reasoning_content":7`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			mockStream := `data: {"choices":[{"delta":{` + member + `,"mistral_content_chunks":` + chunks + `},"finish_reason":"stop"}]}
 
 data: [DONE]
 `
-	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "mistral-large-4-0", "mistral")
-	raw, err := io.ReadAll(converter)
-	require.NoError(t, err)
+			converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "mistral-large-4-0", "mistral")
+			raw, err := io.ReadAll(converter)
+			require.NoError(t, err)
 
-	want := mistralContentChunks(map[string]any{"type": "reference", "reference_ids": []any{float64(0)}})
-	done, terminal, seen := messageItemExtraContent(t, string(raw))
-	require.Equal(t, 2, seen)
-	assert.Equal(t, want, done)
-	assert.Equal(t, want, terminal)
+			_, _, seen := messageItemExtraContent(t, string(raw))
+			require.Equal(t, 2, seen)
+			// The item also states them when it opens: they came with its first text.
+			assert.Equal(t, 3, strings.Count(string(raw), `"extra_content":{"mistral":{"content_chunks":`+chunks+`}}`),
+				"every statement of the message item must carry the chunks unchanged: %s", raw)
+			assert.NotContains(t, string(raw), "9007199254740992")
+		})
+	}
+}
+
+// A turn whose only content is chunks has no text delta to open the message
+// item, so the end of the stream opens one for them, after the reasoning
+// item and any tool call, as the buffered translation keeps them too.
+func TestOpenAIResponsesStreamConverter_MistralContentChunksWithoutText(t *testing.T) {
+	tests := []struct {
+		name      string
+		stream    string
+		wantTypes []any
+	}{
+		{
+			name: "chunks only",
+			stream: `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"","mistral_content_chunks":[{"type":"reference","reference_ids":[4]}]},"finish_reason":"stop"}]}
+
+data: [DONE]
+`,
+			wantTypes: []any{"message"},
+		},
+		{
+			name: "after reasoning and a tool call",
+			stream: `data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"thinking"},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"mistral_content_chunks":[{"type":"reference","reference_ids":[4]}],"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`,
+			wantTypes: []any{"reasoning", "function_call", "message"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(tt.stream)), "mistral-large-4-0", "mistral")
+			raw, err := io.ReadAll(converter)
+			require.NoError(t, err)
+
+			want := mistralContentChunks(map[string]any{"type": "reference", "reference_ids": []any{float64(4)}})
+			done, terminal, seen := messageItemExtraContent(t, string(raw))
+			require.Equal(t, 2, seen)
+			assert.Equal(t, want, done)
+			assert.Equal(t, want, terminal)
+
+			events := parseTestSSEEvents(t, string(raw))
+			requireNormalizedResponsesStream(t, events)
+			var types, indexes []any
+			for _, event := range events {
+				if event.Name == "response.output_item.done" {
+					types = append(types, event.Payload["item"].(map[string]any)["type"])
+					indexes = append(indexes, event.Payload["output_index"])
+				}
+			}
+			assert.ElementsMatch(t, tt.wantTypes, types)
+			assert.Len(t, indexes, len(tt.wantTypes))
+			for i := range tt.wantTypes {
+				assert.Contains(t, indexes, float64(i), "output indexes must be unique and dense")
+			}
+			for _, event := range events {
+				if event.Name != "response.completed" {
+					continue
+				}
+				output, _ := event.Payload["response"].(map[string]any)["output"].([]any)
+				var got []any
+				for _, item := range output {
+					got = append(got, item.(map[string]any)["type"])
+				}
+				assert.Equal(t, tt.wantTypes, got, "terminal output is ordered by output index")
+			}
+		})
+	}
 }
 
 // eventNames lists the SSE event names in stream order, with "[DONE]" for the
