@@ -82,6 +82,17 @@ type ServerConfig struct {
 	// Default: 60 (DefaultStreamStallTimeoutSeconds). 0 disables the limit.
 	StreamStallTimeout int `yaml:"stream_stall_timeout" env:"STREAM_STALL_TIMEOUT"`
 
+	// AudioSpeechChunkChars is the most characters of POST /v1/audio/speech
+	// input sent to a provider in one request. Longer input is split at
+	// sentence boundaries, synthesized part by part, and returned as one audio
+	// stream, so a client can send a whole article where the provider caps or
+	// degrades on long input. It applies to response_format wav and pcm, the
+	// formats that can be joined without decoding; other formats are forwarded
+	// as they are. Set it to the smallest input limit among your speech
+	// providers (OpenAI: 4096).
+	// Default: 0 (input is never split).
+	AudioSpeechChunkChars int `yaml:"audio_speech_chunk_chars" env:"AUDIO_SPEECH_CHUNK_CHARS"`
+
 	// TrustedProxies lists the networks your own proxies sit on, enabling
 	// header-based client addresses everywhere the gateway reports one (request log
 	// entries, rate limit keys, logs). Entries are CIDR networks, bare

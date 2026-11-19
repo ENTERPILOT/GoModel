@@ -119,6 +119,46 @@ jako zwykły tekst.
 Zsyntetyzowane audio jest **przekazywane na bieżąco, w miarę jak provider je generuje** – zobacz
 [Streaming](#streaming).
 
+### Długi tekst
+
+Providerzy ograniczają długość tekstu w jednym requeście (OpenAI: 4096 znaków),
+a modele lokalne często brzmią gorzej na długo przed swoim limitem. Ustaw
+[`AUDIO_SPEECH_CHUNK_CHARS`](/pl/advanced/configuration#serwer) na ten limit,
+a klient może wysłać cały artykuł w jednym requeście:
+
+```bash
+AUDIO_SPEECH_CHUNK_CHARS=4096
+```
+
+- Tekst dłuższy niż limit jest dzielony na **granicach zdań**. Skróty, inicjały
+  i liczby (`dr.`, `np.`, `3.14`) nie kończą zdania, a pisma, które kończą
+  zdania bez spacji (`。！？`), są rozpoznawane. Zdanie dłuższe niż limit jest
+  dzielone na końcu linii, potem na przecinku, potem między słowami.
+- Części są syntetyzowane **po kolei, z tymi samymi parametrami**, a ich audio
+  wraca jako **jedna odpowiedź**. Pierwsze bajty przychodzą, gdy tylko pierwsza
+  część jest gotowa.
+- To nadal **jeden request**: jeden wpis w logu requestów, jeden rekord użycia
+  z łączną liczbą znaków i łącznym czasem audio oraz jeden request w limitach
+  GoModel. Provider widzi jeden request na każdą część.
+
+Dzielenie działa dla `response_format` `wav` i `pcm`, które da się połączyć bez
+dekodowania. Pozostałe formaty, w tym domyślny `mp3`, oraz
+`stream_format: "sse"` są przekazywane bez zmian, więc nadal obowiązuje dla nich
+limit providera. [audio.cpp](/pl/providers/audiocpp) odpowiada plikiem WAV
+niezależnie od żądanego formatu, więc proś go o `wav`. Połączony plik WAV
+zostawia w nagłówku otwartą długość, tak jak odpowiedzi WAV samego OpenAI;
+odtwarzacze czytają go do końca.
+
+Wartość domyślna to `0`: tekst nigdy nie jest dzielony. Ustawienie dotyczy
+całego gatewaya, więc użyj najmniejszego limitu spośród swoich providerów mowy.
+
+<Note>
+  Pierwsza część jest zamawiana, zanim zacznie się odpowiedź, więc request
+  odrzucony przez providera zwraca jego błąd jak zwykle. Jeśli zawiedzie
+  późniejsza część, audio kończy się w tym miejscu, a wpis w logu requestów
+  odnotowuje `stream_error`.
+</Note>
+
 ## Mowa na tekst
 
 <CodeGroup>

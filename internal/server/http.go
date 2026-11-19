@@ -112,6 +112,7 @@ type Config struct {
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
 	DisableLiteLLMTags              bool                                   // Leave LiteLLM tags alone: no labels from them and no stripping
 	RealtimeEnabled                 bool                                   // Enable the realtime websocket routes (/v1/realtime, /v1/realtime/translations) and passthrough upgrades
+	AudioSpeechChunkChars           int                                    // Max characters of /v1/audio/speech input per provider request; longer wav/pcm input is split and joined. 0 never splits
 	AuthVerifyEnabled               bool                                   // Enable the credential check route (GET /v1/auth/verify); off by default
 	MCPEnabled                      bool                                   // Enable the MCP gateway routes /mcp and /mcp/{server}
 	MCPGateway                      *mcpgateway.Service                    // MCP gateway service (nil if disabled or not wired)
@@ -259,6 +260,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// so the documented default and the registered route stay consistent.
 	handler.realtimeEnabled = cfg == nil || cfg.RealtimeEnabled
 	if cfg != nil {
+		handler.audioSpeechChunkChars = cfg.AudioSpeechChunkChars
 		handler.versionChecker = cfg.VersionChecker
 		handler.masterKey = cfg.effectiveMasterKey()
 	}
