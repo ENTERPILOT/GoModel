@@ -263,28 +263,43 @@ func (k *Keyring) Primary() string {
 }
 
 // Position reports which key of the ring an outbound request carries in
-// header, as its 1-based position in the key list, or 0 when it carries none:
-// an empty, nil or federated ring, an unauthenticated request, or a key that
-// Replace has since dropped. A key is recognised as a whole header value
-// (`x-api-key: <key>`) or after an auth scheme (`Authorization: Bearer <key>`),
-// which covers every way a provider sends one. It lets a caller name the key
-// in use without ever handling the key itself.
+// header, as its 1-based position in the key list. It lets a caller name the
+// key in use without ever handling the key itself.
+//
+// Only credential headers are read (core.IsCredentialHeader), so a key that
+// shows up in any other header cannot place the request. There a key is
+// recognised as the whole value (`x-api-key: <key>`) or after an auth scheme
+// (`Authorization: Bearer <key>`), which covers every way a provider sends
+// one.
+//
+// It returns 0 when the request cannot be placed: an empty, nil or federated
+// ring, no credential, a key that Replace has since dropped, or credential
+// headers that carry two different keys of the ring, as a passthrough client
+// could arrange by sending one of them in a header the provider does not set.
 func (k *Keyring) Position(header http.Header) int {
 	keys := k.load()
 	if len(keys) == 0 {
 		return 0
 	}
-	for _, values := range header {
+	position := 0
+	for name, values := range header {
+		if !core.IsCredentialHeader(name) {
+			continue
+		}
 		for _, value := range values {
 			_, credential, _ := strings.Cut(value, " ")
 			for i, key := range keys {
-				if value == key || credential == key {
-					return i + 1
+				if value != key && credential != key {
+					continue
 				}
+				if position != 0 && position != i+1 {
+					return 0
+				}
+				position = i + 1
 			}
 		}
 	}
-	return 0
+	return position
 }
 
 // Len reports how many distinct keys back the rotation; 1 for a federated

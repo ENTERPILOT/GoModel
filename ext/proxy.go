@@ -16,12 +16,13 @@ type ProxyRequest struct {
 	// the provider's key list: 1 for `api_key` or `<PROVIDER>_API_KEY`, 2 for
 	// the next one, counted after empty and duplicate entries are dropped.
 	//
-	// It is 0 when the request carries none of those keys: the provider is
-	// keyless or authenticates with cloud credentials or workload identity,
-	// the request is unauthenticated, or its key was rotated out while it was
-	// in flight. A selector that must never send an account through the wrong
-	// egress should return an error for 0 on the providers it maps by key.
-	// The key itself is never exposed.
+	// It is 0 when the request cannot be placed: the provider is keyless or
+	// authenticates with cloud credentials or workload identity, the request
+	// is unauthenticated, its key was rotated out while it was in flight, or
+	// its credential headers carry more than one of the provider's keys. A
+	// selector that must never send an account through the wrong egress
+	// should return an error for 0 on the providers it maps by key. The key
+	// itself is never exposed.
 	KeyPosition int
 }
 
