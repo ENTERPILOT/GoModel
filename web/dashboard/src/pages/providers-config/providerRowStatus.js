@@ -2,6 +2,7 @@
 // (/admin/provider-credentials) with its entry from /admin/providers/status,
 // matched by provider name. Pure so it is testable with node.
 
+import * as m from "../../lib/paraglide/messages.js";
 import { providerLastErrorText } from "../overview/providersLogic.js";
 
 export function providerStatusByName(providers) {
@@ -30,4 +31,12 @@ export function providerRowStatus(row, statusByName) {
     modelCount: runtime.inventory_stale ? 0 : Number(runtime.discovered_model_count || 0),
     lastError: providerLastErrorText(provider),
   };
+}
+
+// providerRowNoStatusTitle explains an empty Status cell: a disabled row is
+// not registered for routing; an enabled one simply has no status reported.
+export function providerRowNoStatusTitle(row) {
+  return row && row.enabled === false
+    ? m.providers_status_unknown()
+    : m.providers_status_missing();
 }

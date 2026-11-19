@@ -1030,6 +1030,7 @@
   "providers_status": "状态",
   "providers_status_models": "模型：{count}",
   "providers_status_unknown": "无实时状态。已禁用的供应商不会注册到路由中。",
+  "providers_status_missing": "尚未报告此供应商的实时状态。",
   "rate_limits_title": "限流",
   "rate_limits_create": "创建限流规则",
   "rate_limits_unavailable": "限流管理不可用。",

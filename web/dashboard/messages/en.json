@@ -1138,6 +1138,7 @@
   "providers_status": "Status",
   "providers_status_models": "Models: {count}",
   "providers_status_unknown": "No live status. A disabled provider is not registered for routing.",
+  "providers_status_missing": "No live status reported for this provider yet.",
   "rate_limits_title": "Rate Limits",
   "rate_limits_create": "Create Rate Limit",
   "rate_limits_unavailable": "Rate limit management is unavailable.",

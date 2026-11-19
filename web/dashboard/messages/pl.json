@@ -1118,6 +1118,7 @@
   "providers_status": "Status",
   "providers_status_models": "Modele: {count}",
   "providers_status_unknown": "Brak bieżącego statusu. Wyłączony dostawca nie jest zarejestrowany do routingu.",
+  "providers_status_missing": "Brak jeszcze bieżącego statusu dla tego dostawcy.",
   "rate_limits_title": "Rate Limits",
   "rate_limits_create": "Utwórz Rate Limit",
   "rate_limits_unavailable": "Zarządzanie Rate Limitami jest niedostępne.",

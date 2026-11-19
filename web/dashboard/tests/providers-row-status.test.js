@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  providerRowNoStatusTitle,
   providerRowStatus,
   providerStatusByName,
 } from "../src/pages/providers-config/providerRowStatus.js";
@@ -78,4 +79,10 @@ test("providerRowStatus pairs a row with its live status", () => {
 
 test("providerRowStatus without a status index shows nothing", () => {
   assert.equal(providerRowStatus({ name: "openai", enabled: true }, undefined), null);
+});
+
+test("providerRowNoStatusTitle blames disabling only for a disabled row", () => {
+  assert.match(providerRowNoStatusTitle({ name: "openai", enabled: false }), /disabled/);
+  assert.doesNotMatch(providerRowNoStatusTitle({ name: "openai", enabled: true }), /disabled/);
+  assert.doesNotMatch(providerRowNoStatusTitle(null), /disabled/);
 });

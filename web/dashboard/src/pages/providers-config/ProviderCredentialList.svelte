@@ -14,7 +14,11 @@
     providerRowNonBillable,
     providerRowsHaveActions,
   } from "./providersConfigLogic.js";
-  import { providerRowStatus, providerStatusByName } from "./providerRowStatus.js";
+  import {
+    providerRowNoStatusTitle,
+    providerRowStatus,
+    providerStatusByName,
+  } from "./providerRowStatus.js";
   import { providerStatusState } from "../overview/overviewState.svelte.js";
   import ProviderStatusPill from "../overview/ProviderStatusPill.svelte";
   import { formatNumber } from "$lib/utils/format.js";
@@ -71,7 +75,7 @@
                 <div class="provider-row-status-error" title={status.lastError}>{status.lastError}</div>
               {/if}
             {:else}
-              <span class="provider-row-status-none" title={m.providers_status_unknown()}>—</span>
+              <span class="provider-row-status-none" title={providerRowNoStatusTitle(row)}>—</span>
             {/if}
           </td>
           <td><span class="budget-source mono"><HighlightText text={row.type} needle={providersConfig.filter} /></span></td>
