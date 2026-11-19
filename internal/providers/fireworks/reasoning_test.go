@@ -48,12 +48,13 @@ func TestChatCompletion_MapsReasoningToReasoningEffort(t *testing.T) {
 }
 
 // Fireworks answers 400 "Extra inputs are not permitted" to annotations, audio
-// and function_call on a replayed assistant message; refusal, name and
-// reasoning_content are part of its schema and stay.
+// and function_call on a replayed assistant message, with or without a value;
+// refusal, name and reasoning_content are part of its schema and stay.
 func TestChatCompletion_DropsRejectedAssistantMembers(t *testing.T) {
 	const body = `{"model":"accounts/fireworks/models/gpt-oss-120b","messages":[` +
 		`{"role":"user","content":"17*23?","name":"alice"},` +
-		`{"role":"assistant","content":"391","name":"bot","refusal":null,"annotations":[],"audio":null,"function_call":null,"reasoning_content":"17*23"},` +
+		`{"role":"assistant","content":"391","name":"bot","refusal":null,"annotations":[],"audio":{"id":"audio_1"},` +
+		`"function_call":{"name":"f","arguments":"{}"},"reasoning_content":"17*23"},` +
 		`{"role":"user","content":"sure?"}]}`
 	want := map[string]any{"role": "assistant", "content": "391", "name": "bot", "refusal": nil, "reasoning_content": "17*23"}
 

@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"bytes"
 	"log/slog"
 	"slices"
 
@@ -39,15 +38,18 @@ func dropMessageMembers(req *core.ChatRequest, role string, keys []string, nullO
 	var adapted *core.ChatRequest
 	changed := 0
 	for i := range req.Messages {
-		fields := req.Messages[i].ExtraFields
-		if req.Messages[i].Role != role || !fields.HasAny(keys...) {
+		if req.Messages[i].Role != role {
 			continue
 		}
+		fields := req.Messages[i].ExtraFields
 		drop := keys
 		if nullOnly {
-			if drop = nullMembers(fields, keys); len(drop) == 0 {
-				continue
-			}
+			drop = fields.NullMembers(keys...)
+		} else if !fields.HasAny(keys...) {
+			drop = nil
+		}
+		if len(drop) == 0 {
+			continue
 		}
 		if adapted == nil {
 			copied := *req
@@ -63,15 +65,4 @@ func dropMessageMembers(req *core.ChatRequest, role string, keys []string, nullO
 	slog.Debug("dropped message members the provider rejects",
 		"model", req.Model, "role", role, "members", keys, "null_only", nullOnly, "messages", changed)
 	return adapted
-}
-
-// nullMembers returns the keys whose member is present with a null value.
-func nullMembers(fields core.UnknownJSONFields, keys []string) []string {
-	var null []string
-	for _, key := range keys {
-		if raw := fields.Lookup(key); raw != nil && core.IsJSONNull(bytes.TrimSpace(raw)) {
-			null = append(null, key)
-		}
-	}
-	return null
 }

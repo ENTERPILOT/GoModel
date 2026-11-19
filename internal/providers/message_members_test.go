@@ -57,6 +57,23 @@ func TestDropNullMessageMembers(t *testing.T) {
 	assert.JSONEq(t, `{"name":"f","arguments":"{}"}`, string(second.Lookup("function_call")))
 }
 
+// A client can send a key twice, and the gateway keeps both. Which one a
+// null-intolerant upstream reads is its parser's choice, so neither may reach
+// it when one of them is null.
+func TestDropNullMessageMembers_DropsAKeySentTwiceWhenEitherIsNull(t *testing.T) {
+	var req core.ChatRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"model":"m","messages":[`+
+		`{"role":"assistant","content":"a","refusal":"no","refusal":null},`+
+		`{"role":"assistant","content":"b","refusal":null,"refusal":"no","name":"bot"}]}`), &req))
+
+	got := DropNullMessageMembers(&req, "assistant", "refusal")
+
+	for i, message := range got.Messages {
+		assert.False(t, message.ExtraFields.HasAny("refusal"), "message %d", i)
+	}
+	assert.Equal(t, json.RawMessage(`"bot"`), got.Messages[1].ExtraFields.Lookup("name"))
+}
+
 func TestDropMessageMembers_ReturnsRequestWhenNothingChanges(t *testing.T) {
 	req := &core.ChatRequest{Model: "m", Messages: []core.Message{
 		{Role: "user", Content: "hi", ExtraFields: messageExtras(t, `{"refusal":null}`)},
