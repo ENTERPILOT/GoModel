@@ -33,7 +33,7 @@ providers:
 ```
 
 仅通过环境变量配置的 Provider 使用 `<PROVIDER>[_SUFFIX]_HEADERS`，值为 JSON 对象。
-值中的引用会被解析：
+值中的引用会被解析；请写 `${env:NAME}`，因为裸 `${NAME}` 在这里不会展开，并会使启动失败：
 
 ```bash
 GEMINI_API_KEY=...
@@ -73,14 +73,15 @@ Embedder 使用该 Provider 时也会发送它们。
 | 所有 Provider | `Host`、`Content-Length`、`Transfer-Encoding`、`Connection`、`Keep-Alive`、`Te`、`Trailer`、`Upgrade`、`Expect`、`Proxy-*`、`Content-Type`、`Content-Encoding`、`Accept-Encoding`、`Idempotency-Key` | 由 HTTP 客户端或网关管理。 |
 | `anthropic` | `anthropic-version`、`anthropic-beta` | 由 GoModel 设置；`anthropic-beta` 还携带 OAuth 标志。 |
 | `gemini` | `x-goog-user-project` | 根据 Google 凭据设置。 |
-| `vertex` | `x-goog-user-project`、`anthropic-version`、`anthropic-beta` | 根据 Google 凭据及 Anthropic 适配器设置。 |
+| `vertex` | `x-goog-user-project`、`anthropic-version` | 根据 Google 凭据及 Anthropic 适配器设置。 |
+| `openrouter` | `X-Session-Id` | 每个请求根据检测到的会话设置。 |
 | `llmd` | `x-llm-d-inference-objective`、`x-llm-d-inference-fairness-id`、`x-gateway-inference-objective`、`x-gateway-inference-fairness-id` | 根据 `inference_objective` 和用户路径设置。 |
 
 边缘网关的密钥是凭据规则的例外，因为它们用于 GoModel 向代理认证，而不是向 Provider
 认证：允许使用 `cf-aig-authorization`、`Ocp-Apim-Subscription-Key`、`Helicone-Auth`
 和 `X-Portkey-Api-Key`。
 
-以下 Provider 类型完全不接受 `headers`：`bedrock` 和 `bedrock-mantle`（请求经过
+以下 Provider 类型完全不接受 `headers`：`bedrock` 和 `bedrock-mantle`（请求经由 AWS SDK 发送，未设置 Bedrock API 密钥时使用
 SigV4 签名，移除自身请求头的代理会破坏签名），以及订阅客户端 `chatgpt`、
 `github-copilot`、`kimicode` 和 `opencode_go`。
 
@@ -90,7 +91,7 @@ SigV4 签名，移除自身请求头的代理会破坏签名），以及订阅�
 ## 密钥
 
 - 无论名称如何，请求头的值都按密钥处理。它们从不出现在日志、错误、管理 API 或审计记录中。
-- [配置导出](/advanced/config-yaml#exporting-the-effective-configuration)会保留密钥引用形式的值，
+- [配置导出](/advanced/config-yaml#exporting-the-effective-configuration)（英文）会保留密钥引用形式的值，
   其他值则写成需要设置的 `${env:...}` 引用。
 - 无法解析的引用会使启动失败，或使[重新加载](/zh/advanced/cli#配置重新加载)失败并保留当前运行的配置，
   错误信息会给出字段名，例如 `providers.gemini.headers.X-Edge-Auth`。

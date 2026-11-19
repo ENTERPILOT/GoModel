@@ -123,6 +123,11 @@ func TestValidateHeaders(t *testing.T) {
 			wantErr: "headers.x-tenant: header is set twice, also as X-Tenant",
 		},
 		{
+			name:    "duplicate spelled with an underscore",
+			headers: map[string]string{"X-Tenant": "a", "X_Tenant": "b"},
+			wantErr: "headers.X_Tenant: header is set twice, also as X-Tenant",
+		},
+		{
 			name:    "empty value",
 			headers: map[string]string{"X-Tenant": " "},
 			wantErr: "headers.X-Tenant: value is empty",
@@ -244,7 +249,12 @@ func TestResolveProviders_Headers(t *testing.T) {
 		{
 			name:    "an unset legacy placeholder is not sent as the value",
 			raw:     map[string]config.RawProviderConfig{"gemini": {Type: "gemini", APIKey: "k", Headers: map[string]string{"X-Edge-Auth": "${GOMODEL_TEST_UNSET}"}}},
-			wantErr: "providers.gemini.headers.X-Edge-Auth: value references an environment variable that is not set",
+			wantErr: "providers.gemini.headers.X-Edge-Auth: value holds a ${...} placeholder that was not expanded; set the variable it names, or write ${env:NAME}",
+		},
+		{
+			name:    "a legacy placeholder in an env value is never expanded, even when the variable is set",
+			env:     map[string]string{"GEMINI_API_KEY": "k", "GOMODEL_TEST_EDGE": "edge-token", "GEMINI_HEADERS": `{"X-Edge-Auth":"${GOMODEL_TEST_EDGE}"}`},
+			wantErr: "providers.gemini.headers.X-Edge-Auth: value holds a ${...} placeholder that was not expanded; set the variable it names, or write ${env:NAME}",
 		},
 		{
 			name:    "a malformed env value fails without repeating it",

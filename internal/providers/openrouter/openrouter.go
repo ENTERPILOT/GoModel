@@ -24,6 +24,8 @@ var Registration = providers.Registration{
 	PassthroughSemanticEnricher: passthroughSemanticEnricher,
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL: defaultBaseURL,
+		// Set per request from the detected session (see setHeaders).
+		ReservedHeaders: []string{"X-Session-Id"},
 	},
 }
 

@@ -43,6 +43,13 @@ func IsProviderHeaderReserved(name string) bool {
 	return canonical == IdempotencyKeyHeader || strings.HasPrefix(canonical, "Proxy-")
 }
 
+// CanonicalProviderHeaderName returns the form two names of a provider's
+// `headers` share when they reach a proxy as the same header. See
+// canonicalHeaderName.
+func CanonicalProviderHeaderName(name string) string {
+	return canonicalHeaderName(name)
+}
+
 // canonicalHeaderName returns the canonical form of a header name, reading
 // "_" as "-" like IsCredentialHeader: a proxy that folds one into the other
 // would otherwise receive a header the gateway refuses under its usual name.

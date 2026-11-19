@@ -35,7 +35,8 @@ providers:
 ```
 
 Environment-only providers use `<PROVIDER>[_SUFFIX]_HEADERS` with a JSON object.
-References inside the values are resolved:
+References inside the values are resolved; write `${env:NAME}`, since a bare
+`${NAME}` is not expanded there and stops startup:
 
 ```bash
 GEMINI_API_KEY=...
@@ -80,7 +81,8 @@ that names the header, never its value.
 | All providers | `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Te`, `Trailer`, `Upgrade`, `Expect`, `Proxy-*`, `Content-Type`, `Content-Encoding`, `Accept-Encoding`, `Idempotency-Key` | The HTTP client or the gateway owns them. |
 | `anthropic` | `anthropic-version`, `anthropic-beta` | Set by GoModel; `anthropic-beta` also carries the OAuth flag. |
 | `gemini` | `x-goog-user-project` | Set from the Google credentials. |
-| `vertex` | `x-goog-user-project`, `anthropic-version`, `anthropic-beta` | Set from the Google credentials and the Anthropic adapter. |
+| `vertex` | `x-goog-user-project`, `anthropic-version` | Set from the Google credentials and the Anthropic adapter. |
+| `openrouter` | `X-Session-Id` | Set per request from the detected session. |
 | `llmd` | `x-llm-d-inference-objective`, `x-llm-d-inference-fairness-id`, `x-gateway-inference-objective`, `x-gateway-inference-fairness-id` | Set from `inference_objective` and the user path. |
 
 Edge-gateway keys are the exception to the credential rule, since they
@@ -89,8 +91,8 @@ authenticate GoModel to the proxy rather than to the provider:
 `X-Portkey-Api-Key` are allowed.
 
 These provider types refuse `headers` entirely: `bedrock` and `bedrock-mantle`
-(requests are SigV4-signed, so a proxy that strips its own header breaks the
-signature), and the subscription clients `chatgpt`, `github-copilot`,
+(requests go through the AWS SDK and are SigV4-signed unless a Bedrock API key
+is set, so a proxy that strips its own header breaks the signature), and the subscription clients `chatgpt`, `github-copilot`,
 `kimicode`, and `opencode_go`.
 
 Names must be valid HTTP header names and unique ignoring case. Values must

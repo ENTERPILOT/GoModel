@@ -620,7 +620,7 @@ providers:
     # other header, for a proxy in front of it that wants its own token or for
     # static attribution headers. Values accept secret references. Credential,
     # transport and content headers are refused. Default: none.
-    # Equivalent env var: OPENAI_HEADERS='{"X-Edge-Auth":"${file:/run/secrets/edge}"}'
+    # Equivalent env var: OPENAI_HEADERS='{"X-Edge-Auth":"${file:/run/secrets/edge-token}"}'
     # (a JSON object that replaces this map).
     # headers:
     #   X-Edge-Auth: "${file:/run/secrets/edge-token}"

@@ -102,3 +102,35 @@ func TestEveryProviderTypeSendsItsConfiguredHeaders(t *testing.T) {
 		assert.Empty(t, exchange.Header.Get(header), "a token endpoint must never receive a provider header")
 	}
 }
+
+// TestProviderTypesReserveTheHeadersTheySetPerRequest pins the per-type
+// reservations of the shipped adapters: a header the adapter sets per request
+// or for its protocol is refused, and one it never sets is allowed.
+func TestProviderTypesReserveTheHeadersTheySetPerRequest(t *testing.T) {
+	factory := defaultProviderFactory(&config.Config{})
+	tests := []struct {
+		providerType, header string
+		reserved             bool
+	}{
+		{"anthropic", "anthropic-version", true},
+		{"anthropic", "anthropic-beta", true},
+		{"gemini", "x-goog-user-project", true},
+		{"vertex", "x-goog-user-project", true},
+		{"vertex", "anthropic-version", true},
+		{"vertex", "anthropic-beta", false},
+		{"openrouter", "x-session-id", true},
+		{"llmd", "x-llm-d-inference-objective", true},
+		{"openai", "x-session-id", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.providerType+" "+tt.header, func(t *testing.T) {
+			err := factory.ValidateHeaders(tt.providerType, map[string]string{tt.header: "v"})
+			if tt.reserved {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "is set by GoModel for "+tt.providerType)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}

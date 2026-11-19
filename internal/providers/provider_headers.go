@@ -3,7 +3,6 @@ package providers
 import (
 	"fmt"
 	"maps"
-	"net/http"
 	"slices"
 	"strings"
 
@@ -35,8 +34,8 @@ func parseHeadersEnv(value string) (map[string]string, error) {
 }
 
 // rejectUnsetHeaderPlaceholders fails on a header value still holding a
-// legacy ${VAR} that environment expansion left in place because VAR is
-// unset. Unlike an API key, a header cannot be dropped quietly: the provider
+// legacy ${VAR}: in config.yaml, environment expansion left it in place
+// because VAR is unset; in <PROVIDER>_HEADERS it is never expanded. Unlike an API key, a header cannot be dropped quietly: the provider
 // would start without the token its proxy wants, or send the placeholder as
 // the token. It runs before secret resolution, the only point where "${" is
 // still a placeholder and not data.
@@ -45,7 +44,7 @@ func rejectUnsetHeaderPlaceholders(candidates map[string]config.RawProviderConfi
 		headers := candidates[name].Headers
 		for _, header := range slices.Sorted(maps.Keys(headers)) {
 			if config.HasUnresolvedPlaceholder(headers[header]) {
-				return fmt.Errorf("%s: value references an environment variable that is not set", providerHeaderPath(name, header))
+				return fmt.Errorf("%s: value holds a ${...} placeholder that was not expanded; set the variable it names, or write ${env:NAME}", providerHeaderPath(name, header))
 			}
 		}
 	}
@@ -95,7 +94,9 @@ func validateHeaders(providerType string, spec DiscoveryConfig, headers map[stri
 		if !httpguts.ValidHeaderFieldName(name) {
 			return fmt.Errorf("headers: %q is not a valid header name", name)
 		}
-		canonical := http.CanonicalHeaderKey(name)
+		// "_" reads as "-" here as in the reserved-name checks: a proxy that
+		// folds one into the other would receive both spellings as one header.
+		canonical := core.CanonicalProviderHeaderName(name)
 		if first, dup := seen[canonical]; dup {
 			return fmt.Errorf("headers.%s: header is set twice, also as %s", name, first)
 		}

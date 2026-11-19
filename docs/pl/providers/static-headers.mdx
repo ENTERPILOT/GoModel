@@ -37,7 +37,8 @@ providers:
 
 Providery konfigurowane wyłącznie zmiennymi środowiskowymi używają
 `<PROVIDER>[_SUFFIX]_HEADERS` z obiektem JSON. Referencje w wartościach są
-rozwiązywane:
+rozwiązywane; pisz `${env:NAME}`, bo samo `${NAME}` nie jest tam rozwijane i
+zatrzymuje uruchamianie:
 
 ```bash
 GEMINI_API_KEY=...
@@ -83,7 +84,8 @@ błędem, który podaje nagłówek, nigdy jego wartość.
 | Wszystkie providery | `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Te`, `Trailer`, `Upgrade`, `Expect`, `Proxy-*`, `Content-Type`, `Content-Encoding`, `Accept-Encoding`, `Idempotency-Key` | Należą do klienta HTTP lub bramki. |
 | `anthropic` | `anthropic-version`, `anthropic-beta` | Ustawiane przez GoModel; `anthropic-beta` niesie też flagę OAuth. |
 | `gemini` | `x-goog-user-project` | Ustawiany z poświadczeń Google. |
-| `vertex` | `x-goog-user-project`, `anthropic-version`, `anthropic-beta` | Ustawiane z poświadczeń Google i przez adapter Anthropic. |
+| `vertex` | `x-goog-user-project`, `anthropic-version` | Ustawiane z poświadczeń Google i przez adapter Anthropic. |
+| `openrouter` | `X-Session-Id` | Ustawiany dla każdego żądania z wykrytej sesji. |
 | `llmd` | `x-llm-d-inference-objective`, `x-llm-d-inference-fairness-id`, `x-gateway-inference-objective`, `x-gateway-inference-fairness-id` | Ustawiane z `inference_objective` i ścieżki użytkownika. |
 
 Klucze bramek brzegowych są wyjątkiem od reguły poświadczeń, bo uwierzytelniają
@@ -92,8 +94,8 @@ GoModel wobec proxy, a nie wobec providera: `cf-aig-authorization`,
 dozwolone.
 
 Te typy providerów w ogóle odrzucają `headers`: `bedrock` i `bedrock-mantle`
-(żądania są podpisywane SigV4, więc proxy, które usuwa własny nagłówek, psuje
-podpis) oraz klienci subskrypcyjni `chatgpt`, `github-copilot`, `kimicode` i
+(żądania idą przez AWS SDK i są podpisywane SigV4, o ile nie ustawiono klucza
+API Bedrock, więc proxy, które usuwa własny nagłówek, psuje podpis) oraz klienci subskrypcyjni `chatgpt`, `github-copilot`, `kimicode` i
 `opencode_go`.
 
 Nazwy muszą być poprawnymi nazwami nagłówków HTTP i unikalne bez względu na
@@ -104,7 +106,7 @@ NUL. Provider przyjmuje najwyżej 32 nagłówki i 8 KiB nazw oraz wartości.
 
 - Wartości nagłówków są traktowane jak sekrety niezależnie od nazwy. Nigdy nie
   pojawiają się w logach, błędach, API administracyjnym ani wpisach audytu.
-- [Eksport konfiguracji](/advanced/config-yaml#exporting-the-effective-configuration)
+- [Eksport konfiguracji](/advanced/config-yaml#exporting-the-effective-configuration) (po angielsku)
   zachowuje wartość będącą referencją do sekretu, a każdą inną zapisuje jako
   referencję `${env:...}` do ustawienia.
 - Nierozwiązywalna referencja zatrzymuje uruchamianie albo powoduje nieudany

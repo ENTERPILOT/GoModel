@@ -42,8 +42,10 @@ var Registration = providers.Registration{
 			{Name: providers.CredentialFieldGCPScope, Advanced: true},
 		},
 		// The quota project comes from the Google credentials, and
-		// api_mode: anthropic runs the Anthropic adapter with its headers.
-		ReservedHeaders: []string{googlecommon.QuotaProjectHeader, "anthropic-version", "anthropic-beta"},
+		// api_mode: anthropic runs the Anthropic adapter, which sets
+		// anthropic-version. It sets no anthropic-beta on Vertex, which
+		// has no OAuth flag to keep, so a configured one is allowed.
+		ReservedHeaders: []string{googlecommon.QuotaProjectHeader, "anthropic-version"},
 	},
 }
 

@@ -37,7 +37,8 @@ providers:
 
 Provider, die nur über Umgebungsvariablen konfiguriert sind, verwenden
 `<PROVIDER>[_SUFFIX]_HEADERS` mit einem JSON-Objekt. Referenzen in den Werten
-werden aufgelöst:
+werden aufgelöst; schreiben Sie `${env:NAME}`, denn ein bloßes `${NAME}` wird dort
+nicht expandiert und stoppt den Start:
 
 ```bash
 GEMINI_API_KEY=...
@@ -83,7 +84,8 @@ stoppt den Start mit einem Fehler, der den Header nennt, nie seinen Wert.
 | Alle Provider | `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Te`, `Trailer`, `Upgrade`, `Expect`, `Proxy-*`, `Content-Type`, `Content-Encoding`, `Accept-Encoding`, `Idempotency-Key` | Sie gehören dem HTTP-Client oder dem Gateway. |
 | `anthropic` | `anthropic-version`, `anthropic-beta` | Von GoModel gesetzt; `anthropic-beta` trägt auch das OAuth-Flag. |
 | `gemini` | `x-goog-user-project` | Aus den Google-Credentials gesetzt. |
-| `vertex` | `x-goog-user-project`, `anthropic-version`, `anthropic-beta` | Aus den Google-Credentials und vom Anthropic-Adapter gesetzt. |
+| `vertex` | `x-goog-user-project`, `anthropic-version` | Aus den Google-Credentials und vom Anthropic-Adapter gesetzt. |
+| `openrouter` | `X-Session-Id` | Pro Anfrage aus der erkannten Session gesetzt. |
 | `llmd` | `x-llm-d-inference-objective`, `x-llm-d-inference-fairness-id`, `x-gateway-inference-objective`, `x-gateway-inference-fairness-id` | Aus `inference_objective` und dem User-Pfad gesetzt. |
 
 Schlüssel von Edge-Gateways sind die Ausnahme von der Credential-Regel, da sie
@@ -92,8 +94,9 @@ GoModel gegenüber dem Proxy authentifizieren, nicht gegenüber dem Provider:
 `X-Portkey-Api-Key` sind erlaubt.
 
 Diese Provider-Typen lehnen `headers` vollständig ab: `bedrock` und
-`bedrock-mantle` (Anfragen sind mit SigV4 signiert, ein Proxy, der seinen
-eigenen Header entfernt, bricht also die Signatur) sowie die
+`bedrock-mantle` (Anfragen laufen über das AWS SDK und sind mit SigV4 signiert, sofern kein
+Bedrock-API-Key gesetzt ist; ein Proxy, der seinen eigenen Header entfernt,
+bricht also die Signatur) sowie die
 Abo-Clients `chatgpt`, `github-copilot`, `kimicode` und `opencode_go`.
 
 Namen müssen gültige HTTP-Header-Namen und ohne Beachtung der
@@ -105,7 +108,7 @@ Zeilenumbrüche oder NUL enthalten. Ein Provider nimmt höchstens 32 Header und
 
 - Header-Werte gelten unabhängig vom Namen als Secrets. Sie erscheinen nie in
   Logs, Fehlern, der Admin-API oder Audit-Einträgen.
-- Ein [Konfigurationsexport](/advanced/config-yaml#exporting-the-effective-configuration)
+- Ein [Konfigurationsexport](/advanced/config-yaml#exporting-the-effective-configuration) (englisch)
   behält einen Wert, der eine Secret-Referenz ist, und schreibt jeden anderen
   Wert als zu setzende `${env:...}`-Referenz.
 - Eine nicht auflösbare Referenz stoppt den Start oder lässt ein
