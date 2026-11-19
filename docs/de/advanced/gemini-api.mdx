@@ -122,7 +122,7 @@ eigenen typisierten Fehler auslösen.
 | `contents`, `systemInstruction` | Text-Parts, in `camelCase` oder `snake_case`, da die Gemini API beides akzeptiert. |
 | `inlineData` | Bilder werden zu Bild-Input für jedes Vision-Modell. Andere Medientypen werden als Dateianhang weitergeleitet, den Gemini-Modelle wieder als Inline-Daten erhalten und den andere Provider nur akzeptieren, wenn sie diesen Dateityp unterstützen. |
 | `tools[].functionDeclarations` | Function-Tools. `parameters` (das Schema von Gemini, mit `"type": "OBJECT"` und `nullable`) wird in JSON Schema umgewandelt; `parametersJsonSchema` wird unverändert übergeben. |
-| `toolConfig.functionCallingConfig` | `AUTO`, `ANY`, `NONE` und `VALIDATED`, mit `allowedFunctionNames`. |
+| `toolConfig.functionCallingConfig` | `AUTO`, `ANY`, `NONE` und `VALIDATED`, mit `allowedFunctionNames`. `VALIDATED` ohne `allowedFunctionNames` wird als `AUTO` bedient: Für die Schema-Garantie gibt es keine portable Entsprechung. |
 | `functionCall`, `functionResponse` | Vollständige Tool-Call-Roundtrips, auch mit parallelen Aufrufen. Responses tragen an jedem `functionCall` eine `id`; der Turn ist unverändert zurückzusenden, wie es die SDKs tun. Eine `functionResponse` ohne `id` beantwortet den Aufruf gleichen Namens, in Reihenfolge. |
 | `thoughtSignature` | Wird bei Function Calls von Gemini 3 zurückgegeben und an Gemini erneut gesendet, wenn die Unterhaltung weitergeht. |
 | `generationConfig` | `temperature`, `topP`, `maxOutputTokens`, `stopSequences`, `seed`. |

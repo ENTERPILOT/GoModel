@@ -109,15 +109,22 @@ type pendingCall struct {
 // contentConverter flattens Gemini contents into canonical messages. Chat
 // matches a tool result to its call by ID, while Gemini 2.5 function calls
 // carry none and are matched by name and order, so every call gets an ID:
-// its own when the client sent one, otherwise a generated call_<n>.
+// its own when the client sent one, otherwise a generated call_<n> that no
+// call of the request uses.
 type contentConverter struct {
 	messages []core.Message
 	pending  []pendingCall
+	// supplied holds the function call IDs the client sent, anywhere in the
+	// request, so a generated ID never repeats one of them.
+	supplied map[string]struct{}
 	nextID   int
 }
 
 func convertContents(req *GenerateContentRequest) ([]core.Message, error) {
-	conv := &contentConverter{messages: make([]core.Message, 0, len(req.Contents)+1)}
+	conv := &contentConverter{
+		messages: make([]core.Message, 0, len(req.Contents)+1),
+		supplied: suppliedCallIDs(req.Contents),
+	}
 	if system := req.systemInstruction(); system != nil {
 		text, err := systemText(system)
 		if err != nil {
@@ -265,32 +272,60 @@ func (c *contentConverter) userTurn(parts []Part) error {
 	return nil
 }
 
+// suppliedCallIDs collects the function call IDs the client sent.
+func suppliedCallIDs(contents []Content) map[string]struct{} {
+	supplied := make(map[string]struct{})
+	for _, content := range contents {
+		for _, part := range content.Parts {
+			if call := part.functionCall(); call != nil {
+				if id := strings.TrimSpace(call.ID); id != "" {
+					supplied[id] = struct{}{}
+				}
+			}
+		}
+	}
+	return supplied
+}
+
 // callID returns the ID a function call travels under: the client's, or the
-// next unused generated one.
+// next generated one the client did not use itself.
 func (c *contentConverter) callID(id string) string {
 	if id = strings.TrimSpace(id); id != "" {
 		return id
 	}
-	id = "call_" + strconv.Itoa(c.nextID)
-	c.nextID++
-	return id
+	for {
+		id = "call_" + strconv.Itoa(c.nextID)
+		c.nextID++
+		if _, taken := c.supplied[id]; !taken {
+			return id
+		}
+	}
 }
 
 // answer finds the pending call a function response belongs to: the one with
 // its ID, or else the first unanswered call of the same name.
 func (c *contentConverter) answer(response *FunctionResponse) (string, error) {
-	id := strings.TrimSpace(response.ID)
-	for i := range c.pending {
-		call := &c.pending[i]
-		if call.answered {
-			continue
-		}
-		if (id != "" && call.id == id) || (id == "" && call.name == response.Name) {
-			call.answered = true
+	if id := strings.TrimSpace(response.ID); id != "" {
+		if call := c.unanswered(func(call pendingCall) bool { return call.id == id }); call != nil {
 			return call.id, nil
 		}
 	}
+	if call := c.unanswered(func(call pendingCall) bool { return call.name == response.Name }); call != nil {
+		return call.id, nil
+	}
 	return "", fmt.Errorf("functionResponse %q does not answer a functionCall of the preceding model turn", response.Name)
+}
+
+// unanswered marks the first pending call that matches as answered and
+// returns it, or nil when none does.
+func (c *contentConverter) unanswered(matches func(pendingCall) bool) *pendingCall {
+	for i := range c.pending {
+		if call := &c.pending[i]; !call.answered && matches(*call) {
+			call.answered = true
+			return call
+		}
+	}
+	return nil
 }
 
 // mediaPart converts inline media. Images become image_url parts, which every

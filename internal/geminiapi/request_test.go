@@ -191,6 +191,9 @@ func TestToChatRequest_ToolConfig(t *testing.T) {
 				"mode": "required", "tools": []any{function("a"), function("b")},
 			}},
 		},
+		// The schema guarantee of VALIDATED has no portable equivalent; the
+		// model may still call a function or answer in text, as with AUTO.
+		{name: "validated", config: `{"functionCallingConfig":{"mode":"VALIDATED"}}`, want: "auto"},
 		{
 			name:   "validated with functions",
 			config: `{"functionCallingConfig":{"mode":"VALIDATED","allowedFunctionNames":["a"]}}`,
@@ -257,6 +260,52 @@ func TestToChatRequest_FunctionCallRoundTrip(t *testing.T) {
 	assert.Equal(t, "fc_9", second.ToolCalls[0].ID)
 	assert.Equal(t, "{}", second.ToolCalls[0].Function.Arguments)
 	assert.Equal(t, core.Message{Role: "tool", ToolCallID: "fc_9", Content: `{"ok":true}`}, chat.Messages[6])
+}
+
+// A call without an ID must not be given one the client used itself: two tool
+// calls sharing an ID would send both results under one function's name.
+func TestToChatRequest_GeneratedCallIDsAvoidSuppliedOnes(t *testing.T) {
+	chat := mustTranslate(t, `{"contents":[
+		{"role":"user","parts":[{"text":"Go"}]},
+		{"role":"model","parts":[
+			{"functionCall":{"name":"first"}},
+			{"functionCall":{"id":"call_0","name":"second"}},
+			{"functionCall":{"name":"third"}}
+		]},
+		{"role":"user","parts":[
+			{"functionResponse":{"name":"third","response":{"n":3}}},
+			{"functionResponse":{"id":"call_0","name":"second","response":{"n":2}}},
+			{"functionResponse":{"name":"first","response":{"n":1}}}
+		]},
+		{"role":"model","parts":[{"functionCall":{"id":"call_2","name":"fourth"}}]},
+		{"role":"user","parts":[{"functionResponse":{"name":"fourth","response":{"n":4}}}]}
+	]}`)
+
+	require.Len(t, chat.Messages, 7)
+	calls := chat.Messages[1].ToolCalls
+	require.Len(t, calls, 3)
+	// call_0 and call_2 are the client's, so the generated IDs skip them.
+	assert.Equal(t, []string{"call_1", "call_0", "call_3"}, []string{calls[0].ID, calls[1].ID, calls[2].ID})
+
+	assert.Equal(t, core.Message{Role: "tool", ToolCallID: "call_3", Content: `{"n":3}`}, chat.Messages[2])
+	assert.Equal(t, core.Message{Role: "tool", ToolCallID: "call_0", Content: `{"n":2}`}, chat.Messages[3])
+	assert.Equal(t, core.Message{Role: "tool", ToolCallID: "call_1", Content: `{"n":1}`}, chat.Messages[4])
+	// A response without an ID still answers a call that carries one, by name.
+	assert.Equal(t, core.Message{Role: "tool", ToolCallID: "call_2", Content: `{"n":4}`}, chat.Messages[6])
+}
+
+// A client that drops the ID from the call it echoes but keeps it on the
+// response still gets its result matched, by name.
+func TestToChatRequest_ResponseIDWithoutMatchingCallFallsBackToName(t *testing.T) {
+	chat := mustTranslate(t, `{"contents":[
+		{"role":"user","parts":[{"text":"Go"}]},
+		{"role":"model","parts":[{"functionCall":{"name":"lookup"}}]},
+		{"role":"user","parts":[{"functionResponse":{"id":"upstream_7","name":"lookup","response":{"ok":true}}}]}
+	]}`)
+
+	require.Len(t, chat.Messages, 3)
+	assert.Equal(t, "call_0", chat.Messages[1].ToolCalls[0].ID)
+	assert.Equal(t, core.Message{Role: "tool", ToolCallID: "call_0", Content: `{"ok":true}`}, chat.Messages[2])
 }
 
 func TestToChatRequest_ModelTurnThoughts(t *testing.T) {

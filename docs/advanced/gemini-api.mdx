@@ -120,7 +120,7 @@ their own typed errors.
 | `contents`, `systemInstruction` | Text parts, in either `camelCase` or `snake_case`, as the Gemini API accepts both. |
 | `inlineData` | Images become image input for any vision model. Other media types are forwarded as a file attachment, which Gemini models receive as inline data again and other providers accept only where they support that file type. |
 | `tools[].functionDeclarations` | Function tools. `parameters` (Gemini's schema, with `"type": "OBJECT"` and `nullable`) is converted to JSON Schema; `parametersJsonSchema` is passed as it is. |
-| `toolConfig.functionCallingConfig` | `AUTO`, `ANY`, `NONE`, and `VALIDATED`, with `allowedFunctionNames`. |
+| `toolConfig.functionCallingConfig` | `AUTO`, `ANY`, `NONE`, and `VALIDATED`, with `allowedFunctionNames`. `VALIDATED` without `allowedFunctionNames` is served as `AUTO`: its schema guarantee has no portable equivalent. |
 | `functionCall`, `functionResponse` | Full tool-call round trips, including parallel calls. Responses carry an `id` on each `functionCall`; echo the turn back unchanged, as the SDKs do. A `functionResponse` without an `id` answers the call of the same name, in order. |
 | `thoughtSignature` | Returned on Gemini 3 function calls and replayed to Gemini when the conversation continues. |
 | `generationConfig` | `temperature`, `topP`, `maxOutputTokens`, `stopSequences`, `seed`. |

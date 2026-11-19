@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	apiMetric "go.opentelemetry.io/otel/metric"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/usagemetrics"
 )
@@ -145,7 +146,10 @@ func usageOperation(s usagemetrics.Sample) string {
 	case strings.HasSuffix(endpoint, "embeddings"), strings.HasSuffix(endpoint, "/embed"):
 		return llmclient.OperationEmbeddings
 	case strings.HasSuffix(endpoint, "chat/completions"), strings.HasSuffix(endpoint, "responses"),
-		strings.HasSuffix(endpoint, "messages"), strings.HasSuffix(endpoint, "/chat"):
+		strings.HasSuffix(endpoint, "messages"), strings.HasSuffix(endpoint, "/chat"),
+		// The Gemini API ingress is translated to chat.
+		strings.HasSuffix(endpoint, ":"+core.GeminiMethodGenerateContent),
+		strings.HasSuffix(endpoint, ":"+core.GeminiMethodStreamGenerateContent):
 		return llmclient.OperationChat
 	case strings.HasSuffix(endpoint, "/completions"):
 		return llmclient.OperationTextCompletion

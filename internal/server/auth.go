@@ -340,8 +340,8 @@ func requestAuthToken(r *http.Request) (token, errMessage string) {
 	if apiKey := r.Header.Get("x-api-key"); apiKey != "" {
 		return apiKey, ""
 	}
-	if apiKey := geminiCredential(r); apiKey != "" {
-		return apiKey, ""
+	if key := geminiCredential(r); key != "" {
+		return key, ""
 	}
 	if core.IsGeminiAPIPath(r.URL.Path) {
 		return "", "missing credentials: send 'x-goog-api-key: <token>' or 'Authorization: Bearer <token>'"
@@ -362,8 +362,8 @@ func geminiCredential(r *http.Request) string {
 	if !core.IsGeminiAPIPath(r.URL.Path) {
 		return ""
 	}
-	if apiKey := r.Header.Get("x-goog-api-key"); apiKey != "" {
-		return apiKey
+	if key := r.Header.Get("x-goog-api-key"); key != "" {
+		return key
 	}
 	if r.URL.RawQuery == "" {
 		return ""
