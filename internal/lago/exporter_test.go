@@ -298,7 +298,6 @@ func TestExporterHalvesABatchLagoRefusesWithoutNamingEvents(t *testing.T) {
 func TestExporterCloseStopsSplittingARefusedBatch(t *testing.T) {
 	firstCh := make(chan struct{})
 	releaseFirst := sync.OnceFunc(func() { close(firstCh) })
-	t.Cleanup(releaseFirst)
 	var requests atomic.Int32
 	server, _ := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 		readBatch(t, r)
@@ -314,6 +313,9 @@ func TestExporterCloseStopsSplittingARefusedBatch(t *testing.T) {
 	short := idleTiming
 	short.shutdown = 100 * time.Millisecond
 	exporter := startExporter(t, server.URL, short)
+	// Cleanups run last-registered first: release the handler before the
+	// exporter and server cleanups wait for it.
+	t.Cleanup(releaseFirst)
 
 	for i := range 50 { // 100 events: one full batch, sent at once
 		exporter.Record(testEntry("e" + strconv.Itoa(i)))
@@ -376,7 +378,6 @@ func TestExporterCloseDuringARetryWaitCountsWhatIsLost(t *testing.T) {
 func TestExporterDropsNewRequestsWhenTheBufferIsFull(t *testing.T) {
 	releaseCh := make(chan struct{})
 	release := sync.OnceFunc(func() { close(releaseCh) })
-	t.Cleanup(release) // runs before the server cleanup, so a failed wait never hangs it
 	lago := &lagoServer{}
 	server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 		events := readBatch(t, r)
@@ -390,6 +391,9 @@ func TestExporterDropsNewRequestsWhenTheBufferIsFull(t *testing.T) {
 		BufferSize:    1,
 	}, testTiming)
 	t.Cleanup(exporter.Close)
+	// Registered last, so it runs first and a failed wait never hangs the
+	// exporter and server cleanups.
+	t.Cleanup(release)
 	dropped := testutil.ToFloat64(eventsDropped.WithLabelValues(dropBufferFull))
 
 	// The first request is in flight, the second waits in the buffer, and
