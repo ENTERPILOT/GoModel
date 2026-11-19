@@ -1,0 +1,148 @@
+---
+title: "Speechmatics"
+description: "Configure Speechmatics in GoModel: batch speech-to-text behind /v1/audio/transcriptions, regions, models, and response formats."
+icon: "audio-lines"
+tag: "Beta"
+keywords: ["Speechmatics", "speech-to-text", "STT", "transcription", "batch transcription", "subtitles", "provider setup"]
+---
+
+<Warning>
+  Speechmatics support is in beta. It is covered by automated tests against a
+  simulated API built from Speechmatics' published API reference, but has not
+  yet been verified against the live Speechmatics service. Please report any
+  issues you hit.
+</Warning>
+
+Speechmatics is a speech-to-text provider. GoModel serves its
+[Batch API](https://docs.speechmatics.com/speech-to-text/batch/quickstart)
+behind the standard `/v1/audio/transcriptions` endpoint. It has no chat,
+`/responses`, or embeddings API, and GoModel does not serve its text-to-speech
+preview, so those endpoints return `invalid_request_error` for
+Speechmatics-routed models.
+
+## Configure
+
+Create an API key in the [Speechmatics portal](https://portal.speechmatics.com/settings/api-keys) and set:
+
+```bash
+SPEECHMATICS_API_KEY=...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  speechmatics:
+    type: speechmatics
+    api_key: "${SPEECHMATICS_API_KEY}"
+    # base_url defaults to "https://eu1.asr.api.speechmatics.com/v2".
+```
+
+### Regions
+
+Audio is processed in the region of the endpoint. The default is EU1; set
+`SPEECHMATICS_BASE_URL` to use another one:
+
+| Region | Base URL |
+| ------ | -------- |
+| EU1 (default) | `https://eu1.asr.api.speechmatics.com/v2` |
+| US1 | `https://us1.asr.api.speechmatics.com/v2` |
+| AU1 | `https://au1.asr.api.speechmatics.com/v2` |
+
+A job exists only in the region that created it, so one provider talks to one
+region. To use two regions, configure two providers, for example
+`speechmatics` and `speechmatics-us` with different `base_url` values.
+
+## Models
+
+Speechmatics has no model listing, so GoModel lists its batch models itself:
+
+| Model | Use it for |
+| ----- | ---------- |
+| `enhanced` | Highest accuracy, one language per file |
+| `standard` | Faster turnaround, one language per file |
+| `melia-1` | Audio where speakers switch between languages |
+| `oak-1` | Multilingual healthcare audio |
+
+Speechmatics models are not in the model catalog GoModel prices from. Usage is
+recorded as audio seconds; to get a cost, set a `per_second_input` price for
+the model as a [pricing override](/features/cost-tracking), or declare it under
+`providers.speechmatics.models` in `config.yaml`. By default a provider with
+models listed in `config.yaml` serves only those, so list every model you use.
+
+## Transcribe
+
+```bash
+curl https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F "file=@meeting.mp3" \
+  -F "model=speechmatics/enhanced" \
+  -F "language=en"
+```
+
+Speechmatics transcribes asynchronously. GoModel uploads the audio as a job,
+waits for it to finish, and returns the transcript in the same response, so
+clients see an ordinary synchronous call.
+
+- GoModel waits up to 10 minutes. After that it answers `504` and terminates
+  the job.
+- When the client disconnects, the job is terminated too, so it does not keep
+  running for a result nobody reads.
+- A finished job stays in your Speechmatics account for Speechmatics' own
+  retention period (7 days); GoModel does not delete it.
+- With several API keys configured, all calls of one job use the same key.
+
+### Parameters
+
+| OpenAI parameter | Speechmatics |
+| ---------------- | ------------ |
+| `model` | The job's `model` |
+| `language` | The job's `language`. `zh` is sent as `cmn`; Speechmatics language packs such as `cmn_en` pass through. |
+| `response_format` | `json` (default), `text`, `verbose_json`, `srt`, `vtt` |
+| `timestamp_granularities[]` | `word` adds `words` to `verbose_json` |
+| `prompt`, `temperature` | Ignored: Speechmatics has no equivalent |
+
+Other form fields are not forwarded, because a Speechmatics job is configured
+with JSON rather than form fields. Use [passthrough](#native-passthrough) for
+diarization, custom dictionaries, and other job options.
+
+**Without `language`**, `enhanced` and `standard` identify the language
+(`"language": "auto"`) and transcribe with the best match. Identification needs
+speech to work with: Speechmatics recommends at least 60 seconds, and rejects a
+file in which it finds no speech. Send `language` when you know it.
+
+**`melia-1` and `oak-1`** detect languages themselves. GoModel always sends
+them `"language": "multi"` and passes your `language` as a language hint.
+
+### Response formats
+
+- `json` and `text` — the transcript text.
+- `verbose_json` — adds `language` (the code Speechmatics reports, such as
+  `en`), `duration` (whole seconds), and `segments`: one per sentence, each with
+  `id`, `start`, `end`, and `text`. Whisper's decoder statistics (`tokens`,
+  `avg_logprob`, ...) are not included. Request the `word` granularity to also
+  get `words` with per-word timings.
+- `srt` — Speechmatics' own SubRip output.
+- `vtt` — the same subtitles converted to WebVTT.
+
+### Errors
+
+- A job Speechmatics rejects (unreadable audio, no identifiable language, an
+  unsupported language) returns `400` with Speechmatics' reason.
+- A job that does not finish in time returns `504`.
+- Other Speechmatics errors keep their status and message.
+
+## Native passthrough
+
+Add `speechmatics` to `ENABLED_PASSTHROUGH_PROVIDERS` to call the Batch API
+directly through [passthrough](/features/passthrough-api), for example
+`POST /p/speechmatics/jobs` and `GET /p/speechmatics/jobs/{id}/transcript`.
+GoModel adds the Speechmatics credential and forwards the request unchanged.
+
+## Not implemented
+
+- **Realtime transcription** — Speechmatics' realtime WebSocket API has its own
+  message protocol, not the OpenAI Realtime one that `/v1/realtime` relays.
+- **Text-to-speech** — in preview at Speechmatics, on a separate endpoint.
+- **Translations** (`/v1/audio/translations`), diarization, custom
+  dictionaries, and speech intelligence features as typed parameters.
