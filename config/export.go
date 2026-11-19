@@ -287,9 +287,21 @@ func (e *exporter) walk(path string, v, def reflect.Value, node *yaml.Node, clas
 					_, defChild, _ = yamlField(def, key.Value)
 				}
 				// A value environment expansion wrote is kept as written, empty
-				// or not: it reads the variable on the next load.
-				_, expanded := e.expanded[childPath]
-				if isNil(child) || !expanded && isEmpty(child) && isEmpty(defChild) {
+				// or not, as is a section holding one: it reads the variable on
+				// the next load.
+				expanded := e.expandedUnder(childPath)
+				if !expanded && (isNil(child) || isEmpty(child) && isEmpty(defChild)) {
+					continue
+				}
+				if isNil(child) {
+					// Expanded to empty, as "enabled: ${VAR:-}" does.
+					written, ok := e.expanded[childPath]
+					if !ok {
+						continue
+					}
+					value.Kind, value.Value, value.Tag, value.Style, value.Content = yaml.ScalarNode, written.value, "!!str", written.style, nil
+					e.key(key)
+					kept = append(kept, key, value)
 					continue
 				}
 				if field.Tag.Get("secrets") == secretsDeferred || field.Type == yamlNodeType || field.Type.Kind() == reflect.Map && field.Type.Elem() == yamlNodeType {
@@ -297,7 +309,7 @@ func (e *exporter) walk(path string, v, def reflect.Value, node *yaml.Node, clas
 				}
 				e.walk(childPath, child, defChild, value, exportClassOf(field), field.Tag.Get("env"))
 				// Every field of a struct left empty is dropped too.
-				if value.Kind == yaml.MappingNode && len(value.Content) == 0 && child.Kind() == reflect.Struct && isEmpty(defChild) {
+				if value.Kind == yaml.MappingNode && len(value.Content) == 0 && child.Kind() == reflect.Struct && isEmpty(defChild) && !expanded {
 					continue
 				}
 			}
@@ -472,6 +484,17 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 		return
 	}
 	e.setSecret(path, node, head, secret, envName)
+}
+
+// expandedUnder reports whether environment expansion wrote the value at
+// path or one inside it.
+func (e *exporter) expandedUnder(path string) bool {
+	for written := range e.expanded {
+		if rest, ok := strings.CutPrefix(written, path); ok && (rest == "" || rest[0] == '.' || rest[0] == '[') {
+			return true
+		}
+	}
+	return false
 }
 
 // isUnresolved reports whether path is in a section config.Load leaves
