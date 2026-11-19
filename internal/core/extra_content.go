@@ -22,7 +22,17 @@ const ExtraContentField = "extra_content"
 const (
 	ExtraContentVendorGoogle    = "google"
 	ExtraContentVendorAnthropic = "anthropic"
+	// ExtraContentVendorMistral is written on Responses output only, by the
+	// chat-to-Responses translation, from what the mistral adapter left on
+	// the chat message. Mistral reads nothing back, so the router drops it
+	// from every request.
+	ExtraContentVendorMistral = "mistral"
 )
+
+// ContentChunksField is the member of extra_content.mistral on a Responses
+// message item: the content chunks of the answer that have no
+// OpenAI-compatible shape, such as Mistral's citation "reference" chunks.
+const ContentChunksField = "content_chunks"
 
 // Members of extra_content.anthropic, set by the Anthropic Messages ingress
 // and consumed by the Anthropic provider.

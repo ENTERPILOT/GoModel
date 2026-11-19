@@ -45,6 +45,10 @@ type ResponsesOutputEventState struct {
 	// on the message itself, such as a Gemini 3 text-turn thought signature.
 	// Clients echo the message item back with it.
 	assistantExtraContent json.RawMessage
+	// assistantContentChunks are the content chunks the provider could not
+	// map to standard output (MistralContentChunksField), in arrival order.
+	// The message item carries them at extra_content.mistral.content_chunks.
+	assistantContentChunks []json.RawMessage
 
 	reasoningReserved    bool
 	reasoningStarted     bool
@@ -309,10 +313,34 @@ func (s *ResponsesOutputEventState) AssistantMessageItem(status string, includeC
 	if includeContent {
 		item["content"] = []map[string]any{assistantPart(s.assistantText.String())}
 	}
-	if len(s.assistantExtraContent) > 0 {
-		item[core.ExtraContentField] = s.assistantExtraContent
+	if extra := s.assistantItemExtraContent(); len(extra) > 0 {
+		item[core.ExtraContentField] = extra
 	}
 	return item
+}
+
+// assistantItemExtraContent returns the message item's extra_content: the
+// replay state the stream carried, plus the collected content chunks under
+// the mistral vendor.
+func (s *ResponsesOutputEventState) assistantItemExtraContent() json.RawMessage {
+	if len(s.assistantContentChunks) == 0 {
+		return s.assistantExtraContent
+	}
+	chunks, err := json.Marshal(s.assistantContentChunks)
+	if err != nil {
+		return s.assistantExtraContent
+	}
+	return withMistralContentChunks(s.assistantExtraContent, chunks)
+}
+
+// AppendAssistantContentChunks records content chunks with no standard
+// Responses shape (Mistral citation references) for the assistant message
+// item. They arrive between text deltas and have no stream event of their
+// own, so they are rendered in the extra_content of every message item
+// written from here on: its output_item.done event and the terminal output.
+// A turn that never opens a message item has nowhere to carry them.
+func (s *ResponsesOutputEventState) AppendAssistantContentChunks(chunks []json.RawMessage) {
+	s.assistantContentChunks = append(s.assistantContentChunks, chunks...)
 }
 
 // SetAssistantExtraContent attaches provider replay state to the assistant
@@ -524,6 +552,7 @@ func (s *ResponsesOutputEventState) StartNextAssistantMessage(outputIndex int) {
 	s.assistantReserved, s.assistantStarted, s.assistantPartStarted, s.assistantDone = false, false, false, false
 	s.assistantMessageID, s.assistantFinalStatus = "", ""
 	s.assistantExtraContent = nil
+	s.assistantContentChunks = nil
 	s.assistantText.Reset()
 }
 

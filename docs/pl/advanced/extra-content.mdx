@@ -40,7 +40,7 @@ klienci zbudowani pod niego działają bez zmian.
 | API | Lokalizacja |
 | --- | --- |
 | Chat Completions | `tool_calls[].extra_content`; na wiadomości asystenta dla stanu dotyczącego całej tury, np. bloków thinking; również na streamowanych `tool_calls` i deltach wiadomości |
-| Responses | elementy wyjściowe `function_call`; elementy wyjściowe `reasoning`; element `message` asystenta, gdy podpis tury tekstowej nadejdzie podczas streamingu |
+| Responses | elementy wyjściowe `function_call`; elementy wyjściowe `reasoning`; element `message` asystenta, gdy podpis tury tekstowej nadejdzie podczas streamingu, oraz dla fragmentów cytowań Mistrala |
 | Anthropic Messages | bloki treści `tool_use`. Bloki thinking używają zamiast tego własnych pól dialektu: `signature` i `data`. |
 
 Stan znajduje się na jednostce, która odpowiada jednej części po stronie providera.
@@ -328,6 +328,7 @@ provider, jest usuwany przed wysłaniem – na każdej trasie i w każdym dialek
 | `extra_content.google` | dowolny inny provider | nic; pole jest usuwane |
 | `extra_content.anthropic` | `anthropic` | bloki thinking i `is_error`, przywrócone na swoje miejsce; blok thinking niepodpisany przez Anthropic jest usuwany |
 | `extra_content.anthropic` | dowolny inny provider | nic; pole jest usuwane |
+| `extra_content.mistral` | dowolny provider, także `mistral` | nic; pole jest usuwane |
 
 Historia po stronie klienta nigdy nie jest modyfikowana. Filtrowanie odbywa się
 na kopii, którą GoModel wysyła do upstreamu.
@@ -338,3 +339,4 @@ na kopii, którą GoModel wysyła do upstreamu.
 | --- | --- | --- |
 | `google` | `gemini`, `vertex` | `thought_signature`: podpis Gemini 3 wywołania funkcji lub tury tekstowej. |
 | `anthropic` | `anthropic` | `thinking_blocks`: bloki `thinking` i `redacted_thinking` tury asystenta, łącznie z podpisami, zapisywane w odpowiedziach i odczytywane z powrotem w requestach; `is_error`: oznacza wynik narzędzia jako nieudany, ustawiane przez wejście Anthropic Messages API. |
+| `mistral` | `mistral` | `content_chunks`: fragmenty treści odpowiedzi bez odpowiednika w OpenAI, np. [fragmenty `reference` z cytowań](/pl/providers/mistral#cytowania), zapisywane na elemencie `message` w Responses. Tylko wyjście: nic nie odczytuje tego pola z powrotem. |

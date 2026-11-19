@@ -75,6 +75,8 @@ type openAIStreamChunk struct {
 			ToolCalls        []openAIChunkToolCall `json:"tool_calls"`
 			ExtraContent     json.RawMessage       `json:"extra_content"`
 			Images           json.RawMessage       `json:"images"`
+			// ContentChunks is the MistralContentChunksField member.
+			ContentChunks []json.RawMessage `json:"mistral_content_chunks"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -292,6 +294,7 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	// so the state lands on the item it arrived with.
 	sc.openMessageAfterImage(choice.Delta.Content != "", choice.Delta.ExtraContent)
 	sc.setMessageExtraContent(choice.Delta.ExtraContent)
+	sc.output.AppendAssistantContentChunks(choice.Delta.ContentChunks)
 	// "reasoning_content" wins over the vendor "reasoning" member (Groq,
 	// OpenRouter), the same precedence the streaming codec applies.
 	if reasoning := cmp.Or(choice.Delta.ReasoningContent, choice.Delta.Reasoning); reasoning != "" {
@@ -361,6 +364,9 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 		}
 		sc.openMessageAfterImage(content != "", extra)
 		sc.setMessageExtraContent(extra)
+		if chunks, ok := delta[MistralContentChunksField].([]any); ok {
+			sc.output.AppendAssistantContentChunks(rawJSONValues(chunks))
+		}
 		reasoning, _ := delta["reasoning_content"].(string)
 		if reasoning == "" {
 			reasoning, _ = delta["reasoning"].(string)
@@ -387,6 +393,18 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 	if finishReason == "tool_calls" {
 		sc.buffer.AppendString(sc.completePendingToolCalls())
 	}
+}
+
+// rawJSONValues re-encodes generically parsed values, skipping any that do not
+// encode.
+func rawJSONValues(values []any) []json.RawMessage {
+	encoded := make([]json.RawMessage, 0, len(values))
+	for _, value := range values {
+		if raw, err := json.Marshal(value); err == nil {
+			encoded = append(encoded, raw)
+		}
+	}
+	return encoded
 }
 
 // chunkToolCallsFromAny converts generically parsed tool-call deltas into the

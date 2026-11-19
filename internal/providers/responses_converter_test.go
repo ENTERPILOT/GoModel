@@ -1083,6 +1083,137 @@ data: [DONE]
 	t.Fatal("expected a message output_item.done event")
 }
 
+// messageItemExtraContent returns the extra_content of the message item on
+// its output_item.done event and in the terminal output, and the number of
+// events it was read from.
+func messageItemExtraContent(t *testing.T, raw string) (done, terminal any, seen int) {
+	t.Helper()
+	for _, event := range parseTestSSEEvents(t, raw) {
+		switch event.Name {
+		case "response.output_item.done":
+			item, _ := event.Payload["item"].(map[string]any)
+			if item["type"] == "message" {
+				done = item["extra_content"]
+				seen++
+			}
+		case "response.completed":
+			output, _ := event.Payload["response"].(map[string]any)["output"].([]any)
+			for _, entry := range output {
+				if item, _ := entry.(map[string]any); item["type"] == "message" {
+					terminal = item["extra_content"]
+					seen++
+				}
+			}
+		}
+	}
+	return done, terminal, seen
+}
+
+// mistralContentChunks is the extra_content a message item carries for the
+// given content chunks.
+func mistralContentChunks(chunks ...any) map[string]any {
+	return map[string]any{"mistral": map[string]any{"content_chunks": chunks}}
+}
+
+// The mistral provider streams content chunks it cannot map to standard chat
+// output (citation references) as a vendor member of the delta they arrived
+// in. They have no Responses stream event, so the message item collects them
+// in order under extra_content.mistral: on its output_item.done event and in
+// the terminal output. The text stream itself is unchanged.
+func TestOpenAIResponsesStreamConverter_MistralContentChunksOnMessageItem(t *testing.T) {
+	mockStream := `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Paris"},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"content":"","mistral_content_chunks":[{"type":"reference","reference_ids":[0]}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"content":" is old.","mistral_content_chunks":[{"type":"reference","reference_ids":[1,"doc-2"]}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"mistral_content_chunks":null},"finish_reason":"stop"}]}
+
+data: [DONE]
+`
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "mistral-large-4-0", "mistral")
+	raw, err := io.ReadAll(converter)
+	require.NoError(t, err)
+
+	want := mistralContentChunks(
+		map[string]any{"type": "reference", "reference_ids": []any{float64(0)}},
+		map[string]any{"type": "reference", "reference_ids": []any{float64(1), "doc-2"}},
+	)
+	done, terminal, seen := messageItemExtraContent(t, string(raw))
+	require.Equal(t, 2, seen)
+	assert.Equal(t, want, done)
+	assert.Equal(t, want, terminal)
+	assert.NotContains(t, string(raw), MistralContentChunksField, "the chat member name must not reach a Responses item")
+
+	events := parseTestSSEEvents(t, string(raw))
+	requireNormalizedResponsesStream(t, events)
+	var text strings.Builder
+	for _, event := range events {
+		if event.Name == "response.output_text.delta" {
+			text.WriteString(event.Payload["delta"].(string))
+		}
+	}
+	assert.Equal(t, "Paris is old.", text.String())
+}
+
+// A tool call in the same delta closes the message item on the spot, so the
+// chunks must be recorded before that or the item's output_item.done would
+// disagree with the terminal output.
+func TestOpenAIResponsesStreamConverter_MistralContentChunksBeforeToolCallCloses(t *testing.T) {
+	mockStream := `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Checking.","mistral_content_chunks":[{"type":"reference","reference_ids":[4]}],"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "mistral-large-4-0", "mistral")
+	raw, err := io.ReadAll(converter)
+	require.NoError(t, err)
+
+	want := mistralContentChunks(map[string]any{"type": "reference", "reference_ids": []any{float64(4)}})
+	done, terminal, seen := messageItemExtraContent(t, string(raw))
+	require.Equal(t, 2, seen)
+	assert.Equal(t, want, done)
+	assert.Equal(t, want, terminal)
+}
+
+// Replay state another vendor put on the same message item stays next to the
+// chunks.
+func TestOpenAIResponsesStreamConverter_MistralContentChunksKeepOtherVendors(t *testing.T) {
+	mockStream := `data: {"choices":[{"index":0,"delta":{"content":"Paris","extra_content":{"google":{"thought_signature":"sig-text"}},"mistral_content_chunks":[{"type":"reference","reference_ids":[0]}]},"finish_reason":"stop"}]}
+
+data: [DONE]
+`
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "m", "p")
+	raw, err := io.ReadAll(converter)
+	require.NoError(t, err)
+
+	want := mistralContentChunks(map[string]any{"type": "reference", "reference_ids": []any{float64(0)}})
+	want["google"] = map[string]any{"thought_signature": "sig-text"}
+	done, terminal, seen := messageItemExtraContent(t, string(raw))
+	require.Equal(t, 2, seen)
+	assert.Equal(t, want, done)
+	assert.Equal(t, want, terminal)
+}
+
+// The tolerant decode path, taken for off-spec chunks, must carry the member
+// as well.
+func TestOpenAIResponsesStreamConverter_MistralContentChunksTolerantPath(t *testing.T) {
+	mockStream := `data: {"choices":[{"delta":{"content":"Paris","reasoning_content":7,"mistral_content_chunks":[{"type":"reference","reference_ids":[0]}]},"finish_reason":"stop"}]}
+
+data: [DONE]
+`
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "mistral-large-4-0", "mistral")
+	raw, err := io.ReadAll(converter)
+	require.NoError(t, err)
+
+	want := mistralContentChunks(map[string]any{"type": "reference", "reference_ids": []any{float64(0)}})
+	done, terminal, seen := messageItemExtraContent(t, string(raw))
+	require.Equal(t, 2, seen)
+	assert.Equal(t, want, done)
+	assert.Equal(t, want, terminal)
+}
+
 // eventNames lists the SSE event names in stream order, with "[DONE]" for the
 // trailing marker.
 func eventNames(events []testSSEEvent) []string {
