@@ -65,6 +65,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		BaseURL:        baseURL(cfg.BaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
+		Headers:        opts.Headers,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
 	p.client = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, clientCfg, p.setHeaders)

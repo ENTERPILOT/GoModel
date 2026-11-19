@@ -29,6 +29,9 @@ var Registration = providers.Registration{
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL:   defaultBaseURL,
 		WorkloadIdentity: workloadidentity.JWTBearer,
+		// A configured anthropic-beta would also drop the OAuth flag that
+		// subscription credentials need.
+		ReservedHeaders: []string{"anthropic-version", anthropicBetaHeader},
 	},
 }
 
@@ -88,6 +91,7 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		BaseURL:        providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
+		Headers:        opts.Headers,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
 	p.client = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, clientCfg, p.setHeaders)

@@ -36,6 +36,9 @@ var Registration = providers.Registration{
 			{Name: providers.CredentialFieldBaseURL},
 			{Name: providers.CredentialFieldAPIMode, Advanced: true, Options: []string{modeAuto, modeOpenAI, modeStandard}},
 		},
+		// SigV4 signs the headers present at signing time: a proxy that
+		// strips its own header before forwarding breaks the signature.
+		HeadersUnsupported: true,
 	},
 }
 

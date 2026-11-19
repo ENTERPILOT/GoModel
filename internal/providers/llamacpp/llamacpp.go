@@ -65,11 +65,12 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			BaseURL:        providers.PassthroughBaseURL(baseURL),
 			Retry:          opts.Resilience.Retry,
 			Hooks:          opts.Hooks,
+			Headers:        opts.Headers,
 			CircuitBreaker: opts.Resilience.CircuitBreaker,
 		}, func(req *http.Request) {
 			setHeaders(req, keys.NextForContext(req.Context()))
 		}),
-		propsClient: newPropsClient(opts.ClientName("llamacpp"), baseURL, opts.Hooks, opts.HTTPClient, func(req *http.Request) {
+		propsClient: newPropsClient(opts.ClientName("llamacpp"), baseURL, opts, func(req *http.Request) {
 			setHeaders(req, keys.NextForContext(req.Context()))
 		}),
 	}
@@ -78,11 +79,12 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 // newPropsClient builds the client used for optional /props enrichment: no
 // retries and no circuit breaker, so a failing /props costs one request and
 // leaves the shared native-route budget untouched.
-func newPropsClient(providerName, baseURL string, hooks llmclient.Hooks, httpClient *http.Client, setHeader llmclient.HeaderSetter) *llmclient.Client {
-	return llmclient.NewWithOptionalHTTPClient(httpClient, llmclient.Config{
+func newPropsClient(providerName, baseURL string, opts providers.ProviderOptions, setHeader llmclient.HeaderSetter) *llmclient.Client {
+	return llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, llmclient.Config{
 		ProviderName: providerName,
 		BaseURL:      providers.PassthroughBaseURL(baseURL),
-		Hooks:        hooks,
+		Hooks:        opts.Hooks,
+		Headers:      opts.Headers,
 	}, setHeader)
 }
 

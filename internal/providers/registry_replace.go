@@ -115,6 +115,7 @@ func (r *ModelRegistry) swapProviderLocked(provider core.Provider, providerName,
 		}
 		delete(r.providerTypes, p)
 		delete(r.providerNames, p)
+		delete(r.providerHeaders, p)
 	}
 	if !replaced {
 		kept = append(kept, provider)

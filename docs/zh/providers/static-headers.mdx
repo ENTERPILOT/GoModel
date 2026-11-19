@@ -1,0 +1,98 @@
+---
+title: "Provider 请求头"
+description: "在发往某个 Provider 的每个请求中附带固定请求头，例如边缘代理的令牌或租户 ID。"
+icon: "heading"
+keywords: ["请求头", "headers", "Provider 请求头", "provider headers", "边缘代理", "edge proxy", "API 网关", "API gateway", "cf-aig-authorization", "Ocp-Apim-Subscription-Key", "OpenAI-Organization", "反向代理"]
+---
+
+当某个 Provider 的每次调用都需要一个 GoModel 本身不会发送的固定请求头时，在该
+Provider 上设置 `headers`：
+
+- 通过需要认证的代理或 API 网关访问的 Provider，例如 Cloudflare AI Gateway
+  （`cf-aig-authorization`）、Azure API Management
+  （`Ocp-Apim-Subscription-Key`），或自建的 `X-Edge-Auth`。
+- 位于反向代理之后、代理需要自己令牌的自托管运行时（vLLM、Ollama、llama.cpp）。
+- 固定的路由或归属请求头，例如 `OpenAI-Organization`、`OpenAI-Project` 或
+  `X-Tenant`。
+
+默认不设置任何请求头。未设置该项的 Provider 行为不变。
+
+## 配置
+
+在 `config.yaml` 中，值支持[密钥引用](/zh/advanced/secret-references)，名称不支持：
+
+```yaml
+providers:
+  gemini:
+    type: gemini
+    api_key: "${env:GEMINI_API_KEY}"
+    base_url: https://edge.example.com/gemini/v1beta
+    headers:
+      X-Edge-Auth: "${file:/run/secrets/edge-token}"
+      X-Tenant: acme
+```
+
+仅通过环境变量配置的 Provider 使用 `<PROVIDER>[_SUFFIX]_HEADERS`，值为 JSON 对象。
+值中的引用会被解析：
+
+```bash
+GEMINI_API_KEY=...
+GEMINI_HEADERS='{"X-Edge-Auth":"${file:/run/secrets/edge-token}","X-Tenant":"acme"}'
+```
+
+该变量会整体替换 `config.yaml` 中声明的 Provider 的 `headers` 映射，从不与其合并。
+`GEMINI_HEADERS='{}'` 会将其清空。
+
+<Note>
+  请求头可以在 `config.yaml` 和环境变量中设置。在控制台中管理的 Provider 暂不支持。
+</Note>
+
+## 发送范围
+
+Provider 发往其 API 的每个请求都会带上这些请求头：推理、流式响应、模型发现、
+Embeddings、音频、文件、批处理、透传（`/p/<provider>/...`）以及实时连接。语义缓存的
+Embedder 使用该 Provider 时也会发送它们。
+
+它们从不会发送到：
+
+- 其他 Provider，包括故障转移链中的下一个。
+- OAuth 和身份令牌端点，例如交换 Vertex 凭据的 Google 令牌端点，或工作负载身份的令牌交换。
+- MCP 服务器。
+
+## 优先级
+
+配置的请求头**最后**设置，并替换任何同名的值。透传客户端和[插件](/zh/advanced/plugins)
+请求头都无法覆盖它们。
+
+由于它们优先级最高，GoModel 会拒绝那些会破坏认证、传输或 Provider 协议的名称。
+被拒绝的名称会使启动失败，错误信息只给出请求头名称，从不包含其值。
+
+| 拒绝范围 | 名称 | 原因 |
+| --- | --- | --- |
+| 所有 Provider | `Authorization`、`X-Api-Key`、`Api-Key`、`X-Goog-Api-Key`、`Xi-Api-Key`、`Cookie` 及其他凭据请求头 | Provider 凭据来自 `api_key` 或 `api_keys`，以保证密钥轮换继续生效。 |
+| 所有 Provider | `Host`、`Content-Length`、`Transfer-Encoding`、`Connection`、`Keep-Alive`、`Te`、`Trailer`、`Upgrade`、`Expect`、`Proxy-*`、`Content-Type`、`Content-Encoding`、`Accept-Encoding`、`Idempotency-Key` | 由 HTTP 客户端或网关管理。 |
+| `anthropic` | `anthropic-version`、`anthropic-beta` | 由 GoModel 设置；`anthropic-beta` 还携带 OAuth 标志。 |
+| `gemini` | `x-goog-user-project` | 根据 Google 凭据设置。 |
+| `vertex` | `x-goog-user-project`、`anthropic-version`、`anthropic-beta` | 根据 Google 凭据及 Anthropic 适配器设置。 |
+| `llmd` | `x-llm-d-inference-objective`、`x-llm-d-inference-fairness-id`、`x-gateway-inference-objective`、`x-gateway-inference-fairness-id` | 根据 `inference_objective` 和用户路径设置。 |
+
+边缘网关的密钥是凭据规则的例外，因为它们用于 GoModel 向代理认证，而不是向 Provider
+认证：允许使用 `cf-aig-authorization`、`Ocp-Apim-Subscription-Key`、`Helicone-Auth`
+和 `X-Portkey-Api-Key`。
+
+以下 Provider 类型完全不接受 `headers`：`bedrock` 和 `bedrock-mantle`（请求经过
+SigV4 签名，移除自身请求头的代理会破坏签名），以及订阅客户端 `chatgpt`、
+`github-copilot`、`kimicode` 和 `opencode_go`。
+
+名称必须是合法的 HTTP 请求头名称，且不区分大小写时唯一。值不能为空，也不能包含换行符
+或 NUL。每个 Provider 最多 32 个请求头，名称和值合计最多 8 KiB。
+
+## 密钥
+
+- 无论名称如何，请求头的值都按密钥处理。它们从不出现在日志、错误、管理 API 或审计记录中。
+- [配置导出](/advanced/config-yaml#exporting-the-effective-configuration)会保留密钥引用形式的值，
+  其他值则写成需要设置的 `${env:...}` 引用。
+- 无法解析的引用会使启动失败，或使[重新加载](/zh/advanced/cli#配置重新加载)失败并保留当前运行的配置，
+  错误信息会给出字段名，例如 `providers.gemini.headers.X-Edge-Auth`。
+- 要使用轮换后的值，请重新加载。能够上报变更的密钥管理器会自行触发重新加载，与 `proxy_url`
+  变更时相同；参见[轮换](/zh/advanced/secret-references#轮换)。

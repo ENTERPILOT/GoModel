@@ -308,6 +308,13 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 		httpReq.Header.Set(core.IdempotencyKeyHeader, key)
 	}
 
+	// The provider's configured headers go last and replace a value of the
+	// same name: an operator sets them for a proxy in front of the provider,
+	// so neither a passthrough client nor a plugin may override them.
+	for name, value := range c.config.Headers {
+		httpReq.Header.Set(name, value)
+	}
+
 	return httpReq, nil
 }
 

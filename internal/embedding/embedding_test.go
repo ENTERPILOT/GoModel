@@ -174,3 +174,35 @@ func TestAPIEmbedder_UsesProviderCredentials(t *testing.T) {
 	want := "https://api.groq.com/openai/v1/embeddings"
 	assert.Equal(t, want, a.endpointURL)
 }
+
+// TestAPIEmbedder_SendsProviderHeaders covers a provider reached through a
+// proxy that wants its own token: the embedder calls the same endpoint, so it
+// must send the provider's configured headers too.
+func TestAPIEmbedder_SendsProviderHeaders(t *testing.T) {
+	received := make(chan http.Header, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2]}]}`))
+	}))
+	defer server.Close()
+
+	emb, err := NewEmbedder(config.EmbedderConfig{Provider: "edge"}, map[string]config.RawProviderConfig{
+		"edge": {
+			Type:    "openai",
+			APIKey:  "sk-test",
+			BaseURL: server.URL,
+			Headers: map[string]string{"X-Edge-Auth": "edge-token", "x-tenant": "acme"},
+		},
+	})
+	require.NoError(t, err)
+	defer emb.Close()
+
+	_, err = emb.Embed(context.Background(), "hello")
+	require.NoError(t, err)
+	got := <-received
+	assert.Equal(t, "edge-token", got.Get("X-Edge-Auth"))
+	assert.Equal(t, "acme", got.Get("X-Tenant"))
+	assert.Equal(t, "Bearer sk-test", got.Get("Authorization"))
+	assert.Equal(t, "application/json", got.Get("Content-Type"))
+}

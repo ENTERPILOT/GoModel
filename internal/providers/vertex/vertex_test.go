@@ -378,6 +378,37 @@ func TestNewSetsQuotaProjectHeaderOnVertexRequests(t *testing.T) {
 	}
 }
 
+// TestProviderHeadersNeverReachTheTokenEndpoint pins where the operator's
+// static headers go: to the Vertex API the provider calls, never to the
+// Google token endpoint its credentials are exchanged at. A proxy secret
+// meant for the provider's edge must not reach an identity service.
+func TestProviderHeadersNeverReachTheTokenEndpoint(t *testing.T) {
+	tokenURL, tokenCapture := tokenServer(t, "service-account-token")
+	upstream, capture := providertest.JSONServer(t, http.StatusOK, generateContentJSON)
+
+	cfg := testConfig()
+	cfg.APIMode = "native"
+	cfg.AuthType = "gcp_service_account"
+	cfg.BaseURL = upstream.URL + nativeBasePath
+	cfg.ServiceAccountJSON = vertexServiceAccountCredentials(t, tokenURL)
+
+	provider := New(cfg, providers.ProviderOptions{Headers: map[string]string{"X-Edge-Auth": "edge-token"}})
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "google/gemini-2.5-flash",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "edge-token", sent.Header.Get("X-Edge-Auth"))
+	assert.Equal(t, "Bearer service-account-token", sent.Header.Get("Authorization"))
+
+	require.Positive(t, tokenCapture.Count(), "the token endpoint was never called")
+	for _, exchange := range tokenCapture.All() {
+		assert.Empty(t, exchange.Header.Get("X-Edge-Auth"), "the token endpoint must not receive a provider header")
+	}
+}
+
 func vertexServiceAccountCredentialsFile(t *testing.T, tokenURL string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "service-account.json")

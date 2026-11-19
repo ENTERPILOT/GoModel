@@ -1,0 +1,117 @@
+---
+title: "Provider-Header"
+description: "Senden Sie feste Header, etwa ein Token für einen Edge-Proxy oder eine Mandanten-ID, bei jeder Anfrage an einen Provider."
+icon: "heading"
+keywords: ["Header", "headers", "Provider-Header", "provider headers", "Edge-Proxy", "edge proxy", "API-Gateway", "cf-aig-authorization", "Ocp-Apim-Subscription-Key", "OpenAI-Organization", "Reverse Proxy"]
+---
+
+Setzen Sie `headers` an einem Provider, wenn jeder Aufruf dieses Providers einen
+festen Header braucht, den GoModel nicht selbst sendet:
+
+- Ein Provider, der über einen authentifizierenden Proxy oder ein API-Gateway
+  erreicht wird, etwa Cloudflare AI Gateway (`cf-aig-authorization`), Azure API
+  Management (`Ocp-Apim-Subscription-Key`) oder ein eigenes `X-Edge-Auth`.
+- Eine selbst gehostete Runtime (vLLM, Ollama, llama.cpp) hinter einem Reverse
+  Proxy, der ein eigenes Token verlangt.
+- Feste Routing- oder Zuordnungs-Header wie `OpenAI-Organization`,
+  `OpenAI-Project` oder `X-Tenant`.
+
+Standardmäßig sind keine Header gesetzt. Für Provider ohne diese Einstellung
+ändert sich nichts.
+
+## Konfiguration
+
+In `config.yaml` akzeptieren die Werte
+[Secret-Referenzen](/de/advanced/secret-references), die Namen nicht:
+
+```yaml
+providers:
+  gemini:
+    type: gemini
+    api_key: "${env:GEMINI_API_KEY}"
+    base_url: https://edge.example.com/gemini/v1beta
+    headers:
+      X-Edge-Auth: "${file:/run/secrets/edge-token}"
+      X-Tenant: acme
+```
+
+Provider, die nur über Umgebungsvariablen konfiguriert sind, verwenden
+`<PROVIDER>[_SUFFIX]_HEADERS` mit einem JSON-Objekt. Referenzen in den Werten
+werden aufgelöst:
+
+```bash
+GEMINI_API_KEY=...
+GEMINI_HEADERS='{"X-Edge-Auth":"${file:/run/secrets/edge-token}","X-Tenant":"acme"}'
+```
+
+Die Variable ersetzt die gesamte `headers`-Map eines Providers, den
+`config.yaml` deklariert; sie wird nie damit zusammengeführt.
+`GEMINI_HEADERS='{}'` leert sie.
+
+<Note>
+  Header lassen sich in `config.yaml` und über Umgebungsvariablen setzen.
+  Provider, die im Dashboard verwaltet werden, unterstützen sie noch nicht.
+</Note>
+
+## Wohin sie gesendet werden
+
+Die Header gehen mit jeder Anfrage, die der Provider an seine API sendet:
+Inferenz, Streaming, Modellerkennung, Embeddings, Audio, Dateien, Batches,
+Passthrough (`/p/<provider>/...`) und Realtime-Verbindungen. Der Embedder des
+semantischen Caches sendet sie ebenfalls, wenn er diesen Provider nutzt.
+
+Sie werden nie gesendet an:
+
+- Einen anderen Provider, auch nicht an den nächsten in einer Failover-Kette.
+- OAuth- und Identitäts-Token-Endpunkte, etwa den Google-Token-Endpunkt, an dem
+  Vertex-Credentials getauscht werden, oder einen Workload-Identity-Token-Tausch.
+- MCP-Server.
+
+## Vorrang
+
+Konfigurierte Header werden **zuletzt** gesetzt und ersetzen jeden Wert mit
+demselben Namen. Weder ein Passthrough-Client noch ein
+[Plugin](/de/advanced/plugins)-Header kann sie überschreiben.
+
+Weil sie Vorrang haben, lehnt GoModel Namen ab, die die Authentifizierung, den
+Transport oder das Protokoll des Providers brechen würden. Ein abgelehnter Name
+stoppt den Start mit einem Fehler, der den Header nennt, nie seinen Wert.
+
+| Abgelehnt | Namen | Grund |
+| --- | --- | --- |
+| Alle Provider | `Authorization`, `X-Api-Key`, `Api-Key`, `X-Goog-Api-Key`, `Xi-Api-Key`, `Cookie` und die übrigen Credential-Header | Das Provider-Credential kommt aus `api_key` oder `api_keys`, damit die Schlüsselrotation weiter funktioniert. |
+| Alle Provider | `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Te`, `Trailer`, `Upgrade`, `Expect`, `Proxy-*`, `Content-Type`, `Content-Encoding`, `Accept-Encoding`, `Idempotency-Key` | Sie gehören dem HTTP-Client oder dem Gateway. |
+| `anthropic` | `anthropic-version`, `anthropic-beta` | Von GoModel gesetzt; `anthropic-beta` trägt auch das OAuth-Flag. |
+| `gemini` | `x-goog-user-project` | Aus den Google-Credentials gesetzt. |
+| `vertex` | `x-goog-user-project`, `anthropic-version`, `anthropic-beta` | Aus den Google-Credentials und vom Anthropic-Adapter gesetzt. |
+| `llmd` | `x-llm-d-inference-objective`, `x-llm-d-inference-fairness-id`, `x-gateway-inference-objective`, `x-gateway-inference-fairness-id` | Aus `inference_objective` und dem User-Pfad gesetzt. |
+
+Schlüssel von Edge-Gateways sind die Ausnahme von der Credential-Regel, da sie
+GoModel gegenüber dem Proxy authentifizieren, nicht gegenüber dem Provider:
+`cf-aig-authorization`, `Ocp-Apim-Subscription-Key`, `Helicone-Auth` und
+`X-Portkey-Api-Key` sind erlaubt.
+
+Diese Provider-Typen lehnen `headers` vollständig ab: `bedrock` und
+`bedrock-mantle` (Anfragen sind mit SigV4 signiert, ein Proxy, der seinen
+eigenen Header entfernt, bricht also die Signatur) sowie die
+Abo-Clients `chatgpt`, `github-copilot`, `kimicode` und `opencode_go`.
+
+Namen müssen gültige HTTP-Header-Namen und ohne Beachtung der
+Groß-/Kleinschreibung eindeutig sein. Werte dürfen nicht leer sein und keine
+Zeilenumbrüche oder NUL enthalten. Ein Provider nimmt höchstens 32 Header und
+8 KiB an Namen und Werten.
+
+## Secrets
+
+- Header-Werte gelten unabhängig vom Namen als Secrets. Sie erscheinen nie in
+  Logs, Fehlern, der Admin-API oder Audit-Einträgen.
+- Ein [Konfigurationsexport](/advanced/config-yaml#exporting-the-effective-configuration)
+  behält einen Wert, der eine Secret-Referenz ist, und schreibt jeden anderen
+  Wert als zu setzende `${env:...}`-Referenz.
+- Eine nicht auflösbare Referenz stoppt den Start oder lässt ein
+  [Reload](/de/advanced/cli#konfiguration-neu-laden) fehlschlagen und behält die
+  laufende Konfiguration, mit einem Fehler, der das Feld nennt, etwa
+  `providers.gemini.headers.X-Edge-Auth`.
+- Um einen rotierten Wert zu übernehmen, laden Sie neu. Ein Secret-Manager, der
+  Änderungen meldet, löst das Reload selbst aus, wie bei einer geänderten
+  `proxy_url`; siehe [Rotation](/de/advanced/secret-references#rotation).

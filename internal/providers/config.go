@@ -57,7 +57,11 @@ type ProviderConfig struct {
 	// ProxyURL routes this provider's upstream traffic through one HTTP(S)
 	// or SOCKS5 proxy. Empty defers to the extension proxy selector, if any,
 	// and then to the process environment.
-	ProxyURL             string
+	ProxyURL string
+	// Headers are the operator's static headers for this provider, resolved
+	// and validated (see validateProviderHeaders). Every client the provider
+	// builds sends them last, on calls to the provider's API only.
+	Headers              map[string]string
 	InferenceObjective   string
 	FairnessFromUserPath bool
 	Models               []string
@@ -149,6 +153,9 @@ func mergeProviderSources(ctx context.Context, secrets *config.Secrets, raw map[
 		// Keys are resolved below, under their own sources.
 		p.APIKey, p.APIKeys = "", nil
 		candidates[name] = p
+	}
+	if err := rejectUnsetHeaderPlaceholders(candidates); err != nil {
+		return providerSources{}, err
 	}
 	if err := secrets.ResolveFields(ctx, "providers", &candidates); err != nil {
 		return providerSources{}, err
@@ -332,6 +339,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		ServiceAccountJSONBase64: raw.ServiceAccountJSONBase64,
 		GCPScope:                 raw.GCPScope,
 		ProxyURL:                 strings.TrimSpace(raw.ProxyURL),
+		Headers:                  raw.Headers,
 		Models:                   config.ProviderModelIDs(raw.Models),
 		ModelsMode:               config.NormalizeConfiguredProviderModelsMode(raw.ModelsMode),
 		ModelMetadataOverrides:   config.ProviderModelMetadataOverrides(raw.Models),

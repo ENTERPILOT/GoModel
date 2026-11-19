@@ -101,6 +101,9 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	if err := validateProviderModelsModes(providerMap); err != nil {
 		return nil, err
 	}
+	if err := validateProviderHeaders(providerMap, discovery); err != nil {
+		return nil, err
+	}
 	fromFile, fromEnv := providerOrigins(result.RawProviders, providerMap)
 	slog.Info("providers resolved",
 		"total", len(providerMap),
@@ -362,6 +365,7 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 		registry.SetProviderModelFilter(name, pCfg.ModelFilter)
 		registry.SetProviderModelsMode(name, pCfg.ModelsMode)
 		registry.SetProviderBillable(name, pCfg.Billable)
+		registry.SetProviderHeaders(p, pCfg.Headers)
 		keyrings[name] = result.keys
 		count++
 		slog.Info("provider registered", "name", name, "type", pCfg.Type)

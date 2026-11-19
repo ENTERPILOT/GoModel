@@ -41,6 +41,9 @@ var Registration = providers.Registration{
 			{Name: providers.CredentialFieldAPIMode, Advanced: true, Options: []string{apiModeNative, apiModeOpenAICompatible, apiModeAnthropic}},
 			{Name: providers.CredentialFieldGCPScope, Advanced: true},
 		},
+		// The quota project comes from the Google credentials, and
+		// api_mode: anthropic runs the Anthropic adapter with its headers.
+		ReservedHeaders: []string{googlecommon.QuotaProjectHeader, "anthropic-version", "anthropic-beta"},
 	},
 }
 
@@ -112,6 +115,7 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 		BaseURL:        nativeBaseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
+		Headers:        opts.Headers,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
 	if authClient != nil {

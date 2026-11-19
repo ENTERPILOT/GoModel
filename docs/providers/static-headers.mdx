@@ -1,0 +1,113 @@
+---
+title: "Provider Headers"
+description: "Send fixed headers, such as an edge-proxy token or a tenant ID, on every request to one provider."
+icon: "heading"
+keywords: ["headers", "provider headers", "edge proxy", "API gateway", "cf-aig-authorization", "Ocp-Apim-Subscription-Key", "OpenAI-Organization", "reverse proxy"]
+---
+
+Set `headers` on a provider when every call to that provider needs a fixed
+header that GoModel does not send itself:
+
+- A provider reached through an authenticating proxy or API gateway, such as
+  Cloudflare AI Gateway (`cf-aig-authorization`), Azure API Management
+  (`Ocp-Apim-Subscription-Key`), or an in-house `X-Edge-Auth`.
+- A self-hosted runtime (vLLM, Ollama, llama.cpp) behind a reverse proxy that
+  wants its own token.
+- Static routing or attribution headers, such as `OpenAI-Organization`,
+  `OpenAI-Project`, or `X-Tenant`.
+
+The default is no headers. Nothing changes for providers that don't set it.
+
+## Configure
+
+In `config.yaml`, values accept [secret references](/advanced/secret-references);
+names do not:
+
+```yaml
+providers:
+  gemini:
+    type: gemini
+    api_key: "${env:GEMINI_API_KEY}"
+    base_url: https://edge.example.com/gemini/v1beta
+    headers:
+      X-Edge-Auth: "${file:/run/secrets/edge-token}"
+      X-Tenant: acme
+```
+
+Environment-only providers use `<PROVIDER>[_SUFFIX]_HEADERS` with a JSON object.
+References inside the values are resolved:
+
+```bash
+GEMINI_API_KEY=...
+GEMINI_HEADERS='{"X-Edge-Auth":"${file:/run/secrets/edge-token}","X-Tenant":"acme"}'
+```
+
+The variable replaces the whole `headers` map of a provider that `config.yaml`
+declares; it never merges with it. `GEMINI_HEADERS='{}'` clears it.
+
+<Note>
+  Headers can be set in `config.yaml` and environment variables. Providers
+  managed from the dashboard don't support them yet.
+</Note>
+
+## Where they are sent
+
+Headers go on every request the provider sends to its API: inference,
+streaming, model discovery, embeddings, audio, files, batches, passthrough
+(`/p/<provider>/...`), and realtime connections. The semantic-cache embedder
+sends them too when it uses that provider.
+
+They are never sent to:
+
+- Another provider, including the next one in a failover chain.
+- OAuth and identity token endpoints, such as the Google token endpoint Vertex
+  credentials are exchanged at, or a workload identity token exchange.
+- MCP servers.
+
+## Precedence
+
+Configured headers are applied **last** and replace any value with the same
+name. Neither a passthrough client nor a [plugin](/advanced/plugins) header
+can override them.
+
+Because they win, GoModel refuses names that would break authentication, the
+transport, or the provider protocol. A refused name stops startup with an error
+that names the header, never its value.
+
+| Refused | Names | Why |
+| --- | --- | --- |
+| All providers | `Authorization`, `X-Api-Key`, `Api-Key`, `X-Goog-Api-Key`, `Xi-Api-Key`, `Cookie`, and the other credential headers | The provider credential comes from `api_key` or `api_keys`, so key rotation keeps working. |
+| All providers | `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Te`, `Trailer`, `Upgrade`, `Expect`, `Proxy-*`, `Content-Type`, `Content-Encoding`, `Accept-Encoding`, `Idempotency-Key` | The HTTP client or the gateway owns them. |
+| `anthropic` | `anthropic-version`, `anthropic-beta` | Set by GoModel; `anthropic-beta` also carries the OAuth flag. |
+| `gemini` | `x-goog-user-project` | Set from the Google credentials. |
+| `vertex` | `x-goog-user-project`, `anthropic-version`, `anthropic-beta` | Set from the Google credentials and the Anthropic adapter. |
+| `llmd` | `x-llm-d-inference-objective`, `x-llm-d-inference-fairness-id`, `x-gateway-inference-objective`, `x-gateway-inference-fairness-id` | Set from `inference_objective` and the user path. |
+
+Edge-gateway keys are the exception to the credential rule, since they
+authenticate GoModel to the proxy rather than to the provider:
+`cf-aig-authorization`, `Ocp-Apim-Subscription-Key`, `Helicone-Auth`, and
+`X-Portkey-Api-Key` are allowed.
+
+These provider types refuse `headers` entirely: `bedrock` and `bedrock-mantle`
+(requests are SigV4-signed, so a proxy that strips its own header breaks the
+signature), and the subscription clients `chatgpt`, `github-copilot`,
+`kimicode`, and `opencode_go`.
+
+Names must be valid HTTP header names and unique ignoring case. Values must
+not be empty or contain line breaks or NUL. A provider takes at most 32 headers
+and 8 KiB of names and values.
+
+## Secrets
+
+- Header values are treated as secrets whatever the name. They never appear in
+  logs, errors, the admin API, or audit entries.
+- A [configuration export](/advanced/config-yaml#exporting-the-effective-configuration) keeps a value that is a
+  secret reference, and writes any other value as an `${env:...}` reference to
+  set.
+- An unresolvable reference stops startup, or fails a
+  [reload](/advanced/cli#configuration-reload) and keeps the running
+  configuration, with an error naming the field, such as
+  `providers.gemini.headers.X-Edge-Auth`.
+- To pick up a rotated value, reload. A secret manager that reports changes
+  triggers the reload itself, as it does for a changed `proxy_url`; see
+  [Rotation](/advanced/secret-references#rotation).

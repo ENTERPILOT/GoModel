@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -28,12 +29,17 @@ func (r *Router) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest) 
 	if err := checkRealtimeIntent(p, req.Model, req.Intent); err != nil {
 		return nil, err
 	}
-	return rp.RealtimeTarget(ctx, &core.RealtimeRequest{
+	target, err := rp.RealtimeTarget(ctx, &core.RealtimeRequest{
 		Model:    selector.Model,
 		Provider: selector.Provider,
 		CallID:   req.CallID,
 		Intent:   req.Intent,
 	})
+	if err != nil || target == nil {
+		return target, err
+	}
+	target.Headers = r.withProviderHeaders(p, target.Headers)
+	return target, nil
 }
 
 // RealtimeCallTarget resolves the upstream HTTP endpoint for the WebRTC SDP
@@ -71,11 +77,40 @@ func (r *Router) realtimeCallTarget(
 	if err := checkRealtimeIntent(p, req.Model, req.Intent); err != nil {
 		return nil, err
 	}
-	return call(rp, ctx, &core.RealtimeRequest{
+	target, err := call(rp, ctx, &core.RealtimeRequest{
 		Model:    selector.Model,
 		Provider: selector.Provider,
 		Intent:   req.Intent,
 	})
+	if err != nil || target == nil {
+		return target, err
+	}
+	target.Headers = r.withProviderHeaders(p, target.Headers)
+	return target, nil
+}
+
+// withProviderHeaders adds the provider's configured headers to the headers
+// of a realtime target. Realtime dials and signaling requests do not go
+// through llmclient, which applies them to every other call, so this is the
+// one place they join a realtime request. As there, they go last and replace
+// a value of the same name. headers is returned as is when the provider has
+// none configured.
+func (r *Router) withProviderHeaders(p core.Provider, headers http.Header) http.Header {
+	if r.caps.headers == nil {
+		return headers
+	}
+	configured := r.caps.headers.ProviderHeaders(p)
+	if len(configured) == 0 {
+		return headers
+	}
+	merged := headers.Clone()
+	if merged == nil {
+		merged = make(http.Header, len(configured))
+	}
+	for name, value := range configured {
+		merged.Set(name, value)
+	}
+	return merged
 }
 
 // checkRealtimeIntent rejects a specialized session intent the resolved provider
