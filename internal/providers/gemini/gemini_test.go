@@ -593,6 +593,30 @@ func TestListModels_ListsVeoAsVideoGeneration(t *testing.T) {
 	assert.Nil(t, veo.Metadata.MaxOutputTokens)
 }
 
+// Gemini Omni generates video through generateContent, so it is both a chat
+// model and a video model.
+func TestListModels_ListsGeminiOmniAsChatAndVideo(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{
+		"models": [{
+			"name": "models/gemini-omni-1.2-flash",
+			"outputTokenLimit": 65536,
+			"supportedGenerationMethods": ["generateContent", "countTokens"]
+		}]
+	}`)
+
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
+
+	resp, err := provider.ListModels(context.Background())
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 1)
+	require.NotNil(t, resp.Data[0].Metadata)
+	assert.Equal(t, []string{"chat", "video_generation"}, resp.Data[0].Metadata.Modes)
+	assert.Equal(t, []core.ModelCategory{core.CategoryTextGeneration, core.CategoryVideo}, resp.Data[0].Metadata.Categories)
+}
+
 func TestIsGeminiVideoModel(t *testing.T) {
 	tests := []struct {
 		model   string
@@ -603,6 +627,8 @@ func TestIsGeminiVideoModel(t *testing.T) {
 		{model: "models/veo-2.0-generate-001", methods: []string{"predictLongRunning"}, want: true},
 		{model: "veo-3.0-generate-001", want: true},
 		{model: "veo-3.0-generate-001", methods: []string{"generateContent"}},
+		{model: "gemini-omni-1.2-flash", methods: []string{"generateContent", "countTokens"}, want: true},
+		{model: "google/gemini-omni-1.2-flash", want: true},
 		{model: "imagen-4.0-generate-001", methods: []string{"predictLongRunning"}},
 		{model: "gemini-2.5-flash", methods: []string{"generateContent"}},
 	}

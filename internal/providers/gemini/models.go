@@ -59,15 +59,20 @@ func geminiModelSupportedMethods(modelID string, methods []string) (supportsGene
 	return supportsGenerate, slices.Contains(methods, "embedContent"), supportsImage
 }
 
-// isGeminiVideoModel recognizes Veo video generation models, which list only
-// predictLongRunning: generation is an asynchronous operation, not a
-// generateContent call. They are listed so the catalog can describe and price
-// them per second of video.
+// isGeminiVideoModel recognizes Google's video generation models: Veo, which
+// lists only predictLongRunning (generation is an asynchronous operation), and
+// Gemini Omni (gemini-omni-1.2-flash, ...), Veo's replacement on the Gemini
+// API, which lists generateContent and is also a chat model. They are tagged
+// so the Models page shows them under Video and the catalog can price them.
 func isGeminiVideoModel(modelID string, methods []string) bool {
-	if !strings.HasPrefix(normalizeGeminiModelID(modelID), "veo-") {
-		return false
+	normalized := normalizeGeminiModelID(modelID)
+	switch {
+	case strings.HasPrefix(normalized, "veo-"):
+		return len(methods) == 0 || slices.Contains(methods, "predictLongRunning")
+	case strings.HasPrefix(normalized, "gemini-omni-"):
+		return len(methods) == 0 || slices.Contains(methods, "generateContent")
 	}
-	return len(methods) == 0 || slices.Contains(methods, "predictLongRunning")
+	return false
 }
 
 // isGeminiImageModelID recognizes generateContent models with image output
