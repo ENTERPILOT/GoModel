@@ -9871,6 +9871,240 @@ const docTemplate = `{
                 ]
             }
         },
+        "/v1beta/models": {
+            "get": {
+                "description": "Returns the same catalog as GET /v1/models in the Gemini list shape. The whole catalog is one page.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "gemini"
+                ],
+                "summary": "List available models (Gemini API)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ModelsList"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1beta/models/{model}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "gemini"
+                ],
+                "summary": "Retrieve a model (Gemini API)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID, e.g. gemini-2.5-flash or openai/gpt-4o-mini",
+                        "name": "model",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ModelInfo"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1beta/models/{model}:generateContent": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "gemini"
+                ],
+                "summary": "Generate content (Gemini API)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID, e.g. gemini-2.5-flash or openai/gpt-4o-mini",
+                        "name": "model",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Gemini generateContent request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.GenerateContentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.GenerateContentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1beta/models/{model}:streamGenerateContent": {
+            "post": {
+                "description": "Streams the answer as server-sent events, one GenerateContentResponse per event. alt=sse is required, as the Gemini SDKs send it.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "gemini"
+                ],
+                "summary": "Stream generated content (Gemini API)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID, e.g. gemini-2.5-flash or openai/gpt-4o-mini",
+                        "name": "model",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Must be sse",
+                        "name": "alt",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "Gemini generateContent request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.GenerateContentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of GenerateContentResponse events",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.GenerateContentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/geminiapi.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/version": {
             "get": {
                 "produces": [
@@ -13563,6 +13797,378 @@ const docTemplate = `{
                 },
                 "url": {
                     "type": "string"
+                }
+            }
+        },
+        "geminiapi.Blob": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "string"
+                },
+                "mimeType": {
+                    "type": "string"
+                }
+            }
+        },
+        "geminiapi.Candidate": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "$ref": "#/definitions/geminiapi.ResponseContent"
+                },
+                "finishReason": {
+                    "type": "string"
+                },
+                "index": {
+                    "type": "integer"
+                }
+            }
+        },
+        "geminiapi.Content": {
+            "type": "object",
+            "properties": {
+                "parts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/geminiapi.Part"
+                    }
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "geminiapi.ErrorObject": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "description": "Code is the HTTP status code.",
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "Status is the canonical gRPC status name, e.g. INVALID_ARGUMENT.",
+                    "type": "string"
+                }
+            }
+        },
+        "geminiapi.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/geminiapi.ErrorObject"
+                }
+            }
+        },
+        "geminiapi.FunctionCall": {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "type": "object"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "geminiapi.FunctionCallingConfig": {
+            "type": "object",
+            "properties": {
+                "allowedFunctionNames": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "mode": {
+                    "type": "string"
+                }
+            }
+        },
+        "geminiapi.FunctionDeclaration": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "parameters": {
+                    "type": "object"
+                },
+                "parametersJsonSchema": {
+                    "type": "object"
+                }
+            }
+        },
+        "geminiapi.FunctionResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "response": {
+                    "type": "object"
+                }
+            }
+        },
+        "geminiapi.GenerateContentRequest": {
+            "type": "object",
+            "properties": {
+                "cachedContent": {
+                    "type": "string"
+                },
+                "contents": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/geminiapi.Content"
+                    }
+                },
+                "generationConfig": {
+                    "$ref": "#/definitions/geminiapi.GenerationConfig"
+                },
+                "safetySettings": {
+                    "description": "SafetySettings are accepted and ignored: they have no portable\nequivalent, and a provider's own defaults apply.",
+                    "type": "array",
+                    "items": {
+                        "type": "object"
+                    }
+                },
+                "systemInstruction": {
+                    "$ref": "#/definitions/geminiapi.Content"
+                },
+                "toolConfig": {
+                    "$ref": "#/definitions/geminiapi.ToolConfig"
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/geminiapi.Tool"
+                    }
+                }
+            }
+        },
+        "geminiapi.GenerateContentResponse": {
+            "type": "object",
+            "properties": {
+                "candidates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/geminiapi.Candidate"
+                    }
+                },
+                "modelVersion": {
+                    "type": "string"
+                },
+                "responseId": {
+                    "type": "string"
+                },
+                "usageMetadata": {
+                    "$ref": "#/definitions/geminiapi.UsageMetadata"
+                }
+            }
+        },
+        "geminiapi.GenerationConfig": {
+            "type": "object",
+            "properties": {
+                "candidateCount": {
+                    "type": "integer"
+                },
+                "maxOutputTokens": {
+                    "type": "integer"
+                },
+                "responseJsonSchema": {
+                    "type": "object"
+                },
+                "responseMimeType": {
+                    "type": "string"
+                },
+                "responseModalities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "responseSchema": {
+                    "type": "object"
+                },
+                "seed": {
+                    "type": "integer"
+                },
+                "stopSequences": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "temperature": {
+                    "type": "number"
+                },
+                "thinkingConfig": {
+                    "$ref": "#/definitions/geminiapi.ThinkingConfig"
+                },
+                "topP": {
+                    "type": "number"
+                }
+            }
+        },
+        "geminiapi.ModelInfo": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "displayName": {
+                    "type": "string"
+                },
+                "inputTokenLimit": {
+                    "type": "integer"
+                },
+                "name": {
+                    "description": "Name is the resource name: \"models/\" followed by the model ID.",
+                    "type": "string"
+                },
+                "outputTokenLimit": {
+                    "type": "integer"
+                },
+                "supportedGenerationMethods": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "geminiapi.ModelsList": {
+            "type": "object",
+            "properties": {
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/geminiapi.ModelInfo"
+                    }
+                },
+                "nextPageToken": {
+                    "type": "string"
+                }
+            }
+        },
+        "geminiapi.Part": {
+            "type": "object",
+            "properties": {
+                "functionCall": {
+                    "$ref": "#/definitions/geminiapi.FunctionCall"
+                },
+                "functionResponse": {
+                    "$ref": "#/definitions/geminiapi.FunctionResponse"
+                },
+                "inlineData": {
+                    "$ref": "#/definitions/geminiapi.Blob"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "thought": {
+                    "description": "Thought marks model reasoning, as opposed to the answer.",
+                    "type": "boolean"
+                },
+                "thoughtSignature": {
+                    "description": "ThoughtSignature is opaque state Gemini 3 and later return on a part and\nrequire back unchanged when the conversation continues.",
+                    "type": "string"
+                }
+            }
+        },
+        "geminiapi.ResponseContent": {
+            "type": "object",
+            "properties": {
+                "parts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/geminiapi.ResponsePart"
+                    }
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "geminiapi.ResponsePart": {
+            "type": "object",
+            "properties": {
+                "functionCall": {
+                    "$ref": "#/definitions/geminiapi.FunctionCall"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "thought": {
+                    "type": "boolean"
+                },
+                "thoughtSignature": {
+                    "type": "string"
+                }
+            }
+        },
+        "geminiapi.ThinkingConfig": {
+            "type": "object",
+            "properties": {
+                "includeThoughts": {
+                    "type": "boolean"
+                },
+                "thinkingBudget": {
+                    "type": "integer"
+                },
+                "thinkingLevel": {
+                    "type": "string"
+                }
+            }
+        },
+        "geminiapi.Tool": {
+            "type": "object",
+            "properties": {
+                "functionDeclarations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/geminiapi.FunctionDeclaration"
+                    }
+                }
+            }
+        },
+        "geminiapi.ToolConfig": {
+            "type": "object",
+            "properties": {
+                "functionCallingConfig": {
+                    "$ref": "#/definitions/geminiapi.FunctionCallingConfig"
+                }
+            }
+        },
+        "geminiapi.UsageMetadata": {
+            "type": "object",
+            "properties": {
+                "cachedContentTokenCount": {
+                    "type": "integer"
+                },
+                "candidatesTokenCount": {
+                    "type": "integer"
+                },
+                "promptTokenCount": {
+                    "type": "integer"
+                },
+                "thoughtsTokenCount": {
+                    "type": "integer"
+                },
+                "totalTokenCount": {
+                    "type": "integer"
                 }
             }
         },

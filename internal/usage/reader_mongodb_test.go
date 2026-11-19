@@ -131,6 +131,8 @@ func TestMongoUsageMatchFiltersEndpointAndOperation(t *testing.T) {
 				"/v1/chat/completions", "/v1/chat/completions/",
 				"/v1/messages", "/v1/messages/",
 				"/v1/messages/count_tokens", "/v1/messages/count_tokens/",
+				"/v1beta/models/{model}:generateContent", "/v1beta/models/{model}:generateContent/",
+				"/v1beta/models/{model}:streamGenerateContent", "/v1beta/models/{model}:streamGenerateContent/",
 				"/mcp",
 			}}}}},
 			bson.D{{Key: "endpoint", Value: bson.D{{Key: "$regex", Value: "^/mcp/"}}}},

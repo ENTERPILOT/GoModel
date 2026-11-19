@@ -698,7 +698,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 	}
 
 	requestID := requestIDFromContextOrHeader(c.Request())
-	endpoint := c.Request().URL.Path
+	endpoint := core.UsageEndpoint(c.Request().URL.Path)
 	observers := make([]streaming.Observer, 0, 4+len(extra))
 	observers = append(observers, extra...)
 	if generation != nil {

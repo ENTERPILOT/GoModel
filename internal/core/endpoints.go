@@ -116,6 +116,17 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "anthropic",
 			Operation:        OperationChatCompletions,
 		}
+	case isGeminiInferencePath(path):
+		// Gemini API dialect (generateContent, streamGenerateContent). Like
+		// the Anthropic Messages dialect it is translated to the canonical
+		// chat type at ingress, so it is a chat-completions operation (see
+		// ADR-0017). The model comes from the path, not the body.
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			IngressManaged:   true,
+			Dialect:          "gemini",
+			Operation:        OperationChatCompletions,
+		}
 	case path == "/v1/batches" || strings.HasPrefix(path, "/v1/batches/"):
 		return EndpointDescriptor{
 			ModelInteraction: true,

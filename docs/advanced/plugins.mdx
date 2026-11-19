@@ -54,10 +54,10 @@ is written). A manifest may declare them; GoModel validates that the
 interfaces are implemented and ignores them at runtime. The `route` kind is
 used by virtual models, see [Routing strategy plugins](#routing-strategy-plugins).
 
-Phases apply to `/v1/chat/completions`, `/v1/responses`, and `/v1/messages`.
-Anthropic requests are translated to the chat form before any hook runs, so a
-plugin sees one shape; `Meta.Dialect` reports `anthropic_messages` when it
-matters. Inline `/v1/batches` items go through the `prompt` phase when
+Phases apply to `/v1/chat/completions`, `/v1/responses`, `/v1/messages`, and
+the Gemini API routes. Anthropic and Gemini requests are translated to the chat
+form before any hook runs, so a plugin sees one shape; `Meta.Dialect` reports
+`anthropic_messages` or `gemini_generate_content` when it matters. Inline `/v1/batches` items go through the `prompt` phase when
 `guardrails.enable_for_batch_processing` is on.
 
 ## Chain execution

@@ -112,6 +112,17 @@ metered.
 | `/v1/messages`              | POST   | Anthropic Messages API through translated model routing (streaming supported) |
 | `/v1/messages/count_tokens` | POST   | Heuristic Anthropic Messages input token estimate                             |
 
+## Gemini-Compatible API
+
+Beta; see [Gemini API](/advanced/gemini-api).
+
+| Endpoint                                        | Method | Description                                                          |
+| ----------------------------------------------- | ------ | -------------------------------------------------------------------- |
+| `/v1beta/models/{model}:generateContent`        | POST   | Gemini `generateContent` through translated model routing            |
+| `/v1beta/models/{model}:streamGenerateContent`  | POST   | Streaming `generateContent` as server-sent events (`alt=sse`)        |
+| `/v1beta/models`                                | GET    | Model catalog in the Gemini list shape                               |
+| `/v1beta/models/{model}`                        | GET    | One model in the Gemini model shape                                  |
+
 ## Decisions API
 
 Available when an `openai`, `jev`, or `openrouter` provider is configured; see

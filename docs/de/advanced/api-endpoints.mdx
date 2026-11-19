@@ -110,6 +110,17 @@ WebRTC-Calls ihre Medien außerhalb des Gateways und werden nicht erfasst.
 | `/v1/messages`              | POST   | Anthropic Messages API über übersetztes Modell-Routing (Streaming wird unterstützt) |
 | `/v1/messages/count_tokens` | POST   | Heuristische Schätzung der Input-Tokens für Anthropic Messages                             |
 
+## Gemini-kompatible API
+
+Beta; siehe [Gemini API](/de/advanced/gemini-api).
+
+| Endpunkt                                        | Methode | Beschreibung                                                       |
+| ----------------------------------------------- | ------- | ------------------------------------------------------------------ |
+| `/v1beta/models/{model}:generateContent`        | POST    | Gemini `generateContent` über übersetztes Modell-Routing           |
+| `/v1beta/models/{model}:streamGenerateContent`  | POST    | Streaming-`generateContent` als Server-Sent Events (`alt=sse`)     |
+| `/v1beta/models`                                | GET     | Modellkatalog in der Gemini-Listenform                             |
+| `/v1beta/models/{model}`                        | GET     | Ein Modell in der Gemini-Modellform                                |
+
 ## Decisions API
 
 Verfügbar, wenn ein Provider vom Typ `openai`, `jev` oder `openrouter` konfiguriert ist; siehe

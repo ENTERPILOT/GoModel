@@ -1,0 +1,163 @@
+---
+title: "Gemini API"
+description: "Point Google Gen AI SDK clients at GoModel: generateContent and streamGenerateContent requests are routed to any configured provider, with budgets, guardrails, failover, and usage tracking applied."
+icon: "sparkles"
+tag: "Beta"
+keywords: ["Gemini API", "generateContent", "streamGenerateContent", "google-genai", "Google Gen AI SDK", "x-goog-api-key", "API translation"]
+---
+
+## Overview
+
+GoModel accepts the **Gemini API** request dialect at
+`POST /v1beta/models/{model}:generateContent`, in addition to its
+OpenAI-compatible API. Clients built on the Google Gen AI SDKs
+(`google-genai`, `@google/genai`) work by changing the base URL and the API key.
+
+The request is translated to GoModel's canonical chat type at ingress and runs
+through the same pipeline as `/v1/chat/completions`, so virtual models, workflow
+policy, guardrails, rate limits, budgets, failover, usage and cost tracking, and
+request logging all apply. Because every provider implements chat completion, a
+Gemini-format request can be routed to **any** configured provider (OpenAI,
+Anthropic, Bedrock, and others), not only Gemini.
+
+<Warning>
+  The Gemini API ingress is in beta and covers text, images, function calling,
+  and structured output. A request that uses a Gemini feature outside that set
+  is rejected with a `400` that names it, never answered as if the feature had
+  not been sent. See [Limitations](#limitations).
+</Warning>
+
+## Supported endpoints
+
+| Endpoint | Behavior |
+| --- | --- |
+| `POST /v1beta/models/{model}:generateContent` | Generates a response through translated model routing. |
+| `POST /v1beta/models/{model}:streamGenerateContent?alt=sse` | Streams the response as server-sent events, one `GenerateContentResponse` per event. `alt=sse` is required; the SDKs send it. |
+| `GET /v1beta/models` | Returns the same catalog as `GET /v1/models` in the Gemini list shape, in one page. |
+| `GET /v1beta/models/{model}` | Retrieves one model in the Gemini model shape. |
+
+`{model}` is any model ID GoModel serves: `gemini-2.5-flash`,
+`openai/gpt-4o-mini`, a virtual model name. The name a model list returns
+(`models/openai/gpt-4o-mini`) works as it is.
+
+## Authentication
+
+A GoModel key is accepted the way the Gemini API takes its own:
+
+- `x-goog-api-key: <key>`: the header the SDKs send.
+- `?key=<key>`: the query parameter of plain REST calls. Prefer the header: a
+  key in a URL can end up in the logs of a proxy in front of the gateway.
+  GoModel redacts it from its own access log and removes it from the request
+  URL after authentication.
+- `Authorization: Bearer <key>`: GoModel's primary scheme, which takes
+  precedence when present.
+
+`x-goog-api-key` and `?key=` are read on `/v1beta` routes only.
+
+## Example
+
+<CodeGroup>
+
+```bash curl
+curl "https://your-gateway/v1beta/models/gemini-2.5-flash:generateContent" \
+  -H "x-goog-api-key: $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "systemInstruction": {"parts": [{"text": "Be concise."}]},
+    "contents": [{"role": "user", "parts": [{"text": "Hello"}]}]
+  }'
+```
+
+```python Python
+import os
+
+from google import genai
+from google.genai import types
+
+client = genai.Client(
+    api_key=os.environ["GOMODEL_KEY"],
+    http_options=types.HttpOptions(base_url="https://your-gateway"),
+)
+
+response = client.models.generate_content(
+    model="openai/gpt-4o-mini",  # any configured provider's model
+    contents="Hello",
+    config=types.GenerateContentConfig(system_instruction="Be concise."),
+)
+
+print(response.text)
+```
+
+```javascript JavaScript
+import { GoogleGenAI } from "@google/genai";
+
+const ai = new GoogleGenAI({
+  apiKey: process.env.GOMODEL_KEY,
+  httpOptions: { baseUrl: "https://your-gateway" },
+});
+
+const response = await ai.models.generateContent({
+  model: "openai/gpt-4o-mini", // any configured provider's model
+  contents: "Hello",
+  config: { systemInstruction: "Be concise." },
+});
+
+console.log(response.text);
+```
+
+</CodeGroup>
+
+The response uses the Gemini shape (`candidates`, `usageMetadata`,
+`modelVersion`, `responseId`). Errors use the Gemini error envelope
+(`{"error": {"code": 400, "message": "...", "status": "INVALID_ARGUMENT"}}`),
+including authentication errors and unknown `/v1beta` routes, so the SDKs raise
+their own typed errors.
+
+## What translates
+
+| Gemini | Behavior |
+| --- | --- |
+| `contents`, `systemInstruction` | Text parts, in either `camelCase` or `snake_case`, as the Gemini API accepts both. |
+| `inlineData` | Images become image input for any vision model. Other media types are forwarded as a file attachment, which Gemini models receive as inline data again and other providers accept only where they support that file type. |
+| `tools[].functionDeclarations` | Function tools. `parameters` (Gemini's schema, with `"type": "OBJECT"` and `nullable`) is converted to JSON Schema; `parametersJsonSchema` is passed as it is. |
+| `toolConfig.functionCallingConfig` | `AUTO`, `ANY`, `NONE`, and `VALIDATED`, with `allowedFunctionNames`. |
+| `functionCall`, `functionResponse` | Full tool-call round trips, including parallel calls. Responses carry an `id` on each `functionCall`; echo the turn back unchanged, as the SDKs do. A `functionResponse` without an `id` answers the call of the same name, in order. |
+| `thoughtSignature` | Returned on Gemini 3 function calls and replayed to Gemini when the conversation continues. |
+| `generationConfig` | `temperature`, `topP`, `maxOutputTokens`, `stopSequences`, `seed`. |
+| `responseMimeType`, `responseSchema`, `responseJsonSchema` | JSON output, with the schema when one is given. |
+| `thinkingConfig` | Becomes a reasoning effort: `thinkingLevel` by name, `thinkingBudget` by size (`0` off, up to 1024 `low`, up to 8192 `medium`, above that `high`). With `includeThoughts`, reasoning a provider returns comes back as `thought` parts. |
+| `usageMetadata` | `promptTokenCount` (the whole prompt, cached tokens included), `cachedContentTokenCount`, `candidatesTokenCount`, `thoughtsTokenCount`, `totalTokenCount`, for every provider. |
+
+## Cost tracking and request logs
+
+Requests are tracked and logged like the OpenAI-compatible routes, and cost is
+computed from the provider that served the request. The request log shows the
+request path. Usage is recorded under the path template,
+`/v1beta/models/{model}:generateContent` and
+`/v1beta/models/{model}:streamGenerateContent`, so one filter covers every
+model.
+
+## Limitations
+
+Every request is translated through GoModel's canonical chat type, including
+requests routed to a Gemini model. Gemini features without a canonical
+equivalent are therefore not available yet:
+
+- **Rejected with a `400`:** `cachedContent`, built-in tools (`googleSearch`,
+  `codeExecution`, `urlContext`, and others), `fileData` parts (Files API and
+  YouTube URIs), `executableCode` and `codeExecutionResult` parts,
+  `candidateCount` above 1, `responseModalities` other than `TEXT`, and
+  `responseMimeType` values other than `text/plain` and `application/json`.
+- **Ignored:** `topK` and `safetySettings`. The serving provider's own safety
+  defaults apply.
+- **Thought summaries from Gemini models** are not returned, and an exact
+  `thinkingBudget` becomes one of the effort levels above.
+- **Generated images** are not returned; use
+  [`/v1/images/generations`](/advanced/images-api) for image models.
+- **Not served:** `countTokens`, `embedContent`, `batchGenerateContent`, the
+  Files and cached-content APIs, the Vertex AI path layout, and
+  `streamGenerateContent` without `alt=sse`. Unknown methods answer `404`.
+- **The response cache** is not consulted on these routes.
+
+See [ADR-0017](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0017-gemini-api-ingress.md)
+for the design rationale and what a native path to Gemini would add.

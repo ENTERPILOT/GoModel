@@ -96,15 +96,17 @@ curl http://localhost:8080/v1/responses \
 
 ## GoModel and official SDKs
 
-GoModel accepts requests in two compatible formats:
+GoModel accepts requests in three compatible formats:
 
 - OpenAI-compatible at `/v1`
 - Anthropic-compatible at `/v1/messages`
+- Gemini-compatible at `/v1beta/models/{model}:generateContent` (beta)
 
 The official SDKs therefore work unchanged. Configure their base URLs as follows:
 
 - OpenAI SDK: `http://localhost:8080/v1`
 - Anthropic SDK: `http://localhost:8080` (the SDK appends `/v1/messages`)
+- Google Gen AI SDK: `http://localhost:8080` (the SDK appends `/v1beta/models/...`)
 
 ## List of Supported LLM Providers
 
