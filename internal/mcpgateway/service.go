@@ -19,6 +19,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
+	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -240,6 +241,9 @@ type Options struct {
 	// one database, so a session continues on whichever replica a request
 	// reaches. Nil keeps every session on the instance that opened it.
 	SharedStore ext.SharedStore
+	// ToolCache stores the tool results of servers that opt into caching.
+	// Nil caches nothing. The caller owns and closes it.
+	ToolCache cache.Store
 }
 
 // NewService builds the gateway service and starts connecting to the merged
@@ -264,6 +268,9 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		postTouchInterval: sessionIdleTimeout / 2,
 		requestCancels:    make(map[uint64]context.CancelFunc),
 		stop:              make(chan struct{}),
+	}
+	if opts.ToolCache != nil {
+		s.manager.toolCache = &toolCache{store: opts.ToolCache}
 	}
 	if opts.oauthStore != nil {
 		s.oauth = newOAuthManager(opts.oauthStore, opts.HTTPClient)
@@ -1068,8 +1075,8 @@ func (s *Service) toolHandler(upstreamName, toolName, exposedName, endpoint stri
 			return nil, err
 		}
 		started := time.Now()
-		result, err := s.manager.CallTool(ctx, upstreamName, toolName, req.Params.Arguments)
-		s.recordToolCall(req, upstreamName, exposedName, endpoint, started, result, err)
+		result, cached, err := s.manager.CallTool(ctx, upstreamName, toolName, req.Params.Arguments)
+		s.recordToolCall(req, upstreamName, exposedName, endpoint, started, result, cached, err)
 		if err != nil {
 			return nil, fmt.Errorf("mcp server %q: %w", upstreamName, err)
 		}

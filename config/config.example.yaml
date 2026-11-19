@@ -190,6 +190,11 @@ models:
 #       user_paths: [] # restrict visibility to these user-path subtrees; empty = everyone
 #       disallowed_user_paths: [] # hide from these subtrees, even inside user_paths
 #       tool_timeout: 30s # per tools/call upper bound
+#       # Cache tool results. Off by default: tool calls are not idempotent in
+#       # general. Set ttl only for tools whose results may be reused for that long.
+#       cache:
+#         ttl: 300 # seconds a result is served from the cache (default: 0 = off)
+#         tools: [] # tools to cache; empty = only tools the server annotates readOnlyHint
 #     local-files: # stdio servers spawn a subprocess and are declarative-only:
 #       transport: stdio # the admin API and dashboard reject them by design
 #       command: npx
@@ -221,6 +226,13 @@ cache:
     #   url: "redis://localhost:6379"
     #   key: "gomodel:models"
     #   ttl: 86400 # 24 hours in seconds
+  # Where MCP tool results are cached for servers that set mcp.servers.<name>.cache.
+  # Default: process memory (64 MB, per instance). Set a Redis URL to share entries
+  # between replicas; an unreachable Redis falls back to memory at startup.
+  # mcp:
+  #   redis:
+  #     url: "redis://localhost:6379" # env: REDIS_URL
+  #     key: "gomodel:mcp:" # env: REDIS_KEY_MCP
   # response:
   #   partition_by_user_path: false # env: RESPONSE_CACHE_PARTITION_BY_USER_PATH; true gives each effective user path its own exact and semantic entries. Only keys bound to a user path are isolated from each other; see docs/features/cache.mdx
   #   simple: # omit the whole `simple` key to disable exact-match caching (unless RESPONSE_CACHE_SIMPLE_ENABLED=true)

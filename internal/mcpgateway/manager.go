@@ -38,6 +38,10 @@ type Manager struct {
 	// reconnectTimeout is the constant of that name; a field so tests can
 	// shorten it.
 	reconnectTimeout time.Duration
+
+	// toolCache holds the tool results of servers that opt into caching; nil
+	// caches nothing. Set before the first Apply.
+	toolCache *toolCache
 }
 
 // NewManager creates an empty manager. Apply installs the initial specs.
@@ -217,13 +221,26 @@ func (m *Manager) Reconnect(ctx context.Context, name string) (ServerView, error
 }
 
 // CallTool forwards one tool call to the named server using the original
-// (un-prefixed) tool name.
-func (m *Manager) CallTool(ctx context.Context, server, tool string, args json.RawMessage) (*mcp.CallToolResult, error) {
+// (un-prefixed) tool name. A server that opts into caching answers a repeated
+// call from the cache instead; cached reports that it did.
+func (m *Manager) CallTool(ctx context.Context, server, tool string, args json.RawMessage) (result *mcp.CallToolResult, cached bool, err error) {
 	u, ok := m.get(server)
 	if !ok {
-		return nil, fmt.Errorf("mcp server %q is not configured", server)
+		return nil, false, fmt.Errorf("mcp server %q is not configured", server)
 	}
-	return u.callTool(ctx, tool, args)
+	call, cacheable := u.cachedCall(tool, args)
+	if m.toolCache == nil || !cacheable {
+		result, err = u.callTool(ctx, tool, args)
+		return result, false, err
+	}
+	if hit := m.toolCache.get(ctx, call.key); hit != nil {
+		return hit, true, nil
+	}
+	result, err = u.callTool(ctx, tool, call.args)
+	if err == nil {
+		m.toolCache.put(ctx, call, result)
+	}
+	return result, false, err
 }
 
 // GetPrompt forwards one prompts/get to the named server.

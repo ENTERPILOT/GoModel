@@ -745,7 +745,7 @@ func TestReconnectDoesNotWaitForACallInFlight(t *testing.T) {
 	service, _ := newTestService(t, nil, testSpec("alpha", ts.URL, func(spec *ServerSpec) {
 		spec.ToolTimeout = time.Minute
 	}))
-	go func() { _, _ = service.manager.CallTool(context.Background(), "alpha", "slow", nil) }()
+	go func() { _, _, _ = service.manager.CallTool(context.Background(), "alpha", "slow", nil) }()
 	select {
 	case <-started:
 	case <-time.After(5 * time.Second):

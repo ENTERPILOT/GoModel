@@ -254,6 +254,7 @@ Felder pro Server:
 | `user_paths` | alle | Sichtbarkeits-Teilbäume, wie bei virtuellen Modellen |
 | `disallowed_user_paths` | keine | Teilbäume, die den Server nie sehen; hat Vorrang vor `user_paths` |
 | `tool_timeout` | `30s` | Obergrenze für einen einzelnen `tools/call` |
+| `cache` | aus | [Tool-Ergebnisse cachen](#tool-ergebnisse-cachen): `ttl` in Sekunden, optional `tools` |
 
 Ungültige Deklarationen (fehlerhafter Slug, fehlende `url`/`command`, unbekannter
 Transport) brechen den Start mit einem eindeutigen Fehler ab, statt den Server
@@ -553,6 +554,58 @@ mcp:
       url: https://api.githubcopilot.com/mcp
       disallowed_tools: ["delete_repository", "merge_pull_request"]
 ```
+
+## Tool-Ergebnisse cachen
+
+Ein Server kann einen wiederholten Tool-Aufruf aus einem Cache beantworten, statt den
+Upstream erneut aufzurufen. Das Caching ist standardmäßig aus, weil Tool-Aufrufe im
+Allgemeinen nicht idempotent sind: Ein gecachtes `create_issue` würde Erfolg melden,
+ohne etwas anzulegen. Es wird pro Server mit einer TTL eingeschaltet:
+
+```yaml
+mcp:
+  servers:
+    docs:
+      url: https://docs.example.com/mcp
+      cache:
+        ttl: 300 # Sekunden; Standard 0 = aus
+        tools: ["search", "get_page"] # optional
+```
+
+| Feld | Standard | Bedeutung |
+| --- | --- | --- |
+| `cache.ttl` | `0` (aus) | Sekunden, für die ein Ergebnis aus dem Cache ausgeliefert wird |
+| `cache.tools` | Read-only-Tools | Upstream-Tool-Namen, die gecacht werden. Leer cacht nur die Tools, die der Server mit `readOnlyHint` annotiert |
+
+Sinnvoll ist das für Abfragen, die langsam, ratenlimitiert oder pro Aufruf
+kostenpflichtig sind, etwa eine Dokumentations- oder Websuche; die TTL gibt an, wie
+veraltet eine Antwort sein darf. Für Tools, die etwas ändern, und für Abfragen, die
+aktuell sein müssen, bleibt es aus.
+
+- **Welche Tools.** Ohne `tools` werden nur Tools gecacht, die der Server mit
+  `readOnlyHint: true` markiert. Der Hinweis stammt vom Upstream und GoModel
+  überprüft ihn nicht; für Server außerhalb der eigenen Kontrolle gehört deshalb
+  eine `tools`-Liste dazu. Ein aufgeführtes Tool wird mit oder ohne Hinweis gecacht.
+- **Ein Eintrag** ist ein Server, die Zugangsdaten, mit denen er aufgerufen wird, ein
+  Tool und ein Satz Argumente. Schlüsselreihenfolge und Leerraum spielen keine Rolle;
+  der Upstream erhält die Argumente mit sortierten Schlüsseln. Eine geänderte URL,
+  geänderte Header oder eine erneute OAuth-Anmeldung beginnen mit einem leeren Cache.
+- **Einträge werden von allen Aufrufern geteilt.** Jeder Client erreicht einen Server
+  mit den Zugangsdaten des Servers, das Ergebnis hängt also nicht davon ab, wer fragt.
+  User-Paths und Tool-Filter werden weiterhin bei jedem Aufruf geprüft, bevor der
+  Cache gelesen wird.
+- **Nie gecacht werden** fehlgeschlagene Aufrufe, Ergebnisse mit `isError` und
+  Ergebnisse über 1 MB.
+- **Nutzung.** Ein Cache-Hit bleibt ein Nutzungseintrag, mit `cache_type` `exact` wie
+  ein Hit im [Response-Cache](/de/features/cache#cache-analysen): Nutzungssummen
+  lassen ihn aus, außer mit `cache_mode=all`.
+- **Speicherort.** Standardmäßig der Prozessspeicher, bis zu 64 MB pro Instanz. Ist
+  `REDIS_URL` (oder `cache.mcp.redis.url`) gesetzt, liegen die Einträge in Redis unter
+  dem Präfix `gomodel:mcp:` (`REDIS_KEY_MCP`) und alle Replikate teilen sie. Ist Redis
+  beim Start nicht erreichbar, cacht diese Instanz im Speicher.
+
+Das Caching wird in der `config.yaml` oder in `MCP_SERVERS` gesetzt; im Dashboard
+hinzugefügte Server werden noch nicht gecacht.
 
 ## Einschränken, wer einen Server sieht
 

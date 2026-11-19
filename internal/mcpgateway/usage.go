@@ -17,7 +17,9 @@ import (
 // in the same usage pipeline (and by-label breakdowns) as model traffic.
 // Identity comes from the HTTP headers of the POST that carried the call —
 // tool handlers run on the session context, not the per-request context.
-func (s *Service) recordToolCall(req *mcp.CallToolRequest, server, exposedTool, endpoint string, started time.Time, result *mcp.CallToolResult, callErr error) {
+// A result served from the tool cache is marked with the exact cache type,
+// like a response-cache hit on a model request.
+func (s *Service) recordToolCall(req *mcp.CallToolRequest, server, exposedTool, endpoint string, started time.Time, result *mcp.CallToolResult, cached bool, callErr error) {
 	if s.usageLogger == nil || !s.usageLogger.Config().Enabled {
 		return
 	}
@@ -33,6 +35,9 @@ func (s *Service) recordToolCall(req *mcp.CallToolRequest, server, exposedTool, 
 			"method":      "tools/call",
 			"duration_ms": time.Since(started).Milliseconds(),
 		},
+	}
+	if cached {
+		entry.CacheType = usage.CacheTypeExact
 	}
 	if callErr != nil {
 		entry.RawData["error"] = "upstream_failure"

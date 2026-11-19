@@ -241,6 +241,7 @@ Per-server fields:
 | `user_paths` | everyone | Visibility subtrees, like virtual models |
 | `disallowed_user_paths` | none | Subtrees that never see the server; wins over `user_paths` |
 | `tool_timeout` | `30s` | Upper bound for one `tools/call` |
+| `cache` | off | [Cache tool results](#cache-tool-results): `ttl` in seconds, optional `tools` |
 
 Invalid declarations (bad slug, missing `url`/`command`, unknown transport)
 abort startup with a clear error rather than silently dropping the server.
@@ -522,6 +523,58 @@ mcp:
       url: https://api.githubcopilot.com/mcp
       disallowed_tools: ["delete_repository", "merge_pull_request"]
 ```
+
+## Cache tool results
+
+A server can answer a repeated tool call from a cache instead of calling the
+upstream again. Caching is off by default, because tool calls are not
+idempotent in general: a cached `create_issue` would report success without
+creating anything. Turn it on per server by setting a TTL:
+
+```yaml
+mcp:
+  servers:
+    docs:
+      url: https://docs.example.com/mcp
+      cache:
+        ttl: 300 # seconds; default 0 = off
+        tools: ["search", "get_page"] # optional
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `cache.ttl` | `0` (off) | Seconds a result is served from the cache |
+| `cache.tools` | read-only tools | Upstream tool names to cache. Empty caches only the tools the server annotates with `readOnlyHint` |
+
+Turn it on for lookups that are slow, rate-limited, or billed per call, such
+as documentation or web search, and set the TTL to how stale an answer may be.
+Leave it off for tools that change something and for reads that must be
+current.
+
+- **Which tools.** Without `tools`, only tools the server marks
+  `readOnlyHint: true` are cached. The hint comes from the upstream and GoModel
+  does not verify it, so list `tools` for servers you do not control. A listed
+  tool is cached with or without the hint.
+- **One entry** is one server, the credentials it is called with, one tool,
+  and one set of arguments. Key order and whitespace do not matter; the
+  upstream receives the arguments with sorted keys. Changing the server's URL
+  or headers, or signing in again with OAuth, starts from an empty cache.
+- **Entries are shared between callers.** Every client reaches a server with
+  the server's own credentials, so a result does not depend on who asks. User
+  paths and tool filters are still checked on every call, before the cache is
+  read.
+- **Never cached:** failed calls, results marked `isError`, and results larger
+  than 1 MB.
+- **Usage.** A cache hit is still a usage entry, with `cache_type` `exact`
+  like a [response cache](/features/cache#cache-analytics) hit: usage totals
+  leave it out unless you pass `cache_mode=all`.
+- **Storage.** Process memory by default, up to 64 MB per instance. With
+  `REDIS_URL` (or `cache.mcp.redis.url`) set, entries go to Redis under the
+  `gomodel:mcp:` prefix (`REDIS_KEY_MCP`) and all replicas share them. If Redis
+  cannot be reached at startup, that instance caches in memory.
+
+Caching is set in `config.yaml` or `MCP_SERVERS`; servers added in the
+dashboard are not cached yet.
 
 ## Limit who can see a server
 

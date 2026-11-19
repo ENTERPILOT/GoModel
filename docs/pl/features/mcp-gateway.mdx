@@ -245,6 +245,7 @@ Pola serwera:
 | `user_paths` | wszyscy | Poddrzewa widoczności, jak w modelach wirtualnych |
 | `disallowed_user_paths` | brak | Poddrzewa, które nigdy nie widzą serwera; wygrywa z `user_paths` |
 | `tool_timeout` | `30s` | Górny limit czasu jednego `tools/call` |
+| `cache` | wyłączony | [Cache wyników narzędzi](#cache’uj-wyniki-narzędzi): `ttl` w sekundach, opcjonalne `tools` |
 
 Nieprawidłowe deklaracje (zły slug, brak `url`/`command`, nieznany transport)
 przerywają uruchamianie z czytelnym błędem, zamiast po cichu pomijać serwer.
@@ -526,6 +527,58 @@ mcp:
       url: https://api.githubcopilot.com/mcp
       disallowed_tools: ["delete_repository", "merge_pull_request"]
 ```
+
+## Cache'uj wyniki narzędzi
+
+Serwer może odpowiedzieć na powtórzone wywołanie narzędzia z cache'u, zamiast
+ponownie wywoływać upstream. Cache jest domyślnie wyłączony, bo wywołania narzędzi
+nie są z natury idempotentne: `create_issue` z cache'u zgłosiłoby sukces, niczego
+nie tworząc. Włącz go dla serwera, ustawiając TTL:
+
+```yaml
+mcp:
+  servers:
+    docs:
+      url: https://docs.example.com/mcp
+      cache:
+        ttl: 300 # sekundy; domyślnie 0 = wyłączony
+        tools: ["search", "get_page"] # opcjonalne
+```
+
+| Pole | Wartość domyślna | Znaczenie |
+| --- | --- | --- |
+| `cache.ttl` | `0` (wyłączony) | Liczba sekund, przez które wynik jest serwowany z cache'u |
+| `cache.tools` | narzędzia tylko do odczytu | Upstreamowe nazwy narzędzi do cache'owania. Pusta lista cache'uje tylko narzędzia, które serwer oznacza `readOnlyHint` |
+
+Włącz go dla odczytów, które są wolne, limitowane albo płatne za wywołanie, takich
+jak wyszukiwanie w dokumentacji czy w sieci, i ustaw TTL na tyle, na ile odpowiedź
+może być nieaktualna. Zostaw wyłączony dla narzędzi, które coś zmieniają, i dla
+odczytów, które muszą być aktualne.
+
+- **Które narzędzia.** Bez `tools` cache'owane są tylko narzędzia, które serwer
+  oznacza `readOnlyHint: true`. Ta wskazówka pochodzi z upstreamu i GoModel jej nie
+  weryfikuje, więc dla serwerów, których nie kontrolujesz, wymień `tools`. Wymienione
+  narzędzie jest cache'owane niezależnie od wskazówki.
+- **Jeden wpis** to jeden serwer, poświadczenia, z którymi jest wywoływany, jedno
+  narzędzie i jeden zestaw argumentów. Kolejność kluczy i białe znaki nie mają
+  znaczenia; upstream dostaje argumenty z posortowanymi kluczami. Zmiana URL-a lub
+  nagłówków serwera albo ponowne zalogowanie przez OAuth zaczyna od pustego cache'u.
+- **Wpisy są wspólne dla wszystkich wywołujących.** Każdy klient łączy się z serwerem
+  przy użyciu poświadczeń samego serwera, więc wynik nie zależy od tego, kto pyta.
+  Ścieżki użytkowników i filtry narzędzi są nadal sprawdzane przy każdym wywołaniu,
+  przed odczytem z cache'u.
+- **Nigdy nie są cache'owane:** nieudane wywołania, wyniki oznaczone `isError` oraz
+  wyniki większe niż 1 MB.
+- **Użycie.** Cache hit nadal jest wpisem użycia, z `cache_type` równym `exact`, tak
+  jak trafienie w [cache odpowiedzi](/pl/features/cache#analityka-cache’u): sumy użycia
+  pomijają go, chyba że przekażesz `cache_mode=all`.
+- **Przechowywanie.** Domyślnie pamięć procesu, do 64 MB na instancję. Po ustawieniu
+  `REDIS_URL` (lub `cache.mcp.redis.url`) wpisy trafiają do Redisa z prefiksem
+  `gomodel:mcp:` (`REDIS_KEY_MCP`) i są wspólne dla wszystkich replik. Jeśli Redis jest
+  nieosiągalny przy starcie, ta instancja cache'uje w pamięci.
+
+Cache ustawia się w `config.yaml` lub `MCP_SERVERS`; serwery dodane w dashboardzie
+nie są jeszcze cache'owane.
 
 ## Ogranicz, kto widzi serwer
 

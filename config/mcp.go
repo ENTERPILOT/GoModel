@@ -166,6 +166,22 @@ type MCPServerConfig struct {
 	// ToolTimeout bounds a single tools/call against this server.
 	// Default: 30s.
 	ToolTimeout time.Duration `yaml:"tool_timeout,omitempty" json:"tool_timeout,omitempty"`
+
+	// Cache opts this server's tool results into caching. Default: off.
+	Cache MCPToolCacheConfig `yaml:"cache,omitempty" json:"cache,omitzero"`
+}
+
+// MCPToolCacheConfig opts one server's tools/call results into caching. Tool
+// calls are not idempotent in general, so nothing is cached unless TTL is set.
+type MCPToolCacheConfig struct {
+	// TTL is how long a result is served from the cache, in seconds.
+	// Default: 0, which leaves caching off.
+	TTL int `yaml:"ttl,omitempty" json:"ttl,omitempty"`
+
+	// Tools lists the tools (original, un-prefixed names) whose results are
+	// cached. Empty caches only the tools the server annotates with
+	// readOnlyHint.
+	Tools []string `yaml:"tools,omitempty" json:"tools,omitempty"`
 }
 
 const envMCPServers = "MCP_SERVERS"
@@ -229,6 +245,9 @@ func expandMCPServerEnv(server *MCPServerConfig) {
 	}
 	for i := range server.DisallowedTools {
 		server.DisallowedTools[i] = expandString(server.DisallowedTools[i])
+	}
+	for i := range server.Cache.Tools {
+		server.Cache.Tools[i] = expandString(server.Cache.Tools[i])
 	}
 	for i := range server.UserPaths {
 		server.UserPaths[i] = expandString(server.UserPaths[i])
@@ -509,6 +528,9 @@ func validateMCPServerConfig(server *MCPServerConfig, allowReferences bool) erro
 	if server.ToolTimeout == 0 {
 		server.ToolTimeout = DefaultMCPToolTimeout
 	}
+	if err := normalizeMCPToolCache(&server.Cache); err != nil {
+		return err
+	}
 	var err error
 	if server.UserPaths, err = normalizeMCPUserPaths("user_paths", server.UserPaths); err != nil {
 		return err
@@ -516,6 +538,36 @@ func validateMCPServerConfig(server *MCPServerConfig, allowReferences bool) erro
 	if server.DisallowedUserPaths, err = normalizeMCPUserPaths("disallowed_user_paths", server.DisallowedUserPaths); err != nil {
 		return err
 	}
+	return nil
+}
+
+// maxMCPToolCacheTTL is the longest accepted cache.ttl, in seconds.
+const maxMCPToolCacheTTL = 365 * 24 * 60 * 60
+
+// normalizeMCPToolCache trims and dedupes the cached tool names. A tool list
+// without a TTL is rejected: it would read as caching while caching is off.
+func normalizeMCPToolCache(cache *MCPToolCacheConfig) error {
+	if cache.TTL < 0 {
+		return fmt.Errorf("cache.ttl must not be negative")
+	}
+	if cache.TTL > maxMCPToolCacheTTL {
+		return fmt.Errorf("cache.ttl must be at most %d seconds (one year)", maxMCPToolCacheTTL)
+	}
+	tools := make([]string, 0, len(cache.Tools))
+	for _, tool := range cache.Tools {
+		tool = strings.TrimSpace(tool)
+		if tool != "" && !slices.Contains(tools, tool) {
+			tools = append(tools, tool)
+		}
+	}
+	if len(tools) == 0 {
+		cache.Tools = nil
+		return nil
+	}
+	if cache.TTL == 0 {
+		return fmt.Errorf("cache.ttl is required when cache.tools is set: results are cached for that many seconds")
+	}
+	cache.Tools = tools
 	return nil
 }
 

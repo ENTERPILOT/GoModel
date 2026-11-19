@@ -304,6 +304,7 @@ var plainCredentialLookalikes = map[string]bool{
 	"server.client_ip_header":                           true,
 	"cache.model.redis.key":                             true,
 	"cache.response.simple.redis.key":                   true,
+	"cache.mcp.redis.key":                               true,
 	"metrics.endpoint":                                  true,
 	"failover.rules_json":                               true,
 	"failover.disabled_models_json":                     true,

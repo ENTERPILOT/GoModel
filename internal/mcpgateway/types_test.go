@@ -46,3 +46,23 @@ func TestSpecFromConfigMapsAccessPolicy(t *testing.T) {
 	assert.Equal(t, []string{"search"}, spec.AllowedTools)
 	assert.Equal(t, "Bearer x", spec.Headers["Authorization"])
 }
+
+func TestSpecFromConfigMapsToolCache(t *testing.T) {
+	t.Parallel()
+	cfg := config.MCPServerConfig{
+		URL:   "https://mcp.example.com/mcp",
+		Cache: config.MCPToolCacheConfig{TTL: 300, Tools: []string{"search"}},
+	}
+
+	spec := SpecFromConfig("docs", cfg)
+
+	assert.Equal(t, 5*time.Minute, spec.CacheTTL)
+	assert.Equal(t, []string{"search"}, spec.CacheTools)
+	assert.Zero(t, SpecFromConfig("plain", config.MCPServerConfig{URL: cfg.URL}).CacheTTL, "caching is off unless configured")
+
+	// A changed cache policy is a changed spec, so a reload applies it.
+	cfg.Cache.TTL = 60
+	assert.False(t, spec.equal(SpecFromConfig("docs", cfg)))
+	cfg.Cache = config.MCPToolCacheConfig{TTL: 300, Tools: []string{"fetch"}}
+	assert.False(t, spec.equal(SpecFromConfig("docs", cfg)))
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/encryption/encryptiontest"
 	"github.com/enterpilot/gomodel/internal/storage"
 )
@@ -36,6 +37,37 @@ func TestNewKeepsVirtualServerPersistenceWithEncryption(t *testing.T) {
 	assert.NotNil(t, result.Service.virtualStore, "virtual servers keep their store when headers are sealed")
 	_, err = result.Service.UpsertVirtual(ctx, ManagedVirtualServer{Name: "coding", Servers: []string{"ghost"}})
 	require.ErrorIs(t, err, ErrInvalidVirtualServer, "the store is reachable: validation, not missing persistence, rejects this")
+}
+
+// The cache store is opened for the first server that opts in, so a gateway
+// that caches nothing holds no store (or Redis connection) for it.
+func TestNewOpensToolCacheOnlyWhenAServerOptsIn(t *testing.T) {
+	ctx := context.Background()
+	url := newTestUpstream(t, "docs", addEchoTool("search"))
+	open := func(server config.MCPServerConfig) *Result {
+		shared, err := storage.New(ctx, storage.Config{
+			Type:   storage.TypeSQLite,
+			SQLite: storage.SQLiteConfig{Path: filepath.Join(t.TempDir(), "gomodel.db")},
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = shared.Close() })
+		cfg := &config.Config{MCP: config.MCPConfig{Servers: map[string]config.MCPServerConfig{"docs": server}}}
+		result, err := New(ctx, cfg, shared, nil, nil, nil, nil, nil, nil)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = result.Close() })
+		return result
+	}
+
+	plain := open(config.MCPServerConfig{URL: url, Transport: config.MCPTransportHTTP})
+	assert.Nil(t, plain.toolCache)
+	assert.Nil(t, plain.Service.manager.toolCache)
+
+	caching := open(config.MCPServerConfig{URL: url, Transport: config.MCPTransportHTTP, Cache: config.MCPToolCacheConfig{TTL: 60}})
+	assert.IsType(t, &cache.MemoryStore{}, caching.toolCache)
+	require.NotNil(t, caching.Service.manager.toolCache)
+	spec, ok := caching.Service.manager.spec("docs")
+	require.True(t, ok)
+	assert.Equal(t, time.Minute, spec.CacheTTL)
 }
 
 func TestConfigServerSpecsDeclaredServerWinsSlugClash(t *testing.T) {

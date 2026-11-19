@@ -55,6 +55,11 @@ type ServerSpec struct {
 	// UserPaths.
 	DisallowedUserPaths []string
 	ToolTimeout         time.Duration
+	// CacheTTL is how long a tool result is served from the cache; zero, the
+	// default, caches nothing. CacheTools lists the cached tools; empty
+	// caches the tools the server annotates with readOnlyHint.
+	CacheTTL   time.Duration
+	CacheTools []string
 
 	// Managed marks specs declared in config.yaml / MCP_SERVERS. They override
 	// admin-store rows with the same name and are read-only in the dashboard.
@@ -84,6 +89,8 @@ func SpecFromConfig(name string, cfg config.MCPServerConfig) ServerSpec {
 		UserPaths:           normalizeUserPaths(cfg.UserPaths),
 		DisallowedUserPaths: normalizeUserPaths(cfg.DisallowedUserPaths),
 		ToolTimeout:         cfg.ToolTimeout,
+		CacheTTL:            time.Duration(cfg.Cache.TTL) * time.Second,
+		CacheTools:          slices.Clone(cfg.Cache.Tools),
 		Managed:             true,
 	}
 }
@@ -107,6 +114,8 @@ func (s ServerSpec) equal(other ServerSpec) bool {
 		slices.Equal(s.UserPaths, other.UserPaths) &&
 		slices.Equal(s.DisallowedUserPaths, other.DisallowedUserPaths) &&
 		s.ToolTimeout == other.ToolTimeout &&
+		s.CacheTTL == other.CacheTTL &&
+		slices.Equal(s.CacheTools, other.CacheTools) &&
 		s.Managed == other.Managed &&
 		s.oauth == other.oauth
 }
