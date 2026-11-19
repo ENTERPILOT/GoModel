@@ -13,6 +13,7 @@ import {
   conversationFollowUpEntry,
   conversationMessageCopyText,
   conversationRequestStepBody,
+  conversationRequestStepBodyMissing,
   conversationRequestStepID,
   conversationRequestSteps,
   extractConversationErrorMessage,
@@ -1274,6 +1275,221 @@ test("step preview never changes branch membership: lineage stays on the origina
   // the branch even while the anchor previews its compressed shape.
   assert.deepEqual(view.entryIDs, ["request-log-rev", "request-log-rev-2"]);
   assert.ok(view.messages.some((msg) => msg.text === "Follow-up"));
+});
+
+// A prompt guardrail (here a system_prompt decorator) edits the request after
+// it was logged, so the sent shape lives in the entry's revision.
+function guardedThread({ path, original, sent, response, laterRequest }) {
+  const anchor = {
+    id: "guarded-1",
+    path,
+    timestamp: "2026-07-06T12:00:00Z",
+    data: {
+      request_body: original,
+      response_body: response,
+      request_revisions: [
+        { seq: 1, rewriter: "safety-prompt", bytes_before: 100, bytes_after: 140, body: sent },
+      ],
+    },
+  };
+  const later = {
+    id: "guarded-2",
+    path,
+    timestamp: "2026-07-06T12:01:00Z",
+    data: { request_body: laterRequest },
+  };
+  return { anchor, later };
+}
+
+const chatAnswer = { choices: [{ message: { role: "assistant", content: "First answer" } }] };
+
+const guardedThreads = [
+  {
+    name: "chat completions",
+    path: "/v1/chat/completions",
+    original: {
+      messages: [
+        { role: "system", content: "Be terse" },
+        { role: "user", content: "First question" },
+      ],
+    },
+    sent: {
+      messages: [
+        { role: "system", content: "Stay safe\nBe terse" },
+        { role: "user", content: "First question" },
+      ],
+    },
+    response: chatAnswer,
+    laterRequest: {
+      messages: [
+        { role: "system", content: "Be terse" },
+        { role: "user", content: "First question" },
+        { role: "assistant", content: "First answer" },
+        { role: "user", content: "Second question" },
+      ],
+    },
+    originalSystem: "Be terse",
+  },
+  {
+    name: "chat completions without a caller system prompt",
+    path: "/v1/chat/completions",
+    original: { messages: [{ role: "user", content: "First question" }] },
+    sent: {
+      messages: [
+        { role: "system", content: "Stay safe\nBe terse" },
+        { role: "user", content: "First question" },
+      ],
+    },
+    response: chatAnswer,
+    laterRequest: {
+      messages: [
+        { role: "user", content: "First question" },
+        { role: "assistant", content: "First answer" },
+        { role: "user", content: "Second question" },
+      ],
+    },
+    originalSystem: "",
+  },
+  {
+    name: "messages",
+    path: "/v1/messages",
+    original: {
+      system: "Be terse",
+      messages: [{ role: "user", content: "First question" }],
+    },
+    sent: {
+      system: "Stay safe\nBe terse",
+      messages: [{ role: "user", content: "First question" }],
+    },
+    response: { role: "assistant", content: [{ type: "text", text: "First answer" }] },
+    laterRequest: {
+      system: "Be terse",
+      messages: [
+        { role: "user", content: "First question" },
+        { role: "assistant", content: "First answer" },
+        { role: "user", content: "Second question" },
+      ],
+    },
+    originalSystem: "Be terse",
+  },
+  {
+    name: "responses with replayed input",
+    path: "/v1/responses",
+    original: {
+      instructions: "Be terse",
+      input: [{ role: "user", content: "First question" }],
+    },
+    sent: {
+      instructions: "Stay safe\nBe terse",
+      input: [{ role: "user", content: "First question" }],
+    },
+    response: {
+      id: "resp_1",
+      output: [{
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "First answer" }],
+      }],
+    },
+    laterRequest: {
+      instructions: "Be terse",
+      input: [
+        { role: "user", content: "First question" },
+        { role: "assistant", content: "First answer" },
+        { role: "user", content: "Second question" },
+      ],
+    },
+    originalSystem: "Be terse",
+  },
+];
+
+for (const thread of guardedThreads) {
+  test(`a later request keeps the opened request's selected step: ${thread.name}`, () => {
+    const { anchor, later } = guardedThread(thread);
+    const rendered = (step) =>
+      buildConversationView([anchor, later], anchor.id, { anchorRequestStep: step })
+        .messages.map((msg) => [msg.role, msg.text, msg.isAnchor ? "opened" : "later"]);
+
+    // The later request is a snapshot that repeats the opened request as the
+    // client sent it. It adds its new turns and leaves the opened request as
+    // the provider received it.
+    assert.deepEqual(rendered("final"), [
+      ["system", "Stay safe\nBe terse", "opened"],
+      ["user", "First question", "opened"],
+      ["assistant", "First answer", "opened"],
+      ["user", "Second question", "later"],
+    ]);
+    assert.deepEqual(rendered("original"), [
+      ...(thread.originalSystem ? [["system", thread.originalSystem, "opened"]] : []),
+      ["user", "First question", "opened"],
+      ["assistant", "First answer", "opened"],
+      ["user", "Second question", "later"],
+    ]);
+  });
+}
+
+test("a later snapshot that drops the opened request replaces its step preview", () => {
+  const { anchor, later } = guardedThread(guardedThreads[0]);
+  // Linked to the opened request, but its history was rewritten: the newest
+  // snapshot stays authoritative, and one built on it does not bring the
+  // opened request's preview back.
+  const rewritten = {
+    ...later,
+    data: {
+      request_headers: { "X-GoModel-Interaction-Parent": anchor.id },
+      request_body: { messages: [{ role: "user", content: "Summarized history" }] },
+      response_body: { choices: [{ message: { role: "assistant", content: "Summary answer" } }] },
+    },
+  };
+  const afterRewrite = {
+    id: "guarded-3",
+    path: anchor.path,
+    timestamp: "2026-07-06T12:02:00Z",
+    data: {
+      request_headers: { "X-GoModel-Interaction-Parent": rewritten.id },
+      request_body: {
+        messages: [
+          { role: "system", content: "Be terse" },
+          { role: "user", content: "First question" },
+          { role: "user", content: "Third question" },
+        ],
+      },
+    },
+  };
+  const view = buildConversationView([anchor, rewritten, afterRewrite], anchor.id, {
+    anchorRequestStep: "final",
+  });
+  assert.deepEqual(view.messages.map((msg) => [msg.role, msg.text]), [
+    ["system", "Be terse"],
+    ["user", "First question"],
+    ["user", "Third question"],
+  ]);
+});
+
+test("a selected step whose body was not stored is reported once the detail is loaded", () => {
+  const stored = revisionedEntry({ _detail_loaded: true });
+  const notStored = revisionedEntry({ _detail_loaded: true });
+  notStored.data = {
+    ...notStored.data,
+    request_revisions: [
+      { seq: 1, rewriter: "safety-prompt", bytes_before: 100, bytes_after: 140 },
+      { seq: 2, rewriter: "compress", bytes_before: 140, bytes_after: 90, body: { messages: [] } },
+    ],
+  };
+  const cases = [
+    { name: "stored final step", entry: stored, step: "final", missing: false },
+    { name: "final step by default", entry: stored, step: undefined, missing: false },
+    { name: "unstored step", entry: notStored, step: "revision-1", missing: true },
+    { name: "stored step next to an unstored one", entry: notStored, step: "final", missing: false },
+    { name: "final step addressed by its revision", entry: notStored, step: "revision-2", missing: false },
+    { name: "original request", entry: notStored, step: "original", missing: false },
+    // Revisions arrive without bodies until the detail fetch fills them in.
+    { name: "detail not loaded yet", entry: { ...notStored, _detail_loaded: false }, step: "revision-1", missing: false },
+    { name: "no entry", entry: null, step: "final", missing: false },
+  ];
+  for (const { name, entry, step, missing } of cases) {
+    assert.equal(conversationRequestStepBodyMissing(entry, step), missing, name);
+  }
 });
 
 test("opening from a request log pane maps its step onto selectable step ids", () => {

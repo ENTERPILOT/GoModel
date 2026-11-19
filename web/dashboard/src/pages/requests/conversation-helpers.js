@@ -418,6 +418,18 @@ export function conversationRequestStepBody(entry, step) {
         : original;
 }
 
+// conversationRequestStepBodyMissing reports that the selected step rewrote
+// the request but its body was not stored (revision bodies off, or over the
+// capture limit), so the preview shows the original request instead. False
+// until the record's detail is loaded: revisions arrive without bodies first.
+export function conversationRequestStepBodyMissing(entry, step) {
+    if (!entry || !entry._detail_loaded) return false;
+    const wanted = String(step || REQUEST_STEP_FINAL);
+    const selected = conversationRequestSteps(entry).find((candidate) =>
+        candidate.id === wanted || conversationRequestStepID(candidate) === wanted);
+    return !!selected && selected.seq > 0 && !selected.hasBody;
+}
+
 function cloneJSON(value) {
     if (!value || typeof value !== 'object') return null;
     try {
@@ -1173,6 +1185,22 @@ function fullSnapshotLineage(requestBody) {
     return values.map(stableJSON);
 }
 
+// requestBodyAfterLineage drops the first `count` lineage values (see
+// fullSnapshotLineage) from a full-snapshot request, leaving the turns it
+// adds to a request that shares that prefix.
+function requestBodyAfterLineage(requestBody, count) {
+    const rest = { ...requestBody };
+    let skip = count;
+    ['system', 'instructions'].forEach((key) => {
+        if (rest[key] === undefined) return;
+        delete rest[key];
+        skip--;
+    });
+    const listKey = Array.isArray(rest.messages) ? 'messages' : 'input';
+    rest[listKey] = rest[listKey].slice(Math.max(skip, 0));
+    return rest;
+}
+
 function conversationReference(requestBody) {
     const value = requestBody && requestBody.conversation;
     if (typeof value === 'string') return value.trim();
@@ -1212,6 +1240,9 @@ export function buildConversationView(entries, anchorID, options) {
     const acceptedConversationIDs = new Set();
     let historySignatures = [];
     let anchorLineage = null;
+    // How many leading messages are the anchor's request rendered at a
+    // rewrite step; 0 when it renders the original request.
+    let anchorPreviewLength = 0;
     let idx = 0;
     const anchorIndex = sorted.findIndex((entry) => entry.id === anchorID);
 
@@ -1228,14 +1259,27 @@ export function buildConversationView(entries, anchorID, options) {
         const isAfterAnchor = anchorIndex >= 0 && entryIndex > anchorIndex;
         const ts = entry.timestamp;
         const originalRequestBody = entry.data && entry.data.request_body ? entry.data.request_body : null;
+        const lineage = fullSnapshotLineage(originalRequestBody);
+        const isFullSnapshot = lineage !== null;
+        const retainsAnchor = isAfterAnchor && isFullSnapshot &&
+            !!anchorLineage && anchorLineage.length > 0 &&
+            anchorLineage.every((value, i) => lineage[i] === value);
         // The previewed (anchor) entry renders its request at the selected
         // rewrite step — by default the final shape sent to the provider.
         // Branch/lineage bookkeeping below intentionally stays on the
         // original body so the step preview can never change which entries
         // belong to the rendered branch.
-        const requestBody = isAnchor && anchorRequestStep !== ''
-            ? conversationRequestStepBody(entry, anchorRequestStep) || originalRequestBody
-            : originalRequestBody;
+        //
+        // A later snapshot that still starts with the anchor's request
+        // contributes only the turns it adds. Rendering it whole would put
+        // the anchor's original request back in place of the selected step.
+        const extendsAnchorPreview = retainsAnchor && anchorPreviewLength > 0;
+        let requestBody = originalRequestBody;
+        if (isAnchor && anchorRequestStep !== '') {
+            requestBody = conversationRequestStepBody(entry, anchorRequestStep) || originalRequestBody;
+        } else if (extendsAnchorPreview) {
+            requestBody = requestBodyAfterLineage(originalRequestBody, anchorLineage.length);
+        }
         const responseBody = entry.data && entry.data.response_body ? entry.data.response_body : null;
         const requestStart = messages.length;
         const cachedPrompt = (text, sourceSegments) =>
@@ -1378,8 +1422,6 @@ export function buildConversationView(entries, anchorID, options) {
         // only a delta, so those continue to extend the rendered transcript.
         const requestMessages = messages.splice(requestStart);
         const requestSignatures = requestMessages.map(signature);
-        const lineage = fullSnapshotLineage(originalRequestBody);
-        const isFullSnapshot = lineage !== null;
         const parentID = interactionParentID(entry);
         const linkedParent = !!parentID && branchEntryIDSet.has(parentID);
         const previousResponseID = String(originalRequestBody && originalRequestBody.previous_response_id || '').trim();
@@ -1389,8 +1431,6 @@ export function buildConversationView(entries, anchorID, options) {
             (!!conversationID && acceptedConversationIDs.has(conversationID));
 
         if (isAfterAnchor) {
-            const retainsAnchor = isFullSnapshot && anchorLineage && anchorLineage.length > 0 &&
-                anchorLineage.every((value, i) => lineage[i] === value);
             if ((isFullSnapshot && !retainsAnchor && !linkedParent) ||
                 (!isFullSnapshot && !linkedDelta)) return;
         }
@@ -1408,25 +1448,34 @@ export function buildConversationView(entries, anchorID, options) {
             if (isAnchor || isAfterAnchor) branchEntryIDSet.add(entryID);
         }
         if (conversationID) acceptedConversationIDs.add(conversationID);
+        // A snapshot replaces the transcript, or only what follows the
+        // anchor's previewed request when it extends that preview.
+        const kept = extendsAnchorPreview ? anchorPreviewLength : 0;
         let commonPrefix = 0;
         while (commonPrefix < requestSignatures.length &&
-            commonPrefix < historySignatures.length &&
-            requestSignatures[commonPrefix] === historySignatures[commonPrefix]) {
+            kept + commonPrefix < historySignatures.length &&
+            requestSignatures[commonPrefix] === historySignatures[kept + commonPrefix]) {
             commonPrefix++;
         }
         if (isFullSnapshot) {
             for (let i = 0; i < commonPrefix; i++) {
+                const previous = messages[kept + i];
                 requestMessages[i] = {
                     ...requestMessages[i],
-                    uid: messages[i].uid,
-                    entryID: messages[i].entryID,
-                    timestamp: messages[i].timestamp,
-                    isAnchor: messages[i].isAnchor,
-                    isAfterAnchor: messages[i].isAfterAnchor,
+                    uid: previous.uid,
+                    entryID: previous.entryID,
+                    timestamp: previous.timestamp,
+                    isAnchor: previous.isAnchor,
+                    isAfterAnchor: previous.isAfterAnchor,
                 };
             }
-            messages.splice(0, messages.length, ...requestMessages);
-            historySignatures = requestSignatures;
+            messages.splice(kept, messages.length - kept, ...requestMessages);
+            historySignatures = [...historySignatures.slice(0, kept), ...requestSignatures];
+            if (kept === 0) {
+                anchorPreviewLength = isAnchor && requestBody !== originalRequestBody
+                    ? requestMessages.length
+                    : 0;
+            }
         } else {
             let overlap = Math.min(historySignatures.length, requestSignatures.length);
             while (overlap > 0) {

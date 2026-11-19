@@ -22,6 +22,7 @@ import {
   conversationEntryByRequestID,
   conversationEntryIsLatest,
   conversationFollowUpEntry,
+  conversationRequestStepBodyMissing,
   conversationRequestSteps,
   followUpEndpointKind,
   formatJSON,
@@ -231,6 +232,15 @@ class ConversationDrawerStore {
   selectRequestStep(stepID) {
     this.conversationRequestStep = String(stepID || REQUEST_STEP_FINAL);
     void this._ensureAnchorRevisionBodies();
+  }
+
+  // The selected step rewrote the request but its body was not stored, so
+  // the transcript shows the original request under that step's name.
+  requestStepBodyMissing() {
+    return conversationRequestStepBodyMissing(
+      this.selectedConversationEntry(),
+      this.conversationRequestStep,
+    );
   }
 
   // Conversation entries arrive with revision bodies stripped (metadata
