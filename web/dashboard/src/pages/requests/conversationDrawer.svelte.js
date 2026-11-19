@@ -277,7 +277,7 @@ class ConversationDrawerStore {
       // selection retries.
       if (!result.ok || result.stale || !result.data) {
         requested.delete(entryID);
-        if (!result.stale) this.revisionDetailFailedID = entryID;
+        if (!result.stale) this._markRevisionDetailFailed(requested, entryID);
         return;
       }
       if (this.revisionDetailFailedID === entryID) this.revisionDetailFailedID = "";
@@ -287,9 +287,15 @@ class ConversationDrawerStore {
       );
     } catch (e) {
       requested.delete(entryID);
-      this.revisionDetailFailedID = entryID;
+      this._markRevisionDetailFailed(requested, entryID);
       console.error("Failed to fetch request log detail for request steps:", e);
     }
+  }
+
+  // A fetch started before the drawer was reopened must not mark the new
+  // session's entry as failed.
+  _markRevisionDetailFailed(requested, entryID) {
+    if (requested === this.revisionDetailRequested) this.revisionDetailFailedID = entryID;
   }
 
   // Re-render an open conversation when its normalized request log record changes.
