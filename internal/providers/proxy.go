@@ -25,7 +25,7 @@ func (f *ProviderFactory) SetProxySelector(selector ext.ProxySelector) {
 // selector consulted per request. It returns nil when neither applies, so
 // providers keep constructing their own default client and behaviour is
 // unchanged for deployments without proxies.
-func providerHTTPClient(cfg ProviderConfig, selector ext.ProxySelector) (*http.Client, error) {
+func providerHTTPClient(cfg ProviderConfig, selector ext.ProxySelector, keys *Keyring) (*http.Client, error) {
 	clientCfg := httpclient.DefaultConfig()
 	switch {
 	case cfg.ProxyURL != "":
@@ -35,7 +35,7 @@ func providerHTTPClient(cfg ProviderConfig, selector ext.ProxySelector) (*http.C
 		}
 		clientCfg.Proxy = http.ProxyURL(proxy)
 	case selector != nil:
-		clientCfg.Proxy = selectedProxy(selector, strings.TrimSpace(cfg.Name), cfg.Type, http.ProxyFromEnvironment)
+		clientCfg.Proxy = selectedProxy(selector, strings.TrimSpace(cfg.Name), cfg.Type, keys, http.ProxyFromEnvironment)
 	default:
 		return nil, nil
 	}
@@ -46,12 +46,19 @@ func providerHTTPClient(cfg ProviderConfig, selector ext.ProxySelector) (*http.C
 // provider instance. "No opinion" (nil, nil) defers to fallback -- the
 // process environment in production -- so a selector that only knows some
 // providers leaves the rest untouched.
-func selectedProxy(selector ext.ProxySelector, providerName, providerType string, fallback func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
+//
+// The transport calls it with the request as it goes on the wire, so the key
+// is read from the headers it carries (see Keyring.Position) rather than
+// tracked from where it was picked: header hooks, pinned multi-request
+// operations, SDK clients and realtime handshakes all report the key they
+// really send.
+func selectedProxy(selector ext.ProxySelector, providerName, providerType string, keys *Keyring, fallback func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
 	return func(req *http.Request) (*url.URL, error) {
 		proxy, err := selector.SelectProxy(ext.ProxyRequest{
 			Provider:     providerName,
 			ProviderType: providerType,
 			URL:          req.URL,
+			KeyPosition:  keys.Position(req.Header),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("proxy selector %q: %w", selector.Name(), err)

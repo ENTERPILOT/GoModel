@@ -124,12 +124,61 @@ func TestProviderFactory_SelectorIsConsultedPerRequest(t *testing.T) {
 	assert.Equal(t, "api.openai.com", last.URL.Host)
 }
 
+// The selector learns which key a request carries from the request the
+// transport is about to send, so each rotated key reports its own position.
+// The upstream is on loopback, which the environment fallback never proxies.
+func TestProviderFactory_SelectorSeesTheKeyOfEachRequest(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.Header.Get("Authorization"))
+	}))
+	defer upstream.Close()
+
+	factory, captured := captureOptionsFactory(t)
+	selector := &fakeProxySelector{}
+	factory.SetProxySelector(selector)
+	_, err := factory.Create(ProviderConfig{Name: "groq", Type: "capture", APIKeys: []string{"sk-account-a", "sk-account-b"}})
+	require.NoError(t, err)
+
+	var positions []int
+	var sent []string
+	for range 3 {
+		req, err := http.NewRequest(http.MethodGet, upstream.URL+"/v1/models", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+captured.Keys.Next())
+		resp, err := captured.HTTPClient.Do(req)
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, resp.Body.Close())
+		require.NoError(t, err)
+		positions = append(positions, selector.last.Load().KeyPosition)
+		sent = append(sent, string(body))
+	}
+
+	assert.Equal(t, []int{1, 2, 1}, positions)
+	assert.Equal(t, []string{"Bearer sk-account-a", "Bearer sk-account-b", "Bearer sk-account-a"}, sent)
+	assert.Equal(t, "groq", selector.last.Load().Provider)
+}
+
+func TestProviderFactory_SelectorSeesNoKeyOnAnUnauthenticatedRequest(t *testing.T) {
+	factory, captured := captureOptionsFactory(t)
+	selector := &fakeProxySelector{}
+	factory.SetProxySelector(selector)
+	_, err := factory.Create(ProviderConfig{Name: "groq", Type: "capture", APIKeys: []string{"sk-account-a", "sk-account-b"}})
+	require.NoError(t, err)
+
+	transportProxy(t, captured.HTTPClient, "https://api.groq.com/openai/v1/models")
+
+	last := selector.last.Load()
+	require.NotNil(t, last)
+	assert.Zero(t, last.KeyPosition)
+}
+
 // http.ProxyFromEnvironment reads the environment once per process, so the
 // fallback is exercised through the seam rather than by setting HTTPS_PROXY.
 func TestSelectedProxy_WithoutOpinionUsesTheFallback(t *testing.T) {
 	selector := &fakeProxySelector{}
 	fallback := func(*http.Request) (*url.URL, error) { return &url.URL{Scheme: "http", Host: "env-proxy:3128"}, nil }
-	proxyFunc := selectedProxy(selector, "openai-eu", "openai", fallback)
+	proxyFunc := selectedProxy(selector, "openai-eu", "openai", nil, fallback)
 
 	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/v1/models", nil)
 	require.NoError(t, err)

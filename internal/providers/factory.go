@@ -196,7 +196,7 @@ func (f *ProviderFactory) create(cfg ProviderConfig, keys *Keyring) (core.Provid
 	// One trimmed name for the clients and the hooks, so both attribute a
 	// request to the same instance.
 	name := strings.TrimSpace(cfg.Name)
-	httpClient, err := providerHTTPClient(cfg, proxySelector)
+	httpClient, err := providerHTTPClient(cfg, proxySelector, keys)
 	if err != nil {
 		return nil, err
 	}

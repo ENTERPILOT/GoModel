@@ -10,6 +10,19 @@ type ProxyRequest struct {
 	Provider     string
 	ProviderType string
 	URL          *url.URL
+	// KeyPosition tells which of the provider's API keys authenticates the
+	// request, so a provider holding the keys of several accounts can send
+	// each account through its own proxy. It is the key's 1-based position in
+	// the provider's key list: 1 for `api_key` or `<PROVIDER>_API_KEY`, 2 for
+	// the next one, counted after empty and duplicate entries are dropped.
+	//
+	// It is 0 when the request carries none of those keys: the provider is
+	// keyless or authenticates with cloud credentials or workload identity,
+	// the request is unauthenticated, or its key was rotated out while it was
+	// in flight. A selector that must never send an account through the wrong
+	// egress should return an error for 0 on the providers it maps by key.
+	// The key itself is never exposed.
+	KeyPosition int
 }
 
 // ProxySelector chooses the outbound proxy for upstream provider requests.

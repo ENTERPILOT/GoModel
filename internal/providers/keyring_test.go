@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"testing"
 
@@ -149,6 +150,51 @@ func TestKeyringNilIsEmpty(t *testing.T) {
 	assert.Empty(t, got)
 	assert.Zero(t, ring.Len())
 	assert.False(t, ring.Rotates())
+}
+
+func TestKeyringPosition(t *testing.T) {
+	ring := NewKeyring("sk-first", "sk-second", "second")
+	tests := []struct {
+		name   string
+		ring   *Keyring
+		header http.Header
+		want   int
+	}{
+		{name: "bearer scheme", ring: ring, header: http.Header{"Authorization": {"Bearer sk-first"}}, want: 1},
+		{name: "another scheme", ring: ring, header: http.Header{"Authorization": {"Token sk-second"}}, want: 2},
+		{name: "bare key header", ring: ring, header: http.Header{"X-Api-Key": {"sk-second"}}, want: 2},
+		{name: "among other headers", ring: ring, header: http.Header{"Content-Type": {"application/json"}, "Api-Key": {"sk-first"}}, want: 1},
+		{name: "a key ending another key", ring: ring, header: http.Header{"Authorization": {"Bearer second"}}, want: 3},
+		{name: "a key that only ends the value", ring: ring, header: http.Header{"X-Api-Key": {"other-sk-second"}}, want: 0},
+		{name: "unknown key", ring: ring, header: http.Header{"Authorization": {"Bearer sk-rotated-out"}}, want: 0},
+		{name: "no credential", ring: ring, header: http.Header{"Content-Type": {"application/json"}}, want: 0},
+		{name: "no headers", ring: ring, want: 0},
+		{name: "single key", ring: NewKeyring("only"), header: http.Header{"Authorization": {"Bearer only"}}, want: 1},
+		{name: "nil ring", header: http.Header{"Authorization": {"Bearer sk-first"}}, want: 0},
+		{
+			name:   "federated ring",
+			ring:   NewTokenSourceKeyring(fakeTokenSource{token: "minted"}),
+			header: http.Header{"Authorization": {"Bearer minted"}},
+			want:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.ring.Position(tt.header))
+		})
+	}
+}
+
+// A replaced key set renumbers from the new list, and a request still holding
+// a dropped key is no longer placed.
+func TestKeyringPositionFollowsReplace(t *testing.T) {
+	ring := NewKeyring("old", "kept")
+	require.True(t, ring.Replace("kept", "new"))
+
+	assert.Equal(t, 1, ring.Position(http.Header{"Authorization": {"Bearer kept"}}))
+	assert.Equal(t, 2, ring.Position(http.Header{"Authorization": {"Bearer new"}}))
+	assert.Zero(t, ring.Position(http.Header{"Authorization": {"Bearer old"}}))
 }
 
 func TestKeyringPrimaryDoesNotAdvance(t *testing.T) {

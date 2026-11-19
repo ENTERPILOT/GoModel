@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"net/http"
+	"strings"
 	"sync/atomic"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -258,6 +260,31 @@ func (k *Keyring) Primary() string {
 		return ""
 	}
 	return keys[0]
+}
+
+// Position reports which key of the ring an outbound request carries in
+// header, as its 1-based position in the key list, or 0 when it carries none:
+// an empty, nil or federated ring, an unauthenticated request, or a key that
+// Replace has since dropped. A key is recognised as a whole header value
+// (`x-api-key: <key>`) or after an auth scheme (`Authorization: Bearer <key>`),
+// which covers every way a provider sends one. It lets a caller name the key
+// in use without ever handling the key itself.
+func (k *Keyring) Position(header http.Header) int {
+	keys := k.load()
+	if len(keys) == 0 {
+		return 0
+	}
+	for _, values := range header {
+		for _, value := range values {
+			_, credential, _ := strings.Cut(value, " ")
+			for i, key := range keys {
+				if value == key || credential == key {
+					return i + 1
+				}
+			}
+		}
+	}
+	return 0
 }
 
 // Len reports how many distinct keys back the rotation; 1 for a federated
