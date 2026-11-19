@@ -61,8 +61,12 @@ flowchart LR
 5. **ID heuristic** — a last-resort name check for models that end up with no
    modes at all (typical for llama.cpp and LM Studio): IDs containing `embed` or
    matching well-known embedding families (`bge`, `e5`, `gte`, `minilm`) become
-   embedding models, IDs containing `rerank` become reranking models. Namespaced
-   IDs are matched by their final path segment. When unsure, it claims nothing.
+   embedding models, IDs containing `rerank` become reranking models, and IDs
+   with a `tts` token become speech models while `whisper`, `transcribe`, `asr`,
+   or `stt` tokens mark transcription models (`mimo-v2.5-tts-voiceclone`,
+   `whisper-large-v3`); an embedding or reranking match wins over an audio
+   token. Namespaced IDs are matched by their final path segment.
+   When unsure, it claims nothing.
 
 ## Checking where a value came from
 

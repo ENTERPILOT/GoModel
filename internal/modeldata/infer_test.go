@@ -32,10 +32,38 @@ func TestInferModesFromID(t *testing.T) {
 		// Rerankers.
 		{"bge-reranker-v2-m3", "rerank"},
 		{"jina-reranker-v2", "rerank"},
+		// Speech synthesis.
+		{"mimo-v2.5-tts", "audio_speech"},
+		{"mimo-v2.5-tts-voiceclone", "audio_speech"},
+		{"xiaomi/mimo-v2.5-tts-voiceclone", "audio_speech"},
+		{"gpt-4o-mini-tts", "audio_speech"},
+		{"tts-1-hd", "audio_speech"},
+		{"Qwen3-TTS-Flash", "audio_speech"},
+		// Transcription.
+		{"whisper-1", "audio_transcription"},
+		{"openai/whisper-large-v3", "audio_transcription"},
+		{"distil-whisper-large-v3-en", "audio_transcription"},
+		{"ggml-whisper-base.en.bin", "audio_transcription"},
+		{"gpt-4o-transcribe", "audio_transcription"},
+		{"qwen3-asr-flash", "audio_transcription"},
+		{"mimo-v2.5-stt", "audio_transcription"},
+		// Embedding and rerank signals win over audio tokens.
+		{"whisper-embed", "embedding"},
+		{"tts-reranker", "rerank"},
 		// Token matching must not fire on lookalike substrings.
 		{"gemma-3n-e4b", ""},
 		{"bge2000-chat", ""},
 		{"gte", "embedding"}, // bare family name still counts
+		{"putts-7b-chat", ""},
+		{"ttsx-instruct", ""},
+		{"whisperer-13b", ""},
+		{"nasrat-7b", ""},
+		{"rustt-coder", ""},
+		{"transcriber-llama", ""},
+		{"tts/llama-3.1-8b-instruct", ""}, // only the final path segment counts
+		// Audio models without a recognizable token stay uninferred.
+		{"kokoro-82m", ""},
+		{"gpt-4o-audio-preview", ""},
 		// Ordinary chat models stay uninferred.
 		{"gpt-4o", ""},
 		{"llama-3.1-8b-instruct", ""},
