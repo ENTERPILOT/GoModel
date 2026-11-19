@@ -163,7 +163,7 @@ Domyślnie nic nie jest ustawione: bez `user_path_markups` dla wszystkich obowi�
 
 Wartość `---` oznacza, że koszt jest nieznany, ponieważ cennik nie był dostępny – to nie to samo co `$0`.
 
-Wykres użycia w przeglądzie rysuje **Szacowany koszt** jako linię na prawej osi nad skumulowanymi pasmami tokenów, dzięki czemu widać, jak wydatki podążają za liczbą tokenów. Okres, którego użycie nie ma cennika, zostawia przerwę w linii zamiast spadku do `$0`. Gdy w wybranym okresie nie ma żadnego znanego kosztu, wykres pokazuje tylko tokeny.
+Wykres użycia w przeglądzie rysuje **Szacowany koszt** jako linię na prawej osi nad skumulowanymi pasmami tokenów, dzięki czemu widać, jak wydatki podążają za liczbą tokenów. Tak jak karta, każdy punkt sumuje requesty, dla których był dostępny cennik. Okres, którego użycie w ogóle nie ma cennika, zostawia przerwę w linii zamiast spadku do `$0`. Gdy żaden okres w wybranym zakresie nie ma znanego kosztu powyżej `$0`, wykres pokazuje tylko tokeny.
 
 ## Filtrowanie i zestawianie wydatków
 

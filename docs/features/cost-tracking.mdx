@@ -163,7 +163,7 @@ The default is none: without `user_path_markups`, `markups` applies to everyone.
 
 A `---` value means the cost is unknown because no pricing was available, which is not the same as `$0`.
 
-The overview's usage chart draws the **Estimated Cost** as a line on a right-hand axis over the stacked token bands, so you can see how spend follows token volume. A period whose usage has no pricing leaves a gap in the line instead of dropping to `$0`. Without any known cost in the window, the chart shows tokens only.
+The overview's usage chart draws the **Estimated Cost** as a line on a right-hand axis over the stacked token bands, so you can see how spend follows token volume. Like the card, each point sums the requests that had pricing. A period whose usage has no pricing at all leaves a gap in the line instead of dropping to `$0`. When no period in the window has a known cost above `$0`, the chart shows tokens only.
 
 ## Filter and break down spend
 
