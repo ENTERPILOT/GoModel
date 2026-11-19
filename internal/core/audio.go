@@ -132,6 +132,11 @@ type AudioResponse struct {
 	// time-to-first-byte when buffered. It is mutually exclusive with Data, and
 	// the caller owns draining and closing it.
 	Stream io.ReadCloser
+	// AudioSeconds is the transcribed audio length the provider reported, set
+	// when Data is a format with no room for a usage object (text, srt, vtt).
+	// Usage accounting prefers it to measuring the upload, which covers only
+	// some audio formats.
+	AudioSeconds float64
 }
 
 // DecodeAudioSpeechRequest decodes a JSON text-to-speech request body. The

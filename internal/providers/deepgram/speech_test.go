@@ -190,6 +190,61 @@ func TestCreateSpeech_ValidatesRequest(t *testing.T) {
 	}
 }
 
+// decodeSpeechRequest decodes body as the gateway does, so unknown members
+// land in ExtraFields.
+func decodeSpeechRequest(t *testing.T, body string) *core.AudioSpeechRequest {
+	t.Helper()
+	req, err := core.DecodeAudioSpeechRequest([]byte(body), nil)
+	require.NoError(t, err)
+	return req
+}
+
+func TestCreateSpeech_ForwardsDeepgramOptions(t *testing.T) {
+	provider, capture := audioServer(t)
+
+	resp, err := provider.CreateSpeech(context.Background(), decodeSpeechRequest(t, `{
+		"model":"aura-2-thalia-en","input":"hi","response_format":"wav",
+		"sample_rate":16000,"mip_opt_out":true,"tag":["team-a","beta"],
+		"stream_format":"audio","unrelated":"x"
+	}`))
+	require.NoError(t, err)
+	defer resp.Stream.Close()
+
+	assert.Equal(t, url.Values{
+		"model":       {"aura-2-thalia-en"},
+		"encoding":    {"linear16"},
+		"container":   {"wav"},
+		"sample_rate": {"16000"},
+		"mip_opt_out": {"true"},
+		"tag":         {"team-a", "beta"},
+	}, capture.Last(t).Query)
+}
+
+func TestCreateSpeech_RejectsUnsupportedOptions(t *testing.T) {
+	provider := newTestProvider("key", "https://example.invalid", nil)
+	tests := []struct {
+		name  string
+		body  string
+		param string
+	}{
+		{"callback", `{"model":"aura-2-thalia-en","input":"hi","callback":"https://example.com/cb"}`, "callback"},
+		{"callback method", `{"model":"aura-2-thalia-en","input":"hi","callback_method":"PUT"}`, "callback_method"},
+		{"sse", `{"model":"aura-2-thalia-en","input":"hi","stream_format":"sse"}`, "stream_format"},
+		{"object option", `{"model":"aura-2-thalia-en","input":"hi","tag":{"a":1}}`, "tag"},
+		{"pcm rate", `{"model":"aura-2-thalia-en","input":"hi","response_format":"pcm","sample_rate":16000}`, "sample_rate"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := provider.CreateSpeech(context.Background(), decodeSpeechRequest(t, tt.body))
+			var gatewayErr *core.GatewayError
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, http.StatusBadRequest, gatewayErr.StatusCode)
+			require.NotNil(t, gatewayErr.Param)
+			assert.Equal(t, tt.param, *gatewayErr.Param)
+		})
+	}
+}
+
 func TestCreateSpeech_ReturnsUpstreamError(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusUnauthorized,
 		`{"err_code":"INVALID_AUTH","err_msg":"Invalid credentials.","request_id":"01a1f360"}`)

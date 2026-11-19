@@ -82,16 +82,21 @@ func uploadContentType(contentType string) string {
 	return "application/octet-stream"
 }
 
+// listenWord is a timed word, in the member names OpenAI's words array shares
+// with Deepgram's. Speaker is set only when the request asked Deepgram to
+// diarize.
 type listenWord struct {
-	Word  string  `json:"word"`
-	Start float64 `json:"start"`
-	End   float64 `json:"end"`
+	Word    string  `json:"word"`
+	Start   float64 `json:"start"`
+	End     float64 `json:"end"`
+	Speaker *int    `json:"speaker,omitempty"`
 }
 
 type listenUtterance struct {
 	Start      float64 `json:"start"`
 	End        float64 `json:"end"`
 	Transcript string  `json:"transcript"`
+	Speaker    *int    `json:"speaker,omitempty"`
 }
 
 // listenResponse is the part of Deepgram's pre-recorded result the gateway
@@ -172,7 +177,13 @@ func (p *Provider) CreateTranscription(ctx context.Context, req *core.AudioTrans
 	if err != nil {
 		return nil, core.NewProviderError("deepgram", http.StatusBadGateway, "failed to encode transcription response", err)
 	}
-	return &core.AudioResponse{ContentType: core.TranscriptionResponseContentType(format), Data: body}, nil
+	resp := &core.AudioResponse{ContentType: core.TranscriptionResponseContentType(format), Data: body}
+	switch format {
+	case "text", "srt", "vtt":
+		// The JSON formats carry the duration as usage; these cannot.
+		resp.AudioSeconds = max(result.Metadata.Duration, 0)
+	}
+	return resp, nil
 }
 
 // timestampGranularities reads OpenAI's timestamp_granularities, which select
@@ -203,10 +214,11 @@ type transcriptUsage struct {
 }
 
 type transcriptSegment struct {
-	ID    int     `json:"id"`
-	Start float64 `json:"start"`
-	End   float64 `json:"end"`
-	Text  string  `json:"text"`
+	ID      int     `json:"id"`
+	Start   float64 `json:"start"`
+	End     float64 `json:"end"`
+	Text    string  `json:"text"`
+	Speaker *int    `json:"speaker,omitempty"`
 }
 
 // transcript is the OpenAI transcription object; verbose_json fills the
@@ -251,7 +263,7 @@ func transcriptionBody(format, language string, wantWords, wantSegments bool, re
 		if wantSegments {
 			for i, utterance := range result.Results.Utterances {
 				out.Segments = append(out.Segments, transcriptSegment{
-					ID: i, Start: utterance.Start, End: utterance.End, Text: utterance.Transcript,
+					ID: i, Start: utterance.Start, End: utterance.End, Text: utterance.Transcript, Speaker: utterance.Speaker,
 				})
 			}
 		}

@@ -20,6 +20,8 @@ endpointy zwracają `invalid_request_error` dla modeli kierowanych do Deepgram.
 
 ```bash
 DEEPGRAM_API_KEY=...
+# Opcjonalne; domyślnie https://api.deepgram.com/v1
+DEEPGRAM_BASE_URL=https://api.deepgram.com/v1
 ```
 
 Albo w `config.yaml`:
@@ -92,6 +94,11 @@ curl https://your-gateway/v1/audio/transcriptions \
   -F smart_format=false
 ```
 
+Z `diarize=true` format `verbose_json` zawiera numer `speaker` przy każdym
+segmencie i słowie. Wyniki, które Deepgram zwraca obok transkrypcji
+(podsumowania, tematy, intencje, sentyment, encje, trafienia wyszukiwania), nie
+są częścią odpowiedzi OpenAI; użyj do nich passthrough.
+
 Trzy opcje zwracają `400`, ponieważ zmieniają odpowiedź w coś, co nie jest
 transkrypcją: `callback`, `callback_method` i `multichannel`. `stream=true`
 również zwraca `400`.
@@ -120,6 +127,11 @@ zwraca `400`, zamiast zostać zignorowany.
 | `response_format` | `mp3` (domyślnie), `opus`, `aac` i `flac` odpowiadają `encoding` o tej samej nazwie; `wav` to `linear16` w kontenerze `wav`; `pcm` to surowe `linear16` 24 kHz |
 | `speed` | Dopasowywane do zakresu Deepgram `0.7`-`1.5` z krokiem `0.05` (OpenAI akceptuje `0.25`-`4.0`) |
 | `instructions` | Nieobsługiwane; zwraca `400` |
+
+Własne opcje `/speak` Deepgram — `bit_rate`, `sample_rate`, `mip_opt_out` i
+`tag` — można wysłać jako dodatkowe pola JSON; są przekazywane jako parametry
+zapytania. `sample_rate` nie zmienia `pcm`, który zawsze ma 24 kHz.
+`callback`, `callback_method` i `stream_format: "sse"` zwracają `400`.
 
 Audio jest przesyłane do klienta strumieniowo, w miarę jak Deepgram je
 generuje. Deepgram ogranicza tekst wejściowy do 2000 znaków na żądanie.

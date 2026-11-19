@@ -16,6 +16,8 @@ Deepgram 是一个仅提供语音能力的提供商：它通过标准的 `/v1/au
 
 ```bash
 DEEPGRAM_API_KEY=...
+# 可选；默认为 https://api.deepgram.com/v1
+DEEPGRAM_BASE_URL=https://api.deepgram.com/v1
 ```
 
 或者在 `config.yaml` 中：
@@ -78,6 +80,8 @@ curl https://your-gateway/v1/audio/transcriptions \
   -F smart_format=false
 ```
 
+使用 `diarize=true` 时，`verbose_json` 的每个分段和单词都带有 `speaker` 编号。Deepgram 在转写结果之外返回的内容（摘要、主题、意图、情感、实体、搜索命中）不属于 OpenAI 响应；请通过透传获取。
+
 有三个选项会返回 `400`，因为它们会使响应不再是一份转写结果：`callback`、`callback_method` 和 `multichannel`。`stream=true` 同样返回 `400`。
 
 ## 文本转语音
@@ -99,6 +103,8 @@ Deepgram 的模型 ID 同时指定语音系列、语音和语言：`aura-2-thali
 | `response_format` | `mp3`（默认）、`opus`、`aac` 和 `flac` 映射为同名的 `encoding`；`wav` 为 `wav` 容器中的 `linear16`；`pcm` 为 24 kHz 的原始 `linear16` |
 | `speed` | 调整到 Deepgram 的 `0.7`-`1.5` 范围，步长为 `0.05`（OpenAI 接受 `0.25`-`4.0`） |
 | `instructions` | 不支持；返回 `400` |
+
+Deepgram 自身的 `/speak` 选项 `bit_rate`、`sample_rate`、`mip_opt_out` 和 `tag` 可以作为额外的 JSON 字段发送，并作为查询参数转发。`sample_rate` 不会改变 `pcm`，其采样率始终为 24 kHz。`callback`、`callback_method` 和 `stream_format: "sse"` 返回 `400`。
 
 音频会在 Deepgram 生成的同时流式传输给客户端。Deepgram 将每次请求的输入限制为 2000 个字符。
 

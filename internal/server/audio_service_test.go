@@ -703,6 +703,26 @@ func TestAudioTranscription_LogsUsage(t *testing.T) {
 	assert.Equal(t, "gpt-4o-transcribe", captured.Model)
 }
 
+// A text transcript has no room for usage, so the duration a provider reported
+// beside it prices the call; the upload here is not measurable audio.
+func TestAudioTranscription_PricesReportedSecondsOfTextTranscript(t *testing.T) {
+	var captured *usage.UsageEntry
+	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
+	mock := newTranscriptionMock()
+	mock.transcriptionResp = &core.AudioResponse{ContentType: "text/plain; charset=utf-8", Data: []byte("hi"), AudioSeconds: 4.25}
+	pricing := &core.ModelPricing{PerSecondInput: new(0.001)}
+	svc := &audioService{provider: mock, usageLogger: logger, pricingResolver: &mockPricingResolver{pricing: pricing}}
+	c, rec, _ := newTranscriptionRequestWithRequestLogEntry(t, "speech.flac", []byte("flac-bytes"))
+	err := svc.CreateTranscription(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "hi", rec.Body.String())
+	require.NotNil(t, captured)
+	assert.InDelta(t, 4.25, captured.RawData["audio_seconds"], 1e-9)
+	require.NotNil(t, captured.TotalCost)
+	assert.InDelta(t, 0.00425, *captured.TotalCost, 1e-12)
+}
+
 // TestAudioSpeech_NoUsageWhenDisabled verifies nothing is written when usage
 // tracking is off.
 func TestAudioSpeech_NoUsageWhenDisabled(t *testing.T) {

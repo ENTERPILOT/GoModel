@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/goccy/go-json"
+
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 )
@@ -48,6 +50,81 @@ func speechSpeed(speed float64) string {
 		return ""
 	}
 	return strconv.FormatFloat(speed, 'f', -1, 64)
+}
+
+// forwardedSpeakOptions are the /speak query parameters a client may send as
+// extra request members. encoding and container stay derived from
+// response_format, so the audio matches the content type the gateway labels.
+var forwardedSpeakOptions = []string{"bit_rate", "sample_rate", "mip_opt_out", "tag"}
+
+// speakOptions copies Deepgram's own /speak options from the request's extra
+// members into query. Options that would change the response into something
+// other than the audio (a callback, OpenAI's sse stream_format) return 400
+// rather than being dropped.
+func speakOptions(fields core.UnknownJSONFields, format string, query url.Values) error {
+	for _, name := range []string{"callback", "callback_method"} {
+		if fields.HasAny(name) {
+			return core.NewInvalidRequestError(
+				fmt.Sprintf("deepgram speech does not support %s on this endpoint", name), nil).WithParam(name)
+		}
+	}
+	if raw := fields.Lookup("stream_format"); len(raw) > 0 {
+		var streamFormat string
+		if json.Unmarshal(raw, &streamFormat) != nil || !strings.EqualFold(strings.TrimSpace(streamFormat), "audio") {
+			return core.NewInvalidRequestError("deepgram speech supports only the audio stream_format", nil).WithParam("stream_format")
+		}
+	}
+	for _, name := range forwardedSpeakOptions {
+		raw := fields.Lookup(name)
+		if len(raw) == 0 {
+			continue
+		}
+		values, ok := queryValues(raw)
+		if !ok {
+			return core.NewInvalidRequestError(
+				fmt.Sprintf("deepgram speech option %s must be a string, number, boolean, or list of strings", name), nil).WithParam(name)
+		}
+		if name == "sample_rate" && format == "pcm" {
+			// Raw pcm has no header, so its rate is the one OpenAI defines and
+			// the gateway meters the audio at.
+			if len(values) != 1 || values[0] != "24000" {
+				return core.NewInvalidRequestError("deepgram speech returns pcm at 24000 Hz; use wav for another sample_rate", nil).WithParam("sample_rate")
+			}
+			continue
+		}
+		query.Del(name)
+		for _, value := range values {
+			query.Add(name, value)
+		}
+	}
+	return nil
+}
+
+// queryValues renders a JSON scalar, or a list of strings, as query values.
+func queryValues(raw json.RawMessage) ([]string, bool) {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, false
+	}
+	switch v := value.(type) {
+	case string:
+		return []string{v}, true
+	case bool:
+		return []string{strconv.FormatBool(v)}, true
+	case float64:
+		return []string{strconv.FormatFloat(v, 'f', -1, 64)}, true
+	case []any:
+		values := make([]string, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			values = append(values, s)
+		}
+		return values, len(values) > 0
+	}
+	return nil, false
 }
 
 // splitVoiceModel splits a Deepgram voice model id into its family and its
@@ -139,6 +216,9 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechReques
 	}
 	format, query, err := speechFormat(req.ResponseFormat)
 	if err != nil {
+		return nil, err
+	}
+	if err := speakOptions(req.ExtraFields, format, query); err != nil {
 		return nil, err
 	}
 	query.Set("model", model)

@@ -68,6 +68,7 @@ func TestCreateTranscription_SendsAudioBodyAndReturnsJSON(t *testing.T) {
 
 	assert.Equal(t, "application/json", resp.ContentType)
 	assert.JSONEq(t, `{"text":"Hello there. How are you?","usage":{"type":"duration","seconds":4.25}}`, string(resp.Data))
+	assert.Zero(t, resp.AudioSeconds, "json carries its usage in the body")
 }
 
 func TestCreateTranscription_DetectsLanguageWhenNoneIsGiven(t *testing.T) {
@@ -138,6 +139,42 @@ func TestCreateTranscription_VerboseJSONSegmentsAndWords(t *testing.T) {
 	}
 }
 
+// A forwarded diarize=true makes Deepgram label speakers, which verbose_json
+// carries on its segments and words.
+func TestCreateTranscription_VerboseJSONKeepsSpeakers(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"metadata": {"duration": 2},
+		"results": {
+			"channels": [{"alternatives": [{"transcript": "Hi. Hello.", "words": [
+				{"word":"hi","start":0,"end":0.5,"speaker":0,"speaker_confidence":0.9},
+				{"word":"hello","start":1,"end":1.5,"speaker":1,"speaker_confidence":0.8}
+			]}]}],
+			"utterances": [
+				{"start":0,"end":0.5,"transcript":"Hi.","speaker":0},
+				{"start":1,"end":1.5,"transcript":"Hello.","speaker":1}
+			]
+		}
+	}`)
+	provider := newTestProvider("key", server.URL, server.Client())
+	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
+		Model:                  "nova-3",
+		File:                   []byte("audio"),
+		Language:               "en",
+		ResponseFormat:         "verbose_json",
+		TimestampGranularities: []string{"word", "segment"},
+		Fields:                 []core.FormField{{Name: "diarize", Value: "true"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "true", capture.Last(t).Query.Get("diarize"))
+
+	assert.JSONEq(t, `{
+		"task":"transcribe","language":"en","duration":2,"text":"Hi. Hello.",
+		"usage":{"type":"duration","seconds":2},
+		"segments":[{"id":0,"start":0,"end":0.5,"text":"Hi.","speaker":0},{"id":1,"start":1,"end":1.5,"text":"Hello.","speaker":1}],
+		"words":[{"word":"hi","start":0,"end":0.5,"speaker":0},{"word":"hello","start":1,"end":1.5,"speaker":1}]
+	}`, string(resp.Data))
+}
+
 func TestCreateTranscription_TextAndCaptionFormats(t *testing.T) {
 	tests := []struct {
 		format         string
@@ -156,6 +193,8 @@ func TestCreateTranscription_TextAndCaptionFormats(t *testing.T) {
 			assert.Equal(t, tt.wantUtterances, req.Query.Has("utterances"))
 			assert.Equal(t, tt.want, string(resp.Data))
 			assert.True(t, strings.HasPrefix(resp.ContentType, "text/plain"), "content type = %q, want text/plain", resp.ContentType)
+			// The body has no room for usage, so the duration rides beside it.
+			assert.InDelta(t, 4.25, resp.AudioSeconds, 1e-9)
 		})
 	}
 }
