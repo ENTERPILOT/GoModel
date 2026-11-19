@@ -623,7 +623,7 @@ GoModel 发送一个带签名的 `POST`，并等待 `{"action": "allow"}` 或
 
 **阶段：** prompt、response、stream（缓冲）。**编辑内容：** 否；该协议无法改写提示词。
 
-在 stream 阶段，整个流会被缓冲到裁决返回为止，因此不会有工具调用先到达客户端。
+在 stream 阶段，整个流会被缓冲到裁决返回为止，因此不会有工具调用先到达客户端。包含多个 choice 的响应会为每个调用工具的 choice 发送一个帧，其中任何一个被拒绝都会拒绝整个响应。
 
 #### 设置
 
@@ -634,7 +634,7 @@ GoModel 发送一个带签名的 `POST`，并等待 `{"action": "allow"}` 或
 | `auth_header` | 否 | `Authorization` | 携带 `auth_value` 的静态请求头名称。 |
 | `auth_value` | 否 | | 认证请求头的值，原样发送（`Bearer <token>`），用于还需要验证调用方身份的服务器。除非服务器位于 localhost，否则需要 `https://` URL。 |
 | `tenant_id` | 否 | `null` | 每个帧的 `tenant_id`，用于为多个组织服务的服务器。 |
-| `roles` | 否 | `["system", "user", "assistant", "tool"]` | 在 prompt 阶段发送的提示词消息。去掉 `system` 即可只发送 Anthropic 所发送的内容；参阅[发送的内容](#发送的内容)。其他任何角色的消息始终会发送。 |
+| `roles` | 否 | `["system", "user", "assistant", "tool"]` | 在 prompt 阶段发送的提示词消息。`system` 也涵盖开发者消息；去掉它即可只发送 Anthropic 所发送的内容，参阅[发送的内容](#发送的内容)。其他任何角色的消息始终会发送。 |
 | `action` | 否 | `block` | 收到 deny 裁决时：`block` 拒绝，`respond` 以助手回复应答，`warn` 继续并记录裁决。可将 `warn` 用作影子模式，在真实流量上试验策略。 |
 | `message` | 否 | `This request was blocked by policy` | 当裁决不含 `deny_reason` 时使用。否则客户端看到的是服务器的 `deny_reason`（最多 500 个字符）。 |
 | `block_status` | 否 | 阶段默认值 | `block` 使用的一个 400 到 599 之间的 HTTP 状态码，例如 `403`。 |
@@ -649,7 +649,7 @@ GoModel 发送一个带签名的 `POST`，并等待 `{"action": "allow"}` 或
 - `closed`（默认）：请求以 HTTP 500 `plugin_failure` 被拒绝。任何内容都不会未经检查就到达提供商或客户端。
 - `open`：请求在没有裁决的情况下继续，失败会记录在请求日志中。只有当可用性比检查更重要时才选择它。
 
-GoModel 还会在护栏构建时以及每次护栏刷新时（默认每分钟一次）发送协议定义的连接测试（一个 `source.application` 为 `config-test`、不含请求内容的 `prompt` 帧）。如果没有得到有效裁决（allow 或 deny），护栏会在控制台中显示为降级状态。失败的请求不会重试。
+GoModel 还会在护栏构建时以及每次护栏刷新时（默认每分钟一次）发送协议定义的连接测试（一个 `source.application` 为 `config-test` 的 `prompt` 帧，携带一条固定的测试消息，而不含任何请求的内容）。如果没有得到有效裁决（allow 或 deny），护栏会在控制台中显示为降级状态。失败的请求不会重试。
 
 #### 发送的内容
 
@@ -662,7 +662,7 @@ GoModel 还会在护栏构建时以及每次护栏刷新时（默认每分钟一
 | `source.application` | `gomodel` |
 | `model`、`session_id` | 解析后的提供商模型和检测到的会话，或 `null`。 |
 | `metadata` | `gomodel_request_id`、`gomodel_user_path`、`gomodel_provider`。 |
-| `messages` | 文本、工具调用和工具结果。每个图像、音频或文件部分都会变成一个不含内容的 `attachment` 块；媒体字节和工具定义绝不会发送。 |
+| `messages` | 文本、工具调用和工具结果。每个图像、音频或文件部分都会变成一个不含内容的 `attachment` 块：其字节绝不会发送，工具定义和其他请求参数也不会发送。GoModel 未建模的内容（例如 `/v1/responses` 的 reasoning 项）会作为 `attachment` 发送，其 JSON 放在 `text` 中。 |
 
 与 Anthropic 发送的帧相比有两点不同：
 

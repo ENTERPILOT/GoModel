@@ -121,7 +121,10 @@ func signingKey(secret string) ([]byte, error) {
 	return key, nil
 }
 
-// reservedHeaders are set by the plugin on every request.
+// reservedHeaders cannot carry the auth value: the plugin sets the first
+// group on every request, and the transport owns the hop-by-hop names of
+// the second, where it would drop the value or change how the connection
+// behaves.
 var reservedHeaders = map[string]bool{
 	"Content-Type":      true,
 	"Content-Length":    true,
@@ -131,6 +134,14 @@ var reservedHeaders = map[string]bool{
 	"Webhook-Id":        true,
 	"Webhook-Timestamp": true,
 	"Webhook-Signature": true,
+
+	"Connection":        true,
+	"Keep-Alive":        true,
+	"Proxy-Connection":  true,
+	"Te":                true,
+	"Trailer":           true,
+	"Transfer-Encoding": true,
+	"Upgrade":           true,
 }
 
 func validateAuth(s settings) error {

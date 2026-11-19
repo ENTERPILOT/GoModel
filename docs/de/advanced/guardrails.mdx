@@ -850,7 +850,9 @@ oder `{"action": "deny", "deny_reason": "..."}`:
 das Protokoll kann einen Prompt nicht umschreiben.
 
 In der stream-Phase wird der gesamte Stream gepuffert, bis das Urteil
-vorliegt, sodass kein Tool-Call den Client vorher erreicht.
+vorliegt, sodass kein Tool-Call den Client vorher erreicht. Eine Response mit
+mehreren Choices sendet einen Frame pro Choice, die Tools aufruft, und ein Deny
+für eine davon lehnt die gesamte Response ab.
 
 #### Einstellungen
 
@@ -861,7 +863,7 @@ vorliegt, sodass kein Tool-Call den Client vorher erreicht.
 | `auth_header` | Nein | `Authorization` | Name des statischen Headers, der `auth_value` trägt. |
 | `auth_value` | Nein | | Wert des Auth-Headers, unverändert gesendet (`Bearer <token>`), für einen Server, der seine Aufrufer zusätzlich authentifiziert. Benötigt eine `https://`-URL, außer der Server läuft auf localhost. |
 | `tenant_id` | Nein | `null` | `tenant_id` jedes Frames, für einen Server, der mehrere Organisationen bedient. |
-| `roles` | Nein | `["system", "user", "assistant", "tool"]` | Prompt-Nachrichten, die in der prompt-Phase gesendet werden. Entfernen Sie `system`, um das zu senden, was Anthropic sendet; siehe [Was gesendet wird](#was-gesendet-wird). Eine Nachricht mit jeder anderen Rolle wird immer gesendet. |
+| `roles` | Nein | `["system", "user", "assistant", "tool"]` | Prompt-Nachrichten, die in der prompt-Phase gesendet werden. `system` umfasst auch Developer-Nachrichten; entfernen Sie es, um das zu senden, was Anthropic sendet, siehe [Was gesendet wird](#was-gesendet-wird). Eine Nachricht mit jeder anderen Rolle wird immer gesendet. |
 | `action` | Nein | `block` | Bei einem Deny-Urteil: `block` lehnt ab, `respond` antwortet mit einer Assistant-Antwort, `warn` fährt fort und protokolliert das Urteil. Nutzen Sie `warn` als Shadow-Modus, um eine Richtlinie an echtem Traffic zu erproben. |
 | `message` | Nein | `This request was blocked by policy` | Wird verwendet, wenn das Urteil kein `deny_reason` enthält. Andernfalls sieht der Client das `deny_reason` des Servers (höchstens 500 Zeichen). |
 | `block_status` | Nein | Phasenstandard | Ein HTTP-Statuscode zwischen 400 und 599 für `block`, zum Beispiel `403`. |
@@ -883,8 +885,8 @@ als 64 KiB ist. Das `fail_mode` der Regel entscheidet, was ein Fehler bewirkt:
   ist als die Prüfung.
 
 GoModel sendet außerdem den Verbindungstest des Protokolls (einen
-`prompt`-Frame mit `source.application` gleich `config-test` und ohne
-Request-Inhalt), wenn der Guardrail gebaut wird und bei jedem
+`prompt`-Frame mit `source.application` gleich `config-test`, der eine feste
+Testnachricht statt Inhalten eines Requests trägt), wenn der Guardrail gebaut wird und bei jedem
 Guardrail-Refresh, standardmäßig einmal pro Minute. Ohne gültiges Urteil,
 allow oder deny, wird der Guardrail im Dashboard als beeinträchtigt angezeigt.
 Fehlgeschlagene Requests werden nicht wiederholt.
@@ -904,7 +906,7 @@ Der Body folgt dem Frame des Protokolls, mit diesen Werten:
 | `source.application` | `gomodel` |
 | `model`, `session_id` | Das aufgelöste Provider-Modell und die erkannte Session, oder `null`. |
 | `metadata` | `gomodel_request_id`, `gomodel_user_path`, `gomodel_provider`. |
-| `messages` | Text, Tool-Calls und Tool-Ergebnisse. Jeder Bild-, Audio- oder Datei-Teil wird zu einem `attachment`-Block ohne Inhalt; Mediendaten und Tool-Definitionen werden nie gesendet. |
+| `messages` | Text, Tool-Calls und Tool-Ergebnisse. Jeder Bild-, Audio- oder Datei-Teil wird zu einem `attachment`-Block ohne Inhalt: Seine Bytes werden nie gesendet, Tool-Definitionen und andere Request-Parameter ebenfalls nicht. Inhalte, die GoModel nicht modelliert, etwa ein Reasoning-Item von `/v1/responses`, werden als `attachment` mit ihrem JSON als `text` gesendet. |
 
 Zwei Dinge unterscheiden sich von den Frames, die Anthropic sendet:
 

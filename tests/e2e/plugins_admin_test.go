@@ -58,9 +58,10 @@ func TestPlugins_AdminSurface_E2E(t *testing.T) {
 			fields[typ.Type] = len(typ.Fields)
 			assert.Equal(t, "builtin", typ.Source, typ.Type)
 		}
-		for _, name := range []string{"string_replace", "header_edit", "llm_judge"} {
+		for _, name := range []string{"string_replace", "header_edit", "llm_judge", "inference_hook"} {
 			assert.Positive(t, fields[name], "%s should expose its config schema", name)
 		}
+		assert.ElementsMatch(t, []string{"prompt", "response", "stream"}, phases["inference_hook"])
 		assert.ElementsMatch(t, []string{"prompt", "response", "stream"}, phases["string_replace"])
 		assert.ElementsMatch(t, []string{"prompt", "response"}, phases["header_edit"])
 		assert.ElementsMatch(t, []string{"prompt", "response", "stream"}, phases["llm_judge"])

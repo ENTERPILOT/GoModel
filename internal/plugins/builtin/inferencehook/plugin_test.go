@@ -18,6 +18,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/plugins/exchange"
 	"github.com/enterpilot/gomodel/pluginapi"
 	"github.com/enterpilot/gomodel/pluginapi/plugintest"
 )
@@ -214,6 +216,8 @@ func TestInitErrors(t *testing.T) {
 		{"timeout high", `{` + url + `, ` + secret + `, "verdict_timeout_ms": 60001}`, "verdict_timeout_ms must be between 1 and 60000"},
 		{"auth header name", `{` + url + `, ` + secret + `, "auth_header": "X Key", "auth_value": "k"}`, "auth_header"},
 		{"auth header reserved", `{` + url + `, ` + secret + `, "auth_header": "webhook-signature", "auth_value": "k"}`, "auth_header"},
+		{"auth header hop-by-hop", `{` + url + `, ` + secret + `, "auth_header": "transfer-encoding", "auth_value": "k"}`, "auth_header"},
+		{"auth header connection", `{` + url + `, ` + secret + `, "auth_header": "Connection", "auth_value": "k"}`, "auth_header"},
 		{"auth value multi-line", `{` + url + `, ` + secret + `, "auth_value": "a\nb: c"}`, "auth_value must be a single line"},
 		{"auth over plain http", `{"endpoint_url": "http://security.example.com", ` + secret + `, "auth_value": "k"}`, "auth_value needs an https:// endpoint_url"},
 	}
@@ -384,6 +388,44 @@ func TestOnPromptSendsUnknownRoles(t *testing.T) {
 	messages, err := json.Marshal(frames[0]["messages"])
 	require.NoError(t, err)
 	assert.JSONEq(t, `[{"role": "user", "content": [{"type": "text", "text": "card 4111111111111111"}]}]`, string(messages))
+}
+
+// Content GoModel does not model must not be a way around the hook either.
+// A Responses reasoning item the caller replays reaches the provider as
+// sent, so the security server gets its JSON.
+func TestOnPromptSendsUnmodelledContentAsJSON(t *testing.T) {
+	prompt, err := exchange.FromResponsesRequest(&core.ResponsesRequest{
+		Model: "gpt-5",
+		Input: []any{
+			map[string]any{"type": "reasoning", "id": "rs_1", "summary": []any{
+				map[string]any{"type": "summary_text", "text": "card 4111111111111111"},
+			}},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "input_text", "text": "continue"},
+				map[string]any{"type": "future_block", "note": "also inspected"},
+			}},
+		},
+	})
+	require.NoError(t, err)
+	s := newSecurityServer(t, `{"action": "allow"}`)
+	p := newPlugin(t, s, `{}`)
+
+	_, err = p.OnPrompt(context.Background(), plugintest.Exchange(prompt, nil))
+	require.NoError(t, err)
+	frames := s.frames(t)
+	require.Len(t, frames, 1)
+	messages := frames[0]["messages"].([]any)
+	require.Len(t, messages, 2)
+
+	reasoning := messages[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	assert.Equal(t, "attachment", reasoning["type"])
+	assert.Equal(t, "application/json", reasoning["media_type"])
+	assert.Contains(t, reasoning["text"], "card 4111111111111111")
+
+	user := messages[1].(map[string]any)["content"].([]any)
+	require.Len(t, user, 2)
+	assert.Equal(t, map[string]any{"type": "text", "text": "continue"}, user[0])
+	assert.Contains(t, user[1].(map[string]any)["text"], "also inspected")
 }
 
 func TestOnPromptWithoutPrompt(t *testing.T) {
@@ -602,9 +644,54 @@ func TestOnResponseStopsAtTheFirstDeny(t *testing.T) {
 			d, err := p.OnResponse(context.Background(), plugintest.Exchange(nil, calls))
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantAction, d.Action)
-			assert.Len(t, s.received(), tt.wantFrames)
+			frames := s.frames(t)
+			require.Len(t, frames, tt.wantFrames)
+
+			// Every frame sent is in the detail: the deciding verdict at
+			// the top, the choices allowed before it under "allowed".
+			detail := d.Detail.(map[string]any)
+			last := len(frames) - 1
+			assert.Equal(t, frames[last]["request_id"], detail["hook_request_id"])
+			var earlier []any
+			for _, f := range frames[:last] {
+				earlier = append(earlier, map[string]any{"verdict": "allow", "hook_request_id": f["request_id"]})
+			}
+			if earlier == nil {
+				assert.NotContains(t, detail, "allowed")
+				return
+			}
+			assert.Equal(t, earlier, detail["allowed"])
 		})
 	}
+}
+
+func TestOnResponseDenyKeepsEarlierVerdicts(t *testing.T) {
+	calls := &pluginapi.Completion{}
+	for i, name := range []string{"read_file", "bash"} {
+		calls.Choices = append(calls.Choices, pluginapi.Choice{Index: i, Message: pluginapi.Message{Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
+			{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "call", Name: name}},
+		}}})
+	}
+	// Deny the frame that calls bash, allow the other.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"bash"`) {
+			_, _ = io.WriteString(w, `{"action": "deny", "reference_id": "scan_2"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"action": "allow", "reference_id": "scan_1"}`)
+	}))
+	t.Cleanup(srv.Close)
+	p := newPlugin(t, nil, `{"endpoint_url": "`+srv.URL+`"}`)
+
+	d, err := p.OnResponse(context.Background(), plugintest.Exchange(nil, calls))
+	require.NoError(t, err)
+	assert.Equal(t, pluginapi.ActionBlock, d.Action)
+	detail := d.Detail.(map[string]any)
+	assert.Equal(t, "deny", detail["verdict"])
+	assert.Equal(t, "scan_2", detail["reference_id"])
+	require.Len(t, detail["allowed"], 1)
+	assert.Equal(t, "scan_1", detail["allowed"].([]any)[0].(map[string]any)["reference_id"])
 }
 
 func TestOnResponseFailureIsAnError(t *testing.T) {
@@ -648,7 +735,46 @@ func TestHealth(t *testing.T) {
 	}
 }
 
-func TestStreamHooksLeaveTheVerdictToOnResponse(t *testing.T) {
+// A buffered stream is decided by OnResponse on the assembled completion,
+// which is how the host drives a StreamBuffer policy: a streamed tool call
+// gets its verdict before anything reaches the client.
+func TestStreamIsBufferedForTheVerdict(t *testing.T) {
+	events := []*pluginapi.StreamEvent{
+		plugintest.TextDelta("Running it."),
+		{Kind: pluginapi.EventToolCallDelta, Choice: 1, Tool: "bash", Text: `{"command":"ls"}`},
+	}
+	tests := []struct {
+		name       string
+		reply      string
+		wantAction pluginapi.Action
+	}{
+		{"deny blocks the stream", `{"action": "deny", "deny_reason": "bash is not allowed."}`, pluginapi.ActionBlock},
+		{"allow delivers it", `{"action": "allow"}`, pluginapi.ActionAllow},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newSecurityServer(t, tt.reply)
+			p := newPlugin(t, s, `{}`)
+			x := plugintest.Exchange(conversation(), toolCompletion())
+
+			result, err := plugintest.RunStream(context.Background(), p, x, events)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantAction, result.End.Action)
+			frames := s.frames(t)
+			require.Len(t, frames, 1, "the per-event hooks send nothing; OnResponse sends the frame")
+			assert.Equal(t, "tool_call", frames[0]["type"])
+			if tt.wantAction == pluginapi.ActionBlock {
+				assert.Empty(t, result.Text, "nothing is delivered from a denied stream")
+				return
+			}
+			assert.Equal(t, "Running it.", result.Text[1])
+		})
+	}
+}
+
+// The per-event hooks never decide: under the buffer policy the host does
+// not call them for a verdict.
+func TestStreamEventHooksPass(t *testing.T) {
 	s := newSecurityServer(t, `{"action": "deny"}`)
 	p := newPlugin(t, s, `{}`)
 	x := plugintest.Exchange(conversation(), nil)

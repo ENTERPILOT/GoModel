@@ -28,12 +28,15 @@ func (p *Plugin) OnPrompt(ctx context.Context, x *pluginapi.Exchange) (pluginapi
 
 // OnResponse sends one tool call frame per completion choice that calls
 // tools, before the response reaches the client that would run them. As in
-// the protocol, a response without tool calls is not sent.
+// the protocol, a response without tool calls is not sent. The first deny
+// decides; the verdicts of the choices allowed before it stay in the detail
+// as "allowed", so every frame sent can be found in the request log.
 func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
 	if x.Response == nil {
 		return pluginapi.Allow(), nil
 	}
 	decision := pluginapi.Allow()
+	var allowed []any
 	for _, choice := range x.Response.Choices {
 		messages := toolCallMessage(choice)
 		if messages == nil {
@@ -45,9 +48,16 @@ func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (plugina
 		if err != nil {
 			return pluginapi.Decision{}, err
 		}
-		if decision = p.decide(v); v.action == verdictDeny {
+		if decision.Detail != nil {
+			allowed = append(allowed, decision.Detail)
+		}
+		decision = p.decide(v)
+		if v.action == verdictDeny {
 			break
 		}
+	}
+	if detail, ok := decision.Detail.(map[string]any); ok && len(allowed) > 0 {
+		detail["allowed"] = allowed
 	}
 	return decision, nil
 }

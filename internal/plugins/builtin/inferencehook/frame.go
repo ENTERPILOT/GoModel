@@ -78,9 +78,8 @@ type toolResultBlock struct {
 	ToolUseID *string `json:"tool_use_id"`
 }
 
-// attachmentBlock stands for media GoModel cannot turn into text: the
-// server learns that it is there, which is what Anthropic sends for an
-// image. Raw bytes are never sent.
+// attachmentBlock stands for a part GoModel cannot turn into text; see
+// [attachment].
 type attachmentBlock struct {
 	Type      string  `json:"type"`
 	FileName  *string `json:"file_name"`
@@ -209,10 +208,24 @@ func blocks(parts []pluginapi.Part, names map[string]string, toolCalls bool) []a
 				out = append(out, toolResult(*part.ToolResult, names))
 			}
 		default:
-			out = append(out, attachmentBlock{Type: "attachment", MediaType: nullable(part.MediaType)})
+			out = append(out, attachment(part))
 		}
 	}
 	return out
+}
+
+// attachment renders a part that is not text. Media is announced without
+// its bytes, which is what Anthropic sends for an image. Content GoModel
+// does not model (a Responses reasoning or hosted tool item, an unknown
+// content block) is sent as the JSON the provider will receive, so the
+// caller cannot use it to carry text past the hook.
+func attachment(part pluginapi.Part) attachmentBlock {
+	block := attachmentBlock{Type: "attachment", MediaType: nullable(part.MediaType)}
+	if part.Kind == pluginapi.PartOpaque && len(part.Raw) > 0 {
+		block.MediaType = nullable("application/json")
+		block.Text = nullable(string(part.Raw))
+	}
+	return block
 }
 
 func toolUse(call pluginapi.ToolCall, withInfo bool) toolUseBlock {

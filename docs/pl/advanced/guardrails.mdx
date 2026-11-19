@@ -823,7 +823,9 @@ GoModel wysyła podpisany `POST` i czeka na `{"action": "allow"}` albo
 protokół nie pozwala przepisać promptu.
 
 W fazie stream cały stream jest buforowany do czasu werdyktu, więc żadne
-wywołanie narzędzia nie dociera wcześniej do klienta.
+wywołanie narzędzia nie dociera wcześniej do klienta. Odpowiedź z kilkoma
+choices wysyła jedną ramkę na każdy choice wywołujący narzędzia, a deny dla
+któregokolwiek z nich odrzuca całą odpowiedź.
 
 #### Ustawienia
 
@@ -834,7 +836,7 @@ wywołanie narzędzia nie dociera wcześniej do klienta.
 | `auth_header` | Nie | `Authorization` | Nazwa statycznego nagłówka, który przenosi `auth_value`. |
 | `auth_value` | Nie | | Wartość nagłówka uwierzytelniającego, wysyłana bez zmian (`Bearer <token>`), dla serwera, który dodatkowo uwierzytelnia wywołujących. Wymaga URL-a `https://`, chyba że serwer działa na localhost. |
 | `tenant_id` | Nie | `null` | `tenant_id` każdej ramki, dla serwera obsługującego wiele organizacji. |
-| `roles` | Nie | `["system", "user", "assistant", "tool"]` | Wiadomości promptu wysyłane w fazie prompt. Usuń `system`, aby wysyłać to, co wysyła Anthropic; zobacz [Co jest wysyłane](#co-jest-wysyłane). Wiadomość z każdą inną rolą jest zawsze wysyłana. |
+| `roles` | Nie | `["system", "user", "assistant", "tool"]` | Wiadomości promptu wysyłane w fazie prompt. `system` obejmuje też wiadomości developerskie; usuń go, aby wysyłać to, co wysyła Anthropic, zobacz [Co jest wysyłane](#co-jest-wysyłane). Wiadomość z każdą inną rolą jest zawsze wysyłana. |
 | `action` | Nie | `block` | Przy werdykcie deny: `block` odrzuca, `respond` odpowiada wiadomością asystenta, `warn` kontynuuje i zapisuje werdykt. Użyj `warn` jako trybu shadow, aby wypróbować politykę na prawdziwym ruchu. |
 | `message` | Nie | `This request was blocked by policy` | Używany, gdy werdykt nie zawiera `deny_reason`. W przeciwnym razie klient widzi `deny_reason` serwera (najwyżej 500 znaków). |
 | `block_status` | Nie | domyślny dla fazy | Jeden kod statusu HTTP od 400 do 599 dla `block`, na przykład `403`. |
@@ -856,8 +858,8 @@ niż 64 KiB. O skutku awarii decyduje `fail_mode` reguły:
   inspekcja.
 
 GoModel wysyła też test połączenia z protokołu (ramkę `prompt` z
-`source.application` równym `config-test`, bez treści requestu) przy budowaniu
-guardraila i przy każdym odświeżeniu guardraili, domyślnie co minutę. Bez
+`source.application` równym `config-test`, która niesie jedną stałą wiadomość
+testową zamiast treści z requestu) przy budowaniu guardraila i przy każdym odświeżeniu guardraili, domyślnie co minutę. Bez
 poprawnego werdyktu, allow albo deny, guardrail jest oznaczany w dashboardzie
 jako zdegradowany. Nieudane requesty nie są ponawiane.
 
@@ -876,7 +878,7 @@ Body ma kształt ramki z protokołu, z tymi wartościami:
 | `source.application` | `gomodel` |
 | `model`, `session_id` | Rozwiązany model providera i wykryta sesja albo `null`. |
 | `metadata` | `gomodel_request_id`, `gomodel_user_path`, `gomodel_provider`. |
-| `messages` | Tekst, wywołania narzędzi i wyniki narzędzi. Każda część z obrazem, dźwiękiem lub plikiem staje się blokiem `attachment` bez treści; bajty mediów i definicje narzędzi nigdy nie są wysyłane. |
+| `messages` | Tekst, wywołania narzędzi i wyniki narzędzi. Każda część z obrazem, dźwiękiem lub plikiem staje się blokiem `attachment` bez treści: jej bajty nigdy nie są wysyłane, podobnie jak definicje narzędzi i pozostałe parametry requestu. Treść, której GoModel nie modeluje, na przykład element reasoning z `/v1/responses`, jest wysyłana jako `attachment` z jej JSON-em w polu `text`. |
 
 Dwie rzeczy różnią się od ramek wysyłanych przez Anthropic:
 
