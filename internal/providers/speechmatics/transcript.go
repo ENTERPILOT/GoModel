@@ -204,7 +204,7 @@ func transcriptionResponse(provider string, req *core.AudioTranscriptionRequest,
 // the way whisper-1 reports it, so usage tracking can price the call per
 // second without measuring the upload itself.
 type jsonTranscription struct {
-	Text  string            `json:"text"`
+	Text  string     `json:"text"`
 	Usage *jsonUsage `json:"usage,omitempty"`
 }
 
@@ -235,7 +235,8 @@ type verboseResponse struct {
 	Duration float64          `json:"duration"`
 	Text     string           `json:"text"`
 	Segments []verboseSegment `json:"segments"`
-	Words    []verboseWord    `json:"words,omitempty"`
+	// Words is a pointer so a requested but empty list still reads "words": [].
+	Words *[]verboseWord `json:"words,omitempty"`
 }
 
 // verboseTranscription builds the OpenAI verbose_json body. Segments are
@@ -258,7 +259,8 @@ func verboseTranscription(req *core.AudioTranscriptionRequest, upstream *transcr
 	}
 	for _, granularity := range req.TimestampGranularities {
 		if strings.EqualFold(strings.TrimSpace(granularity), "word") {
-			resp.Words = words(tokens)
+			list := words(tokens)
+			resp.Words = &list
 			break
 		}
 	}

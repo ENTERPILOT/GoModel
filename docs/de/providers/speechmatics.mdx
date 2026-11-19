@@ -91,8 +91,10 @@ Clients sehen also einen gewöhnlichen synchronen Aufruf.
 
 - GoModel wartet bis zu 10 Minuten. Danach antwortet es mit `504` und beendet
   den Job.
-- Trennt der Client die Verbindung, wird der Job ebenfalls beendet, damit er
-  nicht für ein Ergebnis weiterläuft, das niemand liest.
+- Trennt der Client die Verbindung, nachdem der Job angelegt wurde, wird der
+  Job ebenfalls beendet, damit er nicht für ein Ergebnis weiterläuft, das
+  niemand liest. Ein Abbruch während des Uploads kann einen Job hinterlassen,
+  dessen ID GoModel nie erfahren hat.
 - Ein abgeschlossener Job bleibt für die Aufbewahrungsfrist von Speechmatics
   (7 Tage) im Speechmatics-Konto; GoModel löscht ihn nicht.
 - Sind mehrere API-Keys konfiguriert, verwenden alle Aufrufe eines Jobs
@@ -128,7 +130,7 @@ bekannt, sollte `language` gesendet werden.
   (`{"type": "duration", "seconds": 4}`), wie bei `whisper-1`.
 - `text` – der Text des Transkripts.
 - `verbose_json` – ergänzt `language` (der Code, den Speechmatics meldet, etwa
-  `en`), `duration` (ganze Sekunden) und `segments`: eines pro Satz, jeweils
+  `en`), `duration` (Sekunden) und `segments`: eines pro Satz, jeweils
   mit `id`, `start`, `end` und `text`. Die Decoder-Statistiken von Whisper
   (`tokens`, `avg_logprob`, ...) sind nicht enthalten. Mit der Granularität
   `word` kommen zusätzlich `words` mit Zeitangaben pro Wort.

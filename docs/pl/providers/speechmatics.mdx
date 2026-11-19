@@ -88,8 +88,9 @@ czeka na jego zakończenie i zwraca transkrypt w tej samej odpowiedzi, więc
 klient widzi zwykłe synchroniczne wywołanie.
 
 - GoModel czeka do 10 minut. Potem odpowiada `504` i przerywa zadanie.
-- Gdy klient się rozłączy, zadanie też jest przerywane, żeby nie działało dalej
-  dla wyniku, którego nikt nie odczyta.
+- Gdy klient rozłączy się po utworzeniu zadania, zadanie też jest przerywane,
+  żeby nie działało dalej dla wyniku, którego nikt nie odczyta. Rozłączenie w
+  trakcie wysyłania pliku może zostawić zadanie, którego ID GoModel nie poznał.
 - Zakończone zadanie zostaje na koncie Speechmatics przez okres przechowywania
   Speechmatics (7 dni); GoModel go nie usuwa.
 - Przy kilku skonfigurowanych kluczach API wszystkie wywołania jednego zadania
@@ -123,7 +124,7 @@ którym nie znajdzie mowy. Wysyłaj `language`, gdy znasz język.
   (`{"type": "duration", "seconds": 4}`), tak jak w `whisper-1`.
 - `text` – tekst transkryptu.
 - `verbose_json` – dodaje `language` (kod zgłaszany przez Speechmatics, np.
-  `en`), `duration` (pełne sekundy) i `segments`: po jednym na zdanie, każdy z
+  `en`), `duration` (sekundy) i `segments`: po jednym na zdanie, każdy z
   `id`, `start`, `end` i `text`. Statystyki dekodera Whispera (`tokens`,
   `avg_logprob`, ...) nie są dołączane. Poproś o granularność `word`, żeby
   dostać też `words` z czasami poszczególnych słów.

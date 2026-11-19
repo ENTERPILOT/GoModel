@@ -9,7 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func TestRegistration_DefaultsToTheEU1BatchEndpoint(t *testing.T) {
@@ -39,9 +41,13 @@ func TestSetBaseURL_ChangesRequestTarget(t *testing.T) {
 	api := newFakeBatchAPI(t, &fakeBatchAPI{transcripts: map[string]string{"json-v2": helloTranscript}})
 	provider := newTestProvider(api)
 	provider.SetBaseURL("http://127.0.0.1:1")
-	provider.SetBaseURL(api.url)
 
 	_, err := provider.CreateTranscription(context.Background(), transcriptionRequest())
+	require.Error(t, err)
+	assert.Equal(t, 0, api.capture.Count())
+
+	provider.SetBaseURL(api.url)
+	_, err = provider.CreateTranscription(context.Background(), transcriptionRequest())
 	require.NoError(t, err)
 	assert.Equal(t, 3, api.capture.Count())
 }
@@ -85,15 +91,26 @@ func TestUnsupportedCapabilities_ReturnInvalidRequestErrors(t *testing.T) {
 
 func TestPassthrough_ForwardsOpaqueRequest(t *testing.T) {
 	api := newFakeBatchAPI(t, &fakeBatchAPI{})
+	var started llmclient.RequestInfo
+	opts := providertest.Options(llmclient.Hooks{OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
+		started = info
+		return ctx
+	}})
+	opts.HTTPClient = api.client
+	provider := New(providers.ProviderConfig{APIKey: "sm_test", BaseURL: api.url}, opts).(*Provider)
 
-	resp, err := newTestProvider(api).Passthrough(context.Background(), &core.PassthroughRequest{
-		Method:   http.MethodGet,
-		Endpoint: "jobs/job1",
-		Headers:  http.Header{},
+	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:    http.MethodGet,
+		Endpoint:  "jobs/job1",
+		Headers:   http.Header{},
+		Model:     "enhanced",
+		Operation: string(core.OperationAudioTranscriptions),
 	})
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 
+	assert.Equal(t, "enhanced", started.Model)
+	assert.Equal(t, string(core.OperationAudioTranscriptions), started.Operation)
 	req := api.capture.Last(t)
 	assert.Equal(t, "/jobs/job1", req.Path)
 	assert.Equal(t, "Bearer sm_test", req.Header.Get("Authorization"))

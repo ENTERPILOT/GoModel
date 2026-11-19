@@ -86,8 +86,9 @@ clients see an ordinary synchronous call.
 
 - GoModel waits up to 10 minutes. After that it answers `504` and terminates
   the job.
-- When the client disconnects, the job is terminated too, so it does not keep
-  running for a result nobody reads.
+- When the client disconnects after the job was created, the job is terminated
+  too, so it does not keep running for a result nobody reads. A disconnect
+  during the upload can leave a job GoModel never learned the ID of.
 - A finished job stays in your Speechmatics account for Speechmatics' own
   retention period (7 days); GoModel does not delete it.
 - With several API keys configured, all calls of one job use the same key.
@@ -120,7 +121,7 @@ them `"language": "multi"` and passes your `language` as a language hint.
   (`{"type": "duration", "seconds": 4}`), as `whisper-1` reports it.
 - `text` — the transcript text.
 - `verbose_json` — adds `language` (the code Speechmatics reports, such as
-  `en`), `duration` (whole seconds), and `segments`: one per sentence, each with
+  `en`), `duration` (seconds), and `segments`: one per sentence, each with
   `id`, `start`, `end`, and `text`. Whisper's decoder statistics (`tokens`,
   `avg_logprob`, ...) are not included. Request the `word` granularity to also
   get `words` with per-word timings.

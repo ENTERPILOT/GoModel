@@ -75,7 +75,7 @@ curl https://your-gateway/v1/audio/transcriptions \
 Speechmatics 以异步方式转录。GoModel 将音频作为任务上传，等待任务完成，并在同一个响应中返回转录结果，因此客户端看到的是一次普通的同步调用。
 
 - GoModel 最多等待 10 分钟。超时后返回 `504` 并终止任务。
-- 客户端断开连接时，任务同样会被终止，避免为无人读取的结果继续运行。
+- 任务创建后客户端断开连接时，任务同样会被终止，避免为无人读取的结果继续运行。如果在上传期间断开，可能会留下 GoModel 尚未获知 ID 的任务。
 - 已完成的任务会在 Speechmatics 自身的保留期（7 天）内保留在您的 Speechmatics 账户中；GoModel 不会删除它。
 - 配置了多个 API 密钥时，同一个任务的所有调用使用同一个密钥。
 
@@ -101,7 +101,7 @@ Speechmatics 以异步方式转录。GoModel 将音频作为任务上传，等�
 - `json`：转录文本，以及与 `whisper-1` 相同的 `usage` 音频时长
   （`{"type": "duration", "seconds": 4}`）。
 - `text`：转录文本。
-- `verbose_json`：增加 `language`（Speechmatics 报告的代码，例如 `en`）、`duration`（整秒）和
+- `verbose_json`：增加 `language`（Speechmatics 报告的代码，例如 `en`）、`duration`（秒）和
   `segments`：每句话一个，各包含 `id`、`start`、`end` 和 `text`。不包含 Whisper 的解码器统计信息（`tokens`、`avg_logprob`
   等）。请求 `word` 粒度可同时获得带逐词时间的 `words`。
 - `srt`：Speechmatics 自己的 SubRip 输出。

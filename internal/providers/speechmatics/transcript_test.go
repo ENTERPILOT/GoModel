@@ -111,7 +111,7 @@ func TestTranscriptionResponse_VerboseJSONWithoutSpeech(t *testing.T) {
 	resp, err := transcriptionResponse("speechmatics", req, "verbose_json", []byte(`{"job":{"duration":3},"results":[]}`))
 	require.NoError(t, err)
 
-	assert.JSONEq(t, `{"task":"transcribe","language":"en","duration":3,"text":"","segments":[]}`, string(resp.Data))
+	assert.JSONEq(t, `{"task":"transcribe","language":"en","duration":3,"text":"","segments":[],"words":[]}`, string(resp.Data))
 }
 
 func TestTranscriptionResponse_RejectsAnUnreadableTranscript(t *testing.T) {
