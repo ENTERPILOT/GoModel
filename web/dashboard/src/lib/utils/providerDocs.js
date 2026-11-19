@@ -38,6 +38,7 @@ const PROVIDER_DOC_SLUGS = new Set([
   "kimicode",
   "llamacpp",
   "llmd",
+  "m365-copilot",
   "minimax",
   "mistral",
   "opencode-go",

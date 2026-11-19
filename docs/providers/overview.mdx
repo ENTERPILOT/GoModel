@@ -60,6 +60,7 @@ support, not every individual model capability exposed by an upstream provider.
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | ChatGPT subscription | `CHATGPT_API_KEY` (Codex sign-in token) | `gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT subscription](/providers/chatgpt) |
 | GitHub Copilot | `GITHUB_COPILOT_API_KEY` (GitHub OAuth token) | `claude-sonnet-5.5` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [GitHub Copilot](/providers/github-copilot) |
+| Microsoft 365 Copilot | `M365_COPILOT_API_KEY` (Entra ID user token) | `m365-copilot` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Microsoft 365 Copilot](/providers/m365-copilot) |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/providers/anthropic) |
 | Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/providers/cohere) |
 | Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [Google Gemini](/providers/gemini) |
@@ -221,6 +222,13 @@ support, not every individual model capability exposed by an upstream provider.
   a GitHub OAuth token for the account, such as `gh auth token`; the models it
   can call depend on the Copilot plan. Reported cost is an estimate that ignores
   the plan's included allowance.
+- **Microsoft 365 Copilot** — the Copilot assistant through the Work IQ REST
+  API, grounded in one user's Microsoft 365 data and the web; billed in Copilot
+  Credits, which GoModel cannot price. Set `M365_COPILOT_API_KEY` to a
+  delegated Entra ID token (scope
+  `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`); it expires after about
+  an hour and is not refreshed. Text chat only: tools, images, `n > 1`, and
+  JSON output are rejected.
 - **Kimi Code** — no per-token pricing; quota refreshes weekly and is also
   constrained by a rolling 5-hour window. Usage-cost tracking reports zero for
   Kimi Code, so `cost` load-balancing cannot price it; prefer conservative
@@ -365,6 +373,8 @@ These are the providers most users hit friction on:
   allowlist, used to put GoModel between Codex and a ChatGPT plan.
 - **GitHub Copilot** — getting a token, Business and Enterprise endpoints,
   and per-model routing between chat completions and Responses.
+- **Microsoft 365 Copilot** — Work IQ prerequisites, the Entra ID token, and
+  how a chat request maps onto one Copilot prompt.
 
 <Tip>
   Every provider page shows three launch forms in one CodeGroup: Docker with

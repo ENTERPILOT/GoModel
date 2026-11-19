@@ -1,0 +1,91 @@
+---
+title: "Microsoft 365 Copilot"
+description: "通过 OpenAI 聊天 API 向 Microsoft 365 Copilot 提问，回答基于用户的 Microsoft 365 数据。"
+icon: "microsoft"
+keywords: ["Microsoft 365 Copilot", "Work IQ", "Copilot Chat API", "Entra ID", "提供商配置", "provider setup"]
+---
+
+`m365-copilot` 提供商通过 [Work IQ REST API](https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/rest/overview)
+将聊天请求发送到 Microsoft 365 Copilot。Copilot 是一个助手，而不是模型端点：它以一名已登录用户的身份回答，并以该用户的邮件、会议、文件、Teams 聊天和网络内容作为每个回答的依据。
+
+用它可以让 Copilot 的回答与其他模型共用同一个网关、同一套密钥和审计日志。它不是通用 LLM：没有模型选择，没有工具调用，也没有 JSON 模式。
+
+## 配置
+
+凭据是 Copilot 所代表用户的委托 Microsoft Entra ID 访问令牌，scope 为
+`api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`：
+
+```bash
+M365_COPILOT_API_KEY=eyJ0eXAi...
+```
+
+或在 `config.yaml` 中：
+
+```yaml
+providers:
+  m365-copilot:
+    type: m365-copilot
+    api_key: "${M365_COPILOT_API_KEY}"
+```
+
+GoModel 原样发送令牌，不做交换或刷新。Entra ID 访问令牌约一小时后过期；过期后请求会返回上游的 `401`，直到你设置新令牌。
+
+### 前提条件
+
+- 管理员已为组织[启用 Work IQ](https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/enable-work-iq)。
+- 一个 Microsoft Entra 应用注册，具有委托权限 `WorkIQAgent.Ask` 并已获得管理员同意。不支持应用（仅应用）令牌，也不支持个人 Microsoft 账号。
+- 用户通过其主租户登录，使令牌的颁发者与之匹配。
+- 一个按使用量计费的 Copilot Credits 计费计划：使用量以 Copilot Credits 计费，与 Microsoft 365 Copilot 许可证无关。
+
+### Microsoft Graph 预览端点
+
+同一个 Chat API 也以预览形式在 Microsoft Graph 上提供，需要 Microsoft 365 Copilot 许可证和具备相应权限的 Graph 令牌。Microsoft 不支持将其用于生产环境：
+
+```bash
+M365_COPILOT_BASE_URL=https://graph.microsoft.com/beta/copilot
+```
+
+## 请求如何映射
+
+每个请求都会打开一个新的 Copilot 对话并发送一个提示：
+
+| OpenAI 请求 | 发送给 Copilot 的形式 |
+| ----------- | --------------------- |
+| 最后一条消息（必须是 `user`） | 提示 |
+| 之前的 `system`、`developer`、`user` 和 `assistant` 消息 | `additionalContext`，按角色标注 |
+| `stream: true` | `chatOverStream`，以 Chat Completion 分块转发 |
+| `/v1/responses` | 转换为聊天请求再转换回来 |
+
+之前的消息是额外的依据，而不是真正的对话轮次，因此 Copilot 对它们的处理可能与聊天模型不同。
+
+以下字段会返回 `400`，而不是被忽略：`tools`（除非 `tool_choice` 为 `none`）、历史中的工具调用和工具结果、图像、音频和文件内容部分、大于 1 的 `n`、`text` 以外的 `modalities`，以及 `text` 以外的 `response_format`。`temperature`、`max_tokens` 等采样和长度设置会被接受并丢弃，因为 Copilot 不提供其中任何一项。
+
+两个 Chat API 字段作为额外请求字段透传：
+
+```json
+{
+  "model": "m365-copilot",
+  "messages": [{"role": "user", "content": "总结这份文档。"}],
+  "locationHint": {"timeZone": "Asia/Shanghai"},
+  "contextualResources": {
+    "files": [{"uri": "https://contoso.sharepoint.com/sites/Specs/Plan.docx"}],
+    "webContext": {"isWebEnabled": false}
+  }
+}
+```
+
+`locationHint` 默认使用网关的时区（`TZ`），时区没有名称时使用 `UTC`。用户位于其他时区时，请按请求设置，因为 Copilot 用它来理解“明天”或“上午 9 点”。
+
+当 Copilot 的负责任 AI 检查结束对话时，回答的 `finish_reason` 为 `"content_filter"`。
+
+## 模型
+
+该提供商只列出一个模型 `m365-copilot`。Copilot 没有模型选择，因此该名称只用于将请求路由到这里。设置 `M365_COPILOT_MODELS` 可以将其他名称路由到这里，例如 `M365_COPILOT_MODELS=copilot`。
+
+不支持 Embeddings、文件、批处理和透传。
+
+## 成本与用量
+
+Copilot 不报告 Token 数，因此用量记录为零 Token，[成本追踪](/zh/features/cost-tracking)显示为零。请在 Microsoft 365 管理中心跟踪 Copilot Credits。
+
+GoModel 不会删除它打开的对话。

@@ -62,6 +62,7 @@ przez providera upstream.
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Subskrypcja ChatGPT | `CHATGPT_API_KEY` (token logowania Codex) | `gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Subskrypcja ChatGPT](/pl/providers/chatgpt) |
 | GitHub Copilot | `GITHUB_COPILOT_API_KEY` (token OAuth GitHuba) | `claude-sonnet-5.5` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [GitHub Copilot](/pl/providers/github-copilot) |
+| Microsoft 365 Copilot | `M365_COPILOT_API_KEY` (token użytkownika Entra ID) | `m365-copilot` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Microsoft 365 Copilot](/pl/providers/m365-copilot) |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/pl/providers/anthropic) |
 | Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/pl/providers/cohere) |
 | Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [Google Gemini](/pl/providers/gemini) |
@@ -225,6 +226,13 @@ przez providera upstream.
   `GITHUB_COPILOT_API_KEY` na token OAuth GitHuba dla konta, np. z
   `gh auth token`; dostępne modele zależą od planu Copilot. Raportowany koszt
   jest szacunkiem, który pomija limit zawarty w planie.
+- **Microsoft 365 Copilot** – asystent Copilot przez Work IQ REST API, z
+  odpowiedziami opartymi na danych Microsoft 365 jednego użytkownika i sieci;
+  rozliczany w Copilot Credits, których GoModel nie wycenia. Ustaw
+  `M365_COPILOT_API_KEY` na delegowany token Entra ID (scope
+  `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`); wygasa po około godzinie
+  i nie jest odświeżany. Tylko czat tekstowy: narzędzia, obrazy, `n > 1` i
+  wyjście JSON są odrzucane.
 - **Kimi Code** – brak cen za token; limit odnawia się co tydzień i jest dodatkowo
   ograniczony kroczącym oknem 5-godzinnym. Śledzenie kosztów użycia raportuje
   zero dla Kimi Code, więc load balancing `cost` nie może go wycenić; preferuj
@@ -380,6 +388,8 @@ To providerzy, z którymi użytkownicy najczęściej mają problemy:
   planem ChatGPT.
 - **GitHub Copilot** – skąd wziąć token, endpointy Business i Enterprise oraz
   routing per model między chat completions a Responses.
+- **Microsoft 365 Copilot** – wymagania Work IQ, token Entra ID oraz to, jak
+  request czatu jest mapowany na jeden prompt Copilota.
 
 <Tip>
   Każda strona providera pokazuje w jednym CodeGroup trzy sposoby uruchamiania:

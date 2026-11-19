@@ -654,6 +654,13 @@ providers:
     type: github-copilot
     api_key: "${GITHUB_COPILOT_API_KEY}"
 
+  # Microsoft 365 Copilot through the Work IQ REST API. The key is a delegated
+  # Entra ID token (scope api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask)
+  # that expires after about an hour (see docs/providers/m365-copilot.mdx).
+  m365-copilot:
+    type: m365-copilot
+    api_key: "${M365_COPILOT_API_KEY}"
+
   cohere:
     type: cohere
     api_key: "${COHERE_API_KEY}"

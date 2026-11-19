@@ -1,0 +1,123 @@
+---
+title: "Microsoft 365 Copilot"
+description: "Fragen Sie Microsoft 365 Copilot über die OpenAI-Chat-API, gestützt auf die Microsoft-365-Daten eines Benutzers."
+icon: "microsoft"
+keywords: ["Microsoft 365 Copilot", "Work IQ", "Copilot Chat API", "Entra ID", "Provider-Einrichtung", "provider setup"]
+---
+
+Der Provider `m365-copilot` sendet Chat-Requests über die
+[Work IQ REST API](https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/rest/overview)
+an Microsoft 365 Copilot. Copilot ist ein Assistent, kein Modell-Endpunkt: Er
+antwortet als ein angemeldeter Benutzer und stützt jede Antwort auf dessen
+E-Mails, Besprechungen, Dateien, Teams-Chats und das Web.
+
+Nutzen Sie ihn, um Copilot-Antworten hinter dasselbe Gateway, dieselben Keys
+und dieselben Audit-Logs wie Ihre anderen Modelle zu stellen. Er ist kein
+Allzweck-LLM: Es gibt keine Modellauswahl, kein Tool Calling und keinen
+JSON-Modus.
+
+## Konfiguration
+
+Die Zugangsdaten sind ein delegiertes Microsoft-Entra-ID-Access-Token des
+Benutzers, für den Copilot antwortet, mit dem Scope
+`api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`:
+
+```bash
+M365_COPILOT_API_KEY=eyJ0eXAi...
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  m365-copilot:
+    type: m365-copilot
+    api_key: "${M365_COPILOT_API_KEY}"
+```
+
+GoModel sendet das Token unverändert, ohne Austausch oder Refresh.
+Entra-ID-Access-Tokens laufen nach etwa einer Stunde ab; danach schlagen
+Requests mit dem `401` des Upstreams fehl, bis Sie ein neues Token setzen.
+
+### Voraussetzungen
+
+- Ein Administrator hat [Work IQ aktiviert](https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/enable-work-iq)
+  für die Organisation.
+- Eine Microsoft-Entra-App-Registrierung mit der delegierten Berechtigung
+  `WorkIQAgent.Ask` und Administratorzustimmung. Anwendungs-Tokens (App-only)
+  werden nicht unterstützt, persönliche Microsoft-Konten ebenfalls nicht.
+- Der Benutzer meldet sich über seinen Home-Tenant an, damit der Aussteller
+  des Tokens dazu passt.
+- Ein nutzungsbasierter Abrechnungsplan für Copilot Credits: Die Nutzung wird
+  in Copilot Credits abgerechnet, unabhängig von Microsoft-365-Copilot-Lizenzen.
+
+### Preview-Endpunkt in Microsoft Graph
+
+Dieselbe Chat API ist auch als Preview in Microsoft Graph verfügbar. Dafür
+sind eine Microsoft-365-Copilot-Lizenz und ein Graph-Token mit dessen
+Berechtigungen nötig. Microsoft unterstützt sie nicht für den
+Produktionseinsatz:
+
+```bash
+M365_COPILOT_BASE_URL=https://graph.microsoft.com/beta/copilot
+```
+
+## Wie Requests abgebildet werden
+
+Jeder Request öffnet eine neue Copilot-Unterhaltung und sendet einen Prompt:
+
+| OpenAI-Request | An Copilot gesendet als |
+| -------------- | ----------------------- |
+| Letzte Nachricht (muss `user` sein) | Der Prompt |
+| Frühere Nachrichten mit `system`, `developer`, `user` und `assistant` | `additionalContext`, nach Rolle beschriftet |
+| `stream: true` | `chatOverStream`, weitergeleitet als Chat-Completion-Chunks |
+| `/v1/responses` | In einen Chat-Request übersetzt und zurück |
+
+Frühere Nachrichten sind zusätzliches Grounding, keine echten
+Gesprächsrunden; Copilot gewichtet sie daher eventuell anders als ein
+Chat-Modell.
+
+Diese Felder schlagen mit `400` fehl, statt ignoriert zu werden: `tools`
+(außer bei `tool_choice: none`), Tool Calls und Tool-Ergebnisse im Verlauf,
+Bild-, Audio- und Datei-Inhalte, `n` größer als 1, andere `modalities`
+als `text` und ein anderes `response_format` als `text`. Sampling- und Längeneinstellungen wie
+`temperature` und `max_tokens` werden angenommen und verworfen, da Copilot
+keine davon anbietet.
+
+Zwei Felder der Chat API werden als zusätzliche Request-Felder durchgereicht:
+
+```json
+{
+  "model": "m365-copilot",
+  "messages": [{"role": "user", "content": "Fasse dieses Dokument zusammen."}],
+  "locationHint": {"timeZone": "Europe/Berlin"},
+  "contextualResources": {
+    "files": [{"uri": "https://contoso.sharepoint.com/sites/Specs/Plan.docx"}],
+    "webContext": {"isWebEnabled": false}
+  }
+}
+```
+
+`locationHint` ist standardmäßig die Zeitzone des Gateways (`TZ`) oder `UTC`,
+wenn sie keinen Namen hat. Setzen Sie es pro Request, wenn Benutzer anderswo
+sind, denn Copilot liest damit „morgen“ oder „9 Uhr“.
+
+Wenn die Responsible-AI-Prüfungen von Copilot die Unterhaltung beenden, hat die
+Antwort `finish_reason: "content_filter"`.
+
+## Modelle
+
+Der Provider listet ein Modell, `m365-copilot`. Copilot bietet keine
+Modellauswahl, daher leitet der Name einen Request nur hierher. Setzen Sie
+`M365_COPILOT_MODELS`, um andere Namen hierher zu leiten, zum Beispiel
+`M365_COPILOT_MODELS=copilot`.
+
+Embeddings, Dateien, Batches und Passthrough sind nicht verfügbar.
+
+## Kosten und Nutzung
+
+Copilot meldet keine Token-Zahlen, daher wird die Nutzung mit null Tokens
+erfasst und das [Cost-Tracking](/de/features/cost-tracking) meldet null.
+Verfolgen Sie Copilot Credits im Microsoft 365 Admin Center.
+
+GoModel löscht die Unterhaltungen, die es öffnet, nicht.
