@@ -44,6 +44,8 @@ type fakeBatchAPI struct {
 	jobErrors string
 	// onStatus runs before each status answer.
 	onStatus func(r *http.Request)
+	// statusFailure, when set, is the HTTP status every status request answers.
+	statusFailure int
 	// transcripts maps a transcript format to the body served for it.
 	transcripts map[string]string
 
@@ -71,6 +73,11 @@ func (f *fakeBatchAPI) serve(w http.ResponseWriter, r *http.Request) {
 	case "GET /jobs/" + testJobID:
 		if f.onStatus != nil {
 			f.onStatus(r)
+		}
+		if f.statusFailure != 0 {
+			w.WriteHeader(f.statusFailure)
+			_, _ = io.WriteString(w, `{"code":500,"error":"Internal Server Error"}`)
+			return
 		}
 		jobErrors := f.jobErrors
 		if jobErrors == "" {

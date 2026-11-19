@@ -98,7 +98,9 @@ Speechmatics 以异步方式转录。GoModel 将音频作为任务上传，等�
 
 ### 响应格式
 
-- `json` 和 `text`：转录文本。
+- `json`：转录文本，以及与 `whisper-1` 相同的 `usage` 音频时长
+  （`{"type": "duration", "seconds": 4}`）。
+- `text`：转录文本。
 - `verbose_json`：增加 `language`（Speechmatics 报告的代码，例如 `en`）、`duration`（整秒）和
   `segments`：每句话一个，各包含 `id`、`start`、`end` 和 `text`。不包含 Whisper 的解码器统计信息（`tokens`、`avg_logprob`
   等）。请求 `word` 粒度可同时获得带逐词时间的 `words`。

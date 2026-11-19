@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
@@ -104,7 +106,7 @@ func TestCreateTranscription_RunsBatchJob(t *testing.T) {
 	assert.Equal(t, []byte("RIFF-audio"), audio)
 
 	assert.Equal(t, "application/json", resp.ContentType)
-	assert.JSONEq(t, `{"text":"Hello world. How are you?"}`, string(resp.Data))
+	assert.JSONEq(t, `{"text":"Hello world. How are you?","usage":{"type":"duration","seconds":4}}`, string(resp.Data))
 }
 
 func TestNewJobConfig_MapsModelAndLanguage(t *testing.T) {
@@ -152,7 +154,7 @@ func TestCreateTranscription_ShapesResponseFormats(t *testing.T) {
 		{
 			name: "json is the default", format: "",
 			wantUpstream: "json-v2", wantContentType: "application/json",
-			wantJSON: `{"text":"Hello world. How are you?"}`,
+			wantJSON: `{"text":"Hello world. How are you?","usage":{"type":"duration","seconds":4}}`,
 		},
 		{
 			name: "text", format: "text",
@@ -304,6 +306,20 @@ func TestCreateTranscription_TerminatesTheJobWhenItsStatusIsUnavailable(t *testi
 	require.ErrorAs(t, err, &gatewayErr)
 	assert.Equal(t, http.StatusNotFound, gatewayErr.StatusCode)
 	assert.Equal(t, []string{"POST /jobs", "GET /jobs/elsewhere", "DELETE /jobs/elsewhere?force=true"}, api.calls())
+}
+
+func TestCreateTranscription_TerminatesTheJobWhenTheBreakerOpens(t *testing.T) {
+	api := newFakeBatchAPI(t, &fakeBatchAPI{statusFailure: http.StatusInternalServerError})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = api.client
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.Resilience.CircuitBreaker.FailureThreshold = 1
+	provider := New(providers.ProviderConfig{APIKey: "sm_test", BaseURL: api.url}, opts).(*Provider)
+
+	_, err := provider.CreateTranscription(context.Background(), transcriptionRequest())
+
+	require.Error(t, err)
+	assert.Equal(t, []string{"POST /jobs", "GET /jobs/job1", "DELETE /jobs/job1?force=true"}, api.calls())
 }
 
 func TestCreateTranscription_MapsSubmissionErrors(t *testing.T) {

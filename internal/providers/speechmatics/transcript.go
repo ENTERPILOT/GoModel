@@ -191,13 +191,42 @@ func transcriptionResponse(provider string, req *core.AudioTranscriptionRequest,
 	case "verbose_json":
 		payload = verboseTranscription(req, &upstream, tokens, text)
 	default:
-		payload = map[string]string{"text": text}
+		payload = jsonTranscription{Text: text, Usage: durationUsage(upstream.duration(tokens))}
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, core.NewProviderError(provider, http.StatusBadGateway, "failed to encode transcription response", err)
 	}
 	return &core.AudioResponse{ContentType: contentType, Data: data}, nil
+}
+
+// jsonTranscription is the OpenAI json body. Usage carries the audio duration
+// the way whisper-1 reports it, so usage tracking can price the call per
+// second without measuring the upload itself.
+type jsonTranscription struct {
+	Text  string            `json:"text"`
+	Usage *jsonUsage `json:"usage,omitempty"`
+}
+
+type jsonUsage struct {
+	Type    string  `json:"type"`
+	Seconds float64 `json:"seconds"`
+}
+
+func durationUsage(seconds float64) *jsonUsage {
+	if seconds <= 0 {
+		return nil
+	}
+	return &jsonUsage{Type: "duration", Seconds: seconds}
+}
+
+// duration is the audio length: the job's own figure, else the end of the
+// last token.
+func (t *transcript) duration(tokens []token) float64 {
+	if t.Job.Duration > 0 || len(tokens) == 0 {
+		return t.Job.Duration
+	}
+	return tokens[len(tokens)-1].end
 }
 
 type verboseResponse struct {
@@ -216,7 +245,7 @@ func verboseTranscription(req *core.AudioTranscriptionRequest, upstream *transcr
 	resp := verboseResponse{
 		Task:     "transcribe",
 		Language: strings.TrimSpace(req.Language),
-		Duration: upstream.Job.Duration,
+		Duration: upstream.duration(tokens),
 		Text:     text,
 		Segments: upstream.segments(tokens),
 	}
@@ -225,9 +254,6 @@ func verboseTranscription(req *core.AudioTranscriptionRequest, upstream *transcr
 		// identified ("auto") language is reported.
 		if language := tokens[0].language; language != "" {
 			resp.Language = language
-		}
-		if resp.Duration <= 0 {
-			resp.Duration = tokens[len(tokens)-1].end
 		}
 	}
 	for _, granularity := range req.TimestampGranularities {

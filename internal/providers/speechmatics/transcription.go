@@ -307,9 +307,11 @@ func (p *Provider) rejectedError(details jobDetails) error {
 
 // abandonJob terminates a job the gateway stopped waiting for, so it does not
 // keep running (and billing) for a result nobody will read. It runs on a
-// context detached from the request's, which is usually the one that ended.
+// context detached from the request's, which is usually the one that ended,
+// and bypasses the circuit breaker, which the failed status request may just
+// have opened.
 func (p *Provider) abandonJob(ctx context.Context, model, jobID string) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cancelTimeout)
+	ctx, cancel := context.WithTimeout(llmclient.WithoutCircuitBreaker(context.WithoutCancel(ctx)), cancelTimeout)
 	defer cancel()
 	if _, err := p.client.DoRaw(ctx, llmclient.Request{
 		Method:   http.MethodDelete,

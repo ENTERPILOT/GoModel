@@ -119,7 +119,9 @@ którym nie znajdzie mowy. Wysyłaj `language`, gdy znasz język.
 
 ### Formaty odpowiedzi
 
-- `json` i `text` – tekst transkryptu.
+- `json` – tekst transkryptu oraz `usage` z długością nagrania
+  (`{"type": "duration", "seconds": 4}`), tak jak w `whisper-1`.
+- `text` – tekst transkryptu.
 - `verbose_json` – dodaje `language` (kod zgłaszany przez Speechmatics, np.
   `en`), `duration` (pełne sekundy) i `segments`: po jednym na zdanie, każdy z
   `id`, `start`, `end` i `text`. Statystyki dekodera Whispera (`tokens`,

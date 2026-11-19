@@ -124,7 +124,9 @@ bekannt, sollte `language` gesendet werden.
 
 ### Antwortformate
 
-- `json` und `text` – der Text des Transkripts.
+- `json` – der Text des Transkripts und `usage` mit der Audiodauer
+  (`{"type": "duration", "seconds": 4}`), wie bei `whisper-1`.
+- `text` – der Text des Transkripts.
 - `verbose_json` – ergänzt `language` (der Code, den Speechmatics meldet, etwa
   `en`), `duration` (ganze Sekunden) und `segments`: eines pro Satz, jeweils
   mit `id`, `start`, `end` und `text`. Die Decoder-Statistiken von Whisper

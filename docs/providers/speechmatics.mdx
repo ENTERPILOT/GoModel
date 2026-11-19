@@ -116,7 +116,9 @@ them `"language": "multi"` and passes your `language` as a language hint.
 
 ### Response formats
 
-- `json` and `text` — the transcript text.
+- `json` — the transcript text, plus `usage` with the audio duration
+  (`{"type": "duration", "seconds": 4}`), as `whisper-1` reports it.
+- `text` — the transcript text.
 - `verbose_json` — adds `language` (the code Speechmatics reports, such as
   `en`), `duration` (whole seconds), and `segments`: one per sentence, each with
   `id`, `start`, `end`, and `text`. Whisper's decoder statistics (`tokens`,
