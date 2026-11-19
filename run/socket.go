@@ -26,7 +26,10 @@ import (
 // gap for a different reason: Go delivers no SIGHUP there, so nothing asks for
 // a second generation in the first place.
 type boundSocket struct {
-	address  string
+	address string
+	// bound is the address the socket was given, which carries the port the
+	// operating system chose when address asked for port 0.
+	bound    net.Addr
 	file     *os.File
 	listener net.Listener
 }
@@ -38,19 +41,20 @@ func listenOn(address string) (*boundSocket, error) {
 		return nil, err
 	}
 
+	bound := listener.Addr()
 	tcp, ok := listener.(*net.TCPListener)
 	if !ok {
-		return &boundSocket{address: address, listener: listener}, nil
+		return &boundSocket{address: address, bound: bound, listener: listener}, nil
 	}
 	file, err := tcp.File()
 	if err != nil {
 		slog.Debug("listening socket cannot be duplicated; a reload will rebind the address",
 			"address", address, "error", err)
-		return &boundSocket{address: address, listener: listener}, nil
+		return &boundSocket{address: address, bound: bound, listener: listener}, nil
 	}
 	// The socket stays open through the duplicate held in file.
 	_ = listener.Close()
-	return &boundSocket{address: address, file: file}, nil
+	return &boundSocket{address: address, bound: bound, file: file}, nil
 }
 
 // next returns the listener for the next application generation.

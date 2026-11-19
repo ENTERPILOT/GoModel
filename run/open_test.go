@@ -7,9 +7,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
+	"regexp"
 	"testing"
 	"time"
 
@@ -150,17 +151,9 @@ func startGateway(t *testing.T, args []string, env map[string]string) (*syncBuff
 	return logs, served
 }
 
-func freeTCPPort(t *testing.T) string {
-	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
-	require.NoError(t, listener.Close())
-	return port
-}
-
 // --open hands the browser the dashboard address of the gateway it started,
-// and that address answers.
+// and that address answers. PORT=0 lets the operating system choose the port,
+// so the address has to carry the bound port rather than the configured one.
 func TestRunOpenOpensTheServedDashboard(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -172,8 +165,7 @@ func TestRunOpenOpensTheServedDashboard(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opened := stubBrowser(t, nil)
-			port := freeTCPPort(t)
-			_, served := startGateway(t, []string{"--open"}, map[string]string{"PORT": port, "BASE_PATH": tt.basePath})
+			_, served := startGateway(t, []string{"--open"}, map[string]string{"PORT": "0", "BASE_PATH": tt.basePath})
 
 			var target string
 			select {
@@ -183,7 +175,12 @@ func TestRunOpenOpensTheServedDashboard(t *testing.T) {
 			case <-time.After(30 * time.Second):
 				t.Fatal("timed out waiting for the dashboard to be opened")
 			}
-			require.Equal(t, "http://localhost:"+port+tt.basePath+"/admin/dashboard", target)
+			u, err := url.Parse(target)
+			require.NoError(t, err)
+			assert.Equal(t, "http", u.Scheme)
+			assert.Equal(t, "localhost", u.Hostname())
+			assert.NotEqual(t, "0", u.Port())
+			assert.Equal(t, tt.basePath+"/admin/dashboard", u.Path)
 
 			client := &http.Client{Timeout: 30 * time.Second}
 			resp, err := client.Get(target)
@@ -199,6 +196,9 @@ func TestRunOpenWithoutADashboardStillServes(t *testing.T) {
 	opened := stubBrowser(t, nil)
 	logs, served := startGateway(t, []string{"--open"}, map[string]string{"PORT": "0", "ADMIN_UI_ENABLED": "false"})
 
+	// The line carries the bound address, such as address=[::]:54321.
+	boundPort := regexp.MustCompile(`starting server.*address=\S*:(\d+)`)
+	var port string
 	require.Eventually(t, func() bool {
 		select {
 		case err := <-served:
@@ -206,8 +206,40 @@ func TestRunOpenWithoutADashboardStillServes(t *testing.T) {
 			return true
 		default:
 		}
-		return len(matchingLines(logs.String(), "starting server")) > 0
+		match := boundPort.FindStringSubmatch(logs.String())
+		if match == nil {
+			return false
+		}
+		port = match[1]
+		return true
 	}, 30*time.Second, 20*time.Millisecond, "never logged \"starting server\"")
+	require.NotEmpty(t, port)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get("http://localhost:" + port + "/health")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, logs.String(), "--open ignored")
 	assert.Empty(t, opened)
+}
+
+func TestWithBoundPort(t *testing.T) {
+	bound := &net.TCPAddr{IP: net.IPv6unspecified, Port: 54321}
+	tests := []struct {
+		name   string
+		target string
+		bound  net.Addr
+		want   string
+	}{
+		{name: "port chosen by the operating system", target: "http://localhost:0/admin/dashboard", bound: bound, want: "http://localhost:54321/admin/dashboard"},
+		{name: "configured port", target: "https://localhost:54321/gateway/admin/dashboard", bound: bound, want: "https://localhost:54321/gateway/admin/dashboard"},
+		{name: "no dashboard", target: "", bound: bound, want: ""},
+		{name: "not a TCP socket", target: "http://localhost:8080/admin/dashboard", bound: &net.UnixAddr{Name: "gomodel.sock", Net: "unix"}, want: "http://localhost:8080/admin/dashboard"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, withBoundPort(tt.target, tt.bound))
+		})
+	}
 }

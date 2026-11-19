@@ -40,9 +40,9 @@ gomodel --open
 
 Dashboard otwiera się raz, gdy gateway zaczyna nasłuchiwać; przeładowanie
 konfiguracji nie otwiera go ponownie. Jeśli przeglądarki nie da się otworzyć
-(serwer lub kontener bez sesji graficznej) albo dashboard jest wyłączony
-(`ADMIN_UI_ENABLED=false`), gateway działa dalej i zapisuje w logach
-ostrzeżenie z adresem dashboardu.
+(serwer lub kontener bez sesji graficznej), gateway działa dalej i zapisuje
+w logach ostrzeżenie z adresem dashboardu. Jeśli dashboard jest wyłączony
+(`ADMIN_UI_ENABLED=false`), zapisuje w logach, że `--open` zostało zignorowane.
 
 ## Sonda health
 

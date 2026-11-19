@@ -39,10 +39,10 @@ gomodel --open
 ```
 
 The dashboard opens once, when the gateway starts listening; a configuration
-reload does not open it again. The gateway keeps serving and logs a warning
-with the dashboard address when no browser can be opened (a server or container
-without a graphical session) or the dashboard is turned off
-(`ADMIN_UI_ENABLED=false`).
+reload does not open it again. When no browser can be opened (a server or
+container without a graphical session), the gateway keeps serving and logs a
+warning with the dashboard address. When the dashboard is turned off
+(`ADMIN_UI_ENABLED=false`), it logs that `--open` was ignored.
 
 ## Health probe
 

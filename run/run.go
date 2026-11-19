@@ -410,7 +410,7 @@ func Run(ctx context.Context, opts Options) error {
 	// queue for the server instead of being refused. A reload does not open
 	// the dashboard again.
 	if cliOpts.Open {
-		openDashboard(application.DashboardURL())
+		openDashboard(withBoundPort(application.DashboardURL(), socket.bound))
 	}
 
 	if err := serveUntilShutdown(signalCtx, reload, socket, application, rebuild); err != nil {

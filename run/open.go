@@ -4,9 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 )
 
 // openDashboard opens the dashboard for --open. A browser that cannot be
@@ -22,6 +25,22 @@ func openDashboard(target string) {
 		return
 	}
 	slog.Info("opening the dashboard in the default browser", "url", target)
+}
+
+// withBoundPort returns target with the port the gateway is listening on. The
+// two differ when PORT=0 asks the operating system for a free port: the
+// configured port stays 0.
+func withBoundPort(target string, bound net.Addr) string {
+	tcp, ok := bound.(*net.TCPAddr)
+	if target == "" || !ok {
+		return target
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		return target
+	}
+	u.Host = net.JoinHostPort(u.Hostname(), strconv.Itoa(tcp.Port))
+	return u.String()
 }
 
 // launchBrowser asks the operating system to open target in the user's

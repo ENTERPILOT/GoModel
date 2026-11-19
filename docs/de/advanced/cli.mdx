@@ -41,9 +41,10 @@ gomodel --open
 
 Das Dashboard wird einmal geöffnet, sobald das Gateway Verbindungen annimmt; ein
 Neuladen der Konfiguration öffnet es nicht erneut. Lässt sich kein Browser
-öffnen (Server oder Container ohne grafische Sitzung) oder ist das Dashboard
-abgeschaltet (`ADMIN_UI_ENABLED=false`), läuft das Gateway weiter und
-protokolliert eine Warnung mit der Dashboard-Adresse.
+öffnen (Server oder Container ohne grafische Sitzung), läuft das Gateway weiter
+und protokolliert eine Warnung mit der Dashboard-Adresse. Ist das Dashboard
+abgeschaltet (`ADMIN_UI_ENABLED=false`), protokolliert es, dass `--open`
+ignoriert wurde.
 
 ## Health-Abfrage
 
