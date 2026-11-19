@@ -1,13 +1,16 @@
 <script>
   import * as m from "$lib/paraglide/messages.js";
   // Providers page: dashboard-managed provider credentials
-  // (/admin/provider-credentials).
+  // (/admin/provider-credentials), each row with its live status
+  // (/admin/providers/status).
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
+  import { untrack } from "svelte";
+  import { providerStatusState } from "../overview/overviewState.svelte.js";
   import { providersConfig } from "./providersConfig.svelte.js";
   import ProviderCredentialList from "./ProviderCredentialList.svelte";
   import ProviderCredentialEditor from "./ProviderCredentialEditor.svelte";
@@ -15,10 +18,16 @@
 
   const PAGE = "providers-config";
 
-  // Re-fetch when the page becomes active or the API key changes.
+  // Re-fetch when the page becomes active or the API key changes; stop the
+  // provider-status poll loop when navigating away.
   $effect(() => {
     void auth.refreshTick;
-    if (router.page === PAGE) providersConfig.fetchPage();
+    if (router.page !== PAGE) return;
+    untrack(() => {
+      providersConfig.fetchPage();
+      providerStatusState.fetch();
+    });
+    return () => providerStatusState.stopPolling();
   });
 </script>
 

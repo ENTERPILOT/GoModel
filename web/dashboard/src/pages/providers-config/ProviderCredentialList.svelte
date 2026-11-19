@@ -1,7 +1,8 @@
 <script>
   import * as m from "$lib/paraglide/messages.js";
   // Provider credential table. Managed rows (declared in config.yaml or env
-  // vars) show a Config badge and expose no edit/delete actions.
+  // vars) show a Config badge and expose no edit/delete actions. The Status
+  // column shows each provider's live status from /admin/providers/status.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
@@ -13,9 +14,14 @@
     providerRowNonBillable,
     providerRowsHaveActions,
   } from "./providersConfigLogic.js";
+  import { providerRowStatus, providerStatusByName } from "./providerRowStatus.js";
+  import { providerStatusState } from "../overview/overviewState.svelte.js";
+  import ProviderStatusPill from "../overview/ProviderStatusPill.svelte";
+  import { formatNumber } from "$lib/utils/format.js";
   import { Pencil, X } from "lucide";
 
   const showActions = $derived(providerRowsHaveActions(providersConfig.filteredRows));
+  const statusByName = $derived(providerStatusByName(providerStatusState.status.providers));
 </script>
 
 <div class="table-wrapper">
@@ -23,6 +29,7 @@
     <thead>
       <tr>
         <th>{m.providers_name()}</th>
+        <th>{m.providers_status()}</th>
         <th>{m.providers_type()}</th>
         <th>{m.overview_base_url()}</th>
         <th>{m.providers_auth()}</th>
@@ -36,6 +43,7 @@
     </thead>
     <tbody>
       {#each providersConfig.filteredRows as row (row.name)}
+        {@const status = providerRowStatus(row, statusByName)}
         <tr>
           <td>
             <span class="font-size-md"><HighlightText text={row.name} needle={providersConfig.filter} /></span>
@@ -50,6 +58,20 @@
                 class="alias-kind-badge"
                 title={m.providers_not_billable_title()}
                 >{m.providers_not_billable()}</span>
+            {/if}
+          </td>
+          <td>
+            {#if status}
+              <div class="provider-row-status">
+                <ProviderStatusPill provider={status.provider} />
+                <span class="provider-row-status-models"
+                >{m.providers_status_models({ count: formatNumber(status.modelCount) })}</span>
+              </div>
+              {#if status.lastError}
+                <div class="provider-row-status-error" title={status.lastError}>{status.lastError}</div>
+              {/if}
+            {:else}
+              <span class="provider-row-status-none" title={m.providers_status_unknown()}>—</span>
             {/if}
           </td>
           <td><span class="budget-source mono"><HighlightText text={row.type} needle={providersConfig.filter} /></span></td>
@@ -94,3 +116,30 @@
     </tbody>
   </table>
 </div>
+
+<style>
+  .provider-row-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .provider-row-status-models,
+  .provider-row-status-none {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  /* One line of the last error; the full text is in the tooltip. */
+  .provider-row-status-error {
+    max-width: 280px;
+    margin-top: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--danger);
+  }
+</style>

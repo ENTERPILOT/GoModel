@@ -13,6 +13,7 @@ import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
+import { providerStatusState } from "../overview/overviewState.svelte.js";
 import {
   defaultProviderCredentialForm,
   filterProviderCredentials,
@@ -287,11 +288,12 @@ class ProvidersConfigState {
     this.focusField = order.find((name) => invalid.includes(name)) || invalid[0];
   }
 
-  // Hot-registering a provider changes the live model inventory, so refresh
-  // the shared models store after every successful upsert/delete.
+  // Hot-registering a provider changes the live model inventory and the
+  // provider status, so refresh both after every successful upsert/delete.
   #refreshInventory() {
     modelsStore.fetchModels();
     modelsStore.fetchCategories();
+    providerStatusState.fetch();
   }
 
   async submitForm() {

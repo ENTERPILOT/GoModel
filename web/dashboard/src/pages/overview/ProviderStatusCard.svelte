@@ -2,10 +2,6 @@
   // One provider card in the Providers Overview grid: status pill, runtime
   // meta, and the expand/collapse toggle. The expandable details body lives
   // in ProviderStatusCardDetails.svelte.
-  //
-  // The status pill's state classes come from a computed string
-  // (providerStatusBadgeClass), so its palette rules must stay in this file
-  // where the compiler can see the pill markup.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { gomodelPath } from "$lib/api/paths.js";
   import { modelsStore } from "$lib/stores/models.svelte.js";
@@ -15,13 +11,12 @@
   import { virtualModels } from "../models/virtualModels.svelte.js";
   import { providerStatusState } from "./overviewState.svelte.js";
   import ProviderStatusCardDetails from "./ProviderStatusCardDetails.svelte";
+  import ProviderStatusPill from "./ProviderStatusPill.svelte";
   import {
-    providerStatusBadgeClass,
     providerTypeLabel,
     providerDocUrl,
     providerLastCheckedTime,
     providerLastCheckedTitle,
-    providerStatusPillTitle,
   } from "./providersLogic.js";
   import { ChevronDown } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
@@ -75,10 +70,7 @@
         {/if}
       </h4>
     </div>
-    <span
-      class="provider-status-pill {providerStatusBadgeClass(provider.status)}"
-      title={providerStatusPillTitle(provider)}
-    >{provider.status_label}</span>
+    <ProviderStatusPill {provider} />
   </div>
 
   <div class="provider-status-meta">
@@ -200,40 +192,6 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-muted);
-  }
-
-  .provider-status-pill {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 28px;
-    padding: 0 10px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    font-size: 12px;
-    font-weight: 700;
-    white-space: nowrap;
-  }
-
-  /* Status pill palette: reads identically to the breaker-state pill inside
-     the details (ProviderStatusCardDetails.svelte keeps its half of these
-     rules). Kept here because the pill's state class is a computed string. */
-  .provider-status-pill.is-healthy {
-    color: var(--success);
-    border-color: color-mix(in srgb, var(--success) 45%, var(--border));
-    background: color-mix(in srgb, var(--success) 10%, transparent);
-  }
-
-  .provider-status-pill.is-degraded {
-    color: var(--warning);
-    border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
-    background: color-mix(in srgb, var(--warning) 26%, var(--bg-surface));
-  }
-
-  .provider-status-pill.is-unhealthy {
-    color: var(--danger);
-    border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-    background: color-mix(in srgb, var(--danger) 10%, transparent);
   }
 
   .provider-status-meta {

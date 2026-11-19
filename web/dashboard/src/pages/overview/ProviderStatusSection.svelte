@@ -1,11 +1,21 @@
 <script>
-  // Providers Overview section: master details toggle + provider card grid.
+  // Providers Overview section: master details toggle + provider card grid,
+  // with a link to the Providers page, which shows the same status per row.
   import Spinner from "$lib/components/atoms/Spinner.svelte";
+  import { gomodelPath } from "$lib/api/paths.js";
+  import { router } from "$lib/stores/router.svelte.js";
   import ProviderStatusCard from "./ProviderStatusCard.svelte";
   import { providerStatusState } from "./overviewState.svelte.js";
   import * as m from "$lib/paraglide/messages.js";
 
   const providers = $derived(providerStatusState.status.providers);
+
+  // A real href keeps open-in-new-tab working; a plain click routes in-app.
+  function openProvidersPage(event) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    router.navigate("providers-config");
+  }
 </script>
 
 {#if providers.length > 0}
@@ -17,6 +27,11 @@
     <div class="provider-status-section-header">
       <div>
         <h3>{m.overview_providers_title()}</h3>
+        <a
+          class="provider-status-manage-link"
+          href={gomodelPath("/admin/dashboard/providers-config")}
+          onclick={openProvidersPage}
+        >{m.overview_manage_providers()}</a>
       </div>
       <button
         type="button"
@@ -61,6 +76,16 @@
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.provider-status-manage-link {
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.provider-status-manage-link:hover {
+  text-decoration: underline;
 }
 
 .provider-status-toggle {
