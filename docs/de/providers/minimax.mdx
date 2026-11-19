@@ -1,6 +1,6 @@
 ---
 title: "MiniMax"
-description: "Konfigurieren Sie MiniMax in GoModel: Chat-Modelle, Behandlung von temperature und natives Text-to-Speech über den Standard-Audio-Endpunkt."
+description: "Konfiguriere MiniMax in GoModel: Chat-Modelle, Behandlung von temperature und natives Text-to-Speech über den Standard-Audio-Endpunkt."
 icon: "audio-waveform"
 keywords: ["MiniMax", "Text-to-Speech", "text-to-speech", "TTS", "t2a_v2", "Provider-Einrichtung", "provider setup"]
 ---
@@ -8,7 +8,7 @@ keywords: ["MiniMax", "Text-to-Speech", "text-to-speech", "TTS", "t2a_v2", "Prov
 MiniMax bietet eine OpenAI-kompatible Chat-API, Chat-Modelle funktionieren
 also ohne weitere Anpassung. Text-to-Speech verwendet jedoch MiniMax' eigene
 `t2a_v2`-API – GoModel übersetzt den Standard-Endpunkt `/v1/audio/speech` für
-Sie in dieses Format.
+dich in dieses Format.
 
 ## Konfigurieren
 
@@ -32,18 +32,18 @@ ihn auf `https://api.minimaxi.com/v1` setzen.
 
 ## Videoeingabe
 
-Verwenden Sie `video_url`-Inhaltsteile in Nachrichten mit `MiniMax-M3` für
+Verwende `video_url`-Inhaltsteile in Nachrichten mit `MiniMax-M3` für
 Videoeingaben auf `/v1/chat/completions`, auch bei Streaming-Requests:
 
 ```json
 {"type":"video_url","video_url":{"url":"mm_file://your-file-id","detail":"high","fps":2}}
 ```
 
-Das Gateway behält Video-URLs und Verarbeitungseinstellungen bei. Sie können
+Das Gateway behält Video-URLs und Verarbeitungseinstellungen bei. Du kannst
 eine URL, eine Base64-Data-URL oder eine bestehende MiniMax-Dateireferenz
-angeben. Laden Sie große Videos zuerst über die Files API von MiniMax hoch; das
-Gateway lädt keine Videos für Sie hoch. Unterstützte Formate und
-Größenbeschränkungen finden Sie in der
+angeben. Lade große Videos zuerst über die Files API von MiniMax hoch; das
+Gateway lädt keine Videos für dich hoch. Unterstützte Formate und
+Größenbeschränkungen findest du in der
 [MiniMax-Referenz zur Videoeingabe](https://platform.minimax.io/docs/api-reference/text-openai-api#multimodal-input).
 
 ## Temperature
@@ -134,7 +134,7 @@ await writeFile("speech.mp3", Buffer.from(await speech.arrayBuffer()));
 - `speed` unterstützt `0.5`–`2.0` (Standard `1.0`).
 
 Speech-Modelle werden von MiniMax' `/models`-Auflistung meist nicht
-zurückgegeben. Tragen Sie sie daher in `MINIMAX_MODELS` ein und setzen Sie
+zurückgegeben. Trage sie daher in `MINIMAX_MODELS` ein und setze
 `MINIMAX_MODELS_MODE=merge`, damit sie neben den erkannten Modellen routbar sind
 (siehe [Modellmodi](/de/advanced/config-yaml#modellmodi)):
 
@@ -154,7 +154,7 @@ weiterzugeben.
 Alle folgenden Fälle liefern `invalid_request_error`, statt die Option
 stillschweigend zu verwerfen:
 
-- Speech-`instructions` (wählen Sie eine Voice-ID, die zum gewünschten Stil
+- Speech-`instructions` (wähle eine Voice-ID, die zum gewünschten Stil
   passt).
 - Speech-Werte für `response_format` außer `mp3`/`wav`/`flac`/`pcm` sowie
   `speed` außerhalb von `0.5`–`2.0`.
@@ -166,10 +166,10 @@ stillschweigend zu verwerfen:
 
 ## Image-to-Image-Generierung
 
-Senden Sie einen Multipart-Request an `/v1/images/edits` mit `model=image-01`
+Sende einen Multipart-Request an `/v1/images/edits` mit `model=image-01`
 oder `model=image-01-live`, einem `prompt` und hochgeladenen `image`-Dateien.
 MiniMax verwendet die Bilder als Referenzporträts für Figuren; maskierte
-Bearbeitungen führt es nicht aus. Verwenden Sie frontal aufgenommene Porträts
+Bearbeitungen führt es nicht aus. Verwende frontal aufgenommene Porträts
 im Format JPEG oder PNG, jeweils kleiner als 10 MB.
 
 Der Adapter sendet die Porträts als Data-URLs in `subject_reference` an
@@ -186,12 +186,12 @@ führen zu einem Validierungsfehler. Native HTTP-200-Fehler werden auf dieselbe
 Weise wie bei der unten beschriebenen Bildgenerierung auf den passenden
 OpenAI-Fehlerstatus abgebildet.
 
-Modellspezifische Parametergrenzen finden Sie in der
+Modellspezifische Parametergrenzen findest du in der
 [Image-to-Image-API von MiniMax](https://platform.minimax.io/docs/api-reference/image-generation-i2i).
 
 ## Bildgenerierung
 
-Verwenden Sie `image-01` oder `image-01-live` mit `/v1/images/generations`.
+Verwende `image-01` oder `image-01-live` mit `/v1/images/generations`.
 GoModel übersetzt Requests an MiniMax' nativen Endpunkt `/v1/image_generation`
 mit der konfigurierten Base-URL und liefert die generierten Bilder in `data`.
 
@@ -200,10 +200,10 @@ mit der konfigurierten Base-URL und liefert die generierten Bilder in `data`.
 ```
 
 Das Standard-Response-Format ist `url`; URLs verfallen nach 24 Stunden.
-Verwenden Sie `response_format: "b64_json"` für eingebettete Bilder. Natives
+Verwende `response_format: "b64_json"` für eingebettete Bilder. Natives
 `base64` wird ebenfalls akzeptiert. `size: "1024x1024"` wird auf `width` und
-`height` abgebildet; lassen Sie `size` weg, wenn Sie native Abmessungen oder
-`aspect_ratio` angeben. Native Optionen wie `seed` und `prompt_optimizer`
+`height` abgebildet; lass `size` weg, wenn du native Abmessungen oder
+`aspect_ratio` angibst. Native Optionen wie `seed` und `prompt_optimizer`
 werden durchgereicht. `quality` und Streaming werden nicht unterstützt.
 
 MiniMax meldet Fehler bei Bildgenerierung, Bildbearbeitung und Speech als
@@ -214,5 +214,5 @@ oder abgelehnte Eingaben, sonst 502 – und hängt MiniMax' eigenes
 `base_resp.status_msg` an die Fehlermeldung an, damit die Diagnose von
 Upstream nicht verloren geht.
 
-Modellspezifische Grenzen finden Sie in der
+Modellspezifische Grenzen findest du in der
 [Bild-API-Referenz von MiniMax](https://platform.minimax.io/docs/api-reference/image-generation-t2i).

@@ -1,7 +1,7 @@
 ---
 title: "Cursor: OpenAI-Base-URL überschreiben"
 sidebarTitle: "Cursor"
-description: "Leiten Sie den OpenAI-BYOK-Modell-Traffic von Cursor über GoModel, konfigurieren Sie eine öffentliche HTTPS-Base-URL und erfahren Sie, welche Cursor-Features das Gateway umgehen."
+description: "Leite den OpenAI-BYOK-Modell-Traffic von Cursor über GoModel, konfiguriere eine öffentliche HTTPS-Base-URL und erfahre, welche Cursor-Features das Gateway umgehen."
 icon: "mouse-pointer-click"
 keywords: ["Cursor", "Cursor IDE", "BYOK", "OpenAI-Base-URL überschreiben", "override OpenAI base URL", "Cursor-Proxy", "AI gateway", "KI-Gateway", "Einrichtungsanleitung"]
 ---
@@ -17,8 +17,8 @@ Ablauf:
 <Warning>
   GoModel muss unter einer öffentlichen HTTPS-URL erreichbar sein. Cursor leitet Requests für den
   finalen Aufbau des Prompts über sein Backend, daher ist `http://localhost:8080/v1` keine
-  zuverlässige Base-URL für Cursor. Stellen Sie eine bereitgestellte GoModel-Instanz hinter TLS,
-  oder verwenden Sie für einen vorübergehenden Test einen sicheren Tunnel.
+  zuverlässige Base-URL für Cursor. Stelle eine bereitgestellte GoModel-Instanz hinter TLS,
+  oder verwende für einen vorübergehenden Test einen sicheren Tunnel.
 </Warning>
 
 ## Cursor-Abonnement und GoModel sind getrennt
@@ -43,7 +43,7 @@ Es stellt GoModel kein Upstream-Modellguthaben bereit:
   kann.
 </Warning>
 
-Wenn GoModel ausgewählt ist, zahlen Sie daher für den Cursor-Plan und für die Modellnutzung auf dem
+Wenn GoModel ausgewählt ist, zahlst du daher für den Cursor-Plan und für die Modellnutzung auf dem
 Provider-Konto hinter GoModel. Team- und Enterprise-Kunden zahlen zusätzlich den Token-Tarif von
 Cursor für berechtigte BYOK-Requests an Drittanbieter.
 
@@ -53,38 +53,38 @@ Cursor für berechtigte BYOK-Requests an Drittanbieter.
 | --- | --- |
 | Chat-Modelle der OpenAI-Familie mit BYOK | Funktioniert über das Überschreiben der OpenAI-Base-URL |
 | Eigene OpenAI-kompatible Modelle | Verfügbar, aber die Kompatibilität von Cursor variiert je nach Modell und Release |
-| Agent und Tool Calls | Kann funktionieren; validieren Sie das ausgewählte Modell, da sich das Tool-Schema von Cursor zwischen Releases geändert hat |
-| Bildanhänge | In aktuellen Cursor-Releases unterstützt; aktualisieren Sie, wenn ein älteres Release die Base-URL ignoriert |
+| Agent und Tool Calls | Kann funktionieren; validiere das ausgewählte Modell, da sich das Tool-Schema von Cursor zwischen Releases geändert hat |
+| Bildanhänge | In aktuellen Cursor-Releases unterstützt; aktualisiere, wenn ein älteres Release die Base-URL ignoriert |
 | Tab-Vervollständigung | Nein; Cursor verwendet seine eingebauten Modelle |
 | Auto, Cursor-eigene Modelle und Background Agents | Werden durch BYOK nicht vollständig ersetzt |
 | Cursor CLI | Eigene API-Keys und Base-URLs werden derzeit nicht unterstützt |
 
 Das Überschreiben der OpenAI-Base-URL gilt global für das Routing von Modellen der OpenAI-Familie.
-Deaktivieren Sie es, bevor Sie ein von Cursor gehostetes Modell verwenden, das nicht über GoModel
+Deaktiviere es, bevor du ein von Cursor gehostetes Modell verwendest, das nicht über GoModel
 laufen soll.
 
-## Bevor Sie beginnen
+## Bevor du beginnst
 
-- Stellen Sie GoModel unter einer öffentlichen HTTPS-URL bereit, etwa
+- Stelle GoModel unter einer öffentlichen HTTPS-URL bereit, etwa
   `https://gomodel.example.com`.
-- Verwenden Sie einen kostenpflichtigen Cursor-Plan für Agent und Edit mit der GoModel-BYOK-Route.
-- Konfigurieren Sie in GoModel mindestens einen Upstream-Provider und ein Modell.
-- Erstellen Sie im Dashboard unter **API Keys -> Create API Key** einen eigenen verwalteten
+- Verwende einen kostenpflichtigen Cursor-Plan für Agent und Edit mit der GoModel-BYOK-Route.
+- Konfiguriere in GoModel mindestens einen Upstream-Provider und ein Modell.
+- Erstelle im Dashboard unter **API Keys -> Create API Key** einen eigenen verwalteten
   GoModel-API-Key für Cursor.
-- Installieren Sie ein aktuelles Cursor-Release. Korrekturen für eigene Endpunkte, einschließlich
+- Installiere ein aktuelles Cursor-Release. Korrekturen für eigene Endpunkte, einschließlich
   des Bild-Routings, wurden im Juni 2026 ausgeliefert.
 
 <Note>
-  Cursor sendet Ihren API-Key mit jedem Request an sein Backend. Laut Cursor wird der Key bei der
+  Cursor sendet deinen API-Key mit jedem Request an sein Backend. Laut Cursor wird der Key bei der
   Übertragung verschlüsselt und nicht gespeichert, die Zero-Data-Retention-Richtlinie gilt jedoch
-  nicht für BYOK-Requests. Verwenden Sie einen eigenen verwalteten GoModel-Key statt
+  nicht für BYOK-Requests. Verwende einen eigenen verwalteten GoModel-Key statt
   `GOMODEL_MASTER_KEY`.
 </Note>
 
 ## 1. GoModel starten
 
-Dieses Beispiel startet GoModel mit einem OpenAI-Upstream. Terminieren Sie TLS im Produktivbetrieb
-an einem Reverse Proxy oder Load Balancer und folgen Sie dem
+Dieses Beispiel startet GoModel mit einem OpenAI-Upstream. Terminiere TLS im Produktivbetrieb
+an einem Reverse Proxy oder Load Balancer und folge dem
 [Leitfaden für das Produktiv-Deployment](/de/guides/production).
 
 ```bash
@@ -94,13 +94,13 @@ docker run --rm -p 8080:8080 \
   enterpilot/gomodel
 ```
 
-`GOMODEL_MASTER_KEY` dient der Administration von GoModel. Geben Sie ihn nicht in Cursor ein,
-nachdem Sie einen eigenen verwalteten Key erstellt haben.
+`GOMODEL_MASTER_KEY` dient der Administration von GoModel. Gib ihn nicht in Cursor ein,
+nachdem du einen eigenen verwalteten Key erstellt hast.
 
 ## 2. Öffentlichen Endpunkt prüfen
 
-Führen Sie diese Prüfungen von einem Rechner aus, der sich nicht im privaten Netzwerk befindet, in
-dem GoModel läuft. Ersetzen Sie `sk_gom_...` durch den für Cursor erstellten Key.
+Führe diese Prüfungen von einem Rechner aus, der sich nicht im privaten Netzwerk befindet, in
+dem GoModel läuft. Ersetze `sk_gom_...` durch den für Cursor erstellten Key.
 
 ```bash
 curl -s https://gomodel.example.com/v1/models \
@@ -108,7 +108,7 @@ curl -s https://gomodel.example.com/v1/models \
   | jq '.data[].id'
 ```
 
-Prüfen Sie dann einen kleinen Chat-Completions-Request:
+Prüfe dann einen kleinen Chat-Completions-Request:
 
 ```bash
 curl -s https://gomodel.example.com/v1/chat/completions \
@@ -130,7 +130,7 @@ Die Response sollte `ok` enthalten.
 Die einfachste Einrichtung verwendet einen Modellnamen im OpenAI-Stil, den Cursor akzeptiert, etwa
 `gpt-4.1-mini`. Cursor leitet diesen Modellnamen unverändert an GoModel weiter.
 
-GoModel listet normalerweise Provider-qualifizierte Selektoren wie `openai/gpt-4.1-mini`. Legen Sie
+GoModel listet normalerweise Provider-qualifizierte Selektoren wie `openai/gpt-4.1-mini`. Lege
 ein [virtuelles Modell](/de/features/virtual-models) an, dessen kurzer Quellname zu Cursor passt und
 dessen Ziel der exakte Provider-qualifizierte Selektor ist:
 
@@ -140,8 +140,8 @@ virtual_models:
     target: openai/gpt-4.1-mini
 ```
 
-Sie können in Cursor auch einen eigenen Namen hinzufügen und denselben Namen als virtuelles Modell
-in GoModel verwenden. Vermeiden Sie eigene Namen, die mit `claude-` oder `gemini-` beginnen, weil
+Du kannst in Cursor auch einen eigenen Namen hinzufügen und denselben Namen als virtuelles Modell
+in GoModel verwenden. Vermeide eigene Namen, die mit `claude-` oder `gemini-` beginnen, weil
 Cursor diese über seine Provider-spezifischen BYOK-Pfade routet statt über die überschriebene
 OpenAI-Base-URL.
 
@@ -149,88 +149,88 @@ OpenAI-Base-URL.
 
 <Steps>
   <Step title="Modelleinstellungen öffnen">
-    Öffnen Sie in Cursor **Cursor Settings -> Models**.
+    Öffne in Cursor **Cursor Settings -> Models**.
   </Step>
   <Step title="OpenAI-API-Key setzen">
-    Suchen Sie **OpenAI API Key**, aktivieren Sie die Option und geben Sie den eigenen verwalteten
+    Suche **OpenAI API Key**, aktiviere die Option und gib den eigenen verwalteten
     GoModel-Key ein.
   </Step>
   <Step title="OpenAI-Base-URL überschreiben">
-    Aktivieren Sie **Override OpenAI Base URL** und geben Sie `https://gomodel.example.com/v1` ein.
-    Behalten Sie `/v1` bei; hängen Sie weder `/chat/completions` noch `/responses` an.
+    Aktiviere **Override OpenAI Base URL** und gib `https://gomodel.example.com/v1` ein.
+    Behalte `/v1` bei; hänge weder `/chat/completions` noch `/responses` an.
   </Step>
   <Step title="Einstellungen speichern">
-    Klicken Sie auf **Save**. Falls Ihr Cursor-Build **Verify** anzeigt, verwenden Sie auch diese
+    Klicke auf **Save**. Falls dein Cursor-Build **Verify** anzeigt, verwende auch diese
     Schaltfläche.
   </Step>
   <Step title="Modell auswählen">
-    Öffnen Sie einen neuen Chat und wählen Sie `gpt-4.1-mini`. Wenn Sie ein eigenes virtuelles Modell
-    angelegt haben, verwenden Sie zuerst **Add Model** in den Modelleinstellungen und geben Sie den
+    Öffne einen neuen Chat und wähle `gpt-4.1-mini`. Wenn du ein eigenes virtuelles Modell
+    angelegt hast, verwende zuerst **Add Model** in den Modelleinstellungen und gib den
     exakten Quellnamen ein.
   </Step>
 </Steps>
 
 ## 5. Cursor-Traffic validieren
 
-Beginnen Sie mit einem reinen Text-Prompt:
+Beginne mit einem reinen Text-Prompt:
 
 ```text
 Reply with exactly ok and no punctuation.
 ```
 
-Testen Sie dann den Agent-Modus in einem Wegwerfprojekt:
+Teste dann den Agent-Modus in einem Wegwerfprojekt:
 
 ```text
 Create a file named gomodel-cursor-test.txt containing exactly tool-ok
 ```
 
-Prüfen Sie die Änderung, bevor Sie sie akzeptieren. Melden Sie sich separat mit dem Master-Key
-oder einem verwalteten Key mit Dashboard-Zugriff im GoModel-Dashboard an. Öffnen Sie
-**Anfragen** und prüfen Sie, ob Cursor `POST /v1/chat/completions` erreicht und das erwartete
+Prüfe die Änderung, bevor du sie akzeptierst. Melde dich separat mit dem Master-Key
+oder einem verwalteten Key mit Dashboard-Zugriff im GoModel-Dashboard an. Öffne
+**Anfragen** und prüfe, ob Cursor `POST /v1/chat/completions` erreicht und das erwartete
 Modell verwendet hat.
 
 <Warning>
   Ein erfolgreicher Text-Prompt beweist nicht, dass jedes Agent-Tool mit dem ausgewählten Modell
   funktioniert. Cursor hat bei einigen neueren GPT-Modellen bereits Custom Tools im Responses-Stil in
   Chat-Completions-Requests gemischt. Wenn der Agent-Modus fehlschlägt, der Text-Chat aber
-  funktioniert, probieren Sie zuerst ein Standard-Chat-Modell ohne Reasoning und prüfen Sie die
-  Response im GoModel-Request-Log, bevor Sie das Gateway ändern.
+  funktioniert, probiere zuerst ein Standard-Chat-Modell ohne Reasoning und prüfe die
+  Response im GoModel-Request-Log, bevor du das Gateway änderst.
 </Warning>
 
 ## Fehlerbehebung
 
 ### Cursor kann `localhost` nicht erreichen
 
-Verwenden Sie eine öffentliche HTTPS-URL. Das Backend von Cursor muss GoModel erreichen können. Eine
+Verwende eine öffentliche HTTPS-URL. Das Backend von Cursor muss GoModel erreichen können. Eine
 lokale Adresse, eine private IP oder ein selbstsigniertes TLS-Zertifikat funktionieren nicht
 zuverlässig.
 
 ### `401 Unauthorized`
 
-Stellen Sie sicher, dass der Wert in **OpenAI API Key** der eigene GoModel-Key ist und dass der Key
-nicht widerrufen wurde. Geben Sie in Cursor keinen Key eines Upstream-Providers ein.
+Stelle sicher, dass der Wert in **OpenAI API Key** der eigene GoModel-Key ist und dass der Key
+nicht widerrufen wurde. Gib in Cursor keinen Key eines Upstream-Providers ein.
 
 ### `Model not found`
 
-Cursor leitet den ausgewählten Modellnamen an GoModel weiter. Kopieren Sie den exakten Selektor aus
-`/v1/models`, oder legen Sie ein virtuelles Modell an, dessen Quelle dem in Cursor angezeigten Namen
+Cursor leitet den ausgewählten Modellnamen an GoModel weiter. Kopiere den exakten Selektor aus
+`/v1/models`, oder lege ein virtuelles Modell an, dessen Quelle dem in Cursor angezeigten Namen
 entspricht.
 
 ### Von Cursor gehostete Modelle funktionieren nicht mehr
 
 Das Überschreiben von OpenAI kann sich auf andere Modell-Routen der OpenAI-Familie und einige von
-Cursor gehostete Modell-Routen auswirken. Deaktivieren Sie den eigenen OpenAI-Key und die Base-URL,
-bevor Sie zu diesen Modellen zurückwechseln, und starten Sie dann einen neuen Chat.
+Cursor gehostete Modell-Routen auswirken. Deaktiviere den eigenen OpenAI-Key und die Base-URL,
+bevor du zu diesen Modellen zurückwechselst, und starte dann einen neuen Chat.
 
 ### Agent oder Tool Calls schlagen fehl, Text funktioniert
 
-Aktualisieren Sie Cursor, versuchen Sie es erneut mit einem Standard-Chat-Modell von OpenAI und
-prüfen Sie das Request-Log von GoModel auf die Upstream-Response. Die Unterstützung eigener Endpunkte
+Aktualisiere Cursor, versuche es erneut mit einem Standard-Chat-Modell von OpenAI und
+prüfe das Request-Log von GoModel auf die Upstream-Response. Die Unterstützung eigener Endpunkte
 hatte Release-spezifische Payload-Fehler, besonders bei Custom Tools auf neueren GPT-Modellen.
 
 ### Bilder erreichen GoModel nicht
 
-Aktualisieren Sie Cursor. Cursor hat das Problem mit dem Bild-Routing bei eigener Base-URL im
+Aktualisiere Cursor. Cursor hat das Problem mit dem Bild-Routing bei eigener Base-URL im
 Release `3.9.16` im Juni 2026 behoben. Ältere Releases können den GoModel-Key direkt gegen OpenAI
 validieren und scheitern, bevor der Request GoModel erreicht.
 
@@ -243,11 +243,11 @@ verwenden.
 
 Für ein aus dem Internet erreichbares GoModel-Deployment:
 
-- verwenden Sie TLS mit einem öffentlich vertrauenswürdigen Zertifikat
-- geben Sie Cursor einen eigenen verwalteten Key statt des Master-Keys
-- schränken Sie den User Path und den Modellzugriff des Keys ein, wo sinnvoll
-- schützen Sie das Admin-Dashboard getrennt von der öffentlichen API
-- rotieren Sie den Cursor-Key, wenn er versehentlich irgendwo eingefügt oder geloggt wurde
+- verwende TLS mit einem öffentlich vertrauenswürdigen Zertifikat
+- gib Cursor einen eigenen verwalteten Key statt des Master-Keys
+- schränke den User Path und den Modellzugriff des Keys ein, wo sinnvoll
+- schütze das Admin-Dashboard getrennt von der öffentlichen API
+- rotiere den Cursor-Key, wenn er versehentlich irgendwo eingefügt oder geloggt wurde
 
 ## Referenzen
 
@@ -273,6 +273,6 @@ bestätigt.
 
 Die lokale Testumgebung enthielt keine lauffähige Cursor-Installation, daher wird der UI-Ablauf in
 Cursor nicht als lokal validierter End-to-End-Test ausgewiesen. Die GoModel-Endpunkte und das
-Verhalten von Modellen und Tools wurden separat getestet; wiederholen Sie
-[Schritt 5](/de/guides/cursor#5-cursor-traffic-validieren) mit der bereitgestellten URL und Ihrem Cursor-Release,
-bevor Sie sich im Produktivbetrieb auf den Agent-Modus verlassen.
+Verhalten von Modellen und Tools wurden separat getestet; wiederhole
+[Schritt 5](/de/guides/cursor#5-cursor-traffic-validieren) mit der bereitgestellten URL und deinem Cursor-Release,
+bevor du dich im Produktivbetrieb auf den Agent-Modus verlässt.

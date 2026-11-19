@@ -1,7 +1,7 @@
 ---
 title: "Jev / Kev (TypeSafe System One)"
 sidebarTitle: "Jev / Kev"
-description: "Routen Sie Entscheidungs-Requests an TypeSafe System One über GoModel, entweder an die gehostete Jev-API oder an einen self-hosted Kev-Server."
+description: "Route Entscheidungs-Requests an TypeSafe System One über GoModel, entweder an die gehostete Jev-API oder an einen self-hosted Kev-Server."
 icon: "scale"
 keywords: ["Jev", "Kev", "TypeSafe", "System One", "Entscheidungsmodell", "decision model", "Decisions API", "Klassifikation", "classification", "noul", "choice", "score", "self-hosted"]
 ---
@@ -18,7 +18,7 @@ Es gibt drei Fragetypen:
 | Typ | Fragt | Antwort |
 | --- | --- | --- |
 | `noul` | Eine Ja/Nein-Frage | `noul`: die Wahrscheinlichkeit für Ja |
-| `choice` | Wählt eine Option aus einer von Ihnen definierten Menge | `choice`, plus `probabilities` und `confidence` |
+| `choice` | Wählt eine Option aus einer von dir definierten Menge | `choice`, plus `probabilities` und `confidence` |
 | `score` | Bewertet anhand geordneter Stufen | `score`, plus `legend`, `probabilities` und `confidence` |
 
 GoModel stellt `jev`-Modelle auf zwei Arten bereit:
@@ -45,8 +45,8 @@ JEV_API_KEY=ts-...
 GOMODEL_MASTER_KEY=change-me
 ```
 
-Für einen self-hosted Kev-Server setzen Sie stattdessen die Basis-URL. Kev hat
-keine eigene Authentifizierung, lassen Sie den Key daher ungesetzt:
+Für einen self-hosted Kev-Server setzt du stattdessen die Basis-URL. Kev hat
+keine eigene Authentifizierung, lass den Key daher ungesetzt:
 
 ```bash
 JEV_BASE_URL=http://host.docker.internal:8009
@@ -57,7 +57,7 @@ GOMODEL_MASTER_KEY=change-me
   Die Standard-Basis-URL ist `https://api.typesafe.ai`, der Origin, den die
   TypeSafe SDKs verwenden; ein abschließendes `/v1` wird akzeptiert und entfernt,
   sodass beide Schreibweisen denselben Server ansprechen. Um die gehostete API und
-  ein lokales Kev parallel zu betreiben, registrieren Sie das zweite unter einem
+  ein lokales Kev parallel zu betreiben, registriere das zweite unter einem
   Namen mit Suffix: `JEV_KEV_BASE_URL=...` erstellt den Provider `jev-kev`,
   erreichbar unter `/p/jev-kev/...`. In `config.yaml` funktioniert jeder Name,
   etwa `kev: {type: jev, base_url: ...}`, und dieser Name erscheint in Logs, in
@@ -100,7 +100,7 @@ curl -s http://localhost:8080/v1/systemone \
 }
 ```
 
-Verwenden Sie auf einem Kev-Server `kev-latest` als Modell; er antwortet auch auf
+Verwende auf einem Kev-Server `kev-latest` als Modell; er antwortet auch auf
 `jev-latest`. Derselbe Request funktioniert unter `/p/jev/v1/systemone`, diese
 Passthrough-Route überspringt jedoch virtuelle Modelle und Guardrails; siehe
 [den nativen Endpunkt](/de/providers/jev#system-one-api).
@@ -129,13 +129,13 @@ curl -s http://localhost:8080/v1/decisions \
 
 Das gehostete Jev liest außerdem Bilder, die als Base64-PNG- oder -JPEG-Data-URLs
 gesendet werden; GoModel sendet sie als System-One-Bild-Assets. Kev-Server lesen
-nur Text. Die vollständige Zuordnung finden Sie unter
+nur Text. Die vollständige Zuordnung findest du unter
 [Jev und Kev](/de/advanced/decisions-api#jev-und-kev).
 
 ## Die TypeSafe SDKs verwenden
 
-Die SDKs senden `POST {base_url}/v1/systemone`. Richten Sie sie daher auf das
-Gateway selbst und authentifizieren Sie sich mit Ihrem GoModel-Key:
+Die SDKs senden `POST {base_url}/v1/systemone`. Richte sie daher auf das
+Gateway selbst und authentifiziere dich mit deinem GoModel-Key:
 
 <CodeGroup>
 ```python Python
@@ -163,10 +163,10 @@ console.log(result.answers.billing.noul);
 
 Dasselbe funktioniert mit `TYPESAFE_BASE_URL=http://localhost:8080` und
 `TYPESAFE_API_KEY=change-me` in der Umgebung. Bei mehreren System-One-Providern
-benennen Sie das Modell mit seinem Provider (`kev/kev-latest`) oder über ein
+benennst du das Modell mit seinem Provider (`kev/kev-latest`) oder über ein
 [virtuelles Modell](/de/features/virtual-models).
 Die Modellauflistung der SDKs erwartet das Format von TypeSafe, während
-`/v1/models` des Gateways dem OpenAI-Format folgt; listen Sie Upstream-Modelle
+`/v1/models` des Gateways dem OpenAI-Format folgt; liste Upstream-Modelle
 über `/p/jev/v1/models` auf.
 
 ## System One API
@@ -176,7 +176,7 @@ virtuelle Modelle, Guardrails auf `state`, den Response-Cache, Failover, Request
 und Nutzungserfassung an und leitet den Request nativ weiter, ohne ihn zu
 übersetzen. `/v1/systemone/permute` und `/v1/systemone/separate` von Kev
 funktionieren auf dieselbe Weise. Das vollständige Verhalten, einschließlich
-OpenRouter, das Jev ebenfalls nativ bereitstellt, finden Sie unter
+OpenRouter, das Jev ebenfalls nativ bereitstellt, findest du unter
 [System One API](/de/advanced/systemone-api).
 
 Alle anderen Upstream-Routen sind über [Passthrough](/de/features/passthrough-api)
@@ -190,7 +190,7 @@ erreichbar, ohne virtuelle Modelle, Guardrails oder Caching:
 Upstream-Fehler behalten ihren Statuscode, wobei der Body des Providers in der
 Fehlermeldung des Gateways enthalten ist: Eine fehlerhafte Frage kommt als `422`
 von TypeSafe zurück und nennt das betroffene Feld, und `429` oder `529`
-bedeuten, dass Sie die Last reduzieren und es erneut versuchen sollten.
+bedeuten, dass du die Last reduzieren und es erneut versuchen solltest.
 
 ## Modelle, Zugriffskontrolle und Kosten
 
@@ -211,15 +211,15 @@ als auch die Passthrough-Schnittstelle die
 Request an.
 
 Eine festgelegte Version wie `jev-1.13.0` funktioniert, ohne deklariert zu
-werden; wie nicht gelistete Namen geroutet werden, erfahren Sie unter
+werden; wie nicht gelistete Namen geroutet werden, erfährst du unter
 [Modelle](/de/advanced/systemone-api#modelle).
 
 `usage.input_tokens` und `usage.output_tokens` der Response werden erfasst,
 sodass System-One-Aufrufe in der Usage API und im Dashboard unter dem Modell
 erscheinen, das geantwortet hat (`jev-1.13.0` oder der Kev-Checkpoint). Jev
 wird pro Input-Token abgerechnet und ist nicht im Upstream-Modellkatalog
-enthalten; deklarieren Sie seine Preise beim Provider, damit diese Zeilen mit
-Kosten versehen werden, oder legen Sie sie im
+enthalten; deklariere seine Preise beim Provider, damit diese Zeilen mit
+Kosten versehen werden, oder lege sie im
 [Editor für Preis-Overrides](/de/features/cost-tracking) fest:
 
 ```yaml

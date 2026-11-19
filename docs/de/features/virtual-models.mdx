@@ -1,6 +1,6 @@
 ---
 title: "Virtuelle Modelle"
-description: "Nutzen Sie virtuelle Modelle in GoModel, um stabile Modellnamen bereitzustellen und Modellwechsel zu testen, ohne den Anwendungscode zu ändern."
+description: "Nutze virtuelle Modelle in GoModel, um stabile Modellnamen bereitzustellen und Modellwechsel zu testen, ohne den Anwendungscode zu ändern."
 icon: "tags"
 keywords: ["virtuelle Modelle", "virtual models", "Modell-Alias", "model alias", "Load Balancing", "Modell-Routing", "model routing", "Modellwechsel"]
 ---
@@ -14,21 +14,21 @@ keywords: ["virtuelle Modelle", "virtual models", "Modell-Alias", "model alias",
 
 ## Was virtuelle Modelle leisten
 
-Ein virtuelles Modell ist ein Modell, das Sie selbst definieren, statt eines,
-das ein Provider anbietet. GoModel bestimmt die Art danach, ob Sie ein Ziel
-angeben:
+Ein virtuelles Modell ist ein Modell, das du selbst definierst, statt eines,
+das ein Provider anbietet. GoModel bestimmt die Art danach, ob du ein Ziel
+angibst:
 
 - Ein **Redirect** (ein Alias) ist ein stabiler Name, der auf ein konkretes
-  Provider-Modell zeigt. Ihre Anwendung sendet den Namen im Feld `model`, und
+  Provider-Modell zeigt. Deine Anwendung sendet den Namen im Feld `model`, und
   GoModel löst ihn auf, bevor der Request an den Upstream gesendet wird.
 - Eine **Zugriffsrichtlinie** hat kein Ziel. Sie beschränkt einen vorhandenen
   Modell-Selektor nach `user_path` – oder deaktiviert ihn vollständig –, ohne
   einen neuen Namen hinzuzufügen. Zur Zugriffskontrolle siehe
   [User Path](/de/features/user-path#modellzugriff).
 
-Beides erstellen und verwalten Sie im Admin-Dashboard unter
-`Models -> New virtual model`. Füllen Sie **Target model** aus, um einen
-Redirect zu erstellen; lassen Sie das Feld leer, um eine Zugriffsrichtlinie für
+Beides erstellst und verwaltest du im Admin-Dashboard unter
+`Models -> New virtual model`. Fülle **Target model** aus, um einen
+Redirect zu erstellen; lass das Feld leer, um eine Zugriffsrichtlinie für
 den Selektor unter **Source** zu erstellen.
 
 GoModel speichert keine leeren, wirkungslosen Zugriffsrichtlinien, unabhängig
@@ -44,12 +44,12 @@ deaktivierten Standard oder eine geerbte User-Path-Beschränkung überschreibt.
 Die Seite [Slowdown](/de/features/slowdown) ist die vollständige Referenz,
 einschließlich der verzögerten Endpunkte.
 
-Setzen Sie **Slowdown** für ein konkretes Modell oder einen Redirect, um einen
+Setze **Slowdown** für ein konkretes Modell oder einen Redirect, um einen
 Anteil der gemessenen Inferenzzeit hinzuzufügen. Aktive Werte reichen von `0.1`
 bis `10`; zum Beispiel fügt `0.5` 50 % hinzu, sodass eine Response, die upstream
-2 Sekunden dauert, nach etwa 3 Sekunden zurückgegeben wird. Setzen Sie `0`, um
+2 Sekunden dauert, nach etwa 3 Sekunden zurückgegeben wird. Setze `0`, um
 Slowdown explizit zu deaktivieren, auch einen von einem konkreten Modell
-geerbten. Wenn Sie das Feld leer lassen, bleibt die Einstellung unbestimmt.
+geerbten. Wenn du das Feld leer lässt, bleibt die Einstellung unbestimmt.
 Verzögerungen berücksichtigen den Abbruch von Requests.
 
 Bei gestreamten Responses – SSE von Chat Completions und Responses API sowie die
@@ -58,13 +58,13 @@ im Hintergrund vollständig aus und gibt jeden gelesenen Chunk auf der skalierte
 Zeitachse frei. Dadurch bleibt das relative Chunk-Timing des Providers erhalten,
 während sich verzögerte Chunks im Arbeitsspeicher ansammeln. Ein großer Faktor
 bei einem langen oder umfangreichen Stream oder bei einer großen Audio-Response
-kann daher erheblichen Speicher belegen; lassen Sie Slowdown im Produktivbetrieb
+kann daher erheblichen Speicher belegen; lass Slowdown im Produktivbetrieb
 ungesetzt, wo es keinen Zweck erfüllt. Realtime-WebSocket-Sessions werden nicht
 verlangsamt.
 
 Wenn sowohl ein Alias als auch sein konkretes Ziel ein Slowdown haben, gilt der
 Wert des Alias. Ein Alias ohne eigenen Wert erbt das Slowdown des ausgewählten
-Zielmodells; setzen Sie den Alias auf `0`, um diese Vererbung zu überschreiben.
+Zielmodells; setze den Alias auf `0`, um diese Vererbung zu überschreiben.
 Das gilt auch für per Load Balancing verteilte virtuelle Modelle, nachdem ein
 Ziel ausgewählt wurde.
 
@@ -76,12 +76,12 @@ Zugriffsregel schaltet das Slowdown eines Modells also nie ab.
 
 ## Reasoning-Effort erzwingen
 
-Setzen Sie **Reasoning effort override** für ein konkretes Modell oder einen
+Setze **Reasoning effort override** für ein konkretes Modell oder einen
 Redirect, um diesen Reasoning-Effort upstream zu senden, unabhängig davon, was
-der Client angefragt hat. Nutzen Sie das, wenn ein Modell nur bestimmte Stufen
+der Client angefragt hat. Nutze das, wenn ein Modell nur bestimmte Stufen
 akzeptiert (zum Beispiel ein selbst gehostetes Modell, das `high` ablehnt), oder
 um Kosten und Latenz eines Modells festzulegen. Mögliche Werte sind `none`,
-`minimal`, `low`, `medium`, `high`, `xhigh` und `max`; lassen Sie das Feld leer
+`minimal`, `low`, `medium`, `high`, `xhigh` und `max`; lass das Feld leer
 (Standard), um den Wert des Clients beizubehalten.
 
 ```yaml
@@ -110,8 +110,8 @@ Wert auf dem Pfad, den das Routing gewählt hat; ein Failover-Versuch nutzt den
 zuerst deklarierten Pfad zu seinem Modell. Das gilt für Chat Completions, die Responses API und die Anthropic
 Messages API; Batches und Provider-Passthrough werden nicht umgeschrieben.
 
-Da der Override eines konkreten Modells jeden Alias darüber schlägt, setzen Sie
-ihn nur für Stufen, die das Modell nicht akzeptiert, und legen Sie Richtlinien
+Da der Override eines konkreten Modells jeden Alias darüber schlägt, setze
+ihn nur für Stufen, die das Modell nicht akzeptiert, und lege Richtlinien
 auf Aliase. Zum Beispiel können die Aliase `fast` und `smart` desselben Modells
 `low` und `high` senden; ein Override auf diesem Modell würde beide dessen Wert
 senden lassen. Das ist das Gegenteil von Slowdown, wo der Alias gewinnt. Wie
@@ -120,11 +120,11 @@ ohne Effort verdeckt keinen allgemeineren.
 
 ## Request-Parameter setzen
 
-Setzen Sie **params** und **default_params** für einen Redirect oder ein
+Setze **params** und **default_params** für einen Redirect oder ein
 konkretes Modell, um Request-Parameter upstream zu senden. `default_params`
 ergänzt einen Schlüssel nur, wenn der Client ihn weggelassen hat; `params`
 ersetzt, was der Client gesendet hat, und ein `null`-Wert entfernt den
-Schlüssel aus dem Request. Nutzen Sie Defaults für Sampling-Einstellungen, die
+Schlüssel aus dem Request. Nutze Defaults für Sampling-Einstellungen, die
 Aufrufer anpassen dürfen, und `params` für Einstellungen, die ein Alias
 festlegen muss. Beide Maps stehen in `config.yaml`, in der Umgebungsvariable
 `VIRTUAL_MODELS`, in der Admin API und im Dashboard-Editor zur Verfügung. Auch
@@ -158,7 +158,7 @@ reinen Chat-Keys `seed`, `stop`, `n`, `frequency_penalty`,
 `presence_penalty`, `logit_bias`, `logprobs`, `modalities`, `audio`,
 `prediction`, `web_search_options`, `response_format` und `verbosity`
 übersprungen (ein erzwungenes `null` entfernt den Wert des Clients trotzdem);
-ein Ausgabeformat oder die Verbosity setzen Sie dort über
+ein Ausgabeformat oder die Verbosity setzt du dort über
 `text`, etwa `{"format": {"type": "json_object"}}`. In Chat Completions werden
 die reinen Responses-Keys `text`, `include`, `truncation`, `max_tool_calls`,
 `background` und `context_management` übersprungen.
@@ -229,13 +229,13 @@ Der Rest dieser Seite behandelt Redirects.
 
 ## Stabile Namen verwenden
 
-Sie können Namen wie `regular` und `smarter` statt providerspezifischer
+Du kannst Namen wie `regular` und `smarter` statt providerspezifischer
 Modell-IDs bereitstellen.
 
 - `regular` -> `anthropic/claude-sonnet-4-6`
 - `smarter` -> `anthropic/claude-opus-4-6`
 
-Ihre Anwendung kann dann Folgendes senden:
+Deine Anwendung kann dann Folgendes senden:
 
 ```json
 {
@@ -247,11 +247,11 @@ Ihre Anwendung kann dann Folgendes senden:
 ## Load Balancing über mehrere Modelle
 
 Ein Redirect kann auf **mehrere** Zielmodelle zeigen und Requests auf diese
-verteilen. Fügen Sie im Editor mehr als ein Ziel hinzu (**Add target**) und
-wählen Sie eine **Strategie**:
+verteilen. Füge im Editor mehr als ein Ziel hinzu (**Add target**) und
+wähle eine **Strategie**:
 
 - **Round-robin** (Standard) verteilt Requests gleichmäßig reihum auf die Ziele.
-  Setzen Sie pro Ziel ein **Gewicht** (weight), um den Anteil zu verschieben –
+  Setze pro Ziel ein **Gewicht** (weight), um den Anteil zu verschieben –
   ein Ziel mit Gewicht `2` erhält doppelt so viel Traffic wie ein Ziel mit
   Gewicht `1`.
 - **Lowest cost** routet jeden Request an das günstigste derzeit verfügbare
@@ -280,11 +280,11 @@ wählen Sie eine **Strategie**:
 Ziele, die das Gateway derzeit nicht bedienen kann (unbekanntes Modell,
 Provider ausgefallen), werden automatisch übersprungen, sodass ein Redirect
 funktioniert, solange ein Ziel verfügbar ist. Dasselbe gilt für ein Zielmodell,
-das Sie **deaktiviert** haben, oder eines, das der API-Key oder `user_path` des
-Requests nicht verwenden darf: Jede Strategie routet daran vorbei. Wenn Sie ein
-Modell deaktivieren (zum Beispiel, während das Kontingent seines Providers
-erschöpft ist), wird sein Traffic also auf die anderen Ziele verlagert, bis Sie
-es wieder aktivieren. Sind alle verfügbaren Ziele deaktiviert oder verweigert,
+das du **deaktiviert** hast, oder eines, das der API-Key oder `user_path` des
+Requests nicht verwenden darf: Jede Strategie routet daran vorbei. Wenn du ein
+Modell deaktivierst (zum Beispiel, während das Kontingent seines Providers
+erschöpft ist), wird sein Traffic also auf die anderen Ziele verlagert, bis du
+es wieder aktivierst. Sind alle verfügbaren Ziele deaktiviert oder verweigert,
 schlägt der Request mit `model_access_denied` fehl; ist überhaupt kein Ziel
 verfügbar (unbekanntes Modell, Provider ausgefallen), wird der Name wie jeder
 andere Modellname aufgelöst, was meist in einem Model-not-found-Fehler endet.
@@ -298,15 +298,15 @@ aufgeführten Reihenfolge wiederholt. Die Checkbox **Failover** im Editor
 (standardmäßig aktiviert; `failover: false` als Code) schaltet das für einen
 Redirect ab, sodass ein fehlgeschlagener Request stattdessen mit dem Fehler
 beantwortet wird; sie kann auch global oder über den Workflow des Requests
-abgeschaltet werden. Unter [Failover](/de/features/failover) erfahren Sie, welche
-Fehler einen Retry auslösen und wie Sie einem echten Modell durch Überlagern
-eine Failover-Kette hinzufügen.
+abgeschaltet werden. Unter [Failover](/de/features/failover) erfährst du, welche
+Fehler einen Retry auslösen und wie du einem echten Modell durch Überlagern
+eine Failover-Kette hinzufügst.
 
 Requests, die zu einer erkannten Client-Session gehören, bleiben bei dem Ziel,
 das die Session zuerst bedient hat (**Session keeping**, standardmäßig
 aktiviert), sodass Konversationen den Prompt-Cache ihres Providers über mehrere
-Runden hinweg warm halten. Deaktivieren Sie die Checkbox **Session keeping** im
-Editor (oder setzen Sie `session_affinity: false`), um zustandsloses Balancing
+Runden hinweg warm halten. Deaktiviere die Checkbox **Session keeping** im
+Editor (oder setze `session_affinity: false`), um zustandsloses Balancing
 wiederherzustellen – siehe [Session Keeping](/de/features/session-keeping).
 
 ```json
@@ -316,16 +316,16 @@ wiederherzustellen – siehe [Session Keeping](/de/features/session-keeping).
 }
 ```
 
-Richten Sie zum Beispiel `smart` mit der Round-robin-Strategie sowohl auf
+Richte zum Beispiel `smart` mit der Round-robin-Strategie sowohl auf
 `openai/gpt-4o` als auch auf `anthropic/claude-sonnet-4-6`, um die Last
 aufzuteilen, oder mit der Kostenstrategie auf ein Premium- und ein günstiges
 Modell, um immer das günstigere zu nehmen.
 
 ## Ziele neu anordnen
 
-Die Zielliste ist geordnet, und der Editor hält sie bearbeitbar: Ziehen Sie den
+Die Zielliste ist geordnet, und der Editor hält sie bearbeitbar: Ziehe den
 **Griff** (☰) am linken Rand einer Zielzeile auf eine andere Zeile, um ihre
-Position zu ändern. Die Zeile, auf der Sie ablegen, wird nicht ersetzt – die
+Position zu ändern. Die Zeile, auf der du ablegst, wird nicht ersetzt – die
 gezogene Zeile rückt an ihre Position, und die Zeilen dazwischen verschieben
 sich. Tastaturbenutzer können den Griff fokussieren und mit **ArrowUp** /
 **ArrowDown** dieselbe Verschiebung vornehmen.
@@ -384,13 +384,13 @@ sodass eine Session beim selben konkreten Modell bleibt.
 Ein Ziel, das als einzelner Name geschrieben ist, wird überall dort, wo es
 deklariert ist – `config.yaml`, Dashboard oder Admin API –, nach Namen
 zugeordnet. `team/cheap` erreicht daher das gleichnamige virtuelle Modell, auch
-wenn es wie `provider/model` aussieht. Setzen Sie `provider` explizit
+wenn es wie `provider/model` aussieht. Setze `provider` explizit
 (`{ provider: groq, model: llama-3.3-70b }`), um ein Ziel unabhängig von einem
 gleichnamigen virtuellen Modell an ein konkretes Modell zu binden.
 
 Ein Redirect, der [ein echtes Modell überlagert](/de/features/virtual-models#ein-modell-überlagern) und dieses
 Modell unter seinen eigenen Zielen aufführt (die Form, die die Seite Models
-erstellt, wenn Sie einem Modell Fallbacks oder Balancing hinzufügen), umhüllt
+erstellt, wenn du einem Modell Fallbacks oder Balancing hinzufügst), umhüllt
 das Modell, statt es zu ersetzen. Ein Alias oder jeder andere Redirect, der das
 Modell nennt, verkettet sich in diese Hülle und erhält so dasselbe Balancing und
 Failover wie ein direkter Request – mit einer Ausnahme: Die Fallback-Referenz
@@ -408,24 +408,24 @@ ausgerichtet sind.
 Ketten müssen zyklenfrei sein (`a -> b -> a` wird mit ausgeschriebenem Zyklus
 abgelehnt) und dürfen höchstens 8 virtuelle Modelle tief sein. Beide Regeln
 werden beim Speichern im Dashboard und beim Start für deklarative Einträge
-durchgesetzt. Ein Ziel muss beim Speichern existieren – erstellen Sie zuerst das
+durchgesetzt. Ein Ziel muss beim Speichern existieren – erstelle zuerst das
 innere virtuelle Modell –, und ein virtuelles Modell, durch das andere verketten,
 kann nicht gelöscht oder umbenannt werden, bis diese neu ausgerichtet sind.
 
 ## Einen Redirect umbenennen oder neu ausrichten
 
-Öffnen Sie einen Redirect im Dashboard und bearbeiten Sie sein Feld **Source**,
+Öffne einen Redirect im Dashboard und bearbeite sein Feld **Source**,
 um ihn umzubenennen. GoModel verschiebt die Definition in einem Schritt auf den
-neuen Namen – der alte Name wird nicht mehr aufgelöst, aktualisieren Sie also
+neuen Namen – der alte Name wird nicht mehr aufgelöst, aktualisiere also
 jede Anwendung, die ihn noch sendet. Das Umbenennen auf einen Namen, der bereits
 zu einem anderen virtuellen Modell gehört, wird abgelehnt; das Umbenennen auf
 den Namen eines konkreten Modells überlagert dieses Modell (siehe
 [Ein Modell überlagern](/de/features/virtual-models#ein-modell-überlagern)).
 
 Redirects, die ein Modell überlagern, lassen sich auf dieselbe Weise bearbeiten –
-verwenden Sie die Aktion **Edit redirect** in der Zeile des Modells. Als Code
+verwende die Aktion **Edit redirect** in der Zeile des Modells. Als Code
 deklarierte virtuelle Modelle behalten ihre `source` fest in der Konfiguration;
-benennen Sie sie um, indem Sie die Deklaration bearbeiten.
+benenne sie um, indem du die Deklaration bearbeitest.
 
 ## Virtuelle Modelle als Code definieren
 
@@ -434,7 +434,7 @@ virtuelle Modelle statt im Dashboard in `config.yaml` oder in der
 Umgebungsvariable `VIRTUAL_MODELS` deklarieren. Deklarative Einträge werden beim
 Start angewendet, **überschreiben** jede Zeile im Admin-Speicher mit derselben
 `source` und werden im Dashboard schreibgeschützt angezeigt (mit dem Badge
-**Config**). Bearbeiten Sie die Konfiguration, um sie zu ändern.
+**Config**). Bearbeite die Konfiguration, um sie zu ändern.
 
 In `config.yaml`:
 
@@ -480,7 +480,7 @@ bis `10`), `reasoning_effort` (siehe
 [Request-Parameter setzen](#request-parameter-setzen)) und `enabled`.
 Ein Ziel-`model` kann ein anderes deklariertes virtuelles Modell nennen (siehe
 [Virtuelle Modelle verketten](/de/features/virtual-models#virtuelle-modelle-verketten)).
-Lassen Sie die Ziele leer, um eine Zugriffsrichtlinie für den `source`-Selektor
+Lass die Ziele leer, um eine Zugriffsrichtlinie für den `source`-Selektor
 zu deklarieren. Eine ungültige Deklaration (unbekannte Strategie, fehlendes oder
 selbstreferenzierendes Ziel, ein Kettenzyklus oder eine Kette, die tiefer als
 8 virtuelle Modelle ist, oder ein Ziel-`provider`, der keinem konfigurierten
@@ -501,7 +501,7 @@ Zwei tolerante Ausnahmen sorgen dafür, dass gültige Setups weiterhin starten:
 ## Standardmäßige Verfügbarkeit von Modellen
 
 Jedes Provider-Modell ist verfügbar, sofern kein `virtual_models`-Eintrag etwas
-anderes festlegt. Um diesen Standard umzukehren, setzen Sie:
+anderes festlegt. Um diesen Standard umzukehren, setze:
 
 ```env
 MODELS_ENABLED_BY_DEFAULT=false
@@ -513,9 +513,9 @@ reine Zugriffsregel (`enabled: true`, optional mit `user_paths`). Requests an
 nicht verfügbare Modelle schlagen mit `400 model_access_denied` fehl, und diese
 Modelle erscheinen nicht in `GET /v1/models`. Ein Redirect wird anhand seines
 eigenen `enabled`-Flags aufgelöst, sein Ziel wird aber wie ein direkter Aufruf
-validiert: Geben Sie bei ausgeschaltetem Standard auch dem Zielmodell einen
+validiert: Gib bei ausgeschaltetem Standard auch dem Zielmodell einen
 eigenen Zugriffseintrag. Ist dieses Ziel zugleich die Quelle eines anderen
-Redirects, verwenden Sie stattdessen eine providerweite oder modellweite
+Redirects, verwende stattdessen eine providerweite oder modellweite
 Richtlinie: Ein Zugriffseintrag für diese Quelle ersetzt dort einen im Dashboard
 verwalteten Redirect.
 
@@ -526,7 +526,7 @@ dürfen.
 
 ## Nur Redirects bereitstellen
 
-Um Provider-Modelle in `GET /v1/models` auszublenden, setzen Sie:
+Um Provider-Modelle in `GET /v1/models` auszublenden, setze:
 
 ```env
 KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT=true
@@ -541,7 +541,7 @@ Einstellung ist auch in `.env.template` aufgeführt.
 Standardmäßig gibt `GET /v1/models` Provider-qualifizierte IDs wie
 `openai/gpt-5` zurück. Manche Clients prüfen das konfigurierte Modell gegen
 diese Liste und kennen nur einfache Namen, sodass sie nie eine Übereinstimmung
-finden. Um stattdessen reine IDs aufzulisten, setzen Sie:
+finden. Um stattdessen reine IDs aufzulisten, setze:
 
 ```env
 UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true
@@ -553,7 +553,7 @@ reinen Modell-ID funktionieren in beiden Modi gleich.
 Einschränkung: Wenn zwei Provider dieselbe Modell-ID bereitstellen (zum Beispiel
 `gpt-5` sowohl bei `openai` als auch bei `azure`), wird nur der Provider
 aufgelistet, an den ein nicht qualifizierter Request geroutet wird (der zuerst
-registrierte). Um einen Namen an einen bestimmten Provider zu binden, fügen Sie
+registrierte). Um einen Namen an einen bestimmten Provider zu binden, füge
 ein virtuelles Modell mit diesem Namen als Quelle hinzu:
 
 ```yaml
@@ -568,23 +568,23 @@ Provider-Eintrag.
 ## Ein Modell überlagern
 
 Ein Redirect kann ein Modell „überlagern“ (Shadowing), indem er denselben Namen
-wie ein vorhandenes Modell verwendet und auf ein anderes Ziel zeigt. So können
-Sie ein angefordertes Modell überschreiben, ohne den Anwendungscode zu ändern.
+wie ein vorhandenes Modell verwendet und auf ein anderes Ziel zeigt. So kannst
+du ein angefordertes Modell überschreiben, ohne den Anwendungscode zu ändern.
 
 Zum Beispiel:
 
 - Quelle: `anthropic/claude-opus-4-6`
 - Zielmodell: `anthropic/claude-sonnet-4-6`
 
-Ihre Anwendung kann weiterhin `anthropic/claude-opus-4-6` senden, während
+Deine Anwendung kann weiterhin `anthropic/claude-opus-4-6` senden, während
 GoModel den Request an `anthropic/claude-sonnet-4-6` routet.
 
 ## A/B-Tests
 
-Redirects eignen sich gut für kurze Modellexperimente. Richten Sie einen
-Redirect von einem Ziel auf ein anderes um und vergleichen Sie dann das
+Redirects eignen sich gut für kurze Modellexperimente. Richte einen
+Redirect von einem Ziel auf ein anderes um und vergleiche dann das
 Verhalten der Anwendung, die Latenz und die Nutzung.
 
-Richten Sie zum Beispiel `smarter` für einen Test auf Opus und für einen anderen
-auf Sonnet. Sie können auch `opus-4-6` mit `sonnet-4-6` überlagern, um zu
+Richte zum Beispiel `smarter` für einen Test auf Opus und für einen anderen
+auf Sonnet. Du kannst auch `opus-4-6` mit `sonnet-4-6` überlagern, um zu
 prüfen, ob derselbe Ablauf in der Anwendung weiterhin funktioniert.

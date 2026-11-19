@@ -9,7 +9,7 @@ Xiaomi MiMo spricht eine OpenAI-kompatible Chat-API mit einigen
 Dialekt-Eigenheiten: Der Thinking-Modus ist standardmäßig aktiv, 1M-Kontext wird
 über ein Suffix an der Modell-ID ausgewählt, und TTS/ASR laufen über Chat
 Completions statt über eigene Audio-Endpunkte. GoModel übersetzt die
-Standard-Endpunkte `/v1/audio/speech` und `/v1/audio/transcriptions` für Sie in
+Standard-Endpunkte `/v1/audio/speech` und `/v1/audio/transcriptions` für dich in
 diesen Dialekt.
 
 ## Konfiguration
@@ -30,24 +30,24 @@ providers:
 
 ## Thinking-Modus
 
-MiMo-Modelle denken standardmäßig, was den Token-Verbrauch erhöht. Deaktivieren
-Sie dies pro Request mit dem MiMo-Parameter `thinking` – GoModel leitet ihn
+MiMo-Modelle denken standardmäßig, was den Token-Verbrauch erhöht. Deaktiviere
+dies pro Request mit dem MiMo-Parameter `thinking` – GoModel leitet ihn
 unverändert weiter:
 
 ```json
 {"model": "xiaomi/mimo-v2.5-pro", "thinking": {"type": "disabled"}, ...}
 ```
 
-Geben Sie in mehrstufigen Unterhaltungen mit Tool Calling das Feld
+Gib in mehrstufigen Unterhaltungen mit Tool Calling das Feld
 `reasoning_content` des Assistenten im Nachrichtenverlauf exakt so zurück, wie
-Sie es erhalten haben. GoModel erhält es in beide Richtungen.
+du es erhalten hast. GoModel erhält es in beide Richtungen.
 
 ## 1M-Kontext
 
-Hängen Sie `[1m]` an eine Modell-ID an (zum Beispiel `mimo-v2.5-pro[1m]`), um
+Hänge `[1m]` an eine Modell-ID an (zum Beispiel `mimo-v2.5-pro[1m]`), um
 einen Kontext von 1M Tokens zu aktivieren. Diese Varianten werden von der
-`/models`-Liste von MiMo meist nicht zurückgegeben. Tragen Sie sie daher in
-`XIAOMI_MODELS` ein und setzen Sie `XIAOMI_MODELS_MODE=merge`, damit sie neben
+`/models`-Liste von MiMo meist nicht zurückgegeben. Trage sie daher in
+`XIAOMI_MODELS` ein und setze `XIAOMI_MODELS_MODE=merge`, damit sie neben
 den erkannten Modellen geroutet werden können (siehe
 [Modellmodi](/de/advanced/config-yaml#modellmodi)):
 
@@ -56,7 +56,7 @@ XIAOMI_MODELS=mimo-v2.5-pro,mimo-v2.5-pro[1m]
 XIAOMI_MODELS_MODE=merge
 ```
 
-Behalten Sie auch das Basismodell in der Liste: Bis die erste `/models`-Abfrage
+Behalte auch das Basismodell in der Liste: Bis die erste `/models`-Abfrage
 gelingt, stellt `merge` nur die konfigurierten IDs bereit, während eine später
 fehlschlagende Aktualisierung die bereits erkannten Modelle behält.
 
@@ -76,7 +76,7 @@ MiMo hat keine nativen `/audio/*`-Endpunkte – TTS (`mimo-v2.5-tts`,
   Transkription unterstützt die Response-Formate `json` (Standard) und `text`,
   wobei `language` an die `asr_options` von MiMo durchgereicht und
   `temperature` an den Chat-Request weitergeleitet wird.
-- **MiMo-Chat-Dialekt** – senden Sie Chat Completions direkt: den zu
+- **MiMo-Chat-Dialekt** – sende Chat Completions direkt: den zu
   synthetisierenden Text in einer `assistant`-Nachricht mit einem
   Top-Level-Parameter `audio: {format, voice}` oder, für die Transkription,
   einen `input_audio`-Content-Part, dessen `data` eine base64-kodierte
@@ -89,7 +89,7 @@ stillschweigend zu verwerfen:
 
 - Embeddings.
 - Speech-Werte für `response_format` außer `wav`/`pcm`/`mp3` (`opus`, `aac`,
-  `flac`) sowie ein nicht standardmäßiger `speed`-Wert (verwenden Sie
+  `flac`) sowie ein nicht standardmäßiger `speed`-Wert (verwende
   `instructions`, um das Tempo anzupassen).
 - Die Transkriptionsformate `verbose_json`/`srt`/`vtt`, `prompt` und
   `timestamp_granularities` (MiMo liefert nur reinen Transkripttext).

@@ -113,7 +113,7 @@ alles andere wird durchgereicht, einschließlich des `usage`-Blocks und der
 zurückgegebenen Ausgabeparameter, die `gpt-image-1` meldet.
 
 <Tip>
-  Verwenden Sie einen `provider/model`-Selektor (zum Beispiel
+  Verwende einen `provider/model`-Selektor (zum Beispiel
   `"model": "openai/dall-e-3"`) oder den Hinweis `"provider"`, wenn dieselbe
   Modell-ID bei mehreren Providern konfiguriert ist – genau wie bei Chat.
 </Tip>
@@ -122,7 +122,7 @@ zurückgegebenen Ausgabeparameter, die `gpt-image-1` meldet.
 
 Bei Bearbeitungen werden das oder die Quellbilder und eine optionale Maske als
 `multipart/form-data` hochgeladen, genau wie es der Endpunkt von OpenAI
-erwartet. `image`, `prompt` und `model` sind erforderlich; senden Sie mehrere
+erwartet. `image`, `prompt` und `model` sind erforderlich; sende mehrere
 Quellbilder als `image[]` (gpt-image-1 akzeptiert bis zu 16). Eine `mask` ist
 ein PNG, dessen transparente Pixel den zu ändernden Bereich markieren.
 
@@ -207,7 +207,7 @@ kein Satz `per_image`/`per_request` –, wird die Nutzungszeile mit einem
 Vorbehalt zur Kostenberechnung markiert, sodass sie als „nicht gemeldete
 Nutzung“ erscheint und nicht als kostenloser Aufruf.
 
-Setzen Sie `per_image` über eine
+Setze `per_image` über eine
 [Preisüberschreibung](/de/features/cost-tracking#preise-überschreiben) oder in
 `config.yaml`, wenn der Modellkatalog keinen Preis für ein Bildmodell enthält:
 
@@ -236,17 +236,17 @@ Inferenz-Orchestrator**. Im Vergleich zu `/v1/chat/completions`:
   [Request-Log](/de/advanced/admin-endpoints) geschrieben.
 - **Kein Streaming** – `stream: true` wird mit `400` abgelehnt, weil
   gestreamte Bildgenerierung als Server-Sent Events geliefert wird, die diese
-  Endpunkte nicht weiterreichen. Lassen Sie `stream` weg (oder setzen Sie es
+  Endpunkte nicht weiterreichen. Lass `stream` weg (oder setze es
   auf `false`), um die vollständige JSON-Response zu erhalten.
 - **Variationen** (`/v1/images/variations`) werden nicht bereitgestellt.
-  Verwenden Sie die [Passthrough-API](/de/features/passthrough-api)
+  Verwende die [Passthrough-API](/de/features/passthrough-api)
   (`/p/{provider}/v1/images/...`), um sie bei einem bestimmten Provider zu
   erreichen.
 - **Request-Format von OpenAI als Eingabe** – Die nativen Bild-APIs von Google
   Gemini (Imagen `predict`, `generateContent` für Gemini-Bildmodelle) werden
   hinter diesen Endpunkten übersetzt; siehe die
   [Hinweise zu Providern](/de/advanced/images-api#google-gemini) unten. Andere Provider, deren native
-  Bild-API von der OpenAI-API abweicht, werden nicht übersetzt; verwenden Sie
+  Bild-API von der OpenAI-API abweicht, werden nicht übersetzt; verwende
   für diese Passthrough.
 
 ## Google Gemini
@@ -254,7 +254,7 @@ Inferenz-Orchestrator**. Im Vergleich zu `/v1/chat/completions`:
 Mit dem Gemini-Provider im nativen API-Modus (Standard) generieren
 Gemini-Bildmodelle (`gemini-2.5-flash-image`, ...) über `generateContent` und
 `imagen-*`-Modelle über die `predict`-API von Imagen. Google hat Imagen am
-17. August 2026 aus der Gemini API (AI Studio) entfernt – verwenden Sie dort
+17. August 2026 aus der Gemini API (AI Studio) entfernt – verwende dort
 ein Gemini-Bildmodell; Imagen bleibt auf [Vertex AI](/de/providers/vertex)
 verfügbar.
 
@@ -271,10 +271,10 @@ verfügbar.
   Gemini-Bildmodell zusätzlich zum Bild erzeugt, wird als `revised_prompt`
   ausgegeben.
 - Gemini-Bildmodelle melden Token-`usage` (tokenbasiert abgerechnet); Imagen
-  meldet keine (bepreisen Sie es mit `per_image`).
+  meldet keine (bepreise es mit `per_image`).
 - Bearbeitungen funktionieren nur mit Gemini-Bildmodellen: Uploads werden zu
   eingebetteten Bildteilen vor dem Prompt. `mask` wird nicht unterstützt –
-  beschreiben Sie den zu ändernden Bereich im Prompt. Imagen-Modelle können
+  beschreibe den zu ändernden Bereich im Prompt. Imagen-Modelle können
   nur generieren.
 
 Im OpenAI-kompatiblen Modus wird die Generierung an Geminis Endpunkt

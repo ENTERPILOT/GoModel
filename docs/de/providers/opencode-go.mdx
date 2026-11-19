@@ -1,14 +1,14 @@
 ---
 title: "OpenCode Go: Basis-URL und OpenAI-kompatibler Endpunkt"
 sidebarTitle: "OpenCode Go"
-description: "Konfigurieren Sie OpenCode Zen (Go-Abonnement) in GoModel über einen OpenAI-kompatiblen Endpunkt."
+description: "Konfiguriere OpenCode Zen (Go-Abonnement) in GoModel über einen OpenAI-kompatiblen Endpunkt."
 icon: "terminal"
 keywords: ["OpenCode Zen", "OpenCode Go", "OPENCODE_GO_BASE_URL", "OpenCode Go endpoint", "OpenCode-Go-Endpunkt", "Provider-Einrichtung", "provider setup"]
 ---
 
 [OpenCode Zen](https://opencode.ai/docs/zen/) stellt die Modelle seines
 „Go“-Abonnements hinter einer OpenAI-kompatiblen API bereit. GoModel bringt einen
-nativen Provider `opencode_go` mit, der die Basis-URL vorbelegt; Sie benötigen also
+nativen Provider `opencode_go` mit, der die Basis-URL vorbelegt; du benötigst also
 nur einen API-Key.
 
 ## Konfiguration
@@ -38,8 +38,8 @@ Console erzeugt wurde.
 
 `GET /v1/models` reicht die Modellliste von OpenCode Zen durch und stellt IDs wie
 `glm-5.1`, `kimi-k2.7-code`, `deepseek-v4-pro` und `mimo-v2.5-pro` bereit.
-Beschränken Sie die ausgewiesene Menge mit einer konfigurierten Liste, wenn Sie nur
-eine Teilmenge möchten:
+Beschränke die ausgewiesene Menge mit einer konfigurierten Liste, wenn du nur
+eine Teilmenge möchtest:
 
 ```bash
 OPENCODE_GO_MODELS=glm-5.1,kimi-k2.7-code,deepseek-v4-pro
@@ -63,7 +63,7 @@ routet pro Modell:
 
 Die Menge der Modelle, die nur über `/messages` erreichbar sind, wird derzeit manuell
 gepflegt (Standard: `qwen3.7-max`), weil OpenCode Zen noch keine Endpunkt-Metadaten
-pro Modell bereitstellt. Überschreiben Sie sie bei Bedarf:
+pro Modell bereitstellt. Überschreibe sie bei Bedarf:
 
 ```bash
 OPENCODE_GO_MESSAGES_MODELS=qwen3.7-max
@@ -99,7 +99,7 @@ weitergeleitet, falls vorhanden, sonst `gomodel`) und einem User-Agent
 [Nutzungsrichtlinien](https://opencode.ai/docs/go/#where-can-i-use-it) des Upstreams
 verlangen.
 
-Deaktivieren Sie die Weiterleitung der Session nur, wenn der Upstream Sie dazu
+Deaktiviere die Weiterleitung der Session nur, wenn der Upstream dich dazu
 auffordert:
 
 ```bash
@@ -117,13 +117,13 @@ Reasoning-Parameter fehlt:
 
 GoModel sendet daher auf `/chat/completions` `reasoning_effort: "low"`, wenn ein
 Request überhaupt keinen Reasoning-Parameter enthält. Modelle, die den Parameter
-ignorieren, sind davon nicht betroffen. Erhöhen Sie den Standardwert pro Deployment:
+ignorieren, sind davon nicht betroffen. Erhöhe den Standardwert pro Deployment:
 
 ```bash
 OPENCODE_GO_DEFAULT_REASONING_EFFORT=high
 ```
 
-Setzen Sie ihn auf `none` (oder `off`), um nichts einzufügen und Requests unverändert
+Setze ihn auf `none` (oder `off`), um nichts einzufügen und Requests unverändert
 weiterzuleiten.
 
 Clients behalten die Kontrolle, wenn sie selbst Reasoning anfordern: Über ein
@@ -153,7 +153,7 @@ Modell-IDs, die mit `deepseek` beginnen, erhalten dieselbe Request-Behandlung wi
 beim nativen DeepSeek-Provider, auch wenn ein virtuelles Modell zu ihnen routet:
 `reasoning_content` wird in früheren Assistant-Turns ergänzt, wenn Tools vorhanden
 sind, und Structured Output über `json_schema` folgt `DEEPSEEK_JSON_SCHEMA_MODE`.
-Details finden Sie unter [DeepSeek](/de/providers/deepseek#structured-outputs).
+Details findest du unter [DeepSeek](/de/providers/deepseek#structured-outputs).
 
 ## Nicht unterstützt
 

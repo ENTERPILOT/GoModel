@@ -1,6 +1,6 @@
 ---
 title: "Cache"
-description: "So funktioniert das Response-Caching in GoModel, so aktivieren Sie den exakten und den semantischen Cache, und das fließt in den Schlüssel des exakten Caches ein."
+description: "So funktioniert das Response-Caching in GoModel, so aktivierst du den exakten und den semantischen Cache, und das fließt in den Schlüssel des exakten Caches ein."
 icon: "database"
 keywords: ["Response-Cache", "response cache", "semantischer Cache", "semantic cache", "exakter Cache", "exact cache", "Cache-Schlüssel", "cache key", "Redis"]
 ---
@@ -48,7 +48,7 @@ X-Cache: HIT (semantic)
 
 ## Exakten Cache aktivieren
 
-Richten Sie das Response-Caching auf Redis aus:
+Richte das Response-Caching auf Redis aus:
 
 ```yaml
 cache:
@@ -59,7 +59,7 @@ cache:
         ttl: 3600
 ```
 
-Sie können es auch mit Umgebungsvariablen konfigurieren:
+Du kannst es auch mit Umgebungsvariablen konfigurieren:
 
 - `REDIS_URL`
 - `REDIS_KEY_RESPONSES`
@@ -67,7 +67,7 @@ Sie können es auch mit Umgebungsvariablen konfigurieren:
 
 ## Semantisches Caching aktivieren
 
-Fügen Sie einen `semantic`-Block mit einem Embedder-Provider und einem Vector Store
+Füge einen `semantic`-Block mit einem Embedder-Provider und einem Vector Store
 hinzu:
 
 ```yaml
@@ -92,8 +92,8 @@ Unterstützte Vector Stores:
 - `weaviate`
 
 Beide Cache-Ebenen laufen nach dem Patching durch Workflows und Guardrails und
-arbeiten daher auf dem endgültigen Request, der upstream gesendet wird. Verwenden
-Sie `Cache-Control: no-cache` oder `Cache-Control: no-store`, um das Caching pro
+arbeiten daher auf dem endgültigen Request, der upstream gesendet wird. Verwende
+`Cache-Control: no-cache` oder `Cache-Control: no-store`, um das Caching pro
 Request zu umgehen. Ein [Plugin](/de/advanced/plugins#entscheidungen) kann eine einzelne
 Response auch mit `NoStore` in seiner Entscheidung aus beiden Ebenen heraushalten;
 das nutzt eine Guardrail, die request-spezifische Daten in die Antwort
@@ -103,7 +103,7 @@ ausgespielt wird. Ein Request mit `background: true` auf
 beide Ebenen: Sein `queued`-Body enthält eine ID, die zur Response eines einzelnen
 Aufrufers gehört.
 
-Das vollständige Design des semantischen Caches und die Speicheroptionen finden Sie
+Das vollständige Design des semantischen Caches und die Speicheroptionen findest du
 in [ADR-0006](/adr/0006-semantic-response-cache).
 
 ## Woraus der Schlüssel des exakten Caches besteht
@@ -143,7 +143,7 @@ außen vor, weil sie die Antwort nicht verändern: `user` (bei Anthropic
 `metadata.user_id`), `metadata`, `safety_identifier`, `prompt_cache_key` und
 `prompt_cache_retention`. Claude Code sendet zum Beispiel für jede Sitzung eine
 neue Sitzungs-ID in `metadata.user_id`, und ein wiederholter, nicht gestreamter
-Request aus einer neuen Sitzung trifft trotzdem. Um Mandanten zu trennen, partitionieren Sie den
+Request aus einer neuen Sitzung trifft trotzdem. Um Mandanten zu trennen, partitioniere den
 Cache nach `user_path` (siehe unten); Aufrufer unter demselben Pfad teilen sich
 weiterhin Einträge.
 
@@ -196,7 +196,7 @@ mitgelieferte Cache-Steuerungen haben immer Vorrang.
 
 Die Planung des Provider-Prompt-Caches ist standardmäßig aktiviert. Um die
 automatische Planung von GoModel zu deaktivieren und kompatible Cache-Direktiven
-des Clients weiterhin durchzureichen, setzen Sie:
+des Clients weiterhin durchzureichen, setze:
 
 ```bash
 PROVIDER_PROMPT_CACHE_PLANNER_ENABLED=false
@@ -220,7 +220,7 @@ eine für einen anderen Tenant gecachte Response erhalten kann.
 
 ### Cache nach `user_path` partitionieren
 
-Aktivieren Sie die Partitionierung, wenn Aufrufer nicht die gecachten Responses
+Aktiviere die Partitionierung, wenn Aufrufer nicht die gecachten Responses
 der anderen erhalten dürfen, zum Beispiel wenn an einen `user_path` gebundene
 API-Keys unterschiedlichen Tenants gehören:
 
@@ -230,7 +230,7 @@ cache:
     partition_by_user_path: true # Standard: false
 ```
 
-Oder setzen Sie `RESPONSE_CACHE_PARTITION_BY_USER_PATH=true`.
+Oder setze `RESPONSE_CACHE_PARTITION_BY_USER_PATH=true`.
 
 Die Einstellung gilt für jede Cache-Ebene, die die oben genannten Endpunkte
 nutzen (Embeddings und System One nutzen nur den exakten Cache), mit und ohne
@@ -254,14 +254,14 @@ Streaming:
 
 Eine Änderung der Einstellung führt bei bestehenden Einträgen zu Cache-Misses: Sie
 werden nie modusübergreifend ausgeliefert. Gelöscht werden sie aber auch nicht. Sie
-laufen mit ihrer TTL ab und werden wieder ausgeliefert, wenn Sie vorher
-zurückschalten. Damit zuvor geteilte Einträge nicht zurückkehren, warten Sie vor dem
-Zurückschalten die TTL ab oder leeren Sie den Cache. Semantische Einträge mit
-`ttl: 0` laufen nie ab; leeren Sie diese.
+laufen mit ihrer TTL ab und werden wieder ausgeliefert, wenn du vorher
+zurückschaltest. Damit zuvor geteilte Einträge nicht zurückkehren, warte vor dem
+Zurückschalten die TTL ab oder leere den Cache. Semantische Einträge mit
+`ttl: 0` laufen nie ab; leere diese.
 
 ### Andere Wege, den Cache einzugrenzen
 
-Wenn Sie nur unterschiedliches Cache-Verhalten pro Scope brauchen, aber keine
+Wenn du nur unterschiedliches Cache-Verhalten pro Scope brauchst, aber keine
 Isolation:
 
 - den Cache in einem Scoped Workflow deaktivieren
@@ -283,8 +283,8 @@ Request mit Miss wechselt per Failover und wird frisch bedient, und nichts davon
 gespeichert. Einträge, die vor dem Ausfall geschrieben wurden, werden weiterhin
 ausgeliefert, bis ihre TTL abläuft: Der Lookup läuft vor der Weiterleitung, sodass
 ein Hit zurückgegeben wird, ohne eines der Ziele zu berühren. Wenn ein Ziel für
-längere Zeit nicht verfügbar sein wird, ändern Sie die Reihenfolge der Kette (oder
-richten Sie das virtuelle Modell auf ein funktionierendes Ziel aus), damit die
+längere Zeit nicht verfügbar sein wird, ändere die Reihenfolge der Kette (oder
+richte das virtuelle Modell auf ein funktionierendes Ziel aus), damit die
 Responses, die es beantworten, wieder cachebar sind.
 
 Retries innerhalb eines Ziels sind nicht betroffen: Nur eine Response, die erzeugt
@@ -303,7 +303,7 @@ Sind Response-Caching und Nutzungserfassung aktiviert, stellt die Admin API eine
 Cache-Hits werden außerdem als Nutzungseinträge erfasst, mit dem `user_path` des
 Aufrufers und einem `cache_type` von `exact` oder `semantic`. Die Nutzungs-Endpunkte
 (`/admin/usage/*` und `/v1/usage`) lassen sie standardmäßig weg, damit Summen und
-Kosten die Provider-Ausgaben abbilden; übergeben Sie `cache_mode=all`, um sie
+Kosten die Provider-Ausgaben abbilden; übergib `cache_mode=all`, um sie
 einzuschließen, oder `cache_mode=cached`, um nur die Hits zu sehen.
 `/admin/usage/sessions` ist die Ausnahme: Die Request- und Token-Summen pro Session
 enthalten immer Cache-Hits, während die Kostenfelder dort nur Provider-Kosten

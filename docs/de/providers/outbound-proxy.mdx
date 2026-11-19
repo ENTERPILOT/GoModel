@@ -1,6 +1,6 @@
 ---
 title: "Ausgehende Proxys"
-description: "Leiten Sie den Traffic eines einzelnen Providers über einen HTTP-, HTTPS- oder SOCKS5-Proxy, während die übrigen die gatewayweiten Proxy-Einstellungen behalten."
+description: "Leite den Traffic eines einzelnen Providers über einen HTTP-, HTTPS- oder SOCKS5-Proxy, während die übrigen die gatewayweiten Proxy-Einstellungen behalten."
 icon: "route"
 keywords: ["Proxy", "proxy", "SOCKS5", "HTTP proxy", "HTTP-Proxy", "egress", "ausgehender Traffic", "HTTPS_PROXY", "geo-restricted", "Geoblocking", "static IP", "statische IP"]
 ---
@@ -10,9 +10,9 @@ dabei für den gesamten Prozess die Standardvariablen `HTTP_PROXY`, `HTTPS_PROXY
 und `NO_PROXY`. Damit ist ein Egress-Proxy im Unternehmen abgedeckt, über den
 sämtlicher Traffic laufen muss.
 
-Setzen Sie `proxy_url` an einem Provider, wenn nur **einige** Provider einen Proxy
+Setze `proxy_url` an einem Provider, wenn nur **einige** Provider einen Proxy
 benötigen oder verschiedene Provider unterschiedliche Proxys: etwa um einen Provider
-zu erreichen, der in Ihrer Region gesperrt ist, um einem Provider eine feste
+zu erreichen, der in deiner Region gesperrt ist, um einem Provider eine feste
 ausgehende IP für dessen Allowlist zu geben, oder um den Traffic eines einzelnen
 Providers zu untersuchen, während der Rest direkt bleibt.
 
@@ -91,7 +91,7 @@ curl -s -H "Authorization: Bearer $GOMODEL_API_KEY" \
   http://localhost:8080/admin/providers/status | jq '.providers[] | {name, proxy_url: .config.proxy_url}'
 ```
 
-Senden Sie anschließend einen Request und prüfen Sie, ob er im Access-Log des Proxys
+Sende anschließend einen Request und prüfe, ob er im Access-Log des Proxys
 erscheint, während vom Gateway aus über dessen eigene IP nichts beim Provider
 ankommt.
 

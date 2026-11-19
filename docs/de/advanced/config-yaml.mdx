@@ -1,15 +1,15 @@
 ---
 title: "config.yaml"
-description: "Wann Sie config.yaml verwenden sollten, wann nicht, und wie die Datei mit Umgebungsvariablen und Docker zusammenwirkt."
+description: "Wann du config.yaml verwenden solltest, wann nicht, und wie die Datei mit Umgebungsvariablen und Docker zusammenwirkt."
 icon: "file-cog"
 keywords: ["config.yaml", "YAML-Konfiguration", "YAML configuration", "Docker", "Umgebungsvariablen", "environment variables"]
 ---
 
 Ziel von GoModel ist es, `config.yaml` so weit wie möglich optional zu machen.
-Bevorzugen Sie Umgebungsvariablen für normale Deployments, CI, Container und das
+Bevorzuge Umgebungsvariablen für normale Deployments, CI, Container und das
 Einschleusen von Secrets.
 
-Verwenden Sie `config.yaml`, wenn Sie Strukturen benötigen, die sich mit
+Verwende `config.yaml`, wenn du Strukturen benötigst, die sich mit
 Umgebungsvariablen nicht sauber ausdrücken lassen, insbesondere:
 
 - Überschreibungen der Ausfallsicherheit pro Provider
@@ -30,7 +30,7 @@ Bindestrich: `OPENAI_EAST_API_KEY` registriert `openai-east`, und
 
 Google Vertex AI folgt derselben Regel vom Suffix zum Namen (`VERTEX_US_PROJECT`
 registriert `vertex-us`). Projekt, Region und weitere Vertex-Einstellungen
-müssen für jede Instanz dasselbe Suffix verwenden: Kombinieren Sie zum Beispiel
+müssen für jede Instanz dasselbe Suffix verwenden: Kombiniere zum Beispiel
 `VERTEX_US_PROJECT` mit `VERTEX_US_LOCATION`, nicht mit dem generischen
 `VERTEX_PROJECT` oder `VERTEX_LOCATION`. `VERTEX_AUTH_TYPE` ist standardmäßig
 `gcp_adc`.
@@ -48,24 +48,24 @@ llm-d-Instanzen akzeptieren außerdem die Steuerungen
 
 | Modus | Stellt bereit | Geeignet, wenn |
 |---|---|---|
-| `allowlist` (Standard) | Nur Ihre Liste | Sie genau diese Modelle wollen, z. B. ein Modell von OpenRouter |
-| `fallback` | Die Upstream-Liste; Ihre Liste nur, wenn `/models` fehlschlägt oder nichts liefert | `/models` manchmal nicht verfügbar ist, die Erkennung aber die Liste bestimmen soll |
-| `merge` | Die Upstream-Liste plus Ihre Modelle, die darin fehlen; verhält sich wie `fallback`, wenn `/models` fehlschlägt | ein Provider Modelle bereitstellt, die er nicht auflistet (Preview- oder nicht gelistete IDs) |
+| `allowlist` (Standard) | Nur deine Liste | du genau diese Modelle willst, z. B. ein Modell von OpenRouter |
+| `fallback` | Die Upstream-Liste; deine Liste nur, wenn `/models` fehlschlägt oder nichts liefert | `/models` manchmal nicht verfügbar ist, die Erkennung aber die Liste bestimmen soll |
+| `merge` | Die Upstream-Liste plus deine Modelle, die darin fehlen; verhält sich wie `fallback`, wenn `/models` fehlschlägt | ein Provider Modelle bereitstellt, die er nicht auflistet (Preview- oder nicht gelistete IDs) |
 
-Mit `allowlist` werden nur die konfigurierten IDs bereitgestellt: Modelle, die der Provider auflistet, die Sie aber nicht konfiguriert haben, kommen nie hinzu, und Anfragen für andere Modelle liefern 404 (Modell nicht gefunden). Damit wieder die Erkennung die Liste bestimmt, setzen Sie `CONFIGURED_PROVIDER_MODELS_MODE=fallback` oder überschreiben einen einzelnen Provider mit `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode`.
+Mit `allowlist` werden nur die konfigurierten IDs bereitgestellt: Modelle, die der Provider auflistet, die du aber nicht konfiguriert hast, kommen nie hinzu, und Anfragen für andere Modelle liefern 404 (Modell nicht gefunden). Damit wieder die Erkennung die Liste bestimmt, setze `CONFIGURED_PROVIDER_MODELS_MODE=fallback` oder überschreibe einen einzelnen Provider mit `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode`.
 
-`fallback` und `merge` lesen bei jeder Aktualisierung das `/models` des Providers. `allowlist` liest es nur für Metadaten – Kontextfenster, maximale Ausgabe-Tokens, Preise, Anzeigename und Modelltyp – Ihrer gelisteten Modelle, solange `ALLOWLIST_UPSTREAM_METADATA` auf `true` steht (Standard; YAML: `models.allowlist_upstream_metadata`) und `GOMODEL_OFFLINE` aus ist. Dieser Aufruf fügt nie Modelle hinzu, aber Upstream-Preise können entscheiden, welche konfigurierten Modelle eine Obergrenze `model_filter.max_price_per_mtok` passieren. Schlägt er fehl, bleiben die Metadaten der letzten erfolgreichen Abfrage erhalten.
+`fallback` und `merge` lesen bei jeder Aktualisierung das `/models` des Providers. `allowlist` liest es nur für Metadaten – Kontextfenster, maximale Ausgabe-Tokens, Preise, Anzeigename und Modelltyp – deiner gelisteten Modelle, solange `ALLOWLIST_UPSTREAM_METADATA` auf `true` steht (Standard; YAML: `models.allowlist_upstream_metadata`) und `GOMODEL_OFFLINE` aus ist. Dieser Aufruf fügt nie Modelle hinzu, aber Upstream-Preise können entscheiden, welche konfigurierten Modelle eine Obergrenze `model_filter.max_price_per_mtok` passieren. Schlägt er fehl, bleiben die Metadaten der letzten erfolgreichen Abfrage erhalten.
 
 <Warning>
 **Breaking Change:** Früher war `fallback` der Standard. Im Standardmodus
 `allowlist` bieten Provider mit einer Liste unter `models:` oder
 `<PROVIDER>_MODELS` jetzt nur diese Modelle an (Provider mit `fallback` oder
-`merge` sind nicht betroffen); setzen Sie `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, um das bisherige
+`merge` sind nicht betroffen); setze `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, um das bisherige
 Verhalten beizubehalten.
 </Warning>
 
-Setzen Sie `models_mode` an einem Provider, um den globalen Modus nur für diesen
-Provider zu überschreiben; ohne Wert gilt der globale Modus. So stellen Sie zum
+Setze `models_mode` an einem Provider, um den globalen Modus nur für diesen
+Provider zu überschreiben; ohne Wert gilt der globale Modus. So stellst du zum
 Beispiel ein einzelnes OpenRouter-Modell bereit, während selbst gehostete
 Provider ihre Modelle weiterhin erkennen:
 
@@ -85,9 +85,9 @@ liegt unter den erweiterten Optionen.
 ## Modelle eines Providers filtern
 
 `model_filter` grenzt das Inventar eines Providers auf die Modelle ein, die
-tatsächlich routbar sein sollen. Verwenden Sie es, wenn der Katalog eines
-Providers weit größer ist als das, was Sie bereitstellen möchten – zum Beispiel,
-wenn Sie das kostenlose Kontingent von OpenRouter für Experimente nutzen,
+tatsächlich routbar sein sollen. Verwende es, wenn der Katalog eines
+Providers weit größer ist als das, was du bereitstellen möchtest – zum Beispiel,
+wenn du das kostenlose Kontingent von OpenRouter für Experimente nutzt,
 während ein separater Provider den Produktions-Traffic bedient.
 
 ```yaml
@@ -118,7 +118,7 @@ ist keine Obergrenze. Die Preise stammen aus der Modell-Registry und aus den
 Angaben des Providers selbst – OpenRouter veröffentlicht eigene Preise, daher ist
 sein Katalog (einschließlich der `:free`-Varianten) ohne zusätzliche
 Konfiguration bepreist. Lokale Provider melden in der Regel überhaupt keine
-Preise; filtern Sie diese daher nach Muster statt nach Preis.
+Preise; filtere diese daher nach Muster statt nach Preis.
 
 `max_price_per_mtok` muss eine endliche Zahl größer oder gleich 0 sein. Eine
 negative, `NaN`- oder unendliche Obergrenze lässt den Start fehlschlagen, statt
@@ -187,7 +187,7 @@ Der Standard ist strikt, weil ein verworfener Eintrag unter `providers`,
 unbemerkt verändert – eine Kostenobergrenze, die nie greift, sieht genauso aus
 wie eine, die greift.
 
-Setzen Sie `CONFIG_STRICT=false`, um unbekannte Schlüssel zu Warnungen
+Setze `CONFIG_STRICT=false`, um unbekannte Schlüssel zu Warnungen
 herabzustufen und ohne sie zu starten. Das ist für das Zurückrollen einer
 Binärdatei unter einer neueren Konfigurationsdatei gedacht, nicht für den
 täglichen Einsatz:
@@ -204,7 +204,7 @@ Ein virtuelles Modell, dessen Ziel einen nicht existierenden Provider benennt,
 lässt den Start fehlschlagen, selbst wenn der Schlüssel, der diesen Provider
 deklariert hätte, mit einer Warnung ignoriert wurde.
 
-Damit Sie prüfen können, welche Ebene Ihre Provider geliefert hat, protokolliert
+Damit du prüfen kannst, welche Ebene deine Provider geliefert hat, protokolliert
 GoModel beim Start eine Zeile:
 
 ```json
@@ -224,11 +224,11 @@ Die maßgebliche Quelle liegt in der Haupt-Codebasis:
 - [config/config.go](https://github.com/ENTERPILOT/GoModel/blob/main/config/config.go)
 - [config/config.example.yaml](https://github.com/ENTERPILOT/GoModel/blob/main/config/config.example.yaml)
 
-Für Deployments unterhalb des Domain-Roots setzen Sie `server.base_path` oder
+Für Deployments unterhalb des Domain-Roots setzt du `server.base_path` oder
 `BASE_PATH`. Mit `BASE_PATH=/g` wird das Gateway beispielsweise unter
 `/g/v1/...`, `/g/admin/...` und `/g/health` bereitgestellt.
 
-Um den eingehenden User-Path-Header zu ändern, setzen Sie
+Um den eingehenden User-Path-Header zu ändern, setze
 `server.user_path_header` oder `USER_PATH_HEADER`. Standardmäßig bleibt es
 `X-GoModel-User-Path`.
 
@@ -245,7 +245,7 @@ das Gateway neu gestartet wird.
 
 GoModel liest zuerst `config/config.yaml`, dann `config.yaml`.
 
-Mit `docker run` können Sie eine Datei namens `config.yml` auf dem Host behalten
+Mit `docker run` kannst du eine Datei namens `config.yml` auf dem Host behalten
 und sie in den Container-Pfad einhängen, den GoModel erwartet:
 
 ```bash
@@ -283,10 +283,10 @@ Steht `${OPENAI_API_KEY}` in der YAML-Datei, ist die Umgebungsvariable aber
 tatsächlich nicht gesetzt, landet der literale String `${OPENAI_API_KEY}` als
 Wert des API-Keys. Der Filter für Zugangsdaten erkennt die Teilzeichenfolge `${`
 und entfernt den Provider vollständig. Das gilt auch, wenn `${VAR}` mitten im
-Wert steht, etwa bei `prefix-${OPENAI_API_KEY}`. Prüfen Sie immer, ob Ihre
-Umgebungsvariablen vor dem Start des Prozesses exportiert sind, oder geben Sie
+Wert steht, etwa bei `prefix-${OPENAI_API_KEY}`. Prüfe immer, ob deine
+Umgebungsvariablen vor dem Start des Prozesses exportiert sind, oder gib
 einen Standardwert an: `${OPENAI_API_KEY:-}`. Wenn der Start stattdessen
-abgebrochen werden soll, verwenden Sie die strikte
+abgebrochen werden soll, verwende die strikte
 [Secret-Referenz](/de/advanced/secret-references) `${env:OPENAI_API_KEY}`.
 
 ### Ein falsch eingerückter `providers:`-Abschnitt wird abgelehnt
@@ -310,7 +310,7 @@ Das strikte Parsen lehnt dies beim Start ab und nennt jede betroffene Zeile:
 failed to parse config.yaml: line 2: field uranium-geryon-9b not found; line 5: field uranium-gemma-embedding not found
 ```
 
-Rücken Sie Provider-Einträge um zwei Leerzeichen unter `providers:` ein. Vor
+Rücke Provider-Einträge um zwei Leerzeichen unter `providers:` ein. Vor
 Einführung des strikten Parsens startete diese Konfiguration ohne YAML-Provider
 und ohne Fehler. Mit `CONFIG_STRICT=false` startet sie ohne YAML-Provider und
 mit einer Warnung pro nicht eingerücktem Schlüssel.
@@ -326,6 +326,6 @@ Provider erfordert einen Block `providers.<name>.resilience:` in `config.yaml`.
 
 YAML wird in eine Struktur eingelesen, die bereits mit den eingebauten
 Standardwerten befüllt ist. Nur Felder, die in der Datei vorkommen, werden
-geschrieben. Lassen Sie `max_backoff` in `resilience.retry` weg, bleibt es beim
-eingebauten Standardwert; Standardwerte, mit denen Sie zufrieden sind, müssen
-Sie nicht wiederholen.
+geschrieben. Lass `max_backoff` in `resilience.retry` weg, bleibt es beim
+eingebauten Standardwert; Standardwerte, mit denen du zufrieden bist, musst
+du nicht wiederholen.

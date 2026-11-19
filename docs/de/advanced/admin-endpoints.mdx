@@ -7,25 +7,25 @@ keywords: ["Admin API", "Dashboard", "REST API", "Monitoring", "Überwachung", "
 
 ## Philosophie
 
-GoModel wird mit **standardmäßig aktivierten** Admin-Endpunkten ausgeliefert. Das Ziel ist einfach: Sie sollen GoModel deployen können und sofort sehen, was passiert – ohne zusätzliche Dienste, ohne separaten Monitoring-Stack, ohne Konfiguration.
+GoModel wird mit **standardmäßig aktivierten** Admin-Endpunkten ausgeliefert. Das Ziel ist einfach: Du sollst GoModel deployen können und sofort sehen, was passiert – ohne zusätzliche Dienste, ohne separaten Monitoring-Stack, ohne Konfiguration.
 
 Die Admin-Schicht besteht aus zwei unabhängig steuerbaren Teilen:
 
 1. **Admin-REST-API** (`/admin/*`) – maschinenlesbare JSON-Endpunkte für Nutzungsdaten, Budgets und den Modellbestand. Wie alle anderen API-Routen durch `GOMODEL_MASTER_KEY` geschützt.
 2. **Admin-Dashboard-UI** (`/admin/dashboard`) – ein schlankes, eingebettetes HTML-Dashboard, das dieselben Daten visualisiert. Keine externen Abhängigkeiten, keine zu installierenden JavaScript-Frameworks – es ist in das Binary einkompiliert.
 
-Beide sind standardmäßig aktiv, denn Observability sollte kein Opt-in sein. Wenn Sie sie nicht benötigen, schalten Sie sie mit einer einzigen Umgebungsvariable ab.
+Beide sind standardmäßig aktiv, denn Observability sollte kein Opt-in sein. Wenn du sie nicht benötigst, schalte sie mit einer einzigen Umgebungsvariable ab.
 
 ## Konfiguration
 
 Das Verhalten von Admin-Schicht und Dashboard wird über Umgebungsvariablen (oder den
 entsprechenden YAML-Block `admin:`) gesteuert. Unter
-[Admin-Konfiguration](/de/advanced/configuration#admin) finden Sie die vollständige Tabelle der
+[Admin-Konfiguration](/de/advanced/configuration#admin) findest du die vollständige Tabelle der
 Variablen, Standardwerte und den entsprechenden YAML-Block `admin:`.
 
 <Note>
-  Die Dashboard-UI setzt eine aktivierte REST-API voraus. Wenn Sie
-  `ADMIN_ENDPOINTS_ENABLED=false` setzen, aber `ADMIN_UI_ENABLED=true` belassen, wird die UI
+  Die Dashboard-UI setzt eine aktivierte REST-API voraus. Wenn du
+  `ADMIN_ENDPOINTS_ENABLED=false` setzt, aber `ADMIN_UI_ENABLED=true` belässt, wird die UI
   automatisch deaktiviert und eine Warnung in die Logs geschrieben.
 </Note>
 
@@ -72,7 +72,7 @@ console.log(summary);
 
 </CodeGroup>
 
-Dashboard-Zugriff erteilen oder entziehen Sie pro Key auf der Seite „API Keys“ des Dashboards, beim Erstellen (`"dashboard_access": true` bei `POST /admin/auth-keys`) oder nachträglich:
+Dashboard-Zugriff erteilst oder entziehst du pro Key auf der Seite „API Keys“ des Dashboards, beim Erstellen (`"dashboard_access": true` bei `POST /admin/auth-keys`) oder nachträglich:
 
 <CodeGroup>
 
@@ -124,16 +124,16 @@ Zeilen von `GET /admin/auth-keys` enthalten `restricted` und `effective_models` 
 Katalogmodelle, die ein Request mit diesem Key tatsächlich aufrufen kann, nach Anwendung der
 User-Path-Richtlinien, der eigenen Allowlist des Keys und der modellseitigen Richtlinien.
 
-Beschränken Sie einen Key auf bestimmte Modelle mit dem optionalen Feld `allowed_models` bei
+Beschränke einen Key auf bestimmte Modelle mit dem optionalen Feld `allowed_models` bei
 `POST /admin/auth-keys` (fehlt es, gibt es wie bei jedem anderen optionalen Erstellungsfeld
 keine Beschränkung auf Key-Ebene) oder nachträglich mit
 `PUT /admin/auth-keys/<key-id>/allowed-models` (`{"allowed_models": ["anthropic/*", "openai/gpt-4o"]}`;
 eine explizit leere Liste hebt die Beschränkung auf Key-Ebene auf; ein fehlendes Feld wird abgelehnt). Allowlists auf Gruppen- und
-Benutzerebene verwalten Sie über die [Benutzer-Endpunkte](/de/advanced/admin-endpoints#benutzer-endpunkte).
+Benutzerebene verwaltest du über die [Benutzer-Endpunkte](/de/advanced/admin-endpoints#benutzer-endpunkte).
 
-Dashboard-Zugriff regelt nur `/admin/*`. Modell-Endpunkte und der Self-Service-Endpunkt [`GET /v1/usage`](/de/advanced/usage-api) bleiben für jeden verwalteten Key verfügbar, mit Ausnahme der Provider-Passthrough-Routen (`/p/{provider}/...`): Verwaltete Keys werden ohne Passthrough-Zugriff erstellt; Sie erteilen ihn mit `"passthrough_access": true` bei `POST /admin/auth-keys` oder mit `PUT /admin/auth-keys/<key-id>/passthrough-access` (siehe [Passthrough-Zugriffskontrolle](/de/features/passthrough-api#zugriffskontrolle)).
+Dashboard-Zugriff regelt nur `/admin/*`. Modell-Endpunkte und der Self-Service-Endpunkt [`GET /v1/usage`](/de/advanced/usage-api) bleiben für jeden verwalteten Key verfügbar, mit Ausnahme der Provider-Passthrough-Routen (`/p/{provider}/...`): Verwaltete Keys werden ohne Passthrough-Zugriff erstellt; du erteilst ihn mit `"passthrough_access": true` bei `POST /admin/auth-keys` oder mit `PUT /admin/auth-keys/<key-id>/passthrough-access` (siehe [Passthrough-Zugriffskontrolle](/de/features/passthrough-api#zugriffskontrolle)).
 
-Key-Namen müssen nicht eindeutig sein; eindeutig ist nur das Token. Benennen Sie
+Key-Namen müssen nicht eindeutig sein; eindeutig ist nur das Token. Benenne
 einen Key mit `PUT /admin/auth-keys/<key-id>/name` (`{"name": "ci-deploy-old"}`)
 um; die Antwort enthält den aktualisierten Key. Der Name wird wie beim Erstellen
 getrimmt und darf nicht leer sein. Ein Key kann sich nicht selbst umbenennen
@@ -182,11 +182,11 @@ mit dem Code `auth_key_exists`.
 Ein importierter Key passt nur zum vollständigen LiteLLM-Token `sk-...`, ein
 von GoModel ausgestellter Key wird über sein Secret (den Teil nach dem Präfix)
 erkannt, sodass keiner für den anderen einspringen kann. Das gilt auch für ein eigenes Key-Präfix, das mit
-`sk-` beginnt. Ohne importierte Keys werden LiteLLM-Tokens wie bisher abgelehnt. Deaktivieren Sie einen importierten Key wie jeden
+`sk-` beginnt. Ohne importierte Keys werden LiteLLM-Tokens wie bisher abgelehnt. Deaktiviere einen importierten Key wie jeden
 anderen. Der Import-Endpunkt erfordert globalen Admin-Zugriff.
 
-Ein importierter Key ist genau so stark wie der LiteLLM-Key. Bei LiteLLM können Sie
-benutzerdefinierte Keys wie `sk-1234` wählen; ersetzen Sie solche durch einen neuen GoModel-Key, statt
+Ein importierter Key ist genau so stark wie der LiteLLM-Key. Bei LiteLLM kannst du
+benutzerdefinierte Keys wie `sk-1234` wählen; ersetze solche durch einen neuen GoModel-Key, statt
 sie zu importieren.
 
 ### Bereichsbeschränkter Admin-Zugriff
@@ -202,7 +202,7 @@ Erweiterungsidentitäten wie SSO-Sessions folgen derselben Regel: Der User-Path 
 ist der Teilbaum, den sie verwaltet. Eine Erweiterung bindet daher Gateway-Admins
 an `/` und Team-Admins an die Wurzel des Teams.
 
-Mit `GET /admin/access` finden Sie heraus, um welche Art es sich bei Zugangsdaten handelt:
+Mit `GET /admin/access` findest du heraus, um welche Art es sich bei Zugangsdaten handelt:
 
 ```json
 {"scope": "global"}
@@ -246,8 +246,8 @@ Derselbe Bereich gilt für `/v1`-Lebenszyklusobjekte; siehe
 Die Seiten der Dashboard-UI (`/admin/dashboard`) und die statischen Assets (`/admin/static/*`) **überspringen die Authentifizierung**, damit die Dashboard-Oberfläche erreichbar ist, ohne API-Keys im Browser zu konfigurieren – die Daten, die sie lädt, erfordern weiterhin einen Key mit Dashboard-Zugriff.
 
 <Warning>
-  Wenn Ihre GoModel-Instanz öffentlich erreichbar ist, beachten Sie, dass die Dashboard-UI
-  nicht authentifiziert ist. Deaktivieren Sie sie mit `ADMIN_UI_ENABLED=false` oder beschränken Sie
+  Wenn deine GoModel-Instanz öffentlich erreichbar ist, beachte, dass die Dashboard-UI
+  nicht authentifiziert ist. Deaktiviere sie mit `ADMIN_UI_ENABLED=false` oder beschränke
   den Zugriff auf Netzwerkebene.
 </Warning>
 
@@ -259,7 +259,7 @@ Alle Admin-API-Endpunkte sind unter `/admin` eingehängt.
   **Alter Pfad-Alias** – bis zum **09.08.2026** sind dieselben Endpunkte auch
   unter `/admin/api/v1/*` erreichbar. Responses auf dem alten Pfad enthalten
   `Deprecation: true`, `Sunset: Sun, 09 Aug 2026 00:00:00 GMT` und einen `Link`-Header,
-  der auf den neuen Pfad verweist. Zur Migration ersetzen Sie in Ihren Skripten `/admin/api/v1/` durch
+  der auf den neuen Pfad verweist. Zur Migration ersetzt du in deinen Skripten `/admin/api/v1/` durch
   `/admin/`. Ein Endpunkt wurde zusätzlich innerhalb von `/admin` verschoben:
   `/admin/api/v1/dashboard/config` → `/admin/runtime/config`.
 </Note>
@@ -292,7 +292,7 @@ Gibt aggregierte Statistiken zur Token-Nutzung für ein konfigurierbares Zeitfen
 | `cache_mode` | string | Welche Requests gezählt werden: `uncached`, `cached`, `all` (siehe [Cache-Modus](/de/advanced/admin-endpoints#cache-modus)) | `uncached` |
 | `auth_key_id` | string | Exakte ID des verwalteten Auth-Keys, der die Requests authentifiziert hat | —   |
 
-Verwenden Sie `start_date`/`end_date` für explizite Zeiträume oder `days` als Kurzform. Sind beide angegeben, haben `start_date`/`end_date` Vorrang.
+Verwende `start_date`/`end_date` für explizite Zeiträume oder `days` als Kurzform. Sind beide angegeben, haben `start_date`/`end_date` Vorrang.
 
 Jede Nutzungszeile erfasst den verwalteten Auth-Key, der den Request gestellt hat. Daher
 beantwortet `auth_key_id` die Frage „Wie viel hat dieser Key ausgegeben?“. Jeder Reporting-Endpunkt
@@ -406,10 +406,10 @@ enthalten nur Requests, die an Provider gingen, sodass vermiedene Cache-Kosten n
 
 ### GET /admin/usage/endpoints
 
-Gibt die Nutzung gruppiert nach Request-Endpunkt zurück, sodass Sie sehen, was Chat, Audio oder
+Gibt die Nutzung gruppiert nach Request-Endpunkt zurück, sodass du siehst, was Chat, Audio oder
 Embeddings kosten. Jede Zeile enthält die `operation`, zu der ihr Endpunkt gehört;
 Endpunkte mit derselben Bedeutung teilen sich eine Operation, sodass `/v1/chat/completions` und
-`/v1/messages` beide `chat_completions` sind. Summieren Sie die Zeilen nach `operation`, um eine
+`/v1/messages` beide `chat_completions` sind. Summiere die Zeilen nach `operation`, um eine
 Ansicht pro Operation zu erhalten. Für Endpunkte, die das Gateway nicht klassifiziert, wird `operation`
 weggelassen.
 
@@ -467,7 +467,7 @@ curl "http://localhost:8080/admin/usage/summary?operation=audio_speech,audio_tra
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
 
-Beide akzeptieren Listen, sodass Sie Dialekte vergleichen oder zusammenrechnen können:
+Beide akzeptieren Listen, sodass du Dialekte vergleichen oder zusammenrechnen kannst:
 
 ```bash
 # Chat Completions, Responses und Messages zusammen
@@ -480,7 +480,7 @@ curl "http://localhost:8080/admin/usage/summary?endpoint=/v1/chat/completions,/v
 ### Mehrwertige Filter
 
 Die Datenfilter `model`, `provider`, `label`, `auth_key_id`, `user_path` und
-`endpoint` nehmen jeweils mehrere Werte an. Wiederholen Sie den Parameter, um
+`endpoint` nehmen jeweils mehrere Werte an. Wiederhole den Parameter, um
 mehr als einen Wert zu übergeben. Ein Request erfüllt einen Filter, wenn er
 einen der Werte hat, und er muss jeden gesetzten Filter erfüllen:
 
@@ -591,8 +591,8 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
 - Die Tage des Zeitraums gelten in der Zeitzone des Headers `X-GoModel-Timezone`,
   ohne ihn in UTC, und `time_zone` meldet sie (auch als letzte CSV-Spalte).
 - Eine Rechnung enthält höchstens 50.000 Positionen (Kunde × Modell ×
-  Provider); darüber antwortet der Endpunkt mit `400`. Grenzen Sie Zeitraum
-  oder Filter ein oder fassen Sie Kunden mit `parent` zusammen.
+  Provider); darüber antwortet der Endpunkt mit `400`. Grenze Zeitraum
+  oder Filter ein oder fasse Kunden mit `parent` zusammen.
 - Kosten und `effective_markup_percent` sind `null`, wenn sie unbekannt sind;
   `effective_markup_percent` ist das Verhältnis von abgerechneten Kosten zu
   Provider-Kosten minus eins.
@@ -669,7 +669,7 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=12&top_user
   Requests an Provider, wie auf der Rechnung.
 - Jeder Nutzer wird gezählt, nichts wird unter „other“ zusammengefasst. Ein
   Benchmark enthält höchstens 100.000 Nutzermonate; darüber antwortet der
-  Endpunkt mit `400`. Wählen Sie einen tieferen `parent`, weniger Monate oder
+  Endpunkt mit `400`. Wähle einen tieferen `parent`, weniger Monate oder
   engere Filter.
 
 | Status | Code | Wann |
@@ -683,7 +683,7 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=12&top_user
 Jeder Treffer im [Response-Cache](/de/features/cache) wird als Nutzungseintrag erfasst, mit
 dem `user_path` des Aufrufers und einem `cache_type` von `exact` oder `semantic`. Die Nutzungs-Endpunkte
 lassen diese Einträge standardmäßig weg, sodass Requests, Tokens und Kosten durchweg
-die Ausgaben bei Providern beschreiben. Übergeben Sie `cache_mode`, um das zu ändern:
+die Ausgaben bei Providern beschreiben. Übergib `cache_mode`, um das zu ändern:
 
 | Wert       | Zählt                                                     |
 | ---------- | --------------------------------------------------------- |
@@ -816,7 +816,7 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   dem kein gespeicherter Wert steht, liefert `400`. Ein Wert, der nur aus
   Secret-Referenzen besteht, wird unverändert angezeigt.
 - `billable: false` kennzeichnet einen Provider, dessen Kosten der Aufrufer
-  Ihnen nicht schuldet; siehe
+  dir nicht schuldet; siehe
   [Budgets](/de/features/budgets#nicht-abrechenbare-provider).
 - `DELETE` liefert `204` bzw. `404` für einen unbekannten Namen.
 
@@ -838,9 +838,9 @@ verfügbar, wenn die Budgetverwaltung aktiviert ist.
 `PUT`, `DELETE` und `reset-one` identifizieren ein Budget über den zusammengesetzten
 Schlüssel `(user_path, period)` bzw. `(user_path, period_seconds)` für benutzerdefinierte Zeiträume.
 Diese Operationen wirken nicht global pro Zeitraum. Für die pfadbezogenen Routen `PUT` und
-`DELETE` muss `user_path` URL-kodiert werden; die Form des Requests finden Sie unter [Budgets](/de/features/budgets).
+`DELETE` muss `user_path` URL-kodiert werden; die Form des Requests findest du unter [Budgets](/de/features/budgets).
 
-Unter [Budgets](/de/features/budgets) finden Sie Request-Beispiele und das Durchsetzungsverhalten.
+Unter [Budgets](/de/features/budgets) findest du Request-Beispiele und das Durchsetzungsverhalten.
 
 ### Benutzer-Endpunkte
 
@@ -893,7 +893,7 @@ die hier schreibgeschützt sind (`409`, Code `user_managed`).
 
 `PUT /admin/users` akzeptiert `{"user_path": "/acme/eng", "allowed_models": ["anthropic/*"], "description": "..."}`
 und gibt den aktualisierten Baum zurück. Selektoren werden gegen die konfigurierten
-Provider validiert. Die Abgleichsregeln finden Sie unter [Benutzer](/de/features/users).
+Provider validiert. Die Abgleichsregeln findest du unter [Benutzer](/de/features/users).
 
 ### GET /admin/models
 
@@ -928,7 +928,7 @@ Gibt alle registrierten Modelle mit Provider-Typ und konfiguriertem Provider-Nam
 ]
 ```
 
-Das unterscheidet sich vom Standard-Endpunkt `/v1/models`: Die Admin-Version enthält für jedes Modell sowohl `provider_type` als auch `provider_name`. So erkennen Sie sowohl die Provider-Familie als auch die konkret konfigurierte Provider-Instanz, die das Modell bereitstellt.
+Das unterscheidet sich vom Standard-Endpunkt `/v1/models`: Die Admin-Version enthält für jedes Modell sowohl `provider_type` als auch `provider_name`. So erkennst du sowohl die Provider-Familie als auch die konkret konfigurierte Provider-Instanz, die das Modell bereitstellt.
 
 
 ### GET /admin/models/metadata
@@ -940,7 +940,7 @@ Provider in seiner eigenen Modellliste gemeldet hat, `catalog` der Eintrag in
 `config` die Metadaten-Überschreibung aus `config.yaml`; eine Ebene mit `null` weiß nichts
 über das Modell. `sources` nennt für jedes effektive Feld die maßgebliche Ebene
 (`config`, `provider`, `catalog` oder `inferred` für Modi, die aus der
-Modell-ID abgeleitet wurden). Die Rangfolge finden Sie unter [Modell-Metadaten](/de/advanced/model-metadata).
+Modell-ID abgeleitet wurden). Die Rangfolge findest du unter [Modell-Metadaten](/de/advanced/model-metadata).
 
 Die Seite **Models** des Dashboards ruft diesen Endpunkt ab, wenn eine Zeile aufgeklappt wird. Dafür wird
 nichts gespeichert: Die Ebenen werden bereits pro Modell vorgehalten, und der Katalogeintrag
@@ -1071,7 +1071,7 @@ ausgeschaltet ist (`PLUGINS_ENABLED=false` und `GUARDRAILS_ENABLED=false`).
 
 ## Admin-Dashboard
 
-Das Dashboard ist eine serverseitig gerenderte HTML-Seite, die in das GoModel-Binary eingebettet ist. Sie erreichen es unter:
+Das Dashboard ist eine serverseitig gerenderte HTML-Seite, die in das GoModel-Binary eingebettet ist. Du erreichst es unter:
 
 ```
 http://localhost:8080/admin/dashboard
@@ -1092,7 +1092,7 @@ und das Dashboard lädt die Daten neu über die normalen REST-Endpunkte.
 
 ## Admin-Features deaktivieren
 
-So deaktivieren Sie alle Admin-Features:
+So deaktivierst du alle Admin-Features:
 
 ```bash
 export ADMIN_ENDPOINTS_ENABLED=false

@@ -1,6 +1,6 @@
 ---
 title: "Swagger UI"
-description: "Stellen Sie eine interaktive Swagger UI für die API von GoModel aus einem Binary bereit, das mit dem Build-Tag swagger gebaut wurde."
+description: "Stelle eine interaktive Swagger UI für die API von GoModel aus einem Binary bereit, das mit dem Build-Tag swagger gebaut wurde."
 icon: "file-code"
 keywords: ["Swagger", "Swagger UI", "OpenAPI", "Build-Tag", "build tag", "API-Explorer", "API explorer"]
 ---
@@ -19,7 +19,7 @@ auf 88 MB) und damit auch das Image, und der Endpunkt wird im Produktivbetrieb
 selten benötigt. Ohne sie bleiben die Artefakte klein und die exponierte
 Angriffsfläche minimal.
 
-Wenn Sie nur die API-Spezifikation benötigen, verwenden Sie stattdessen die
+Wenn du nur die API-Spezifikation benötigst, verwende stattdessen die
 eingecheckte
 [`docs/openapi.json`](https://github.com/ENTERPILOT/GoModel/blob/main/docs/openapi.json)
 in einem beliebigen OpenAPI-Viewer.
@@ -52,10 +52,10 @@ server:
 
 <Warning>
 `/swagger/*` umgeht `GOMODEL_MASTER_KEY` und die Authentifizierung per
-Gateway-API-Key. Wenn Sie den Endpunkt aktivieren, veröffentlichen Sie also
+Gateway-API-Key. Wenn du den Endpunkt aktivierst, veröffentlichst du also
 eine interaktive API-Dokumentation für jeden, der den Server erreichen kann.
-Aktivieren Sie ihn nur in Entwicklungs- oder vertrauenswürdigen Umgebungen,
-oder schränken Sie den Pfad auf Netzwerkebene ein.
+Aktiviere ihn nur in Entwicklungs- oder vertrauenswürdigen Umgebungen,
+oder schränke den Pfad auf Netzwerkebene ein.
 </Warning>
 
 Die UI berücksichtigt `BASE_PATH`. Ist `SWAGGER_ENABLED=true` bei einem Binary
@@ -64,7 +64,7 @@ Warnung und liefert unter `/swagger/*` nichts aus.
 
 ## Spezifikation neu generieren
 
-Führen Sie nach Änderungen an API-Annotationen `make swagger` aus, um das
+Führe nach Änderungen an API-Annotationen `make swagger` aus, um das
 eingebettete docs-Paket und `docs/openapi.json` neu zu generieren. Details
-finden Sie in
+findest du in
 [DEVELOPMENT.md](https://github.com/ENTERPILOT/GoModel/blob/main/docs/DEVELOPMENT.md).

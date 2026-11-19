@@ -6,15 +6,15 @@ keywords: ["Go", "Golang", "Rust", "Python", "Wahl der Programmiersprache", "lan
 ---
 
 GoModel ist in Go geschrieben. Wir haben auch Rust ernsthaft in Betracht gezogen.
-Diese Seite erklärt, warum Go gewonnen hat, damit Sie beurteilen können, ob unsere
-Überlegungen zu Ihren eigenen Prioritäten passen.
+Diese Seite erklärt, warum Go gewonnen hat, damit du beurteilen kannst, ob unsere
+Überlegungen zu deinen eigenen Prioritäten passen.
 
 ## Ein Gateway ist ein Laufzeitproblem
 
 Ein AI-Gateway erledigt eine einzige Aufgabe tausende Male pro Sekunde: einen
 Request annehmen, ihn übersetzen, die Response eines Providers zurückstreamen und
-dann aus dem Weg gehen. Die Sprache, in der Sie es schreiben, entscheidet darüber,
-wie viel Ihres Latenzbudgets das Gateway selbst verbraucht.
+dann aus dem Weg gehen. Die Sprache, in der du es schreibst, entscheidet darüber,
+wie viel deines Latenzbudgets das Gateway selbst verbraucht.
 
 Go passt gut zu diesem Profil:
 
@@ -71,7 +71,7 @@ einen Netzwerk-Hop, der vor jedem Modellaufruf sitzt. Die Abwägungen werden in
 [Unsere Werte](/de/about/values) behandelt und auf der Seite
 [Benchmarks](/de/about/benchmarks) gemessen.
 
-## Was das für Sie bedeutet
+## Was das für dich bedeutet
 
 - **Betreiber** erhalten einen kleinen, schnellen, statisch gelinkten Service,
   der sich in Docker, Kubernetes und auf Bare Metal gleich verhält.

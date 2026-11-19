@@ -1,12 +1,12 @@
 ---
 title: "Oracle GenAI"
-description: "Konfigurieren Sie den OpenAI-kompatiblen Endpunkt von Oracle GenAI in GoModel, einschließlich der erforderlichen OCI-Richtlinie und konfigurierter Modelllisten."
+description: "Konfiguriere den OpenAI-kompatiblen Endpunkt von Oracle GenAI in GoModel, einschließlich der erforderlichen OCI-Richtlinie und konfigurierter Modelllisten."
 icon: "/brand/oracle.svg"
 keywords: ["Oracle GenAI", "OCI", "Provider einrichten", "provider setup"]
 ---
 
 GoModel ruft Oracle Generative AI über den OpenAI-kompatiblen Inferenz-Endpunkt von Oracle
-auf. Für die Einrichtung benötigen Sie eine OCI-IAM-Richtlinie für `generativeaiapikey`, eine
+auf. Für die Einrichtung benötigst du eine OCI-IAM-Richtlinie für `generativeaiapikey`, eine
 regionsspezifische Base-URL und eine konfigurierte Modellliste (`/models` von Oracle ist
 beim API-Key-Ablauf nicht zuverlässig verfügbar).
 
@@ -16,7 +16,7 @@ beim API-Key-Ablauf nicht zuverlässig verfügbar).
 Allow any-user to use generative-ai-family in tenancy where ALL {request.principal.type='generativeaiapikey'}
 ```
 
-Diese Richtlinie auf Tenancy-Ebene genügt zum Testen. In der Produktion schränken Sie sie auf ein
+Diese Richtlinie auf Tenancy-Ebene genügt zum Testen. In der Produktion schränkst du sie auf ein
 Compartment, einen API-Key oder ein bestimmtes Modell ein.
 
 ## 2. Konfigurieren
@@ -30,7 +30,7 @@ GOMODEL_MASTER_KEY=change-me
 
 `ORACLE_MODELS` ist eine kommagetrennte Liste (Leerzeichen werden entfernt). Standardmäßig
 werden nur diese Modelle bereitgestellt, Anfragen für andere Modelle liefern 404. Damit
-Oracles `/models` die Liste bestimmt, setzen Sie `ORACLE_MODELS_MODE=fallback` (oder global
+Oracles `/models` die Liste bestimmt, setze `ORACLE_MODELS_MODE=fallback` (oder global
 `CONFIGURED_PROVIDER_MODELS_MODE`); siehe [Modellmodi](/de/advanced/config-yaml#modellmodi).
 
 Oder in `config.yaml`:
@@ -124,14 +124,14 @@ console.log(completion.choices[0].message.content);
 `owned_by: "oracle"` zurück. Die Responses API funktioniert auf dieselbe Weise.
 
 <Note>
-  Verwenden Sie ein ausreichend hohes `max_tokens`-Budget. Einige Reasoning-Modelle bei Oracle
+  Verwende ein ausreichend hohes `max_tokens`-Budget. Einige Reasoning-Modelle bei Oracle
   können kurze Completions für Reasoning-Inhalte aufbrauchen, bevor sie den endgültigen
   Assistant-Text ausgeben.
 </Note>
 
 ## Mehrere Oracle-Provider
 
-Verwenden Sie Umgebungsvariablen mit Suffix, um eine zweite Oracle-Instanz zu registrieren:
+Verwende Umgebungsvariablen mit Suffix, um eine zweite Oracle-Instanz zu registrieren:
 
 ```bash
 ORACLE_US_BASE_URL=https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1
@@ -139,8 +139,8 @@ ORACLE_US_API_KEY=...
 ORACLE_US_MODELS=openai.gpt-oss-120b
 ```
 
-Damit wird der Provider `oracle-us` registriert. Greifen Sie nur dann zu YAML, wenn die generierten Namen
-nicht passen oder Sie Ausfallsicherheits-Einstellungen pro Provider überschreiben möchten.
+Damit wird der Provider `oracle-us` registriert. Greife nur dann zu YAML, wenn die generierten Namen
+nicht passen oder du Ausfallsicherheits-Einstellungen pro Provider überschreiben möchtest.
 
 ## Noch nicht integriert
 
@@ -153,7 +153,7 @@ nicht passen oder Sie Ausfallsicherheits-Einstellungen pro Provider überschreib
 
 - **`404 Authorization failed or requested resource not found`** – fehlende OCI-Richtlinie,
   falsche Region oder Modell für das Konto nicht verfügbar.
-- **`model registry has no models`** – setzen Sie `ORACLE_MODELS` oder YAML `models:`.
+- **`model registry has no models`** – setze `ORACLE_MODELS` oder YAML `models:`.
 - **OCI CLI funktioniert, aber Bearer-Requests an Oracle schlagen fehl** – unterschiedliche Authentifizierungsabläufe.
   Die OCI CLI verwendet API-Signaturschlüssel; die Inferenz von Oracle Generative AI verwendet den
   Bearer-API-Key von Generative AI.

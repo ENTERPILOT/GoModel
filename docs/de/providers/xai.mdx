@@ -1,6 +1,6 @@
 ---
 title: "xAI (Grok)"
-description: "Konfigurieren Sie xAI-Grok-Modelle in GoModel und erfahren Sie, wie Reasoning-Aufwand und Prompt-Cache-Affinität behandelt werden."
+description: "Konfiguriere xAI-Grok-Modelle in GoModel und erfahre, wie Reasoning-Aufwand und Prompt-Cache-Affinität behandelt werden."
 icon: "x"
 keywords: ["xAI", "Grok", "Reasoning-Aufwand", "reasoning effort", "Prompt-Cache", "prompt cache", "Provider-Einrichtung", "provider setup"]
 ---
@@ -27,10 +27,10 @@ providers:
 
 <Note>
   Sprachmodelle (z. B. `grok-voice-latest`) werden vom Endpunkt `/models` von xAI nicht
-  aufgelistet. Um Realtime-Sessions an sie zu routen, tragen Sie sie in
-  `XAI_MODELS` ein (zum Beispiel `XAI_MODELS=grok-voice-latest`) und setzen
+  aufgelistet. Um Realtime-Sessions an sie zu routen, trage sie in
+  `XAI_MODELS` ein (zum Beispiel `XAI_MODELS=grok-voice-latest`) und setze
   `XAI_MODELS_MODE=merge`, damit die erkannten Modelle daneben routbar bleiben;
-  in `config.yaml` tragen Sie sie unter `models:` des Providers ein und setzen
+  in `config.yaml` trägst du sie unter `models:` des Providers ein und setzt
   `models_mode: merge` (siehe [Modellmodi](/de/advanced/config-yaml#modellmodi)).
   Bis die erste `/models`-Abfrage gelingt, stellt `merge` nur die konfigurierten
   IDs bereit; eine später fehlschlagende Aktualisierung behält die bereits
@@ -38,7 +38,7 @@ providers:
 </Note>
 
 Bildmodelle wie `grok-2-image` werden über die [Images API](/de/advanced/images-api)
-(`POST /v1/images/generations`) bereitgestellt. xAI rechnet sie pro Bild ab; setzen Sie für das
+(`POST /v1/images/generations`) bereitgestellt. xAI rechnet sie pro Bild ab; setze für das
 Modell einen `per_image`-Preis, falls der Katalog keinen enthält.
 
 ## Abbildung des Reasoning-Aufwands
@@ -71,7 +71,7 @@ abgerechnet.
 - **Chat Completions:** GoModel leitet einen vom Client gelieferten Header `X-Grok-Conv-Id` weiter
   und leitet andernfalls einen stabilen Wert aus den einleitenden Nachrichten der Konversation ab –
   die Cache-Affinität funktioniert ohne Änderung am Client.
-- **Responses API:** Übergeben Sie `prompt_cache_key` im Request-Body; GoModel leitet ihn
+- **Responses API:** Übergib `prompt_cache_key` im Request-Body; GoModel leitet ihn
   unverändert weiter.
 
 ## `metadata` bei der Responses API

@@ -1,6 +1,6 @@
 ---
 title: "Ausfallsicherheit"
-description: "Passen Sie Retries und den Circuit Breaker pro Provider an und erfahren Sie, wann Sie stattdessen auf modellübergreifendes Failover setzen sollten."
+description: "Passe Retries und den Circuit Breaker pro Provider an und erfahre, wann du stattdessen auf modellübergreifendes Failover setzen solltest."
 icon: "shield-check"
 keywords: ["Ausfallsicherheit", "resilience", "Retries", "Circuit Breaker", "Backoff", "Fehlertoleranz", "fault tolerance"]
 ---
@@ -20,13 +20,13 @@ zu einem anderen Modell oder Provider. Für modellübergreifendes Failover siehe
 
 Diese Seite behandelt die Stellschrauben. Was GoModel tut, wenn ein Provider die
 Form seiner Response ändert, mit `200` ohne verwertbaren Inhalt antwortet oder
-mitten im Stream abbricht, erfahren Sie unter
+mitten im Stream abbricht, erfährst du unter
 [Fehlermodi von Providern](/de/advanced/provider-failure-modes).
 
 ## Standardwerte
 
 Die Standardwerte sind so abgestimmt, dass sie für die meisten Deployments sicher
-sind. Überschreiben Sie nur, was Sie wirklich brauchen.
+sind. Überschreibe nur, was du wirklich brauchst.
 
 | Einstellung         | Standardwert | Hinweise                                  |
 | ------------------- | ------- | ---------------------------------------------- |
@@ -44,19 +44,19 @@ sind. Überschreiben Sie nur, was Sie wirklich brauchen.
 | `timeout`           | `30s`   | Wie lange der Circuit offen bleibt, bevor geprobt wird |
 | `slow_call_threshold` | `0` (aus) | Antworten, die langsamer sind, zählen als Breaker-Fehler |
 
-Um Retries zu deaktivieren, setzen Sie `max_retries: 0` – jeder Request erhält
-dann genau einen Versuch. Um den Circuit Breaker zu deaktivieren, setzen Sie
+Um Retries zu deaktivieren, setze `max_retries: 0` – jeder Request erhält
+dann genau einen Versuch. Um den Circuit Breaker zu deaktivieren, setze
 `circuit_breaker.enabled: false` (oder `CIRCUIT_BREAKER_ENABLED=false`); die
-Schwellenwerte bleiben erhalten, werden aber nie ausgewertet. Wenn Sie ihn wieder
-einschalten, gilt Ihre bisherige Abstimmung wieder. Auch
+Schwellenwerte bleiben erhalten, werden aber nie ausgewertet. Wenn du ihn wieder
+einschaltest, gilt deine bisherige Abstimmung wieder. Auch
 `failure_threshold: 0` deaktiviert den Breaker. Beide Schalter funktionieren
 global oder pro Provider, und ein `enabled: true` pro Provider aktiviert den
 Breaker für diesen Provider wieder, wenn er global ausgeschaltet ist.
 
-Schalten Sie den Breaker aus, wenn bereits etwas vor dem Provider Last abwirft
+Schalte den Breaker aus, wenn bereits etwas vor dem Provider Last abwirft
 (ein providerseitiger Load Balancer, ein Service Mesh) oder wenn eine kurze Folge
 von `5xx`-Responses den Traffic zu diesem Provider niemals pausieren darf.
-Lassen Sie ihn ansonsten eingeschaltet: Er verhindert, dass ein ausgefallener
+Lass ihn ansonsten eingeschaltet: Er verhindert, dass ein ausgefallener
 Upstream jeden Request für die volle Timeout-Dauer blockiert.
 
 ## Was als Fehler zählt
@@ -128,7 +128,7 @@ fehlerhafter `/models`-Endpunkt öffnet den Circuit nicht, sodass ein Ausfall de
 Modellliste die Inferenz nicht anhält, und ein funktionierender schließt ihn
 nicht. Die Provider-Statusseite meldet die fehlgeschlagene Abfrage weiterhin.
 
-Setzen Sie `retry.retry_on_statuses` und `circuit_breaker.failure_on_statuses`
+Setze `retry.retry_on_statuses` und `circuit_breaker.failure_on_statuses`
 unabhängig voneinander. Beide akzeptieren exakte Codes und Klassen wie `5xx`.
 Weggelassene Listen verwenden die Standardwerte; explizite Listen ersetzen sie;
 `[]` deaktiviert statusbasierte Auslöser, die Behandlung von Transportfehlern
@@ -136,7 +136,7 @@ bleibt aber erhalten. Zum Beispiel schließt `failure_on_statuses: [5xx]`
 Rate-Limits von den Breaker-Fehlern aus, auch während Recovery-Probes. Ungültige
 Codes oder Scopes lassen das Laden der Konfiguration fehlschlagen.
 
-**Anhaltende Latenz** kann den Circuit ebenfalls öffnen. Setzen Sie
+**Anhaltende Latenz** kann den Circuit ebenfalls öffnen. Setze
 `circuit_breaker.slow_call_threshold` (oder
 `CIRCUIT_BREAKER_SLOW_CALL_THRESHOLD`), und jeder Aufruf, den der Provider
 langsamer beantwortet, zählt als Breaker-Fehler, genau wie ein `5xx`. Die
@@ -153,8 +153,8 @@ die Zeit bis zum ersten Token begrenzt und nicht die Länge des Streams.
 
 Standardmäßig ist die Option deaktiviert, weil die normale Latenz von der
 Workload abhängt: Ein Reasoning-Aufruf ohne Streaming kann legitimerweise
-Minuten dauern. Wählen Sie einen Wert deutlich über Ihrem langsamsten gesunden
-Request und überschreiben Sie ihn pro Provider, wenn sich die Workloads
+Minuten dauern. Wähle einen Wert deutlich über deinem langsamsten gesunden
+Request und überschreibe ihn pro Provider, wenn sich die Workloads
 unterscheiden. Der Schwellenwert bricht nie einen Request ab – das ist die
 Aufgabe von `HTTP_TIMEOUT`, und ein Aufruf, der diesen erreicht, zählt bereits
 als Fehler.
@@ -299,7 +299,7 @@ kombiniert zwei unabhängige Signale:
   Zustands des Circuit Breakers.
 
 Der Zustand des Circuit Breakers wird auf jeder Provider-Karte angezeigt: Wenn
-Sie eine Karte aufklappen, erscheint ein **Breaker State**-Chip, ein offener
+du eine Karte aufklappst, erscheint ein **Breaker State**-Chip, ein offener
 Breaker setzt die Status-Pill des Providers auf `Circuit Open`, und ein
 halb offener Breaker zeigt `Recovering`. Mit `scope: model` spiegeln Anzeige und
 Metrik des Breakers auf Provider-Ebene den Breaker des zuletzt abgeschlossenen
@@ -372,15 +372,15 @@ Abruf als Unhealthy angezeigt.
 Retries bleiben beim ausgewählten Ziel; der Circuit Breaker überwacht den
 konfigurierten Provider- oder Modell-Scope. Wenn GoModel außerdem ein anderes
 Modell oder einen anderen Provider versuchen soll, wenn das primäre Ziel
-weiterhin fehlschlägt, geben Sie dem Modell ein virtuelles Modell mit mehr als
+weiterhin fehlschlägt, gib dem Modell ein virtuelles Modell mit mehr als
 einem Ziel – die übrigen Ziele bilden seine Failover-Kette. Siehe
 [Failover](/de/features/failover).
 
 ## Cloudflare-Timeouts wiederholen, dann Modell wechseln
 
-Kombinieren Sie bei übersetzten Requests ohne Streaming Retries mit einem
-virtuellen Failover-Modell. Übernehmen Sie die folgenden Einstellungen in Ihre
-bestehende Konfiguration und verwenden Sie dabei Ihre konfigurierten Provider-
+Kombiniere bei übersetzten Requests ohne Streaming Retries mit einem
+virtuellen Failover-Modell. Übernimm die folgenden Einstellungen in deine
+bestehende Konfiguration und verwende dabei deine konfigurierten Provider-
 und Modellnamen:
 
 ```yaml
@@ -408,7 +408,7 @@ failover:
   retry_on_statuses: [429, 5xx]
 ```
 
-Senden Sie `model: resilient-chat`. Solange der Breaker von model1 geschlossen
+Sende `model: resilient-chat`. Solange der Breaker von model1 geschlossen
 ist, löst eine `524`-Response bis zu zwei Retries gegen model1 aus. Schlagen alle
 drei Versuche fehl, versucht GoModel model2 mit dessen eigenem Retry-Budget. Der
 offene Breaker von model1 überspringt dessen Upstream-Aufrufe, ohne model2 zu
@@ -454,6 +454,6 @@ der Traffic kehrt zurück, sobald die Probes innerhalb des Schwellenwerts
 antworten.
 
 Eine schnelle Antwort zwischendurch setzt den Zähler zurück, sodass gelegentliche
-langsame Aufrufe den Circuit nie öffnen. Bevorzugen Sie hier `scope: model`: Mit
+langsame Aufrufe den Circuit nie öffnen. Bevorzuge hier `scope: model`: Mit
 dem Standardwert `scope: provider` setzen schnelle Modelle desselben Providers
 den Zähler für das langsame Modell ständig zurück.

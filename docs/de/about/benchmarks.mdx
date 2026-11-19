@@ -18,10 +18,10 @@ sich die Zahlen im Zeitverlauf entwickeln. Der ausführliche Bericht ist der Art
 [AI Gateway Benchmark 2026: GoModel vs LiteLLM, Portkey & Bifrost](https://enterpilot.io/blog/benchmarking-ai-gateways-gomodel-litellm-portkey-bifrost-june-2026/?utm_source=gomodel_docs).
 
 <Note>
-  Die Tabelle unten zeigt den Lauf vom 20. August 2026 auf AWS. Betrachten Sie sie als Daten, nicht
-  als Dogma. Die Performance eines Gateways hängt von Ihrem Workload, Ihrem Provider-Mix, Ihrem
-  Deployment-Setup und Ihrem Tuning ab. Ältere Läufe (Juni und Juli 2026 auf derselben Hardware,
-  März 2026 nur mit LiteLLM auf localhost) finden Sie in der Historie des Repositorys und im Blog.
+  Die Tabelle unten zeigt den Lauf vom 20. August 2026 auf AWS. Betrachte sie als Daten, nicht
+  als Dogma. Die Performance eines Gateways hängt von deinem Workload, deinem Provider-Mix, deinem
+  Deployment-Setup und deinem Tuning ab. Ältere Läufe (Juni und Juli 2026 auf derselben Hardware,
+  März 2026 nur mit LiteLLM auf localhost) findest du in der Historie des Repositorys und im Blog.
 </Note>
 
 ## Was wir getestet haben
@@ -82,9 +82,9 @@ Ergebnisse auf und baut die Infrastruktur anschließend selbstständig wieder ab
 <Warning>
   Dies läuft auf **kostenpflichtiger** AWS-Infrastruktur, nicht im Free Tier. Eine `c7i.large` kostet
   On-Demand in `us-east-1` etwa $0.09/Stunde (das 20-GiB-gp3-Volume und die öffentliche IPv4-Adresse
-  kosten ein paar Cent zusätzlich), und der Lauf zerstört sich nach etwa 90 Minuten selbst. Planen
-  Sie zur Sicherheit **unter $1** pro Lauf ein. Wenn Sie `KEEP=1` übergeben oder der Abbau
-  fehlschlägt, zahlen Sie weiter, bis Sie die Maschine zerstören – vergewissern Sie sich also, dass
+  kosten ein paar Cent zusätzlich), und der Lauf zerstört sich nach etwa 90 Minuten selbst. Plane
+  zur Sicherheit **unter $1** pro Lauf ein. Wenn du `KEEP=1` übergibst oder der Abbau
+  fehlschlägt, zahlst du weiter, bis du die Maschine zerstörst – vergewissere dich also, dass
   sie entfernt wurde.
 </Warning>
 
@@ -96,12 +96,12 @@ cd ai-gateway-reproducible-benchmark
 ```
 
 Die Standardwerte sind `N=20000` Requests pro Workload, `REPEATS=5` Durchläufe und eine
-Parallelität von `C=10`. Sie können sie als Umgebungsvariablen überschreiben, z. B.
+Parallelität von `C=10`. Du kannst sie als Umgebungsvariablen überschreiben, z. B.
 `N=5000 REPEATS=2 ./run.sh` für einen schnelleren, weniger aussagekräftigen Lauf.
 `GOMODEL_SOURCE=../gomodel` misst einen lokalen Checkout statt des veröffentlichten Images.
 
 Damit wird gemessen, worauf die vier Images heute auflösen. Um die Momentaufnahme vom
-20. August 2026 mit denselben Gateway-Releases zu wiederholen, übergeben Sie deren Versionen:
+20. August 2026 mit denselben Gateway-Releases zu wiederholen, übergib deren Versionen:
 
 ```bash
 GOMODEL_IMAGE=enterpilot/gomodel:0.1.79 \
@@ -113,15 +113,15 @@ BIFROST_IMAGE=maximhq/bifrost:v1.6.11 \
 
 Jeder aufgezeichnete Lauf führt die gemessenen Versionen und Image-Digests in seinen Dateien
 `results/<run>/*_image.json` auf, sodass sich jeder frühere Lauf auf dieselbe Weise wiederholen
-lässt. Die README des Repositorys zeigt außerdem, wie Sie das Harness auf einem beliebigen
-Docker-Host ohne AWS ausführen.
+lässt. Die README des Repositorys zeigt außerdem, wie du das Harness auf einem beliebigen
+Docker-Host ohne AWS ausführst.
 
 ## Warum diese Seite kurz ist
 
-Sie soll Ihnen das Ergebnis schnell und direkt in der Produktdokumentation liefern, ohne einen
+Sie soll dir das Ergebnis schnell und direkt in der Produktdokumentation liefern, ohne einen
 vollständigen Artikel. Für die ausführliche Darstellung, die Diagramme und die Details zur Methodik
-lesen Sie den
+lies den
 [vollständigen Beitrag](https://enterpilot.io/blog/benchmarking-ai-gateways-gomodel-litellm-portkey-bifrost-june-2026/?utm_source=gomodel_docs).
 
-Kein einzelner Benchmark beantwortet die Frage für jede Umgebung. Wenn Sie Gateways ernsthaft
-evaluieren, reproduzieren Sie den Test mit Ihrem eigenen Traffic und Ihrer eigenen Infrastruktur.
+Kein einzelner Benchmark beantwortet die Frage für jede Umgebung. Wenn du Gateways ernsthaft
+evaluierst, reproduziere den Test mit deinem eigenen Traffic und deiner eigenen Infrastruktur.

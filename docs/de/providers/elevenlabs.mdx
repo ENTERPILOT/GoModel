@@ -31,8 +31,8 @@ providers:
 
 Anders als bei den festen Stimmnamen von OpenAI (`alloy`, `verse`, ...) gibt es
 bei ElevenLabs keine eingebauten benannten Stimmen – jede Stimme ist eine ID aus
-Ihrer ElevenLabs-Stimmbibliothek (eingebaut, geklont oder geteilt). Übergeben
-Sie diese ID im OpenAI-kompatiblen Feld `voice`:
+deiner ElevenLabs-Stimmbibliothek (eingebaut, geklont oder geteilt). Übergib
+diese ID im OpenAI-kompatiblen Feld `voice`:
 
 ```json
 {
@@ -42,7 +42,7 @@ Sie diese ID im OpenAI-kompatiblen Feld `voice`:
 }
 ```
 
-Ihre verfügbaren Stimm-IDs finden Sie im ElevenLabs-Dashboard oder über
+Deine verfügbaren Stimm-IDs findest du im ElevenLabs-Dashboard oder über
 [Passthrough](/de/features/passthrough-api) (sobald `elevenlabs` zu
 `ENABLED_PASSTHROUGH_PROVIDERS` hinzugefügt wurde) unter
 `/p/elevenlabs/v2/voices` – dem neueren Such-Endpunkt `GET /v2/voices`.
@@ -71,7 +71,7 @@ bilden eine eigene Modellfamilie neben dem Text-to-Speech-Katalog und werden von
 der `/v1/models`-Liste von ElevenLabs nicht zurückgegeben – GoModel fügt sie
 selbst zur Ausgabe von `/v1/models` hinzu. `response_format` akzeptiert `json`
 (Standard), `text` und `verbose_json`; `srt`/`vtt` werden nicht unterstützt.
-Wenn Sie `verbose_json` oder `word` in `timestamp_granularities` anfordern,
+Wenn du `verbose_json` oder `word` in `timestamp_granularities` anforderst,
 fragt GoModel bei ElevenLabs Zeitangaben auf Wortebene an und bildet sie auf das
 OpenAI-Array `words` ab. `prompt` wird nicht unterstützt.
 

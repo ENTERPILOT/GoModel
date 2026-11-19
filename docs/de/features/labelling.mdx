@@ -1,6 +1,6 @@
 ---
 title: "Labeling"
-description: "Versehen Sie Requests über HTTP-Header oder API-Keys mit Labels und schlüsseln Sie Nutzung und Request-Logs nach Label auf."
+description: "Versieh Requests über HTTP-Header oder API-Keys mit Labels und schlüssle Nutzung und Request-Logs nach Label auf."
 icon: "tags"
 keywords: ["Labels", "labels", "Tagging", "Request-Labels", "Header-Tagging", "Kostenzuordnung", "cost attribution"]
 ---
@@ -21,7 +21,7 @@ der Nutzung nach Label im Dashboard.
 
 ## API-Key-Labels
 
-Weisen Sie Labels zu, wenn Sie im Admin-Dashboard einen Key erstellen:
+Weise Labels zu, wenn du im Admin-Dashboard einen Key erstellst:
 
 `API Keys -> Create API Key -> Labels`
 
@@ -33,8 +33,8 @@ Weisen Sie Labels zu, wenn Sie im Admin-Dashboard einen Key erstellen:
 />
 
 Die Seite **API Keys** listet jeden verwalteten Key mit seinen Labels als Chips
-neben seinem User Path auf. So sehen Sie die Zuordnung auf einen Blick, ohne
-jeden Key öffnen zu müssen. Klicken Sie in einer Zeile auf **Edit Labels**, um
+neben seinem User Path auf. So siehst du die Zuordnung auf einen Blick, ohne
+jeden Key öffnen zu müssen. Klicke in einer Zeile auf **Edit Labels**, um
 sie später zu ändern.
 
 Oder über die Admin API:
@@ -86,7 +86,7 @@ console.log(authKey);
 
 Jeder mit diesem Key authentifizierte Request trägt diese Labels – ohne
 Änderungen am Client. Das ist der einfachste Weg, Traffic pro Team oder Service
-zuzuordnen: Geben Sie jedem Nutzer einen eigenen Key mit Labels.
+zuzuordnen: Gib jedem Nutzer einen eigenen Key mit Labels.
 
 Labels lassen sich später ändern, ohne den Key zu rotieren, im Dashboard
 (`API Keys -> Edit Labels`) oder über die Admin API:
@@ -136,15 +136,15 @@ console.log(authKey);
 
 </CodeGroup>
 
-Die neue Liste ersetzt die alte; senden Sie `[]`, um alle Labels zu entfernen.
+Die neue Liste ersetzt die alte; sende `[]`, um alle Labels zu entfernen.
 Änderungen gelten für neue Requests sofort auf der Instanz, die die
 Aktualisierung verarbeitet hat, und auf anderen Replikaten mit derselben
 Datenbank innerhalb weniger Sekunden.
 
 ## Tagging-Header
 
-Tagging-Regeln benennen Header, deren Werte Labels enthalten. Verwalten Sie sie
-im Dashboard (`Settings -> Tagging based on headers`) oder deklarieren Sie sie
+Tagging-Regeln benennen Header, deren Werte Labels enthalten. Verwalte sie
+im Dashboard (`Settings -> Tagging based on headers`) oder deklariere sie
 als Infrastructure as Code:
 
 <img
@@ -154,10 +154,10 @@ als Infrastructure as Code:
   className="rounded-lg"
 />
 
-Klicken Sie auf **Add Header**, geben Sie den Header an, den Ihre Clients senden
-(zum Beispiel `X-Team`), legen Sie optional ein zu entfernendes Präfix und ein
-Trennzeichen fest und klicken Sie dann auf **Save Tagging Settings**. Aktivieren
-Sie **Do not pass upstream** für Header, die entfernt werden sollen, bevor der
+Klicke auf **Add Header**, gib den Header an, den deine Clients senden
+(zum Beispiel `X-Team`), lege optional ein zu entfernendes Präfix und ein
+Trennzeichen fest und klicke dann auf **Save Tagging Settings**. Aktiviere
+**Do not pass upstream** für Header, die entfernt werden sollen, bevor der
 Request den Provider erreicht.
 
 ```yaml config.yaml
@@ -227,12 +227,12 @@ erreicht.
 <Warning>
   Clients wählen ihre Tags selbst, sodass jeder Client ein Label-Budget
   belasten kann, indem er dessen Label nennt. Wenn Label-Budgets pro Team
-  verlässlich gelten müssen, schalten Sie LiteLLM-Tags ab und versehen Sie
+  verlässlich gelten müssen, schalte LiteLLM-Tags ab und versieh
   Traffic mit [API-Key-Labels](/de/features/labelling#api-key-labels) oder mit Tagging-Headern, die
-  Ihr Proxy setzt.
+  dein Proxy setzt.
 </Warning>
 
-LiteLLM-Tags sind standardmäßig aktiviert. Schalten Sie sie so ab:
+LiteLLM-Tags sind standardmäßig aktiviert. Schalte sie so ab:
 
 ```bash
 LITELLM_TAGS_ENABLED=false
@@ -265,13 +265,13 @@ Provider, der `tags` ablehnt, gibt seinen Fehler zurück.
 
 ## Kosten pro Pull Request
 
-Um zu sehen, was die CI eines Pull Requests für Modelle ausgibt, versehen Sie
+Um zu sehen, was die CI eines Pull Requests für Modelle ausgibt, versieh
 jeden Request ihrer Jobs mit einem Label, das den PR nennt, etwa `pr-1234`. Der
 Header `x-litellm-tags` funktioniert ohne Konfiguration, solange
 [LiteLLM-Tags](#litellm-tags) aktiviert sind (Standard); sind sie aus,
-konfigurieren Sie einen [Tagging-Header](#tagging-header) und senden Sie
-stattdessen diesen. In GitHub Actions setzen Sie das Label einmal für den Job.
-Lassen Sie den Workflow bei `pull_request` laufen: Andere Events wie `push`
+konfiguriere einen [Tagging-Header](#tagging-header) und sende
+stattdessen diesen. In GitHub Actions setzt du das Label einmal für den Job.
+Lass den Workflow bei `pull_request` laufen: Andere Events wie `push`
 haben keine PR-Nummer, das Label wäre dann nur `pr-`. GitHub gibt
 Repository-Secrets nicht an Pull Requests aus Forks weiter, der Job hätte dort
 also keinen Key: Das `if` lässt ihn nur für Branches im Repository laufen.
@@ -295,7 +295,7 @@ jobs:
             -d '{"model": "gpt-5", "messages": [{"role": "user", "content": "Review this diff"}]}'
 ```
 
-Senden Sie es dann bei jedem Request mit:
+Sende es dann bei jedem Request mit:
 
 <CodeGroup>
 
@@ -321,9 +321,9 @@ client = OpenAI(
 
 </CodeGroup>
 
-Lesen Sie die Kosten auf der Nutzungsseite ab: Setzen Sie in
+Lies die Kosten auf der Nutzungsseite ab: Setze in
 **Aufschlüsselung** die Zeilen auf **Label** und die Spalten auf **Modell**
-oder **Zeitraum**. Oder filtern Sie einen beliebigen Nutzungsendpunkt nach dem
+oder **Zeitraum**. Oder filtere einen beliebigen Nutzungsendpunkt nach dem
 Label, um einen exakten Wert zu erhalten:
 
 ```bash
@@ -334,14 +334,14 @@ curl "http://localhost:8080/admin/usage/summary?label=pr-1234&days=30" \
 - Ein Request mit mehreren Labels zählt unter jedem davon einmal, Label-Zeilen
   überschneiden sich also und können zusammen mehr als die Gesamtsumme ergeben.
 - Die Aufschlüsselung behält die obersten Zeilen (`limit`, höchstens 50) und
-  fasst den Rest unter **Sonstige** zusammen. Bei vielen PRs filtern Sie nach
+  fasst den Rest unter **Sonstige** zusammen. Bei vielen PRs filterst du nach
   `label`, um die Kosten eines PRs zu erhalten, statt sie aus der Pivot-Tabelle
   abzulesen.
 
 ## Standardwerte
 
-Labeling ist standardmäßig aktiviert und kostet nichts, bis Sie eine
-Tagging-Regel konfigurieren, einen Key mit Labels erstellen oder ein Client
+Labeling ist standardmäßig aktiviert und kostet nichts, bis du eine
+Tagging-Regel konfigurierst, einen Key mit Labels erstellen oder ein Client
 LiteLLM-Tags sendet. Requests ohne Labels werden wie bisher erfasst.
 
 | Einstellung | Standardwert | Ändern, wenn |

@@ -1,7 +1,7 @@
 ---
 title: "Azure OpenAI: Deployment-URLs und api-version"
 sidebarTitle: "Azure OpenAI"
-description: "Konfigurieren Sie Azure OpenAI und Azure AI Foundry in GoModel mit v1- oder Deployment-basierten URLs."
+description: "Konfiguriere Azure OpenAI und Azure AI Foundry in GoModel mit v1- oder Deployment-basierten URLs."
 icon: "/brand/azure.svg"
 keywords: ["Azure OpenAI", "Azure AI Foundry", "openai/v1", "Azure-Endpunkt", "azure endpoint", "Deployment-Name", "deployment name", "api-version", "api_version", "Provider-Einrichtung", "provider setup"]
 ---
@@ -34,7 +34,7 @@ providers:
 
 Endpunkte von Azure AI Foundry wie
 `https://proj1-resource.services.ai.azure.com/openai/v1/responses` verwenden die
-unversionierte v1-API. Setzen Sie die Base-URL auf alles bis einschließlich `/openai/v1`:
+unversionierte v1-API. Setze die Base-URL auf alles bis einschließlich `/openai/v1`:
 
 ```bash
 AZURE_API_KEY=...
@@ -43,15 +43,15 @@ AZURE_BASE_URL=https://proj1-resource.services.ai.azure.com/openai/v1
 
 Bei einer `/openai/v1`-Base-URL sendet GoModel standardmäßig kein
 `api-version`, und das `model` im Request-Body wählt das Deployment, sodass ein
-Provider alle Deployments der Ressource abdeckt. Lassen Sie `AZURE_API_VERSION`
-(und `api_version` im YAML oben) leer; setzen Sie `preview` nur, um
+Provider alle Deployments der Ressource abdeckt. Lass `AZURE_API_VERSION`
+(und `api_version` im YAML oben) leer; setze `preview` nur, um
 Preview-Features zu aktivieren. Klassische
 URLs `https://your-resource.openai.azure.com/openai/v1` funktionieren genauso.
 Realtime-Sitzungen verwenden den GA-Websocket `/openai/v1/realtime?model=<deployment>`.
 
 `/openai/v1/models` listet die Modelle der Ressource, daher wird ein Deployment,
 das wie sein Modell heißt (Standard in Foundry), direkt geroutet. Eigene
-Deployment-Namen tragen Sie in `AZURE_MODELS` ein und setzen
+Deployment-Namen trägst du in `AZURE_MODELS` ein und setzt
 `AZURE_MODELS_MODE=merge`, damit sie neben den erkannten Modellen bestehen
 bleiben (siehe [Modellmodi](/de/advanced/config-yaml#modellmodi)).
 
@@ -149,10 +149,10 @@ Form der `AZURE_BASE_URL`:
 
 GoModel wählt die API pro Deployment: Ein Deployment, das der Modellkatalog von
 GoModel als Chat-Modell beschreibt, etwa `gpt-6-luna`, geht an die Decisions API,
-jedes andere an System One. Nennen Sie das `gpt-6-luna`-Deployment `gpt-6-luna`.
+jedes andere an System One. Nenne das `gpt-6-luna`-Deployment `gpt-6-luna`.
 
-Azure lehnt Deployment-Namen ab, die `Microsoft` enthalten. Nennen Sie das
-Microsoft-Decision-1-Deployment daher zum Beispiel `ms-decision-1` und listen Sie
+Azure lehnt Deployment-Namen ab, die `Microsoft` enthalten. Nenne das
+Microsoft-Decision-1-Deployment daher zum Beispiel `ms-decision-1` und liste
 es auf, damit GoModel es routen kann:
 
 ```bash
@@ -183,11 +183,11 @@ Microsoft-Decision-1 liest nur Text und JSON: `/v1/decisions` lehnt Bilder dafü
 ab, während `/v1/systemone` sie weiterleitet und die Antwort von Foundry
 zurückgibt, auch einen Fehler. Die Decisions API von `gpt-6-luna` ist in East US 2
 nicht verfügbar. Neue Abonnements haben anfangs für keines der beiden Modelle
-Kontingent, beantragen Sie also Kontingent, bevor Sie sie bereitstellen.
+Kontingent, beantrage also Kontingent, bevor du sie bereitstellst.
 
 ## Mehrere Deployments
 
-Jedes Azure-Deployment ist ein eigener Endpunkt. Registrieren Sie sie über
+Jedes Azure-Deployment ist ein eigener Endpunkt. Registriere sie über
 Umgebungsvariablen mit Suffix als separate Provider:
 
 ```bash
@@ -199,19 +199,19 @@ AZURE_EMBED_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/t
 ```
 
 Dadurch werden `azure-gpt5` und `azure-embed` registriert. Um alle Deployments
-einer Ressource über einen einzigen Provider bereitzustellen, verwenden Sie
+einer Ressource über einen einzigen Provider bereitzustellen, verwende
 stattdessen eine [v1-Base-URL](#azure-ai-foundry-v1-api).
 
 ## Hinweise
 
-- GoModel akzeptiert die Deployment-bezogene URL, die Ihnen das Portal
+- GoModel akzeptiert die Deployment-bezogene URL, die dir das Portal
   anzeigt. Für kontoweite Operationen (Auflisten von Modellen, Batches)
   entfernt GoModel das Suffix `/openai/deployments/<deployment>` automatisch,
   sodass eine einzige `AZURE_BASE_URL` sowohl Chat- als auch
   Ressourcen-Aufrufe abdeckt.
 - `AZURE_API_VERSION` ist bei Deployment-bezogenen URLs standardmäßig
-  `2024-10-21` und wird bei v1-URLs nicht gesendet. Setzen Sie es nur, wenn Sie
-  eine andere stabile oder Preview-Version benötigen – zum Beispiel eine neuere
+  `2024-10-21` und wird bei v1-URLs nicht gesendet. Setze es nur, wenn du
+  eine andere stabile oder Preview-Version benötigst – zum Beispiel eine neuere
   Version der Responses API.
 
 ## Fehlerbehebung
@@ -221,10 +221,10 @@ stattdessen eine [v1-Base-URL](#azure-ai-foundry-v1-api).
   falsch.
 - **`Resource not found` / `DeploymentNotFound`** – Das Modell im Request-Body
   muss der Deployment-Name sein, nicht das zugrunde liegende Basismodell.
-- **`unsupported api version`** – Erhöhen Sie `AZURE_API_VERSION` auf eine
+- **`unsupported api version`** – Erhöhe `AZURE_API_VERSION` auf eine
   Version, die das aufgerufene Feature unterstützt. Neuere Features der
-  Responses API erfordern aktuelle Preview-Versionen. Lassen Sie es bei
-  v1-Base-URLs leer oder verwenden Sie `preview`.
+  Responses API erfordern aktuelle Preview-Versionen. Lass es bei
+  v1-Base-URLs leer oder verwende `preview`.
 - **`404` bei Azure AI Foundry** – Die Base-URL muss auf `/openai/v1` enden,
   nicht auf dem vollständigen Endpunkt (`/openai/v1/responses`) oder der
   Projekt-URL (`/api/projects/...`).

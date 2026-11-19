@@ -1,6 +1,6 @@
 ---
 title: "Eden AI"
-description: "Konfigurieren Sie die OpenAI-kompatible Multi-Provider-API von Eden AI in GoModel."
+description: "Konfiguriere die OpenAI-kompatible Multi-Provider-API von Eden AI in GoModel."
 icon: "leaf"
 keywords: ["Eden AI", "edenai", "multi-provider", "Multi-Provider", "OpenAI-compatible", "OpenAI-kompatibel", "Provider-Einrichtung", "provider setup"]
 ---
@@ -13,15 +13,15 @@ Mistral, Cohere, DeepInfra und weiteren erreicht.
 
 ## Konfiguration
 
-Erstellen Sie einen API-Key in der [Eden AI Console](https://app.edenai.run/) und
-setzen Sie:
+Erstelle einen API-Key in der [Eden AI Console](https://app.edenai.run/) und
+setze:
 
 ```bash
 EDENAI_API_KEY=
 ```
 
 `EDENAI_BASE_URL` ist optional — der Provider verwendet standardmäßig
-`https://api.edenai.run/v3`. Setzen Sie die Variable nur, um einen anderen
+`https://api.edenai.run/v3`. Setze die Variable nur, um einen anderen
 Eden-kompatiblen Endpunkt anzusprechen:
 
 ```bash
@@ -29,23 +29,23 @@ EDENAI_BASE_URL=https://api.edenai.run/v3
 ```
 
 <Warning>
-  Verwenden Sie einen `https://`-Endpunkt. GoModel **verweigert** jeden
+  Verwende einen `https://`-Endpunkt. GoModel **verweigert** jeden
   Eden-Request an ein unverschlüsseltes Ziel, statt ihn zu senden, weil der
   Request-Body den Prompt bzw. die Embedding-Eingabe enthält, nicht nur den
   API-Key. Eine `http://`-Basis-URL, die nicht auf Loopback zeigt, schlägt daher
   mit einem expliziten Fehler fehl, statt irgendetwas zu übertragen.
 
   Für Weiterleitungen gilt derselbe Maßstab: Nur eine Weiterleitung, die auf dem
-  von Ihnen konfigurierten Host bleibt, wird verfolgt. Eine Weiterleitung auf
+  von dir konfigurierten Host bleibt, wird verfolgt. Eine Weiterleitung auf
   `http://` oder auf einen anderen Host — einschließlich einer Subdomain, an die Go
   sonst den `Authorization`-Header mitsenden würde — wird abgelehnt statt verfolgt,
-  sodass ein vom Upstream gewählter `Location`-Header Ihren Key oder Ihren Prompt
-  nicht an ein Ziel verlagern kann, das Sie nicht konfiguriert haben.
+  sodass ein vom Upstream gewählter `Location`-Header deinen Key oder deinen Prompt
+  nicht an ein Ziel verlagern kann, das du nicht konfiguriert hast.
 
   Unverschlüsselter Traffic zu `localhost` (oder `127.0.0.1`) ist erlaubt, da er
   nie ein Netzwerk erreicht -- so bleibt ein lokaler Eden-kompatibler Proxy
-  nutzbar. Wenn Sie Eden einen Proxy auf einem anderen Host vorschalten,
-  terminieren Sie TLS dort und richten Sie `EDENAI_BASE_URL` auf dessen
+  nutzbar. Wenn du Eden einen Proxy auf einem anderen Host vorschaltest,
+  terminiere TLS dort und richte `EDENAI_BASE_URL` auf dessen
   `https://`-Adresse aus.
 </Warning>
 
@@ -59,7 +59,7 @@ providers:
     # base_url: "https://api.edenai.run/v3"
 ```
 
-Sie können die Zugangsdaten statt über Umgebungsvariablen auch auf der Seite
+Du kannst die Zugangsdaten statt über Umgebungsvariablen auch auf der Seite
 **Providers** im Admin-Dashboard hinzufügen.
 
 ## Modelle
@@ -76,12 +76,12 @@ weitergeleitet:
 { "model": "openai/gpt-4", "messages": [{ "role": "user", "content": "Hi" }] }
 ```
 
-Da die ID bereits einen Schrägstrich enthält, qualifizieren Sie sie mit dem
+Da die ID bereits einen Schrägstrich enthält, qualifiziere sie mit dem
 Provider-Namen, wenn ein anderer konfigurierter Provider dieselbe rohe ID
 bereitstellt: `edenai/anthropic/claude-sonnet-latest`. GoModel entfernt vor der
 Weiterleitung nur den äußeren Routing-Qualifier `edenai/`.
 
-Optional können Sie eine konfigurierte Teilmenge festlegen:
+Optional kannst du eine konfigurierte Teilmenge festlegen:
 
 ```bash
 EDENAI_MODELS=openai/gpt-4,anthropic/claude-sonnet-latest
@@ -181,7 +181,7 @@ Chat-Completions-Endpunkt übersetzt**.
   Edens eigene Route `/v3/responses` ist **nicht** die OpenAI Responses API. Sie
   nimmt Eden-spezifische Eingaben entgegen (`routing`, `router_candidates`,
   `fallbacks`) und gibt ein eigenes Response-Objekt zurück; GoModel leitet daher nie
-  dorthin weiter. Betrachten Sie die Unterstützung von `/v1/responses` hier als
+  dorthin weiter. Betrachte die Unterstützung von `/v1/responses` hier als
   Übersetzung auf Chat Completions, nicht als native Kompatibilität.
 </Warning>
 
@@ -212,7 +212,7 @@ Edens Route `/embeddings` ist OpenAI-kompatibel und verwendet dieselben
 Embeddings-Responses enthalten dieselben Eden-Erweiterungen wie Chat Completions,
 sodass auch für sie die von Eden gemeldeten exakten `cost` erfasst werden. Edens
 LLM-Katalog (`GET /v3/models`) listet keine Embedding-Modelle auf; Embedding-IDs
-werden daher ohne ermittelte Metadaten weitergeleitet. Legen Sie sie unter
+werden daher ohne ermittelte Metadaten weitergeleitet. Lege sie unter
 `models:` fest, wenn sie in `/v1/models` ausgewiesen werden sollen.
 
 ## Passthrough

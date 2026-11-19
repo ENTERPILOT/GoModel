@@ -17,16 +17,16 @@ Besonderheiten.
 
 Jede der unten aufgeführten Zugangsdaten (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...) kann
 stattdessen auf der Seite **Providers** im Admin-Dashboard (`/admin/dashboard`) gesetzt werden –
-ohne Neustart. So betreiben Sie GoModel am einfachsten ganz ohne Provider-Umgebungsvariablen:
-Starten Sie das Gateway ohne konfigurierte Provider (der Katalog ist anfangs leer; das Gateway
-startet trotzdem und stellt das Dashboard bereit) und fügen Sie die Provider dann über die UI
+ohne Neustart. So betreibst du GoModel am einfachsten ganz ohne Provider-Umgebungsvariablen:
+Starte das Gateway ohne konfigurierte Provider (der Katalog ist anfangs leer; das Gateway
+startet trotzdem und stellt das Dashboard bereit) und füge die Provider dann über die UI
 hinzu. Ein auf diese Weise hinzugefügter Provider wird sofort im laufenden Gateway registriert.
 
 Provider, die über Umgebungsvariablen oder `config.yaml` deklariert sind, haben immer Vorrang: Ein
 auf eine dieser Arten konfigurierter Name ist im Dashboard **schreibgeschützt** (angezeigt mit
 einem „Config“-Badge) – dieselbe Regel, die GoModel bereits für MCP-Server, virtuelle Modelle und
 Rate-Limits anwendet. API-Keys und Service-Account-Secrets werden nach dem Speichern maskiert
-(`***`) – beim Bearbeiten eines Providers wird für alles, was Sie nicht geändert haben, erneut
+(`***`) – beim Bearbeiten eines Providers wird für alles, was du nicht geändert hast, erneut
 `***` gesendet, und das Gateway behält den gespeicherten Wert. Das Deaktivieren eines Providers
 (statt ihn zu löschen) entfernt ihn aus dem Routing, behält aber seine Konfiguration. Die von den
 Umgebungsvariablen unterstützte Rotation mehrerer Keys (`api_keys`, eine geordnete Liste) und der
@@ -34,11 +34,11 @@ Umgebungsvariablen unterstützte Rotation mehrerer Keys (`api_keys`, eine geordn
 verfügbar.
 
 Jeder Provider trägt außerdem eine Einstellung `billable`, die standardmäßig aktiviert ist.
-Deaktivieren Sie sie für einen Provider, dessen Kosten der Aufrufer Ihnen nicht schuldet, etwa den
+Deaktiviere sie für einen Provider, dessen Kosten der Aufrufer dir nicht schuldet, etwa den
 eigenen API-Key eines Kunden, der als eigene Provider-Instanz registriert ist: Die Nutzung wird
 weiterhin erfasst und bepreist, aber User-Path- und Label-Budgets prüfen sie weder, noch zählen sie
 sie, und bei aktivierten [Aufschlägen](/de/features/cost-tracking#aufschläge-und-abgerechnete-kosten)
-wird sie mit null abgerechnet. Setzen Sie sie mit `providers.<name>.billable: false` in
+wird sie mit null abgerechnet. Setze sie mit `providers.<name>.billable: false` in
 `config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` in der Umgebung, dem Kontrollkästchen
 **Billable** unter den erweiterten Feldern des Dashboard-Formulars oder `"billable": false` bei
 `PUT /admin/provider-credentials`. Ein nicht leerer Wert von `<PROVIDER>_BILLABLE`, der kein Boolean
@@ -48,7 +48,7 @@ Tippfehler einen Provider nie versehentlich abrechenbar lässt; ein leerer Wert 
 ## Unterstützte Provider
 
 Die Beispiel-Modellbezeichner dienen der Veranschaulichung und können sich ändern; aktuelle Modelle
-finden Sie in den Katalogen der Provider. Die Feature-Spalten geben die API-Unterstützung des
+findest du in den Katalogen der Provider. Die Feature-Spalten geben die API-Unterstützung des
 Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider anbietet.
 
 | Provider | Zugangsdaten | Beispielmodell | Chat | `/responses` | Embed | Files | Batches | Passthru | Leitfaden |
@@ -121,10 +121,10 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   Tool erlauben. Die eingeschränkte Tool-Liste kann Prompt-Cache-Treffer
   kosten, wenn sich die Teilmenge zwischen Turns ändert. Eine Teilmenge, die
   keine deklarierte Funktion nennt, wird mit 400 abgelehnt.
-- **llm-d** – richten Sie `LLMD_BASE_URL` auf den Router/EPP-Service aus und deklarieren Sie
+- **llm-d** – richte `LLMD_BASE_URL` auf den Router/EPP-Service aus und deklariere
   `LLMD_MODELS`, wenn die Route `/v1/models` nicht bedient. Der dedizierte Provider fügt
   vertrauenswürdige Header für Inference-Objective und User-Path-Fairness ein.
-- **Z.ai GLM Coding Plan** – setzen Sie `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
+- **Z.ai GLM Coding Plan** – setze `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
 - **Z.ai-Reasoning-Effort** – `reasoning.effort` (Chat Completions und Responses) wird als
   `reasoning_effort` auf oberster Ebene an Z.ai gesendet. GLM-5.3 und GLM-5.3-Flash denken immer
   und akzeptieren nur `low`, `high` und `max`, daher werden `none` und `minimal` auf `low`,
@@ -132,7 +132,7 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   unverändert.
 - **Groq-Reasoning und Transkriptionen** – bei den Familien gpt-oss und qwen3 setzt GoModel Groqs
   `reasoning_format` standardmäßig auf `parsed`, sodass die Chain of Thought in `reasoning`
-  ankommt statt als Inline-Text `<think>…</think>` innerhalb der Antwort. Senden Sie
+  ankommt statt als Inline-Text `<think>…</think>` innerhalb der Antwort. Sende
   `reasoning_format` selbst (`raw` oder `hidden`), um dies zu überschreiben. Bei JSON-Responses für
   Transkription und Übersetzung wird Groqs herstellerspezifisches Feld `x_groq` entfernt, damit sie
   dem OpenAI-Format entsprechen.
@@ -148,31 +148,31 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   API. GoModel sendet `/v1/responses`-Requests direkt an AWS und wählt den erforderlichen
   Upstream-Pfad `/openai/v1/responses`.
 - **Fireworks AI** – Modell-IDs sind kontobezogene Pfade wie
-  `accounts/fireworks/models/gpt-oss-120b`; verwenden Sie sie unverändert in Requests und in
+  `accounts/fireworks/models/gpt-oss-120b`; verwende sie unverändert in Requests und in
   `FIREWORKS_MODELS`.
 - **ElevenLabs** – ein reiner Sprach-Provider: `/v1/audio/speech` (Text-to-Speech) und
   `/v1/audio/transcriptions` (Speech-to-Text) werden unterstützt, Chat, `/v1/responses` und
   Embeddings dagegen nicht (die ❌ oben spiegeln das wider, keine Einschränkung des Gateways). Das
   OpenAI-Feld `voice` muss eine ElevenLabs-voice_id sein. Unterstützte Audioformate und
-  Speech-to-Text-Modelle finden Sie im [ElevenLabs-Leitfaden](/de/providers/elevenlabs).
+  Speech-to-Text-Modelle findest du im [ElevenLabs-Leitfaden](/de/providers/elevenlabs).
 - **Chutes AI** – verwendet standardmäßig `https://llm.chutes.ai/v1` und ermittelt aktuelle
   Modell-IDs, Kontextlimits, Capabilities und Preise aus dem Live-Katalog. GoModel übersetzt
   `/v1/responses`-Requests in Chat Completions; der gemeinsame LLM-Endpunkt von Chutes stellt keine
   Embeddings bereit. Die Passthrough-Unterstützung erfordert ein ausdrückliches Opt-in des
   Betreibers, indem `chutes` zu `ENABLED_PASSTHROUGH_PROVIDERS` hinzugefügt wird.
-- **Meta (Muse Spark)** – die Meta Model API ist OpenAI-kompatibel; setzen Sie `META_API_KEY` und
-  routen Sie zu `muse-spark-1.1`. Muse-Spark-Modelle sind noch nicht im Upstream-Modellkatalog
-  enthalten. Deklarieren Sie daher `context_window` und `pricing` in den Metadaten unter
-  `providers.meta.models` in `config.yaml`, wenn Sie Kostenerfassung und Angaben zum
-  Kontextfenster wünschen.
+- **Meta (Muse Spark)** – die Meta Model API ist OpenAI-kompatibel; setze `META_API_KEY` und
+  route zu `muse-spark-1.1`. Muse-Spark-Modelle sind noch nicht im Upstream-Modellkatalog
+  enthalten. Deklariere daher `context_window` und `pricing` in den Metadaten unter
+  `providers.meta.models` in `config.yaml`, wenn du Kostenerfassung und Angaben zum
+  Kontextfenster wünschst.
 - **Kilo AI** – Modell-IDs haben die Form `provider/model` (zum Beispiel
   `anthropic/claude-sonnet-4.5`) und werden unverändert weitergeleitet. GoModel bedient
   `/v1/responses`, indem es den Request in Kilos Chat-Completions-Endpunkt übersetzt. Stellt ein
-  anderer konfigurierter Provider dieselbe rohe Modell-ID bereit, wählen Sie Kilo explizit mit
+  anderer konfigurierter Provider dieselbe rohe Modell-ID bereit, wähle Kilo explizit mit
   `kilo/anthropic/claude-sonnet-4.5`; GoModel entfernt vor dem Weiterleiten nur den äußeren
   Routing-Qualifier `kilo/`.
 - **Eden AI** – Modell-IDs haben die Form `provider/model` (zum Beispiel `openai/gpt-4`) und werden
-  unverändert weitergeleitet; wählen Sie Eden explizit mit `edenai/openai/gpt-4`, wenn ein anderer
+  unverändert weitergeleitet; wähle Eden explizit mit `edenai/openai/gpt-4`, wenn ein anderer
   konfigurierter Provider dieselbe rohe ID bereitstellt. GoModel ermittelt Edens Katalog,
   Kontextfenster, Capabilities und Preise pro Token über Edens eigenes `/v3/models`, daher gibt es
   keine eingebaute Modellliste, und neue Eden-Modelle erfordern kein Upgrade. Die Kosten pro
@@ -182,40 +182,40 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   nie verwendet. Siehe den [Eden-AI-Leitfaden](/de/providers/edenai).
 - **Xiaomi MiMo** – TTS (`mimo-v2.5-tts*`) und ASR (`mimo-v2.5-asr`) werden über
   `/v1/audio/speech` und `/v1/audio/transcriptions` (übersetzt in MiMos Audio-Dialekt für Chat
-  Completions) sowie direkt über Chat Completions bedient; für einen Kontext von 1M hängen Sie
-  `[1m]` an die Modell-ID an, führen sie in `XIAOMI_MODELS` auf und setzen
+  Completions) sowie direkt über Chat Completions bedient; für einen Kontext von 1M hängst du
+  `[1m]` an die Modell-ID an, führst sie in `XIAOMI_MODELS` auf und setzt
   `XIAOMI_MODELS_MODE=merge`.
 - **OpenCode Go (OpenCode Zen)** – routet pro Modell: Die meisten Modelle verwenden
   `/chat/completions` im OpenAI-Stil, während reine `/messages`-Modelle (standardmäßig
   `qwen3.7-max`, überschreibbar mit `OPENCODE_GO_MESSAGES_MODELS`) an den Anthropic-nativen
   Endpunkt gesendet werden. Chat-Requests ohne Reasoning-Parameter erhalten
   `reasoning_effort: "low"`, weil manche Modelle immer denken und Requests ablehnen, in denen er
-  fehlt (überschreibbar mit `OPENCODE_GO_DEFAULT_REASONING_EFFORT`). Setzen Sie
+  fehlt (überschreibbar mit `OPENCODE_GO_DEFAULT_REASONING_EFFORT`). Setze
   `OPENCODE_GO_API_KEY`; die Base-URL ist standardmäßig `https://opencode.ai/zen/go/v1`.
 - **ChatGPT-Abonnement** – wird über das Kontingent des ChatGPT-Plans abgerechnet statt über
   API-Guthaben. Der Upstream bedient nur `/v1/responses`; Chat Completions werden in
   Responses-Aufrufe übersetzt. Der Upstream akzeptiert nur eine strikte
   Allowlist von Parametern und ausschließlich Streaming; GoModel passt Requests an und fasst den
-  Stream für Aufrufer ohne Streaming zusammen. Setzen Sie `CHATGPT_API_KEY` auf das Access-Token
+  Stream für Aufrufer ohne Streaming zusammen. Setze `CHATGPT_API_KEY` auf das Access-Token
   aus `codex login`. Die gemeldeten Kosten sind keine tatsächlichen Ausgaben: Diese Modell-IDs gibt
   es auch auf der OpenAI Platform, daher ordnet die Registry dem pauschal abgerechneten
-  Abonnement-Traffic ihre Preise pro Token zu – halten Sie Budgets und `cost`-Load-Balancing davon
+  Abonnement-Traffic ihre Preise pro Token zu – halte Budgets und `cost`-Load-Balancing davon
   fern.
 - **GitHub Copilot** – wird pro Token in GitHub AI Credits abgerechnet, zuerst aus dem monatlichen
   Kontingent des Copilot-Plans. Copilot bedient GPT-5 und neuer nur über `/responses` und andere
   Modelle nur über `/chat/completions`; GoModel liest die Endpunkte jedes Modells aus `/models` und
-  übersetzt, sodass beide APIs für jedes Modell funktionieren. Setzen Sie `GITHUB_COPILOT_API_KEY`
+  übersetzt, sodass beide APIs für jedes Modell funktionieren. Setze `GITHUB_COPILOT_API_KEY`
   auf ein GitHub-OAuth-Token des Kontos, etwa aus `gh auth token`; welche Modelle es aufrufen kann,
   hängt vom Copilot-Plan ab. Die gemeldeten Kosten sind eine Schätzung, die das enthaltene
   Kontingent des Plans nicht berücksichtigt.
 - **Kimi Code** – keine Preise pro Token; das Kontingent wird wöchentlich erneuert und ist zusätzlich
   durch ein rollierendes 5-Stunden-Fenster begrenzt. Die Kostenerfassung meldet für Kimi Code null,
-  daher kann `cost`-Load-Balancing es nicht bepreisen; bevorzugen Sie konservative
+  daher kann `cost`-Load-Balancing es nicht bepreisen; bevorzuge konservative
   Retry-Strategien.
-- **Hetzner (experimentell)** – Hetzner bezeichnet die Inferenz-API als experimentell: Rechnen Sie
+- **Hetzner (experimentell)** – Hetzner bezeichnet die Inferenz-API als experimentell: Rechne
   mit Breaking Changes und ohne SLA. Der Modellkatalog und die Rate-Limit-Fenster ändern sich,
-  solange das Experiment läuft; fragen Sie den Live-Endpunkt `/v1/models` und die offizielle
-  Dokumentation ab, statt sich auf Momentaufnahmen zu verlassen. Die Beispiel-Modell-ID in der
+  solange das Experiment läuft; frage den Live-Endpunkt `/v1/models` und die offizielle
+  Dokumentation ab, statt dich auf Momentaufnahmen zu verlassen. Die Beispiel-Modell-ID in der
   Tabelle oben (`Qwen/Qwen3.6-35B-A3B-FP8`) ist der Eintrag aus der offiziellen
   Hetzner-Dokumentation mit Stand 2026-08-17 und kann zum Zeitpunkt des Lesens abweichen. Während der
   experimentellen Phase kostenlos, daher meldet die Kostenerfassung null, und `cost`-Load-Balancing
@@ -224,17 +224,17 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   kennzeichnet die Fähigkeit des Adapters; ob Hetzner beliebige Upstream-Pfade toleriert, ist nicht
   verifiziert, solange die API experimentell ist. `hetzner` ist in der standardmäßigen Allowlist
   `ENABLED_PASSTHROUGH_PROVIDERS` enthalten, sodass `/p/hetzner/...`-Routen ohne Opt-in des
-  Betreibers funktionieren; entfernen Sie es aus der Liste, um sie zu sperren.
+  Betreibers funktionieren; entferne es aus der Liste, um sie zu sperren.
 - **Konfigurierte Modelllisten** – für jeden Provider über `<PROVIDER>_MODELS` verfügbar, zum
   Beispiel `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` oder
   `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. DeepSeek verwendet standardmäßig
-  `https://api.deepseek.com`; setzen Sie `DEEPSEEK_BASE_URL` nur, wenn Sie einen kompatiblen Proxy
-  oder einen alternativen DeepSeek-Endpunkt verwenden. Standardmäßig werden nur die
+  `https://api.deepseek.com`; setze `DEEPSEEK_BASE_URL` nur, wenn du einen kompatiblen Proxy
+  oder einen alternativen DeepSeek-Endpunkt verwendest. Standardmäßig werden nur die
   konfigurierten Modelle bereitgestellt, andere Modelle liefern 404. Ändern lässt sich das mit
   `CONFIGURED_PROVIDER_MODELS_MODE`, für einen einzelnen Provider mit
   `<PROVIDER>[_SUFFIX]_MODELS_MODE` (zum Beispiel `OPENROUTER_MODELS_MODE=fallback`)
   oder mit **Modellmodus** im Dashboard; siehe [Modellmodi](/de/advanced/config-yaml#modellmodi).
-- **Modellfilter** – grenzen Sie einen großen Katalog per Glob-Muster oder Preis ein, statt Modelle
+- **Modellfilter** – grenze einen großen Katalog per Glob-Muster oder Preis ein, statt Modelle
   einzeln aufzulisten: `OPENROUTER_MODEL_FILTER_INCLUDE=*:free` behält nur die kostenlose Stufe von
   OpenRouter, und `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` begrenzt, wohin ein Provider routen
   darf. Siehe
@@ -248,11 +248,11 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   Namensprüfung für noch unklassifizierte Modelle: IDs, die `embed` enthalten oder bekannten
   Embedding-Familien entsprechen (`bge`, `e5`, `gte`, `minilm`), werden als Embedding-Modelle
   eingeordnet, und IDs, die `rerank` enthalten, als Reranking-Modelle – bei IDs mit Namespace wie
-  `org/model` wird das letzte Pfadsegment geprüft. Deklarieren Sie Betreiber-Metadaten nur, wenn ein
+  `org/model` wird das letzte Pfadsegment geprüft. Deklariere Betreiber-Metadaten nur, wenn ein
   Modell nach alledem unklassifiziert bleibt. Kategorien wirken sich nur auf die Gruppierung im
   Dashboard aus; `/v1/embeddings` routet unabhängig von der Kategorie zu jedem Modell, das der
   Provider bereitstellt.
-- **vLLM** – setzen Sie `VLLM_API_KEY` nur, wenn der Upstream-Server mit `--api-key` gestartet
+- **vLLM** – setze `VLLM_API_KEY` nur, wenn der Upstream-Server mit `--api-key` gestartet
   wurde.
 - **audio.cpp** – `AUDIOCPP_BASE_URL` ist erforderlich (der Standardport von audiocpp_server
   kollidiert mit GoModels eigenem Port 8080, daher gibt es keinen Standardwert);
@@ -269,25 +269,25 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   `openrouter`-Provider konfiguriert ist, und `/v1/systemone`, sobald ein `jev`- oder
   `openrouter`-Provider konfiguriert ist; OpenRouter bedient Jev nativ, und seine Decision-Modelle
   werden als Utility-Modelle aufgeführt. `JEV_API_KEY` konfiguriert die gehostete API; für einen
-  selbst gehosteten Kev-Server, der dieselbe API ohne Authentifizierung spricht, setzen Sie
-  `JEV_BASE_URL` und lassen den Key ungesetzt. Siehe [Jev](/de/providers/jev).
+  selbst gehosteten Kev-Server, der dieselbe API ohne Authentifizierung spricht, setze
+  `JEV_BASE_URL` und lass den Key ungesetzt. Siehe [Jev](/de/providers/jev).
 - **llama.cpp / LM Studio** – `LLAMACPP_BASE_URL` ist erforderlich (der Standardport von
   llama-server kollidiert mit GoModels eigenem Port 8080, daher gibt es keinen Standardwert);
-  `LLAMACPP_API_KEY` ist optional. Registrieren Sie diese Server nicht als `ollama`, da dieser Typ
+  `LLAMACPP_API_KEY` ist optional. Registriere diese Server nicht als `ollama`, da dieser Typ
   die native API von Ollama spricht. Siehe [llama.cpp](/de/providers/llamacpp).
 - **llm-d** – `LLMD_BASE_URL` ist erforderlich. `LLMD_API_KEY` ist optional und wird nur gesendet,
   wenn das Gateway vor dem Router Bearer-Authentifizierung verlangt.
-- **SGLang** – setzen Sie `SGLANG_API_KEY` nur, wenn der Upstream-Server mit `--api-key` gestartet
+- **SGLang** – setze `SGLANG_API_KEY` nur, wenn der Upstream-Server mit `--api-key` gestartet
   wurde; andernfalls genügt `SGLANG_BASE_URL`.
-- **Mehrere API-Keys für einen Provider** – setzen Sie `OPENAI_API_KEY_2`, `OPENAI_API_KEY_3` usw.,
+- **Mehrere API-Keys für einen Provider** – setze `OPENAI_API_KEY_2`, `OPENAI_API_KEY_3` usw.,
   um Sessions auf mehrere Keys zu verteilen, wobei jede Konversation für die Prompt-Cache-Affinität
   bei einem Key bleibt. Siehe [API-Key-Rotation](/de/providers/key-rotation).
-- **Mehrere Instanzen eines Provider-Typs** – verwenden Sie ohne `config.yaml` Umgebungsvariablen
-  mit Suffix wie `OPENAI_EAST_API_KEY` und `OPENAI_EAST_BASE_URL`; fügen Sie `OPENAI_EAST_MODELS`
+- **Mehrere Instanzen eines Provider-Typs** – verwende ohne `config.yaml` Umgebungsvariablen
+  mit Suffix wie `OPENAI_EAST_API_KEY` und `OPENAI_EAST_BASE_URL`; füge `OPENAI_EAST_MODELS`
   hinzu, um die Modellliste dieser Instanz zu konfigurieren. Damit wird der Provider `openai-east`
   mit dem Typ `openai` registriert. Vertex AI folgt demselben Suffix-Muster – `VERTEX_US_PROJECT`
   registriert den Provider `vertex-us`. Die Umgebungsvariablen für Vertex-Projekt und -Standort
-  müssen zum Präfix der Instanz passen: Setzen Sie für eine Instanz mit Suffix wie
+  müssen zum Präfix der Instanz passen: Setze für eine Instanz mit Suffix wie
   `VERTEX_US_PROJECT` auch `VERTEX_US_LOCATION` und alle weiteren Einstellungen mit Suffix für
   diese Instanz, statt der generischen `VERTEX_PROJECT` / `VERTEX_LOCATION`. `VERTEX_AUTH_TYPE`
   verwendet standardmäßig Application Default Credentials (`gcp_adc`).
@@ -304,16 +304,16 @@ hat, und leitet alles andere genau so weiter, wie der Provider es gesendet hat.
 - **Herstellerspezifische Felder werden nicht entfernt.** Groqs `x_groq` und seine
   Nutzungs-Timings `queue_time` / `prompt_time` / `completion_time` sowie DeepSeeks
   `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` erreichen den Client unverändert – über
-  diese Durchreichung erhalten Sie Provider-eigene Extras, ohne auf ein GoModel-Release zu warten.
-  Lesen Sie Cache-Treffer aus dem portablen `usage.prompt_tokens_details.cached_tokens`, wenn Sie
-  Provider-unabhängigen Code wünschen. Siehe [ADR-0011](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0011-field-forwarding-on-translated-paths.md).
-- **Streams enthalten ein abschließendes `usage`, auch wenn Sie es nicht angefordert haben.** Bei
+  diese Durchreichung erhältst du Provider-eigene Extras, ohne auf ein GoModel-Release zu warten.
+  Lies Cache-Treffer aus dem portablen `usage.prompt_tokens_details.cached_tokens`, wenn du
+  Provider-unabhängigen Code wünschst. Siehe [ADR-0011](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0011-field-forwarding-on-translated-paths.md).
+- **Streams enthalten ein abschließendes `usage`, auch wenn du es nicht angefordert hast.** Bei
   aktivierter Nutzungserfassung fügt GoModel jedem Streaming-Request
   `stream_options.include_usage` hinzu, um den Aufruf bepreisen zu können, und der Usage-Chunk des
   Providers wird unverändert weitergereicht; OpenAIs eigene API lässt die Nutzung weg, sofern der
   Client sie nicht anfordert. Die meisten Provider senden sie als separaten abschließenden Chunk
-  mit leerem `choices`-Array, DeepSeek hängt sie an seinen letzten Content-Chunk an. Ignorieren Sie
-  das Feld, oder setzen Sie `ENFORCE_RETURNING_USAGE_DATA=false`, damit GoModel es nicht mehr
+  mit leerem `choices`-Array, DeepSeek hängt sie an seinen letzten Content-Chunk an. Ignoriere
+  das Feld, oder setze `ENFORCE_RETURNING_USAGE_DATA=false`, damit GoModel es nicht mehr
   anfordert – auf Kosten von Nutzungsdatensätzen für gestreamte Requests bei Providern, die die
   Nutzung nur auf Anforderung melden.
 
@@ -349,13 +349,13 @@ Bei diesen Providern stoßen die meisten Benutzer auf Schwierigkeiten:
 <Tip>
   Jede Provider-Seite zeigt drei Startvarianten in einer CodeGroup: Docker mit `--env-file .env`
   (empfohlen), Docker mit Inline-Flags `-e` und ein vorgefertigtes Binary aus `make build`. Sobald
-  Sie mehr als ein paar Variablen haben, kopieren Sie `.env.template`, tragen Sie die benötigten
-  Werte ein und verwenden Sie dieselbe Datei sowohl für Docker als auch für das native Binary.
+  du mehr als ein paar Variablen hast, kopiere `.env.template`, trage die benötigten
+  Werte ein und verwende dieselbe Datei sowohl für Docker als auch für das native Binary.
 </Tip>
 
 Provider ohne eigene Seite (OpenAI, Groq, Fireworks AI, Meta, OpenRouter, Kilo AI, Z.ai, xAI,
 MiniMax) folgen demselben Muster: API-Key setzen (und, wo unterstützt, optional die Base-URL),
-GoModel starten, per Modell-ID routen. Die vollständige Referenz der Umgebungsvariablen finden Sie
+GoModel starten, per Modell-ID routen. Die vollständige Referenz der Umgebungsvariablen findest du
 unter [Konfiguration](/de/advanced/configuration).
 
 ## Provider-Status
@@ -373,7 +373,7 @@ Abschnitt **Providers Overview** der Seite **Overview**.
 Die Status-Pill jeder Karte kombiniert zwei Signale – **Modellerkennung** (lässt sich das
 Modellinventar des Providers abrufen?) und **Request-Zustand** (sind echte Requests über das
 Gateway erfolgreich?). Signale aus echtem Traffic können einen Status nur verschlechtern und
-verdecken nie einen Fehler bei der Modellerkennung. Fahren Sie mit der Maus über die Pill, um den
+verdecken nie einen Fehler bei der Modellerkennung. Fahre mit der Maus über die Pill, um den
 Grund der Einstufung und den letzten Fehler zu sehen.
 
 | Pill | Bedeutung |
@@ -387,7 +387,7 @@ Grund der Einstufung und den letzten Fehler zu sehen.
 | `Offline` | Die letzte Aktualisierung oder Verfügbarkeitsprüfung ist fehlgeschlagen; die Modelle des Providers sind in der Modellliste ausgeblendet, bis er sich erholt |
 | `Unhealthy` | Die Modellerkennung ist fehlgeschlagen, und es sind keine Modelle verfügbar |
 
-Klappen Sie eine Karte auf (über den Pfeilstreifen unten oder den abschnittsweiten Schalter
+Klappe eine Karte auf (über den Pfeilstreifen unten oder den abschnittsweiten Schalter
 **Show Details**), um Details zum Request-Zustand zu sehen:
 
 - **Recent Requests** – Requests und Fehler über das Gateway in den letzten 10 Minuten.
@@ -401,11 +401,11 @@ Klappen Sie eine Karte auf (über den Pfeilstreifen unten oder den abschnittswei
 - **Models (Recent Traffic)** – Anzahl der Requests/Fehler pro Modell. Ein Modell mit mindestens
   3 Fehlern, die die Hälfte oder mehr seiner Requests im Zeitfenster ausmachen, wird rot markiert –
   so wird ein einzelnes defektes Modell bei einem ansonsten gesunden Provider erkannt, was die
-  Modellerkennung allein nicht sehen kann. Fahren Sie mit der Maus über eine Zeile, um die letzte
+  Modellerkennung allein nicht sehen kann. Fahre mit der Maus über eine Zeile, um die letzte
   Fehlermeldung des Modells zu sehen. Eine `200`-Response ohne Choices, ohne Output oder ohne
   Token-Nutzung zählt hier ebenfalls als Fehler.
 
-Die Überwachung des Request-Zustands ist passiv: Sie beobachtet den Traffic, den Ihre Clients
+Die Überwachung des Request-Zustands ist passiv: Sie beobachtet den Traffic, den deine Clients
 ohnehin senden (die eigenen Hintergrundprüfungen des Gateways – Modellerkennung und
 Verfügbarkeitsprüfungen – sind ausgenommen), daher zeigt ein Provider ohne Traffic einfach keine
 jüngsten Requests. Die Zähler liegen pro Gateway-Instanz im Arbeitsspeicher und werden bei einem

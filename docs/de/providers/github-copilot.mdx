@@ -1,12 +1,12 @@
 ---
 title: "GitHub Copilot"
-description: "Leiten Sie Traffic für Chat, Responses und Embeddings über ein GitHub-Copilot-Abonnement."
+description: "Leite Traffic für Chat, Responses und Embeddings über ein GitHub-Copilot-Abonnement."
 icon: "github"
 keywords: ["GitHub Copilot", "Copilot", "Abonnement", "subscription", "OAuth", "Provider-Einrichtung", "provider setup"]
 ---
 
 Der Provider `github-copilot` ruft die GitHub-Copilot-API mit den Modellen auf,
-die Ihr Copilot-Plan enthält (Free, Pro, Pro+, Max, Business oder Enterprise).
+die dein Copilot-Plan enthält (Free, Pro, Pro+, Max, Business oder Enterprise).
 Die Nutzung wird mit den GitHub AI Credits des Plans abgerechnet, nicht über
 den API-Key eines Modellanbieters.
 
@@ -45,7 +45,7 @@ GITHUB_COPILOT_API_KEY=$(gh auth token)
 GITHUB_COPILOT_API_KEY=$(jq -r '."github-copilot".refresh' ~/.local/share/opencode/auth.json)
 ```
 
-Welche Modelle antworten, hängt von Ihrem Copilot-Plan ab, nicht vom Token. Ein
+Welche Modelle antworten, hängt von deinem Copilot-Plan ab, nicht vom Token. Ein
 Modell, das der Plan nicht enthält, antwortet mit `model_not_supported`, auch
 wenn `/models` es auflistet.
 
@@ -53,29 +53,29 @@ wenn `/models` es auflistet.
 
 Die Einzelpläne (Free, Pro, Pro+, Max) nutzen die Standard-Base-URL
 `https://api.githubcopilot.com`. Ein Business- oder Enterprise-Platz kann über
-einen anderen Endpunkt bedient werden; setzen Sie ihn, wenn Requests mit `401`
+einen anderen Endpunkt bedient werden; setze ihn, wenn Requests mit `401`
 oder `model_not_supported` fehlschlagen:
 
 ```bash
 GITHUB_COPILOT_BASE_URL=https://api.business.githubcopilot.com
 ```
 
-Den Endpunkt Ihres Kontos finden Sie als `endpoints.api` in der Antwort von
+Den Endpunkt deines Kontos findest du als `endpoints.api` in der Antwort von
 `curl -H "Authorization: Bearer $GITHUB_COPILOT_API_KEY" https://api.github.com/copilot_internal/user`.
 
 ## Modelle
 
 Mit gesetztem `GITHUB_COPILOT_MODELS` werden standardmäßig nur diese Modelle
-angeboten (siehe [Modellmodi](/de/advanced/config-yaml#modellmodi)); fügen Sie ein Modell dort hinzu, um es
-anzubieten, oder setzen Sie `GITHUB_COPILOT_MODELS_MODE=fallback` oder `merge`,
+angeboten (siehe [Modellmodi](/de/advanced/config-yaml#modellmodi)); füge ein Modell dort hinzu, um es
+anzubieten, oder setze `GITHUB_COPILOT_MODELS_MODE=fallback` oder `merge`,
 um die Modelle aus Copilots `/models` zu listen. Diese Liste lässt Modelle weg,
-die Ihr Plan auflistet, die im Konto aber nicht aktiviert sind (Policy
-`disabled`); aktivieren Sie sie in Ihren
+die dein Plan auflistet, die im Konto aber nicht aktiviert sind (Policy
+`disabled`); aktiviere sie in deinen
 [Copilot-Einstellungen](https://github.com/settings/copilot/features), dann
 erscheinen sie bei der nächsten Aktualisierung der Modelle.
 
 Um nur einen Teil der gelisteten Modelle anzubieten,
-[filtern](/de/advanced/config-yaml#modelle-eines-providers-filtern) Sie die
+[filtere](/de/advanced/config-yaml#modelle-eines-providers-filtern) die
 Liste:
 
 ```bash
@@ -106,7 +106,7 @@ gesendet.
 
 Ein Chat-Request an ein reines Responses-Modell wird mit `400` abgelehnt, wenn
 er ein Feld enthält, das die Übersetzung nicht exakt abbilden kann (zum
-Beispiel `logit_bias`); senden Sie ihn stattdessen an `/v1/responses`.
+Beispiel `logit_bias`); sende ihn stattdessen an `/v1/responses`.
 
 Embeddings (`text-embedding-3-small`) werden unterstützt. Copilot akzeptiert
 als `input` nur eine Liste, daher wird ein einzelner String in eine Liste mit

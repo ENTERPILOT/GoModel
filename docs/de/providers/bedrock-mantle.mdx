@@ -1,6 +1,6 @@
 ---
 title: "Amazon Bedrock Mantle"
-description: "Nutzen Sie den OpenAI-kompatiblen Mantle-Endpunkt von Amazon Bedrock mit direktem Routing über die Responses API, einschließlich GPT-5.6 Sol, Terra und Luna."
+description: "Nutze den OpenAI-kompatiblen Mantle-Endpunkt von Amazon Bedrock mit direktem Routing über die Responses API, einschließlich GPT-5.6 Sol, Terra und Luna."
 icon: "/brand/bedrock.svg"
 keywords: ["Amazon Bedrock Mantle", "Responses API", "OpenAI-kompatibles Bedrock", "OpenAI-compatible Bedrock", "Provider-Einrichtung", "provider setup"]
 ---
@@ -11,14 +11,14 @@ Completions oder Bedrock Converse übersetzt werden.
 
 <Note>
   Dies ist ein eigener Provider-Typ, getrennt von [Amazon Bedrock Runtime](/de/providers/bedrock).
-  Verwenden Sie `bedrock-mantle` für OpenAI-kompatible Mantle-Modelle und `bedrock` für
-  Converse-Modelle von Bedrock Runtime. Sie können beide gleichzeitig konfigurieren.
+  Verwende `bedrock-mantle` für OpenAI-kompatible Mantle-Modelle und `bedrock` für
+  Converse-Modelle von Bedrock Runtime. Du kannst beide gleichzeitig konfigurieren.
 </Note>
 
 ## Voraussetzungen
 
-Aktivieren Sie die Modelle in Ihrem AWS-Konto und wählen Sie eine unterstützte AWS-Region. Sie
-können sich mit einem Amazon-Bedrock-API-Key oder über die Standard-Credential-Chain von AWS
+Aktiviere die Modelle in deinem AWS-Konto und wähle eine unterstützte AWS-Region. Du
+kannst dich mit einem Amazon-Bedrock-API-Key oder über die Standard-Credential-Chain von AWS
 authentifizieren.
 
 ## Konfiguration
@@ -47,10 +47,10 @@ GOMODEL_MASTER_KEY=change-me
 </Tabs>
 
 Für SigV4 verwendet GoModel die Credential-Chain des AWS SDK, einschließlich `AWS_PROFILE`, IAM
-Identity Center sowie Container- oder Instanzrollen. Bevorzugen Sie im Produktivbetrieb
+Identity Center sowie Container- oder Instanzrollen. Bevorzuge im Produktivbetrieb
 Workload-Zugangsdaten gegenüber langlebigen Access Keys.
 
-`AWS_BEARER_TOKEN_BEDROCK` wird ebenfalls als Bearer-Token-Fallback akzeptiert. Setzen Sie dazu
+`AWS_BEARER_TOKEN_BEDROCK` wird ebenfalls als Bearer-Token-Fallback akzeptiert. Setze dazu
 `BEDROCK_MANTLE_BASE_URL`, damit die Provider-Erkennung Mantle aktivieren kann.
 
 Die Base URL kann eine AWS-Region oder ein vollständiger Endpunkt sein. Eine Region ist die
@@ -63,10 +63,10 @@ BEDROCK_MANTLE_BASE_URL=us-west-2
 
 Bei einer Konfiguration per API-Key oder YAML ohne Base URL verwendet GoModel
 `BEDROCK_MANTLE_REGION`, dann `AWS_REGION`, dann `AWS_DEFAULT_REGION` und schließlich `us-east-1`.
-Wenn nur IAM-Zugangsdaten vorhanden sind, setzen Sie `BEDROCK_MANTLE_BASE_URL`, damit die
+Wenn nur IAM-Zugangsdaten vorhanden sind, setze `BEDROCK_MANTLE_BASE_URL`, damit die
 Provider-Erkennung Mantle aktiviert.
 
-Alternativ konfigurieren Sie den Provider in `config.yaml`:
+Alternativ konfigurierst du den Provider in `config.yaml`:
 
 ```yaml
 providers:
@@ -153,10 +153,10 @@ voraussetzt. Andere Mantle-Modelle verwenden je nach Bedarf `/v1/responses` oder
 | `openai` | Erzwingt `/openai/v1` für Inferenz-Requests. |
 | `standard` | Erzwingt `/v1` für Inferenz-Requests. |
 
-Der Modellkatalog verwendet immer `/v1/models`. Nutzen Sie einen Override, wenn AWS ein Modell
+Der Modellkatalog verwendet immer `/v1/models`. Nutze einen Override, wenn AWS ein Modell
 hinzufügt, bevor die automatische Pfadliste von GoModel aktualisiert wurde.
 
-In YAML setzen Sie dieselbe Option mit `api_mode`:
+In YAML setzt du dieselbe Option mit `api_mode`:
 
 ```yaml
 providers:
@@ -170,7 +170,7 @@ providers:
 
 ## Mehrere Mantle-Provider
 
-Verwenden Sie Umgebungsvariablen mit Suffix für getrennte Regionen oder Konten:
+Verwende Umgebungsvariablen mit Suffix für getrennte Regionen oder Konten:
 
 ```bash
 BEDROCK_MANTLE_EAST_API_KEY=ABSK...
@@ -184,13 +184,13 @@ Dadurch werden `bedrock-mantle-east` und `bedrock-mantle-west` registriert.
 
 ## Fehlerbehebung
 
-- **GPT-5.6 liefert `404` oder lehnt den Request ab** – verwenden Sie den Provider-Typ
+- **GPT-5.6 liefert `404` oder lehnt den Request ab** – verwende den Provider-Typ
   `bedrock-mantle`. Der Bedrock-Runtime-Provider nutzt Converse, das GPT-5.6 nicht unterstützt.
-- **`403` / Zugriff verweigert** – aktivieren Sie den Modellzugriff und prüfen Sie, ob der API-Key
+- **`403` / Zugriff verweigert** – aktiviere den Modellzugriff und prüfe, ob der API-Key
   oder der IAM-Principal in dieser Region Inferenz über Bedrock Mantle aufrufen darf.
-- **Provider wird mit `AWS_BEARER_TOKEN_BEDROCK` oder einer IAM-Rolle nicht erkannt** – setzen Sie
+- **Provider wird mit `AWS_BEARER_TOKEN_BEDROCK` oder einer IAM-Rolle nicht erkannt** – setze
   `BEDROCK_MANTLE_BASE_URL`, um den Provider ohne Key zu aktivieren.
-- **Ein neu veröffentlichtes Modell verwendet die falsche Route** – setzen Sie
+- **Ein neu veröffentlichtes Modell verwendet die falsche Route** – setze
   `BEDROCK_MANTLE_API_MODE=openai` oder `standard` für diese Provider-Instanz.
 
 ## Referenzen

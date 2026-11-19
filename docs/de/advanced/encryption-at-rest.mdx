@@ -1,12 +1,12 @@
 ---
 title: "Verschlüsselung ruhender Daten"
-description: "Verschlüsseln Sie über das Dashboard gespeicherte Provider-Zugangsdaten, MCP-Header und OAuth-Tokens sowie Guardrail-Secrets mit GOMODEL_ENCRYPTION_KEY."
+description: "Verschlüssle über das Dashboard gespeicherte Provider-Zugangsdaten, MCP-Header und OAuth-Tokens sowie Guardrail-Secrets mit GOMODEL_ENCRYPTION_KEY."
 icon: "lock"
 keywords: ["Verschlüsselung ruhender Daten", "encryption at rest", "GOMODEL_ENCRYPTION_KEY", "Key Rotation", "key rotation", "Secrets", "AES-256-GCM", "KMS"]
 ---
 
-Secrets, die Sie über das Dashboard oder die Admin API speichern, werden in der
-Datenbank von GoModel abgelegt. Wenn Sie `GOMODEL_ENCRYPTION_KEY` setzen, werden
+Secrets, die du über das Dashboard oder die Admin API speicherst, werden in der
+Datenbank von GoModel abgelegt. Wenn du `GOMODEL_ENCRYPTION_KEY` setzt, werden
 sie vor dem Schreiben verschlüsselt. Eine Datenbankdatei, ein Dump, ein Backup
 oder ein Replikat enthält sie dann nicht mehr im Klartext.
 
@@ -28,7 +28,7 @@ sowie MCP oder Guardrails, sofern aktiviert) ein Secret im Klartext lädt.
 
 ## Aktivieren
 
-Erzeugen Sie einen Key und übergeben Sie ihn an jede Instanz, die die Datenbank
+Erzeuge einen Key und übergib ihn an jede Instanz, die die Datenbank
 gemeinsam nutzt:
 
 ```bash
@@ -41,8 +41,8 @@ GOMODEL_ENCRYPTION_KEY=<generated value>
 
 Ein leerer Wert lässt die Verschlüsselung deaktiviert. Jede andere Zeichenkette
 funktioniert, aber der Key-Encryption-Key wird daraus abgeleitet. Ein kurzer
-oder leicht zu erratender Wert schwächt daher die Verschlüsselung: Verwenden Sie
-wie oben 32 zufällige Bytes. Stellen Sie den Key so bereit wie andere Secrets,
+oder leicht zu erratender Wert schwächt daher die Verschlüsselung: Verwende
+wie oben 32 zufällige Bytes. Stelle den Key so bereit wie andere Secrets,
 zur Laufzeit aus einem Secret-Manager und nicht aus einer eingecheckten Datei.
 Eine [Secret-Referenz](/de/advanced/secret-references) wie
 `GOMODEL_ENCRYPTION_KEY=${file:/run/secrets/gomodel-encryption-key}`
@@ -50,7 +50,7 @@ funktioniert ebenfalls.
 
 <Warning>
   Wenn der Key verloren geht, lassen sich die verschlüsselten Secrets nicht mehr
-  wiederherstellen. Bewahren Sie ihn so sorgfältig auf wie die Datenbank-Backups,
+  wiederherstellen. Bewahre ihn so sorgfältig auf wie die Datenbank-Backups,
   die er schützt, und getrennt von diesen. Ohne den Key verweigert GoModel den
   Start mit einer Datenbank, die verschlüsselte Secrets enthält.
 </Warning>
@@ -59,7 +59,7 @@ funktioniert ebenfalls.
 
 Das Aktivieren des Keys schreibt nichts um. Klartextwerte funktionieren weiterhin
 und werden verschlüsselt, sobald der jeweilige Eintrag das nächste Mal
-gespeichert wird. Um alles auf einmal zu verschlüsseln, führen Sie Folgendes aus:
+gespeichert wird. Um alles auf einmal zu verschlüsseln, führe Folgendes aus:
 
 ```bash
 gomodel secrets reencrypt
@@ -76,7 +76,7 @@ verarbeitet.
 
 ## Den Key rotieren
 
-Um `GOMODEL_ENCRYPTION_KEY` zu ändern, starten Sie mit dem neuen Key und dem
+Um `GOMODEL_ENCRYPTION_KEY` zu ändern, starte mit dem neuen Key und dem
 alten Key in `GOMODEL_ENCRYPTION_KEY_PREVIOUS`:
 
 ```bash
@@ -86,11 +86,11 @@ GOMODEL_ENCRYPTION_KEY_PREVIOUS=<old value>
 
 Beim Start verpackt GoModel den Data Key der Datenbank neu mit dem neuen Key.
 Gespeicherte Secrets werden nicht umgeschrieben, daher geschieht dies sofort.
-Sobald alle Instanzen mit dem neuen Key laufen, entfernen Sie
+Sobald alle Instanzen mit dem neuen Key laufen, entferne
 `GOMODEL_ENCRYPTION_KEY_PREVIOUS`.
 
 Um den Data Key selbst zu ersetzen, zum Beispiel nach einem vermuteten Leck einer
-Datenbankkopie zusammen mit dem alten Key, führen Sie Folgendes aus:
+Datenbankkopie zusammen mit dem alten Key, führe Folgendes aus:
 
 ```bash
 gomodel secrets reencrypt --rotate-data-key
@@ -103,7 +103,7 @@ ist, wechselt also ohne Neustart zum neuen Key, und prüft nach dem Speichern
 erneut: Ein Speichervorgang, der beim Wechsel des Keys bereits lief,
 verschlüsselt sich selbst mit dem neuen Key neu. Wenn diese zweite Prüfung den
 Key-Speicher nicht erreicht, wird das Secret trotzdem gespeichert, der
-Speichervorgang gibt aber einen Fehler zurück, der Sie auffordert, es erneut zu
+Speichervorgang gibt aber einen Fehler zurück, der dich auffordert, es erneut zu
 speichern oder `gomodel secrets reencrypt` auszuführen.
 
 ## Funktionsweise
@@ -129,8 +129,8 @@ Backups.
 Eine auf GoModel aufbauende Distribution kann den Data Key statt mit
 `GOMODEL_ENCRYPTION_KEY` mit einem KMS verpacken, indem sie
 `LoadResult.SetKeyWrapper` mit einem `config.KeyWrapper` aus
-`run.Options.SetupConfig` aufruft. Lassen Sie beim ersten Start mit einem neuen
+`run.Options.SetupConfig` aufruft. Lass beim ersten Start mit einem neuen
 Wrapper `GOMODEL_ENCRYPTION_KEY` einmal gesetzt, damit der vorhandene Data Key
 dorthin übertragen werden kann. Um von einem Wrapper zu einem anderen zu
-wechseln, übergeben Sie den alten als vorherigen Wrapper:
+wechseln, übergib den alten als vorherigen Wrapper:
 `SetKeyWrapper(next, previous)`.

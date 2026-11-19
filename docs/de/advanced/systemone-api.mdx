@@ -1,6 +1,6 @@
 ---
 title: "System One API"
-description: "Senden Sie Entscheidungs-Requests an TypeSafe System One (Jev, Kev) über GoModel – nativ weitergeleitet, mit virtuellen Modellen, Guardrails, Caching, Failover, Request-Logging und Nutzungserfassung."
+description: "Sende Entscheidungs-Requests an TypeSafe System One (Jev, Kev) über GoModel – nativ weitergeleitet, mit virtuellen Modellen, Guardrails, Caching, Failover, Request-Logging und Nutzungserfassung."
 icon: "scale"
 keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "Entscheidungsmodell", "decision model", "noul", "choice", "score", "OpenRouter", "Azure", "Microsoft-Decision-1"]
 ---
@@ -11,7 +11,7 @@ typisierter Fragen, und die Antwort ist eine kalibrierte Wahrscheinlichkeit pro
 Frage. Es handelt sich um eine Entscheidungs-API, nicht um einen Textgenerator,
 daher leitet GoModel sie **nativ** weiter und übersetzt sie nie in Chat oder aus
 Chat. Um dieselben Modelle mit den Request- und Antwortformaten von OpenAI zu
-erreichen, verwenden Sie die [Decisions API](/de/advanced/decisions-api), die
+erreichen, verwende die [Decisions API](/de/advanced/decisions-api), die
 GoModel in System One übersetzt.
 
 Der Endpunkt ist verfügbar, sobald ein [`jev`-Provider](/de/providers/jev)
@@ -59,8 +59,8 @@ Die Antwort stammt vom Provider selbst und wird unverändert weitergegeben:
 }
 ```
 
-Die TypeSafe-SDKs senden `POST {base_url}/v1/systemone`. Richten Sie sie daher
-mit Ihrem GoModel-Key auf das Gateway-Root (`base_url="http://localhost:8080"`)
+Die TypeSafe-SDKs senden `POST {base_url}/v1/systemone`. Richte sie daher
+mit deinem GoModel-Key auf das Gateway-Root (`base_url="http://localhost:8080"`)
 aus; siehe [Jev / Kev](/de/providers/jev#die-typesafe-sdks-verwenden).
 
 ## Routen
@@ -106,7 +106,7 @@ Formen gleich behandeln. Das Bild muss ein PNG oder JPEG sein; das `format` des
 Assets bleibt erhalten, wenn es angegeben ist, und wird andernfalls aus den
 Bytes des Bildes ermittelt. Ein Formular, das TypeSafe ablehnen würde, etwa ein
 Part, den kein Asset verwendet, ein Asset, das einen fehlenden Part benennt,
-oder ein Bild, das weder PNG noch JPEG ist, liefert `400`. Senden Sie den
+oder ein Bild, das weder PNG noch JPEG ist, liefert `400`. Sende den
 Header `TypeSafe-Danger-Zone-Images: true`, wie von TypeSafe verlangt; das
 Gateway leitet ihn weiter. Kev-Server und Microsoft-Decision-1 von Azure lesen
 nur Text; das Gateway lehnt ihre Bild-Requests nicht ab, und der Upstream
@@ -129,7 +129,7 @@ curl -s http://localhost:8080/v1/systemone \
 | `jev` (gehostet) | `jev/jev-latest`, `jev/jev-preview` und jede versionierte ID wie `jev/jev-1.13.0` |
 | `jev` (Kev-Server) | `kev/kev-latest` und die Aliase des Checkpoints, für einen Provider namens `kev` |
 | `openrouter` | `openrouter/typesafe/jev-1.13`, `openrouter/~typesafe/jev-latest` und die anderen Decision-Modelle von OpenRouter, etwa `openrouter/jaredpalmer/kev-4b` |
-| `azure` | Der Name Ihres Microsoft-Decision-1-Deployments, etwa `azure/ms-decision-1` |
+| `azure` | Der Name deines Microsoft-Decision-1-Deployments, etwa `azure/ms-decision-1` |
 
 System-One-Modelle werden in `GET /v1/models` als Utility-Modelle ohne
 Generierungsmodus aufgeführt.
@@ -143,7 +143,7 @@ dieselbe Weise pinnen.
 
 OpenRouter akzeptiert `jev-latest` selbst, GoModel routet aber anhand der
 Katalog-IDs. Damit ein einfaches `jev-latest` (der Standard der TypeSafe-SDKs)
-über OpenRouter weiterhin funktioniert, fügen Sie ein virtuelles Modell hinzu:
+über OpenRouter weiterhin funktioniert, füge ein virtuelles Modell hinzu:
 
 ```yaml
 virtual_models:
@@ -158,7 +158,7 @@ Request (gleiche Route, gleiches aufgelöstes Modell, gleiche Guardrails und
 gleicher Body nach Guardrail-Bearbeitungen) aus dem exakten Cache beantwortet
 (`X-Cache: HIT (exact)`) und in der Nutzung als Cache-Treffer erfasst. Der
 semantische Cache bedient System One nie: Ein lediglich ähnlicher State ist
-nicht dieselbe Entscheidung. Senden Sie `Cache-Control: no-cache`, um den Cache
+nicht dieselbe Entscheidung. Sende `Cache-Control: no-cache`, um den Cache
 für einen einzelnen Request zu umgehen.
 
 ## Failover
@@ -190,7 +190,7 @@ dessen Text, jeden anderen JSON-Wert als sein kodiertes JSON, das auch nach
 einer Bearbeitung gültiges JSON sein muss. Das ist genau das, was
 anonymisierende und blockierende Guardrails benötigen; beispielsweise wird eine
 `string_replace`-Regel, die Kartennummern maskiert, auf `state` angewendet,
-bevor er das Gateway verlässt. Die Fragen sind das feste Schema Ihrer Anwendung
+bevor er das Gateway verlässt. Die Fragen sind das feste Schema deiner Anwendung
 und werden nicht offengelegt.
 
 Bearbeitungen, für die ein Entscheidungs-Request keinen Platz hat, etwa ein
@@ -223,9 +223,9 @@ kann:
 
 Jeder Aufruf ist ein Request-Log-Eintrag unter seiner Route, mit angefordertem und
 aufgelöstem Modell, Provider, Request- und Response-Body, Guardrail-Ergebnissen
-und Failover-Versuchen; filtern Sie das Request-Log nach dem Request-Typ
+und Failover-Versuchen; filtere das Request-Log nach dem Request-Typ
 **Decisions**. Die Nutzung erfasst `input_tokens` und `output_tokens` der
 Antwort unter dem Modell, das geantwortet hat. OpenRouter meldet seine eigenen
 `usage.cost`, die als Kosten des Requests erfasst werden; für gehostetes Jev
-deklarieren Sie die Preise am Provider (siehe
+deklarierst du die Preise am Provider (siehe
 [Jev / Kev](/de/providers/jev#modelle-zugriffskontrolle-und-kosten)).

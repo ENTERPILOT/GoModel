@@ -1,6 +1,6 @@
 ---
 title: "DeepInfra"
-description: "Konfigurieren Sie DeepInfra in GoModel für Chat, Responses, Embeddings, Bilder, Audio und Batches."
+description: "Konfiguriere DeepInfra in GoModel für Chat, Responses, Embeddings, Bilder, Audio und Batches."
 icon: "server"
 keywords: ["DeepInfra", "offene Modelle", "open models", "Provider-Einrichtung", "provider setup", "Batches", "Bilder", "images", "Audio"]
 ---
@@ -20,7 +20,7 @@ DeepInfra stellt offene und weitergeleitete Modelle über eine OpenAI-kompatible
 
 ## Konfiguration
 
-Erstellen Sie im [DeepInfra-Dashboard](https://deepinfra.com/dash/api_keys) einen API-Key und setzen Sie:
+Erstelle im [DeepInfra-Dashboard](https://deepinfra.com/dash/api_keys) einen API-Key und setze:
 
 ```bash
 DEEPINFRA_API_KEY=...
@@ -36,7 +36,7 @@ providers:
     # base_url ist standardmäßig "https://api.deepinfra.com/v1/openai".
 ```
 
-Überschreiben Sie die Base-URL oder legen Sie eine feste Modellliste nur fest, wenn Sie dies benötigen:
+Überschreibe die Base-URL oder lege eine feste Modellliste nur fest, wenn du dies benötigst:
 
 ```bash
 DEEPINFRA_BASE_URL=https://api.deepinfra.com/v1/openai
@@ -48,8 +48,8 @@ DEEPINFRA_MODELS=Qwen/Qwen3-32B,Qwen/Qwen3-Embedding-0.6B
 GoModel liest die Live-Liste `/models` von DeepInfra, einschließlich der Art jedes Modells
 (Chat, Embedding, Bild, Sprachausgabe, Transkription), der Kontextlänge, der Reasoning- und
 Vision-Tags sowie der Preise. Modelle zur Videogenerierung werden ausgelassen, weil GoModel
-für DeepInfra keinen Video-Endpunkt hat. Modell-IDs enthalten einen Schrägstrich; verwenden Sie sie
-unverändert, oder stellen Sie den Provider-Namen voran, um die Route festzulegen:
+für DeepInfra keinen Video-Endpunkt hat. Modell-IDs enthalten einen Schrägstrich; verwende sie
+unverändert, oder stelle den Provider-Namen voran, um die Route festzulegen:
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
@@ -74,11 +74,11 @@ Modellen wie Qwen3 ab.
   GoModel diese Requests über Chat Completions, wo `json_schema` und `json_object`
   funktionieren.
 - **Sprachausgabe standardmäßig als MP3.** DeepInfra antwortet mit WAV, wenn `response_format`
-  fehlt; GoModel sendet stattdessen den Standardwert von OpenAI (`mp3`). Setzen Sie
+  fehlt; GoModel sendet stattdessen den Standardwert von OpenAI (`mp3`). Setze
   `response_format` explizit, um ein anderes Format zu erhalten.
 - **Bildpreise gelten pro Bildeinheit.** DeepInfra führt Bildpreise pro Bildeinheit auf, und
   GoModel erfasst diesen Tarif als Preis pro Bild. Die Kostenerfassung ist für Modelle, die
   DeepInfra nach Größe oder Schrittzahl abrechnet, nur näherungsweise.
-- **Passthrough muss aktiviert werden.** Fügen Sie `deepinfra` zu `ENABLED_PASSTHROUGH_PROVIDERS`
+- **Passthrough muss aktiviert werden.** Füge `deepinfra` zu `ENABLED_PASSTHROUGH_PROVIDERS`
   hinzu, um `/p/deepinfra/...` bereitzustellen. Dieser Pfad leitet jeden Pfad unterhalb der
   Base-URL mit dem DeepInfra-Key des Gateways weiter.

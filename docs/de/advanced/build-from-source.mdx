@@ -1,27 +1,27 @@
 ---
 title: "Aus dem Quellcode bauen"
-description: "Bauen Sie das GoModel-Binary aus dem Quellcode eines Releases, mit dem vorgefertigten Admin-Dashboard oder mit Node, einschließlich vollständig offline durchgeführter Builds für Paket-Maintainer."
+description: "Baue das GoModel-Binary aus dem Quellcode eines Releases, mit dem vorgefertigten Admin-Dashboard oder mit Node, einschließlich vollständig offline durchgeführter Builds für Paket-Maintainer."
 icon: "hammer"
 keywords: ["aus dem Quellcode bauen", "build from source", "Paketierung", "Offline-Build", "Nix", "Homebrew", "Dashboard", "reproduzierbar"]
 ---
 
 Die meisten Benutzer sollten GoModel mit dem [Schnellstart](/de/getting-started/quickstart)-Skript,
 mit Docker oder mit einem Binary aus den
-[GitHub Releases](https://github.com/ENTERPILOT/GoModel/releases) installieren. Bauen Sie aus dem
-Quellcode, wenn Sie GoModel für eine Distribution paketieren oder einen eigenen Build benötigen.
+[GitHub Releases](https://github.com/ENTERPILOT/GoModel/releases) installieren. Baue aus dem
+Quellcode, wenn du GoModel für eine Distribution paketieren oder einen eigenen Build benötigst.
 
 Das Admin-Dashboard ist eine Svelte-App, die beim Kompilieren in das Binary eingebettet wird.
 Ihr Build-Output liegt nicht im Repository, daher erzeugt ein einfaches `go build` auf einem
 Source-Checkout ein Binary mit deaktivierter UI. Das Gateway und die Admin API funktionieren
-trotzdem, und im Log steht, dass die UI deaktiviert ist. Fügen Sie das Dashboard vor `go build`
+trotzdem, und im Log steht, dass die UI deaktiviert ist. Füge das Dashboard vor `go build`
 auf eine der beiden folgenden Arten hinzu.
 
 ## Option 1: Vorgefertigtes Dashboard verwenden (ohne Node)
 
 Jedes Release enthält `gomodel_<version>_dashboard.tar.gz`, aufgeführt in der `checksums.txt`
 des jeweiligen Releases. Das Archiv enthält genau das Dashboard, das in die Release-Binaries und
-das Docker-Image eingebettet ist. Seine Pfade sind relativ zum Root des Repositorys, entpacken
-Sie es also dort:
+das Docker-Image eingebettet ist. Seine Pfade sind relativ zum Root des Repositorys, entpacke
+es also dort:
 
 ```bash
 VERSION=0.1.102
@@ -40,7 +40,7 @@ CGO_ENABLED=0 go build -trimpath -tags=grpcnotrace \
 
 Das Tag `grpcnotrace` entfernt das eingebaute Request-Tracing von gRPC, das
 GoModel nie nutzt, und macht das Binary etwa 15 MB kleiner. `-trimpath`
-entfernt die Pfade Ihres Build-Rechners aus dem Binary. Beides ist optional:
+entfernt die Pfade deines Build-Rechners aus dem Binary. Beides ist optional:
 ohne sie funktioniert das Binary genauso, es ist nur größer. `make build` setzt
 beides automatisch.
 
@@ -49,7 +49,7 @@ pinnen.
 
 ## Option 2: Dashboard mit Node bauen
 
-Verwenden Sie Node 22.12 oder neuer aus der 22.x-Reihe oder Node 24+. Node 23 wird von den
+Verwende Node 22.12 oder neuer aus der 22.x-Reihe oder Node 24+. Node 23 wird von den
 Build-Tools des Dashboards nicht unterstützt.
 
 ```bash
@@ -67,6 +67,6 @@ npm ci --offline --ignore-scripts && npm run build
 
 ## Versionsstempel
 
-Setzen Sie `internal/version.Version` wie oben gezeigt mit `-ldflags`. Ohne diese Angabe meldet
+Setze `internal/version.Version` wie oben gezeigt mit `-ldflags`. Ohne diese Angabe meldet
 das Binary `dev`, und die [Update-Prüfung](/de/advanced/version-awareness) meldet nie ein neueres
 Release.

@@ -6,12 +6,12 @@ keywords: ["Produktion", "production", "Deployment", "Self-Hosting", "self-hoste
 ---
 
 Diese Seite fasst die Best Practices für den Produktivbetrieb von GoModel
-zusammen. Mit dem [Schnellstart](/de/getting-started/quickstart) verarbeiten Sie
-in einer Minute Traffic; diese Seite behandelt, was Sie entscheiden sollten,
+zusammen. Mit dem [Schnellstart](/de/getting-started/quickstart) verarbeitest du
+in einer Minute Traffic; diese Seite behandelt, was du entscheiden solltest,
 bevor diese Installation echte Last trägt.
 
-Jeder Abschnitt nennt den Standardwert, wann er ausreicht und wann Sie ihn
-ändern sollten. Eine kompakte [Checkliste](/de/guides/production#checkliste-für-den-produktivbetrieb) finden Sie am
+Jeder Abschnitt nennt den Standardwert, wann er ausreicht und wann du ihn
+ändern solltest. Eine kompakte [Checkliste](/de/guides/production#checkliste-für-den-produktivbetrieb) findest du am
 Ende.
 
 ## Klein genug für jede Umgebung
@@ -32,7 +32,7 @@ auf identischer Hardware im Vergleich mit anderen Gateways gemessen.
 
 Praktisch bedeutet das: GoModel passt problemlos dorthin, wo Größe und
 Kaltstarts bestraft werden – Cloud Run, Fargate, Container Apps, Fly.io,
-Container-Lambdas oder eine kleine VM neben Ihrer Anwendung. Es benötigt keinen
+Container-Lambdas oder eine kleine VM neben deiner Anwendung. Es benötigt keinen
 eigenen Node-Pool.
 
 <Warning>
@@ -51,20 +51,20 @@ verwaltete API-Keys und weiteren Admin-Zustand über `STORAGE_TYPE`.
 | Backend | `STORAGE_TYPE` | Verwenden, wenn |
 | --- | --- | --- |
 | SQLite (Standard) | `sqlite` | Eine einzelne Instanz mit dauerhafter lokaler Festplatte oder einem eingebundenen Volume. |
-| PostgreSQL | `postgresql` | Mehr als ein Replikat, oder Sie betreiben bereits Postgres. Die übliche Wahl für die Produktion. |
-| MongoDB | `mongodb` | Sie betreiben bereits MongoDB und ziehen es Postgres vor. |
+| PostgreSQL | `postgresql` | Mehr als ein Replikat, oder du betreibst bereits Postgres. Die übliche Wahl für die Produktion. |
+| MongoDB | `mongodb` | Du betreibst bereits MongoDB und ziehst es Postgres vor. |
 
-Verwenden Sie bei MongoDB bevorzugt ein Replica Set, auch ein einzelner Knoten
+Verwende bei MongoDB bevorzugt ein Replica Set, auch ein einzelner Knoten
 genügt, wie ihn die `docker-compose.yaml` des Repositorys startet. Ein
 eigenständiger `mongod` funktioniert ebenfalls, kennt aber keine Transaktionen:
 GoModel protokolliert eine Warnung und führt Änderungen über mehrere Dokumente
 (Budget- und Rate-Limit-Konfiguration, Guardrails, Workflow-Versionen,
 Neuberechnung der Nutzungspreise) als einzelne Schreibvorgänge aus. Eine
-unterbrochene Änderung kann daher nur teilweise wirksam werden; führen Sie sie
+unterbrochene Änderung kann daher nur teilweise wirksam werden; führe sie
 erneut aus, um sie abzuschließen. Wird das Speichern eines Workflows unterbrochen,
 während die neue Version aktiviert wird, kann der Scope ohne aktiven Workflow
-bleiben (beim globalen Scope schlägt das Neuladen der Workflows fehl), bis Sie
-diesen Workflow erneut speichern.
+bleiben (beim globalen Scope schlägt das Neuladen der Workflows fehl), bis du
+diesen Workflow erneut speicherst.
 
 SQLite ist der Standardwert, damit GoModel ohne jede Konfiguration
 funktioniert, und für eine einzelne Instanz mit persistentem Volume eine echte
@@ -82,17 +82,17 @@ einzigen Schreiber zu haben und Lock-Konflikte zu vermeiden. Jeder Flush von
 Request-Log- und Nutzungsdaten und jede Budget-Prüfung wird darüber serialisiert, was
 unter Dauerlast eine Obergrenze für den Durchsatz darstellt.
 
-Für Postgres ist `POSTGRES_MAX_CONNS` standardmäßig `10`. Erhöhen Sie diesen
-Wert zuerst, wenn Sie hohe Parallelität mit aktivierten Budgets oder
-Rate-Limits betreiben.
+Für Postgres ist `POSTGRES_MAX_CONNS` standardmäßig `10`. Erhöhe diesen
+Wert zuerst, wenn du hohe Parallelität mit aktivierten Budgets oder
+Rate-Limits betreibst.
 
 <Warning>
   **Das Docker-Image deklariert kein Volume.** Der Standardpfad der Datenbank
   wird im Image zu `/app/data/gomodel.db` aufgelöst, einem Verzeichnis in einem
   Image-Layer. Ohne explizit eingebundenes Volume gehen alle Request-Logs,
   Nutzungsdaten, Budgets, verwalteten API-Keys und gespeicherten Zugangsdaten
-  verloren, wenn der Container ersetzt wird. Binden Sie immer ein Volume unter
-  `/app/data` ein oder wechseln Sie zu Postgres/MongoDB. Das Gateway
+  verloren, wenn der Container ersetzt wird. Binde immer ein Volume unter
+  `/app/data` ein oder wechsle zu Postgres/MongoDB. Das Gateway
   protokolliert beim Start eine Warnung, wenn es diese Situation erkennt, und
   die `docker-compose.yaml` des Repositorys bindet dort das Volume
   `gomodel_data` ein.
@@ -101,7 +101,7 @@ Rate-Limits betreiben.
 Der Standardpfad für SQLite ist `./data/gomodel.db`, wenn neben dem Binary
 bereits ein Verzeichnis `./data` existiert, andernfalls das
 benutzerspezifische Datenverzeichnis des Betriebssystems. Der Standardpfad
-hängt damit vom Arbeitsverzeichnis ab; setzen Sie `SQLITE_PATH` in der
+hängt damit vom Arbeitsverzeichnis ab; setze `SQLITE_PATH` in der
 Produktion daher explizit. Der aufgelöste Pfad wird beim Start als
 `storage configured` ausgegeben. Siehe
 [Wo speichert GoModel seine Daten?](/de/about/faq#wo-speichert-gomodel-seine-daten).
@@ -111,14 +111,14 @@ Produktion daher explizit. Der aufgelöste Pfad wird beim Start als
 Redis ist optional. Es dient als Speicher für den gemeinsamen Snapshot des
 Modellkatalogs und den exakten [Response-Cache](/de/features/cache). Ohne Redis
 verwendet GoModel einen prozessinternen Cache und einen lokalen Datei-Cache.
-Das ist korrekt, wird aber nicht zwischen Replikaten geteilt. Fügen Sie Redis
+Das ist korrekt, wird aber nicht zwischen Replikaten geteilt. Füge Redis
 hinzu, wenn mehrere Replikate Discovery-Ergebnisse und Cache-Treffer teilen
 sollen.
 
 <Note>
   Ist ein Redis-Modell-Cache konfiguriert und Redis **beim Start** nicht
   erreichbar, startet das Gateway nicht. Ein späterer Verlust von Redis ist nur
-  ein eingeschränkter Zustand. Berücksichtigen Sie das bei der Startreihenfolge
+  ein eingeschränkter Zustand. Berücksichtige das bei der Startreihenfolge
   der Services.
 </Note>
 
@@ -131,8 +131,8 @@ GoModel bezieht Provider-Zugangsdaten aus Umgebungsvariablen, aus
 `config.yaml` oder von der Seite **Providers** im Dashboard. Alle drei Wege
 funktionieren, bergen aber nicht dasselbe Risiko.
 
-**Konfigurieren Sie Provider in der Produktion über Umgebungsvariablen und
-beziehen Sie die Werte aus Ihrem Secret-Manager.** Injizieren Sie sie mit AWS
+**Konfiguriere Provider in der Produktion über Umgebungsvariablen und
+beziehe die Werte aus deinem Secret-Manager.** Injiziere sie mit AWS
 Secrets Manager, Google Secret Manager, Azure Key Vault, HashiCorp Vault oder
 einem Kubernetes-Secret, das vom External Secrets Operator oder vom Secrets
 Store CSI Driver befüllt wird.
@@ -159,7 +159,7 @@ Provider kann von jedem bearbeitet werden, der einen Key mit Dashboard-Zugriff
 besitzt – einschließlich seiner `base_url`. Wird `base_url` auf einen vom
 Angreifer kontrollierten Host umgebogen, landen jeder Prompt und der
 injizierte Upstream-Key unbemerkt dort. Werden Provider als Code deklariert,
-kann eine solche Änderung nur über Ihre Deployment-Pipeline erfolgen.
+kann eine solche Änderung nur über deine Deployment-Pipeline erfolgen.
 
 <Warning>
   Eine Umgebungsvariable ist nur so gut wie ihre Quelle. Ein Key, der fest in
@@ -169,11 +169,11 @@ kann eine solche Änderung nur über Ihre Deployment-Pipeline erfolgen.
   für Rotation, Zugriffskontrolle und Audit-Trail zuständig ist.
 
   Umgebungsvariablen sind außerdem über `/proc/<pid>/environ`,
-  `docker inspect` und Crash-Dumps sichtbar. Beschränken Sie daher, wer per
+  `docker inspect` und Crash-Dumps sichtbar. Beschränke daher, wer per
   Exec in den Container gelangen oder den Pod beschreiben darf.
 </Warning>
 
-Wenn Ihre Secret-Werkzeuge Dateien einbinden, verweisen Sie mit einer
+Wenn deine Secret-Werkzeuge Dateien einbinden, verweise mit einer
 [Secret-Referenz](/de/advanced/secret-references) auf die Datei, statt den
 Inhalt in eine Umgebungsvariable zu kopieren:
 
@@ -189,9 +189,9 @@ Vault zu lesen, ist mit [GoModel Pro](/de/pro/overview) möglich.
 
 Der Weg über das Dashboard bleibt die richtige Wahl für Entwicklung,
 Evaluierungen und das Hinzufügen eines Providers ohne erneutes Deployment.
-Wenn Sie ihn in der Produktion nutzen, setzen Sie `GOMODEL_ENCRYPTION_KEY` und
-behandeln Sie die Datenbank trotzdem als sensibel: Verschlüsseln Sie das
-Volume, beschränken Sie den Zugriff und stufen Sie Backups entsprechend ein.
+Wenn du ihn in der Produktion nutzt, setze `GOMODEL_ENCRYPTION_KEY` und
+behandle die Datenbank trotzdem als sensibel: Verschlüssle das
+Volume, beschränke den Zugriff und stufe Backups entsprechend ein.
 
 ### Weiterer Umgang mit Zugangsdaten
 
@@ -207,7 +207,7 @@ Volume, beschränken Sie den Zugriff und stufen Sie Backups entsprechend ein.
   oder `-auth` endet oder `authorization`, `api-key`, `apikey`, `secret`,
   `password`, `signature` oder `jwt` enthält. `Idempotency-Key` und
   `Sec-WebSocket-Key` bleiben erhalten.
-- **Setzen Sie `GOMODEL_MASTER_KEY`.** Ist er leer und gibt es keine
+- **Setze `GOMODEL_MASTER_KEY`.** Ist er leer und gibt es keine
   verwalteten Keys, wird jeder Request ohne Authentifizierung zugelassen, und
   `/admin/*` wird als Wiederherstellungspfad bei Aussperrung in die Liste der
   von der Authentifizierung ausgenommenen Pfade aufgenommen. Ein aus dem
@@ -217,20 +217,20 @@ Volume, beschränken Sie den Zugriff und stufen Sie Backups entsprechend ein.
 ### TLS
 
 Standardmäßig liefert GoModel einfaches HTTP aus und erwartet einen Reverse
-Proxy oder Load Balancer davor, der TLS terminiert. Nutzen Sie bei jedem
-Deployment, das nicht nur auf Loopback läuft, einen solchen oder schalten Sie
+Proxy oder Load Balancer davor, der TLS terminiert. Nutze bei jedem
+Deployment, das nicht nur auf Loopback läuft, einen solchen oder schalte
 [natives TLS](#natives-tls) ein: Ohne beides gehen Client-API-Keys, verwaltete
 Gateway-Keys und der Master-Key im Klartext über das Netzwerk.
 
 Es gibt außerdem keine CORS-Middleware, sodass Browser-Clients von einem
-anderen Origin das Gateway nicht direkt aufrufen können. Ergänzen Sie die
-Header bei Bedarf in Ihrem Proxy.
+anderen Origin das Gateway nicht direkt aufrufen können. Ergänze die
+Header bei Bedarf in deinem Proxy.
 
 ### Natives TLS
 
-Setzen Sie Zertifikat und Schlüssel, und der Listener liefert HTTPS auf demselben
+Setze Zertifikat und Schlüssel, und der Listener liefert HTTPS auf demselben
 Port aus, mit TLS 1.2 oder neuer, den Standard-Cipher-Suites von Go und HTTP/2.
-Nutzen Sie das, wenn Clients das Gateway direkt erreichen, etwa Pod zu Pod über
+Nutze das, wenn Clients das Gateway direkt erreichen, etwa Pod zu Pod über
 einen Kubernetes-Service: Es gibt keinen TLS-Sidecar zu pflegen, und das Gateway
 sieht die echte Client-Adresse.
 
@@ -255,10 +255,10 @@ SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
 - Antworten enthalten `Strict-Transport-Security: max-age=15552000` (180 Tage,
   ohne `includeSubDomains` oder `preload`), damit Browser für diesen Host bei
   HTTPS bleiben. Einfaches HTTP hinter einem TLS-terminierenden Proxy sendet
-  keinen HSTS-Header; setzen Sie ihn am Proxy.
+  keinen HSTS-Header; setze ihn am Proxy.
 
-**Kubernetes mit cert-manager.** Stellen Sie das Zertifikat in ein Secret aus und
-mounten Sie es als Volume. Verwenden Sie kein `subPath`: Das Kubelet aktualisiert
+**Kubernetes mit cert-manager.** Stelle das Zertifikat in ein Secret aus und
+mounte es als Volume. Verwende kein `subPath`: Das Kubelet aktualisiert
 `subPath`-Mounts nicht, sodass ein erneuertes Zertifikat den Pod nie erreichen
 würde.
 
@@ -294,8 +294,8 @@ Das Kubelet prüft das Zertifikat einer HTTPS-Probe nicht. Bei aktivem mTLS
 antworten `/health` und `/health/ready` weiterhin ohne Client-Zertifikat, sodass
 diese Probes unverändert funktionieren; jeder andere Pfad antwortet ohne
 verifiziertes Zertifikat mit 401. Der ServiceMonitor des Charts scrapt einfaches
-HTTP; definieren Sie bei nativem TLS einen eigenen mit `scheme: https`. Bei
-mTLS braucht auch `/metrics` ein Client-Zertifikat; geben Sie diesem
+HTTP; definiere bei nativem TLS einen eigenen mit `scheme: https`. Bei
+mTLS braucht auch `/metrics` ein Client-Zertifikat; gib diesem
 ServiceMonitor daher eine `tlsConfig` mit `ca` für die CA, die das
 Gateway-Zertifikat ausgestellt hat, sowie `cert` und `keySecret` aus einem
 Zertifikat, das die Client-CA signiert hat. `helm test` und die
@@ -311,7 +311,7 @@ Einrichtung benötigen.
 
 Bei einem Upstream, dessen Zertifikat von einer internen oder
 unternehmenseigenen CA ausgestellt wurde, schlägt die Verbindung mit
-`x509: certificate signed by unknown authority` fehl. Binden Sie das
+`x509: certificate signed by unknown authority` fehl. Binde das
 CA-Zertifikat in das vertrauenswürdige Verzeichnis ein, das GoModel zusätzlich
 zu den öffentlichen Root-Zertifikaten liest:
 
@@ -322,11 +322,11 @@ docker run --rm -p 8080:8080 \
 ```
 
 `SSL_CERT_FILE` funktioniert ebenfalls, ersetzt aber die Bundle-Datei, statt
-sie zu ergänzen. Verweisen Sie damit also auf ein Bundle, das auch die
+sie zu ergänzen. Verweise damit also auf ein Bundle, das auch die
 benötigten öffentlichen Root-Zertifikate enthält.
 
 Außerhalb eines Containers oder wenn zusätzlich ein Client-Zertifikat gesendet
-werden soll, setzen Sie stattdessen `HTTP_TLS_CA_FILE`; siehe
+werden soll, setze stattdessen `HTTP_TLS_CA_FILE`; siehe
 [Private CAs und Proxys](#private-cas-und-proxys).
 
 ## Air-Gapped- und Offline-Deployments
@@ -357,11 +357,11 @@ Update-Prüfung, verwirft jede HTTP-URL für den Katalog und stoppt die
 Metadaten-Abfrage von `/models` bei Providern im Modus `allowlist`. Die Einstellung wird
 nach allen anderen angewendet, sodass nichts in `config.yaml` oder in der
 Umgebung darunter einen ausgehenden Aufruf wieder aktivieren kann.
-Inferenz-Aufrufe an konfigurierte Provider und an alles, was Sie selbst deklariert haben – etwa
+Inferenz-Aufrufe an konfigurierte Provider und an alles, was du selbst deklariert hast – etwa
 einen OTLP-Collector, MCP-Upstreams oder einen Vector Store –, bleiben
 unberührt. Das Startprotokoll bestätigt den Modus.
 
-Sie können diese Aufrufe auch einzeln steuern, mit
+Du kannst diese Aufrufe auch einzeln steuern, mit
 `GOMODEL_VERSION_CHECK_ENABLED=false`, `MODEL_LIST_URL=off` und
 `ALLOWLIST_UPSTREAM_METADATA=false`.
 
@@ -377,7 +377,7 @@ Metadatenaufruf im Modus `allowlist`, sofern nicht
 
 <Warning>
   Ohne Katalog-Anreicherung hat ein Modell **keine Preise**, es sei denn, sein
-  Provider meldet Preise in `/models` oder Sie hinterlegen sie
+  Provider meldet Preise in `/models` oder du hinterlegst sie
   (`models[].metadata.pricing` in `config.yaml` oder eine Preisüberschreibung im Dashboard). Die
   Kostenerfassung meldet dann keine Kosten, und da
   [Budgets](/de/features/budgets) die Ausgaben aus den Kostendaten der Nutzung
@@ -387,29 +387,29 @@ Metadatenaufruf im Modus `allowlist`, sofern nicht
 
 Preise lassen sich in einer Air-Gapped-Umgebung auf drei Arten erhalten:
 
-1. **Den Katalog als Datei mitliefern.** Laden Sie `models.min.json` außerhalb
-   der Air-Gapped-Umgebung herunter, kopieren Sie die Datei hinein und richten
-   Sie das Gateway darauf aus. Eine lokale Datei wird gelesen, nie abgerufen,
+1. **Den Katalog als Datei mitliefern.** Lade `models.min.json` außerhalb
+   der Air-Gapped-Umgebung herunter, kopiere die Datei hinein und richte
+   das Gateway darauf aus. Eine lokale Datei wird gelesen, nie abgerufen,
    und bleibt daher auch mit `GOMODEL_OFFLINE=true` aktiv:
 
    ```bash
    MODEL_LIST_URL=/etc/gomodel/models.json   # oder file:///etc/gomodel/models.json
    ```
 
-   Die Datei wird bei jeder Cache-Aktualisierung neu gelesen. Wenn Sie sie auf
-   der Festplatte ersetzen, werden die Preise ohne Neustart aktualisiert.
-2. **Den Katalog spiegeln.** Stellen Sie die Datei über einen internen
-   HTTP-Host bereit und setzen Sie `MODEL_LIST_URL` auf diese URL. Lassen Sie
-   `GOMODEL_OFFLINE` ungesetzt und deaktivieren Sie die Update-Prüfung separat,
-   oder richten Sie auch `GOMODEL_VERSION_CHECK_URL` auf einen internen
+   Die Datei wird bei jeder Cache-Aktualisierung neu gelesen. Wenn du sie auf
+   der Festplatte ersetzt, werden die Preise ohne Neustart aktualisiert.
+2. **Den Katalog spiegeln.** Stelle die Datei über einen internen
+   HTTP-Host bereit und setze `MODEL_LIST_URL` auf diese URL. Lass
+   `GOMODEL_OFFLINE` ungesetzt und deaktiviere die Update-Prüfung separat,
+   oder richte auch `GOMODEL_VERSION_CHECK_URL` auf einen internen
    Spiegel aus.
 3. **Preise pro Modell deklarieren** unter
    `providers.<name>.models[].metadata.pricing` in `config.yaml`.
 
 <Note>
-  Wenn Sie `MODEL_LIST_URL` auf einen leeren String setzen, wird der Download
+  Wenn du `MODEL_LIST_URL` auf einen leeren String setzt, wird der Download
   **nicht** deaktiviert: Leere Umgebungswerte werden übersprungen, sodass die
-  Standard-URL erhalten bleibt. Verwenden Sie `off` oder
+  Standard-URL erhalten bleibt. Verwende `off` oder
   `GOMODEL_OFFLINE=true`.
 </Note>
 
@@ -425,17 +425,17 @@ Proxy- und Vertrauenseinstellungen werden daher einmal konfiguriert und gelten
 gleichermaßen für Provider, Modellkatalog, Update-Prüfung, MCP-Upstreams,
 Vector Stores und Embedding-Endpunkte.
 
-**Proxy.** Setzen Sie die Standardvariablen `HTTPS_PROXY` und `HTTP_PROXY`
+**Proxy.** Setze die Standardvariablen `HTTPS_PROXY` und `HTTP_PROXY`
 (jede deckt Upstreams ihres eigenen Schemas ab; die meisten Deployments sprechen
 nur mit `https://`-Upstreams, aber ein Modellserver mit reinem HTTP würde einen
 nur über `HTTPS_PROXY` gesetzten Proxy umgehen) sowie `NO_PROXY` für lokale
-Modellserver. Mehr ist nicht nötig. Braucht der Proxy Zugangsdaten, geben Sie
+Modellserver. Mehr ist nicht nötig. Braucht der Proxy Zugangsdaten, gib
 ihm eine `https://`-URL: Das Schema in der Proxy-Variable beschreibt die
 Verbindung zum Proxy, und eine `http://`-Proxy-URL sendet
 `Proxy-Authorization` im Klartext. Um einen einzelnen Provider über einen
 anderen Proxy zu leiten, siehe [ausgehende Proxys](/de/providers/outbound-proxy).
 
-**Private CA.** Binden Sie das CA-Bundle ein und verweisen Sie das Gateway darauf:
+**Private CA.** Binde das CA-Bundle ein und verweise das Gateway darauf:
 
 ```bash
 HTTP_TLS_CA_FILE=/etc/gomodel/ca.pem
@@ -458,12 +458,12 @@ anfordert.
 
 **Rotation.** GoModel liest diese Dateien beim Start und bei jedem
 [Reload der Konfiguration](/de/advanced/cli#konfiguration-neu-laden), überwacht
-sie aber nicht. Führen Sie nach einer Rotation, etwa wenn cert-manager ein
-eingebundenes Secret erneuert, `gomodel --reload` aus (oder senden Sie
-`SIGHUP`) oder starten Sie neu. Lässt sich eine rotierte Datei nicht laden,
+sie aber nicht. Führe nach einer Rotation, etwa wenn cert-manager ein
+eingebundenes Secret erneuert, `gomodel --reload` aus (oder sende
+`SIGHUP`) oder starte neu. Lässt sich eine rotierte Datei nicht laden,
 wird der Reload abgelehnt und die laufende Konfiguration bleibt aktiv.
 
-Dieselben Einstellungen liegen unter `http.tls` in `config.yaml`. Verwenden Sie
+Dieselben Einstellungen liegen unter `http.tls` in `config.yaml`. Verwende
 `HTTP_TLS_INSECURE_SKIP_VERIFY=true` nur in Testumgebungen: Es deaktiviert die
 Prüfung für jeden Upstream, und das Gateway warnt beim Start davor.
 
@@ -484,7 +484,7 @@ Prozessspeicher und stimmen sich nicht zwischen Instanzen ab.
 | Pins der [Session-Affinität](/de/features/session-keeping) | In-Memory, pro Instanz | Sessions bleiben pro Replikat gebunden, nicht global, sofern der Load Balancer nicht sticky ist. |
 | [Live-Logs](/de/advanced/admin-endpoints#admin-dashboard) | Lokale Ereignisse In-Memory, die anderer Replikate aus der Datenbank | Ein Dashboard sieht die Requests seines eigenen Replikats sofort und die jedes anderen Replikats in der Regel innerhalb von 7 Sekunden, sobald sie gespeichert sind. Siehe [Live-Logs über mehrere Replikate](#live-logs-über-mehrere-replikate). |
 | Downstream-Sessions von MCP | Dauerhaft (Datenbank) | Eine auf einem Replikat geöffnete Session läuft auf jedem anderen weiter, daher benötigen [MCP](/de/features/mcp-gateway#sessions-über-replikate-hinweg)-Clients keine Sticky Sessions. Nach einem `DELETE` lehnt jedes Replikat ihre Requests innerhalb von etwa 2 Sekunden ab; ein offener `GET`-Stream wird nicht vorzeitig geschlossen. Ein `DELETE`, das eintrifft, während die Datenbank nicht beschreibbar ist, beendet die Session nur auf dem Replikat, das es empfängt; bis ihr Eintrag abläuft, bis zu 30 Minuten später, kann derselbe Client sie noch auf einem anderen Replikat fortsetzen, und die fortgesetzte Session läuft wie gewohnt weiter. Ein laufender Response-Stream bleibt auf dem Replikat, das ihn bedient. |
-| [MCP-OAuth](/de/features/mcp-gateway#mit-oauth-anmelden)-Anmeldung | Laufende Anmeldungen In-Memory, pro Instanz; Tokens dauerhaft (Datenbank) | Der Callback der Dashboard-Anmeldung muss das Replikat erreichen, das sie gestartet hat; routen Sie `/admin` während der Anmeldung daher mit Session-Affinität. Gespeicherte und erneuerte Tokens erhalten alle Replikate über die Datenbank. |
+| [MCP-OAuth](/de/features/mcp-gateway#mit-oauth-anmelden)-Anmeldung | Laufende Anmeldungen In-Memory, pro Instanz; Tokens dauerhaft (Datenbank) | Der Callback der Dashboard-Anmeldung muss das Replikat erreichen, das sie gestartet hat; route `/admin` während der Anmeldung daher mit Session-Affinität. Gespeicherte und erneuerte Tokens erhalten alle Replikate über die Datenbank. |
 | Request-Zustand der Provider | In-Memory, pro Instanz | Der Provider-Status im Dashboard spiegelt das Replikat wider, das geantwortet hat. |
 
 Überraschend sind meist die Rate-Limits: Die Zulassung geschieht im Speicher,
@@ -493,9 +493,9 @@ gespeicherte Zählerstände liest, standardmäßig etwa einmal pro Sekunde. Drei
 Replikate mit einer Regel von 100 rpm lassen insgesamt etwa 100 rpm zu, können
 das Limit aber um etwa zwei Sekunden Traffic der anderen Replikate
 überschreiten, und die Concurrency-Slots eines abgestürzten Replikats bleiben
-einige Sekunden belegt. Verlassen Sie sich nicht auf Rate-Limits für eine
+einige Sekunden belegt. Verlass dich nicht auf Rate-Limits für eine
 Obergrenze, die nie überschritten werden darf, etwa einen gleichzeitigen
-Request über alle Replikate hinweg, und verwenden Sie
+Request über alle Replikate hinweg, und verwende
 [Budgets](/de/features/budgets) als dauerhafte, instanzübergreifende Kontrolle
 der Ausgaben. Siehe
 [Mehrere Replikate teilen sich ein Limit](/de/features/rate-limits#mehrere-replikate-teilen-sich-ein-limit).
@@ -522,12 +522,12 @@ Requests, die ein anderes Replikat bedient hat:
   den die Datenbank nur langsam abschließt, erscheint erst danach, also später;
 - erscheinen als abgeschlossene Einträge mit Status, Dauer, Modell, Provider,
   Nutzung und Kosten, aber ohne Vorschau für laufende Requests oder einzelne
-  Stream-Chunks; Bodies werden aus der Datenbank geladen, wenn Sie den Eintrag
-  aufklappen;
+  Stream-Chunks; Bodies werden aus der Datenbank geladen, wenn du den Eintrag
+  aufklappst;
 - erscheinen nur, wenn sie gespeichert wurden. Request-Log- und Nutzungseinträge
   stammen aus getrennten Features: Ein Replikat mit deaktiviertem Request-Logging
   liefert keine Request-Log-Einträge, eines mit deaktiviertem Usage-Tracking keine
-  Nutzungseinträge. Das Replikat, mit dem Ihr Dashboard verbunden ist, zeigt die
+  Nutzungseinträge. Das Replikat, mit dem dein Dashboard verbunden ist, zeigt die
   Request-Log-Einträge eines anderen Replikats nur, wenn bei ihm selbst Request-Logging
   aktiv ist, und dessen Nutzungseinträge nur mit aktivem Usage-Tracking;
 - werden nach Request-Zeit in die Liste einsortiert, unterhalb von allem
@@ -599,18 +599,18 @@ selbst prüfen. Das funktioniert auch in einem Distroless-Image ohne Shell oder
 | Liveness | `GET /health` | `gomodel --health` | Nichts. Bestätigt, dass der Listener antwortet. |
 | Readiness | `GET /health/ready` | `gomodel --ready` | Storage (503 bei Ausfall), Redis (eingeschränkt, weiterhin 200), Erweiterungskomponenten (eingeschränkt: 200, ausgefallen: 503). |
 
-Richten Sie die Kubernetes-Readiness auf `/health/ready` aus, nicht auf
+Richte die Kubernetes-Readiness auf `/health/ready` aus, nicht auf
 `/health`. Das Helm-Chart im Verzeichnis `helm/` des Repositorys erledigt das
 bereits, führt das Gateway als Nicht-Root-Benutzer des Images auf einem
 schreibgeschützten Dateisystem aus, hält SQLite auf einem persistenten Volume
-und verweigert mehr als ein Replikat, bis Sie `storage.type` auf `postgresql`
-oder `mongodb` umstellen. Die Werte finden Sie in `helm/README.md`.
+und verweigert mehr als ein Replikat, bis du `storage.type` auf `postgresql`
+oder `mongodb` umstellst. Die Werte findest du in `helm/README.md`.
 
 <Note>
   Readiness wartet nicht auf den Modellkatalog, der asynchron geladen wird.
   Ein frischer Pod kann „ready“ melden, während `GET /v1/models` noch leer ist
-  und die ersten Requests fehlschlagen. Berücksichtigen Sie das in den
-  Rollout-Einstellungen oder wärmen Sie Pods vor, bevor Sie Traffic umleiten.
+  und die ersten Requests fehlschlagen. Berücksichtige das in den
+  Rollout-Einstellungen oder wärme Pods vor, bevor du Traffic umleitest.
 </Note>
 
 Bei `SIGTERM` lässt das Gateway laufende HTTP-Arbeit 10 Sekunden lang
@@ -618,7 +618,7 @@ auslaufen und schließt den Abbau dann innerhalb von 30 Sekunden ab, wobei
 gepufferte Nutzungs- und Request-Log-Einträge geschrieben werden. Keiner der beiden
 Timeouts ist konfigurierbar. Laufende gestreamte Responses werden nach 10
 Sekunden abgebrochen, sodass eine lange Completion während eines Rolling
-Deployments abgeschnitten wird. Setzen Sie `terminationGracePeriodSeconds` auf
+Deployments abgeschnitten wird. Setze `terminationGracePeriodSeconds` auf
 mehr als 30 (45 ist eine sinnvolle Wahl), damit der Abbau nicht mit SIGKILL um
 die Wette läuft.
 
@@ -641,8 +641,8 @@ beide bereinigen stündlich.
   bedeutet auch, dass alles Sensible, das ein Benutzer in einen Prompt
   eingibt, für die gesamte Aufbewahrungsdauer gespeichert wird.
 
-  Setzen Sie in regulierten Umgebungen oder überall dort, wo Prompts
-  personenbezogene Daten enthalten, `LOGGING_LOG_BODIES=false` und behalten Sie
+  Setze in regulierten Umgebungen oder überall dort, wo Prompts
+  personenbezogene Daten enthalten, `LOGGING_LOG_BODIES=false` und behalte
   das Request-Log nur mit Metadaten.
 </Warning>
 
@@ -651,100 +651,100 @@ Zwei weitere Punkte bei hohem Volumen:
 - **Nutzungs- und Request-Log-Schreibvorgänge werden gepuffert und bei vollem Puffer
   verworfen, nicht blockiert.** Ein Burst oder eine langsame Datenbank kann
   unbemerkt Nutzungseinträge verlieren, was zu verlorenen Kostendaten und zu
-  gering belasteten Budgets führt. Richten Sie einen Alert auf
+  gering belasteten Budgets führt. Richte einen Alert auf
   `gomodel_usage_entries_dropped_total` ein (siehe
   [Alerts bei verlorener Nutzung](/de/guides/prometheus-metrics#alerts-bei-verlorener-nutzung))
   oder ohne Metriken auf die Log-Meldungen `usage log buffer full`,
   `usage logger closed` und `failed to write usage batch`. Ein verworfener
   Request-Log-Eintrag protokolliert `request log buffer full`.
-- **Budget-Prüfungen fragen bei jedem Request die Nutzungstabelle ab.** Halten
-  Sie `USAGE_RETENTION_DAYS` knapp, wenn Budgets aktiviert sind, und ziehen Sie
+- **Budget-Prüfungen fragen bei jedem Request die Nutzungstabelle ab.** Halte
+  `USAGE_RETENTION_DAYS` knapp, wenn Budgets aktiviert sind, und ziehe
   Postgres SQLite vor, bei dem die einzelne Verbindung dies zum dominierenden
   Kostenfaktor macht.
 
-Die Aufbewahrung löscht Zeilen, verkleinert aber keine SQLite-Datei. Führen Sie
+Die Aufbewahrung löscht Zeilen, verkleinert aber keine SQLite-Datei. Führe
 separat ein VACUUM aus, wenn die Dateigröße wichtig ist.
 
 ## Observability
 
-- **Metriken sind standardmäßig deaktiviert.** Setzen Sie
+- **Metriken sind standardmäßig deaktiviert.** Setze
   `METRICS_ENABLED=true`, um Prometheus-Metriken unter `METRICS_ENDPOINT`
-  (`/metrics`) bereitzustellen. Der Endpunkt ist nicht authentifiziert, halten
-  Sie ihn also innerhalb Ihres Perimeters. Siehe den
+  (`/metrics`) bereitzustellen. Der Endpunkt ist nicht authentifiziert, halte
+  ihn also innerhalb deines Perimeters. Siehe den
   [Prometheus-Leitfaden](/de/guides/prometheus-metrics).
-- **Der OpenTelemetry-Export ist standardmäßig deaktiviert.** Setzen Sie
+- **Der OpenTelemetry-Export ist standardmäßig deaktiviert.** Setze
   `OTEL_ENABLED=true` und `OTEL_EXPORTER_OTLP_ENDPOINT`, um Traces und
-  GenAI-Metriken an Ihren Collector zu senden. Siehe den
+  GenAI-Metriken an deinen Collector zu senden. Siehe den
   [OpenTelemetry-Leitfaden](/de/guides/opentelemetry).
 - **Logs sind automatisch JSON, wenn stdout kein TTY ist**, sodass Container
-  ohne Konfiguration strukturierte Logs erhalten. Setzen Sie `LOG_FORMAT`
+  ohne Konfiguration strukturierte Logs erhalten. Setze `LOG_FORMAT`
   explizit, um dies zu überschreiben. `LOG_LEVEL` ist standardmäßig `info`;
   ein ungültiger Wert lässt den Start fehlschlagen.
-- **`gomodel_circuit_breaker_state`** ist die Gauge, auf die Sie für den
-  Provider-Zustand Alerts setzen sollten. Sie wird pro Request aktualisiert,
+- **`gomodel_circuit_breaker_state`** ist die Gauge, auf die du für den
+  Provider-Zustand Alerts setzen solltest. Sie wird pro Request aktualisiert,
   sodass ein inaktiver Provider seinen zuletzt beobachteten Wert behält.
 - **Die Request-Dauer bei Streaming-Responses misst die Zeit bis zum Aufbau
-  des Streams**, nicht die Gesamtdauer des Streams. Lesen Sie Panels zur
+  des Streams**, nicht die Gesamtdauer des Streams. Lies Panels zur
   Stream-Latenz mit diesem Wissen.
 - **In Prometheus gibt es keine Token- oder Kostenmetriken.** Die Erfassung
   von Ausgaben und Tokens liegt in der Nutzungsdatenbank, im Dashboard und in
-  [`GET /v1/usage`](/de/advanced/usage-api). Setzen Sie Alerts für Ausgaben
+  [`GET /v1/usage`](/de/advanced/usage-api). Setze Alerts für Ausgaben
   über Budgets, nicht über Prometheus.
 
 ## Hinweise zur Härtung
 
-- **Platzieren Sie die Admin-Oberfläche hinter Ihrem Perimeter.** Das
+- **Platziere die Admin-Oberfläche hinter deinem Perimeter.** Das
   Dashboard und `/admin/*` werden auf demselben Port wie die Modell-API
   ausgeliefert und lassen sich nicht auf einen separaten Listener verlegen.
-  Beschränken Sie sie auf Proxy- oder Netzwerkebene oder deaktivieren Sie sie
+  Beschränke sie auf Proxy- oder Netzwerkebene oder deaktiviere sie
   mit `ADMIN_ENDPOINTS_ENABLED=false`. Die Dashboard-Shell und ihre statischen
   Ressourcen umgehen die Authentifizierung bewusst; geschützt sind nur die
   Daten, die sie laden.
-- **Beschränken Sie den Zugriff auf die Datenbankdatei.** Das
+- **Beschränke den Zugriff auf die Datenbankdatei.** Das
   SQLite-Datenverzeichnis wird mit `0755` und die Datenbankdatei mit
   Standardberechtigungen angelegt, sodass sie auf einem gemeinsam genutzten
-  Host für alle lesbar sein kann. Führen Sie GoModel unter einem eigenen
-  Benutzer aus und verschärfen Sie die Berechtigungen, insbesondere wenn
+  Host für alle lesbar sein kann. Führe GoModel unter einem eigenen
+  Benutzer aus und verschärfe die Berechtigungen, insbesondere wenn
   Zugangsdaten über das Dashboard gespeichert werden.
-- **Halten Sie `BODY_SIZE_LIMIT` vernünftig.** Der Standardwert ist `10M`, und
+- **Halte `BODY_SIZE_LIMIT` vernünftig.** Der Standardwert ist `10M`, und
   diese Einstellung verhindert, dass ein übergroßer Body zum Vektor für
   Speichererschöpfung wird. Ein nicht parsbarer Wert fällt nur mit einer
-  Warnung auf den Standardwert zurück – prüfen Sie also die Schreibweise.
-- **Lassen Sie `STREAM_STALL_TIMEOUT` aktiviert.** Der Standardwert ist `60`
+  Warnung auf den Standardwert zurück – prüfe also die Schreibweise.
+- **Lass `STREAM_STALL_TIMEOUT` aktiviert.** Der Standardwert ist `60`
   Sekunden, und diese Einstellung gibt die Goroutine und die
   Upstream-Provider-Verbindung frei, die ein Client belegt, wenn er einen
   Stream öffnet und aufhört zu lesen. Wird sie deaktiviert (`0`), kann ein
   solcher Client beides blockieren, bis der providerseitige `HTTP_TIMEOUT`
   abläuft.
-- **Lassen Sie `pprof` deaktiviert.** Es ist standardmäßig aus und im
+- **Lass `pprof` deaktiviert.** Es ist standardmäßig aus und im
   aktivierten Zustand nicht authentifiziert.
-- **Grenzen Sie verwaltete API-Keys ein.** Geben Sie jedem Verbraucher einen
+- **Grenze verwaltete API-Keys ein.** Gib jedem Verbraucher einen
   eigenen Key mit eigenem [User Path](/de/features/user-path); das ermöglicht
-  auch Rate-Limits und Budgets pro Verbraucher. Vergeben Sie
+  auch Rate-Limits und Budgets pro Verbraucher. Vergib
   `dashboard_access` und
   [`passthrough_access`](/de/features/passthrough-api#zugriffskontrolle) nur, wo
   sie benötigt werden.
 
 ## Checkliste für den Produktivbetrieb
 
-- Setzen Sie `GOMODEL_MASTER_KEY` auf einen starken Wert.
-- Terminieren Sie TLS in einem Proxy vor dem Gateway oder schalten Sie
+- Setze `GOMODEL_MASTER_KEY` auf einen starken Wert.
+- Terminiere TLS in einem Proxy vor dem Gateway oder schalte
   [natives TLS](#natives-tls) ein.
-- Beschränken Sie `/admin/*`, das Dashboard und `/metrics` am Netzwerkperimeter.
-- Verwenden Sie Postgres oder MongoDB bei mehr als einem Replikat oder bei
-  einem flüchtigen Dateisystem; binden Sie bei SQLite ein Volume ein und setzen
-  Sie `SQLITE_PATH`.
-- Deklarieren Sie Provider in Umgebungsvariablen oder `config.yaml`, mit
+- Beschränke `/admin/*`, das Dashboard und `/metrics` am Netzwerkperimeter.
+- Verwende Postgres oder MongoDB bei mehr als einem Replikat oder bei
+  einem flüchtigen Dateisystem; binde bei SQLite ein Volume ein und setze
+  `SQLITE_PATH`.
+- Deklariere Provider in Umgebungsvariablen oder `config.yaml`, mit
   Werten aus einem Secret-Manager.
-- Halten Sie die Uhren der Replikate synchron (NTP); geteilte Concurrency-Limits
+- Halte die Uhren der Replikate synchron (NTP); geteilte Concurrency-Limits
   sind darauf angewiesen.
-- Entscheiden Sie sich bewusst für eine Einstellung von `LOGGING_LOG_BODIES`
-  und legen Sie die Aufbewahrungsfristen gezielt fest.
-- Richten Sie die Readiness auf `/health/ready` aus und setzen Sie
+- Entscheide dich bewusst für eine Einstellung von `LOGGING_LOG_BODIES`
+  und lege die Aufbewahrungsfristen gezielt fest.
+- Richte die Readiness auf `/health/ready` aus und setze
   `terminationGracePeriodSeconds` auf mehr als 30.
-- Aktivieren Sie Metriken und richten Sie Alerts für
+- Aktiviere Metriken und richte Alerts für
   `gomodel_circuit_breaker_state` und
   `gomodel_usage_entries_dropped_total` ein.
-- Setzen Sie bei Air-Gapped-Installationen `GOMODEL_OFFLINE=true` und liefern
-  Sie dann den Modellkatalog als Datei mit oder deklarieren Sie Modellpreise in
+- Setze bei Air-Gapped-Installationen `GOMODEL_OFFLINE=true` und liefere
+  dann den Modellkatalog als Datei mit oder deklariere Modellpreise in
   der Konfiguration, damit Kostenerfassung und Budgets weiter funktionieren.

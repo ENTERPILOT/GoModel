@@ -1,6 +1,6 @@
 ---
 title: "User Path"
-description: "Verwenden Sie user_path, um Keys, Modellzugriff, Modelllisten, Workflows, Nutzung und Request-Logs einem Bereich zuzuordnen."
+description: "Verwende user_path, um Keys, Modellzugriff, Modelllisten, Workflows, Nutzung und Request-Logs einem Bereich zuzuordnen."
 icon: "route"
 keywords: ["user_path", "Mandantenfähigkeit", "multi-tenancy", "Bereichsbeschränkung", "Zugriffskontrolle", "access control", "Team-Isolierung"]
 ---
@@ -15,7 +15,7 @@ dem richtigen Team, Tenant, Dienst oder Kunden zuzuordnen.
 
 ## API-Keys
 
-Sie können einen User-Path im Admin-Dashboard an einen verwalteten API-Key binden:
+Du kannst einen User-Path im Admin-Dashboard an einen verwalteten API-Key binden:
 
 `API Keys -> Create API Key -> User Path`
 
@@ -27,7 +27,7 @@ Sie können einen User-Path im Admin-Dashboard an einen verwalteten API-Key bind
 />
 
 Die Seite **API Keys** zeigt für jeden Key den gebundenen `user_path` zusammen mit seinen
-Labels, sodass Sie auf einen Blick erkennen, welchem Teilbaum ein Key zugeordnet ist.
+Labels, sodass du auf einen Blick erkennst, welchem Teilbaum ein Key zugeordnet ist.
 
 Verwendet ein Request diesen Key, behandelt GoModel den `user_path` des Keys als
 effektiven User-Path des Requests.
@@ -63,12 +63,12 @@ Pfad, dem ein Request zugeordnet wird.
 | An `/team/alpha` gebundener verwalteter Key | `/team/alpha` und Nachfahren |
 | SSO- oder andere Erweiterungsidentität  | Der User-Path ihrer Session, nach derselben Regel |
 
-Die Regel ist für alle Zugangsdaten gleich: Der User-Path ist der Knoten, als der Sie
-handeln, und Sie sehen diesen Knoten und alles darunter. Eine an
+Die Regel ist für alle Zugangsdaten gleich: Der User-Path ist der Knoten, als der du
+handelst, und du siehst diesen Knoten und alles darunter. Eine an
 `/users/alice` gebundene SSO-Session verwaltet daher nur diesen Teilbaum. Eine Erweiterung, die
 Gateway-Admins vergeben möchte, bindet diese Sessions an `/` und Team-Admins an die
-Wurzel des Teams, etwa `/team/alpha` – genau so, wie Sie einen API-Key unter
-diesem Pfad erstellen würden.
+Wurzel des Teams, etwa `/team/alpha` – genau so, wie du einen API-Key unter
+diesem Pfad erstellen würdest.
 
 Der Bereich gilt an zwei Stellen:
 
@@ -92,7 +92,7 @@ Gateway keinen Eintrag hat, wird als fehlend gemeldet, und `GET /v1/files` liste
 nachverfolgten Dateien des Aufrufers aus den eigenen Einträgen des Gateways statt vom
 Provider. Globale Zugangsdaten sehen jedes Objekt, einschließlich älterer Zeilen, die erfasst wurden,
 bevor der Pfad gespeichert wurde, und greifen bei nicht nachverfolgten IDs weiterhin auf den Provider zurück.
-Verwenden Sie einen persistenten Speicher, damit jedes Objekt über Neustarts hinweg nachverfolgt bleibt.
+Verwende einen persistenten Speicher, damit jedes Objekt über Neustarts hinweg nachverfolgt bleibt.
 
 ## Modellzugriff
 
@@ -108,7 +108,7 @@ deaktiviert werden, um den Selektor vollständig abzuschalten. Selektoren könne
 `*` ist in einem Richtlinien-Selektor kein Platzhalter: Ein Selektor, der `*`
 ist oder auf `/*` endet, etwa `openai/*`, liefert in der Admin-API `400` und
 wird aus `config.yaml` oder `VIRTUAL_MODELS` nicht geladen, unabhängig davon,
-ob dieser Provider existiert. Verwenden Sie `openai/` für alle Modelle eines Providers oder `/`
+ob dieser Provider existiert. Verwende `openai/` für alle Modelle eines Providers oder `/`
 für alle Modelle.
 
 Zum Beispiel:
@@ -118,9 +118,9 @@ Zum Beispiel:
 
 Damit sind `/team/alpha` und seine Nachfahren erlaubt, etwa `/team/alpha/service`.
 
-Verwalten Sie diese Regeln im Dashboard unter `Models -> New virtual model`: Lassen Sie
+Verwalte diese Regeln im Dashboard unter `Models -> New virtual model`: Lass
 **Target model** leer, um eine Zugriffsrichtlinie für den **Source**-Selektor zu erstellen.
-Redirects (Aliase) finden Sie unter [Virtuelle Modelle](/de/features/virtual-models).
+Redirects (Aliase) findest du unter [Virtuelle Modelle](/de/features/virtual-models).
 
 Die Seite **Users** beantwortet dieselbe Frage von der anderen Seite: Welche Modelle
 darf eine Gruppe, ein Benutzer oder ein API-Key aufrufen? Jeder User-Path-Knoten und jeder verwaltete API-Key hat eine
@@ -139,13 +139,13 @@ unterschiedliche Regeln für den Modellzugriff gelten.
 Workflows können auch `scope_user_path` enthalten, sodass verschiedene Teams oder Dienste
 unterschiedliche Einstellungen für Budget, Cache, Request-Logging, Nutzung, Guardrails und Failover verwenden können.
 
-Sie können den User-Path mit Provider- und Modellbereich kombinieren, zum Beispiel:
+Du kannst den User-Path mit Provider- und Modellbereich kombinieren, zum Beispiel:
 
 - `/team/alpha`
 - `openai_primary` + `/team/alpha`
 - `openai_primary` + `gpt-5` + `/team/alpha`
 
-Die vollständige Abgleichsreihenfolge finden Sie unter [Workflows](/de/advanced/workflows).
+Die vollständige Abgleichsreihenfolge findest du unter [Workflows](/de/advanced/workflows).
 
 ## Budgets
 
@@ -153,7 +153,7 @@ Auch Budgets sind über `user_path` einem Bereich zugeordnet. Ein Budget für `/
 `/team/alpha` und Nachfahren wie `/team/alpha/service`, aber nicht für benachbarte
 Pfade wie `/team-alpha`.
 
-Ausgabenlimits und die Durchsetzung über Workflows finden Sie unter [Budgets](/de/features/budgets).
+Ausgabenlimits und die Durchsetzung über Workflows findest du unter [Budgets](/de/features/budgets).
 
 ## Self-Service für Nutzung und Limits
 
@@ -193,4 +193,4 @@ console.log(usage);
 
 Die Response bezieht sich auf den effektiven User-Path des Aufrufers: die erfasste Nutzung in einem
 Datumsfenster sowie den Status jeder Budget- und Rate-Limit-Regel, die für diesen
-Pfad gilt. Ein vollständiges Beispiel und die Feldreferenz finden Sie in der [Usage API](/de/advanced/usage-api).
+Pfad gilt. Ein vollständiges Beispiel und die Feldreferenz findest du in der [Usage API](/de/advanced/usage-api).

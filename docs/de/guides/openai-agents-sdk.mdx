@@ -1,34 +1,34 @@
 ---
 title: "GoModel & OpenAI Agents SDK"
-description: "Leiten Sie Modellaufrufe des OpenAI Agents SDK über die OpenAI-kompatible Responses API von GoModel."
+description: "Leite Modellaufrufe des OpenAI Agents SDK über die OpenAI-kompatible Responses API von GoModel."
 icon: "bot"
 keywords: ["OpenAI Agents SDK", "Responses API", "Agents", "agents", "Python SDK"]
 ---
 
-GoModel lässt sich vor das OpenAI Agents SDK schalten, wenn Sie Gateway-Keys,
+GoModel lässt sich vor das OpenAI Agents SDK schalten, wenn du Gateway-Keys,
 Budgets, Request-Logs, Modell-Routing und Nutzungserfassung rund um
-Agent-Ausführungen nutzen möchten.
+Agent-Ausführungen nutzen möchtest.
 
 Ablauf:
 
 `OpenAI Agents SDK -> GoModel /v1 -> selected provider`
 
-## Bevor Sie beginnen
+## Bevor du beginnst
 
-- Installieren Sie GoModel.
-- Wählen Sie einen GoModel-Master-Key, zum Beispiel `change-me`.
-- Konfigurieren Sie mindestens einen Upstream-Modell-Provider.
-- Installieren Sie das OpenAI Agents SDK für Python oder JavaScript.
+- Installiere GoModel.
+- Wähle einen GoModel-Master-Key, zum Beispiel `change-me`.
+- Konfiguriere mindestens einen Upstream-Modell-Provider.
+- Installiere das OpenAI Agents SDK für Python oder JavaScript.
 
 <Note>
-  Das SDK exportiert Traces standardmäßig an OpenAI. Wenn GoModel Ihr einziger
-  OpenAI-Client-Endpunkt ist, deaktivieren Sie das Tracing oder konfigurieren
-  Sie einen separaten OpenAI-Tracing-Key.
+  Das SDK exportiert Traces standardmäßig an OpenAI. Wenn GoModel dein einziger
+  OpenAI-Client-Endpunkt ist, deaktiviere das Tracing oder konfiguriere
+  einen separaten OpenAI-Tracing-Key.
 </Note>
 
 ## 1. GoModel starten
 
-Starten Sie GoModel mit einem Master-Key und einem API-Key für einen
+Starte GoModel mit einem Master-Key und einem API-Key für einen
 Upstream-Provider. Dieses Beispiel verwendet OpenAI als Upstream:
 
 ```bash
@@ -38,12 +38,12 @@ docker run --rm -p 8080:8080 \
   enterpilot/gomodel
 ```
 
-Wenn Sie einen anderen Provider verwenden, behalten Sie dieselbe GoModel-Base-URL
-bei und wählen Sie ein Modell, das Ihr Provider über GoModel bereitstellt.
+Wenn du einen anderen Provider verwendest, behalte dieselbe GoModel-Base-URL
+bei und wähle ein Modell, das dein Provider über GoModel bereitstellt.
 
 ## 2. Den Responses-Endpunkt prüfen
 
-Senden Sie einen kleinen Request über GoModel:
+Sende einen kleinen Request über GoModel:
 
 <CodeGroup>
 
@@ -92,7 +92,7 @@ Ist das Gateway korrekt angebunden, enthält die Response `ok`.
 
 ## 3. Das SDK konfigurieren
 
-Richten Sie den OpenAI-Client des SDK auf GoModel aus:
+Richte den OpenAI-Client des SDK auf GoModel aus:
 
 <CodeGroup>
 
@@ -164,7 +164,7 @@ console.log(result.finalOutput);
 Das Python-SDK behandelt Strings wie `anthropic/claude-sonnet-4-20250514` und
 `gemini/gemini-2.0-flash` standardmäßig als Modellnamen mit Provider-Präfix.
 Sollen diese GoModel-IDs mit Namespace das Gateway unverändert erreichen,
-konfigurieren Sie den Modell-Provider des SDK im Pass-through-Modus für
+konfiguriere den Modell-Provider des SDK im Pass-through-Modus für
 Modell-IDs:
 
 ```python
@@ -232,7 +232,7 @@ Chat-Provider, die diese Felder unterstützen. Für zustandsbehaftete oder
 providernative Responses-Felder wie `previous_response_id`, `conversation` und
 gehostete Tool-Items gibt GoModel einen eindeutigen Fehler zurück.
 
-Die vollständige Feature-Matrix finden Sie unter
+Die vollständige Feature-Matrix findest du unter
 [Responses-Kompatibilität](/de/advanced/responses-compatibility).
 
 ## Speicherverhalten
@@ -244,7 +244,7 @@ Response-Snapshot nicht.
 
 ## Aktuelle Einschränkungen
 
-- Der WebSocket-Transport für Responses ist nicht implementiert. Verwenden Sie
+- Der WebSocket-Transport für Responses ist nicht implementiert. Verwende
   mit GoModel den HTTP/SSE-Transport des SDK.
 - Gehostete Tools wie Websuche, Dateisuche und Computer Use erfordern einen
   nativen Upstream-Provider, der diese Tool-Payloads unterstützt.
@@ -261,12 +261,12 @@ Response-Snapshot nicht.
   vorherige Response muss daher mit aktiviertem `store` erstellt worden sein.
   `conversation` wird für jeden Provider aus den vom Gateway verwalteten
   Conversations aufgelöst.
-- Tracing ist vom Modell-Routing getrennt. Deaktivieren Sie das Tracing des
-  SDK oder konfigurieren Sie einen echten OpenAI-Tracing-Key.
+- Tracing ist vom Modell-Routing getrennt. Deaktiviere das Tracing des
+  SDK oder konfiguriere einen echten OpenAI-Tracing-Key.
 
 ## Weitere Beispiele
 
-Lauffähige Beispiele finden Sie in `docs/examples/openai-agents-sdk/`.
+Lauffähige Beispiele findest du in `docs/examples/openai-agents-sdk/`.
 
 ## Referenzen
 

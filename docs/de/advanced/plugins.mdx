@@ -13,16 +13,16 @@ Plugins, ebenso wie eine benutzerdefinierte Routing-Strategie für ein
 [virtuelles Modell](/de/features/virtual-models). Es gibt einen einzigen Vertrag im Paket
 `github.com/enterpilot/gomodel/pluginapi` und drei Wege, ein Plugin auszuliefern:
 
-| Weg | Wann Sie ihn verwenden | Registriert durch |
+| Weg | Wann du ihn verwendest | Registriert durch |
 | --- | --- | --- |
 | **Eingebaut** | Wird mit GoModel ausgeliefert: `system_prompt`, `llm_based_altering`, `string_replace`, `tag_replace`, `header_edit`, `llm_judge` und die Routing-Strategie `cheapest_healthy` | nichts zu tun |
-| **Einkompiliert** | Sie bauen Ihr eigenes Binary aus dem Paket `run` | `ext.RegisterPlugin(func() pluginapi.Plugin { ... })` vor `run.Run` |
-| **Shared Object** (`.so`) | Sie betreiben das Standard-Binary und möchten beim Start Code hinzufügen | `plugins.load` in `config.yaml` (erfordert den cgo-Build, siehe [Shared-Object-Plugins](/de/advanced/plugins#shared-object-plugins)) |
+| **Einkompiliert** | Du baust dein eigenes Binary aus dem Paket `run` | `ext.RegisterPlugin(func() pluginapi.Plugin { ... })` vor `run.Run` |
+| **Shared Object** (`.so`) | Du betreibst das Standard-Binary und möchtest beim Start Code hinzufügen | `plugins.load` in `config.yaml` (erfordert den cgo-Build, siehe [Shared-Object-Plugins](/de/advanced/plugins#shared-object-plugins)) |
 
 Unabhängig vom Weg erscheint ein Plugin-Typ unter seinem Manifest-Namen auf der Seite Guardrails
 im Dashboard, in `GET /admin/plugins` und als `type` in `guardrails.rules`.
 
-Wenn Sie Ihr eigenes Binary kompilieren, ergänzen Sie `//go:debug multipathtcp=0` direkt vor
+Wenn du dein eigenes Binary kompilierst, ergänze `//go:debug multipathtcp=0` direkt vor
 `package main`. Die Einstellung von GoModel gilt nicht für andere Module; sie entschärft den Linux-Kernel-Fehler
 [CVE-2026-98432](https://groups.google.com/g/golang-announce/c/PCoQcdxoScw).
 Ein gepatchter Kernel bleibt trotzdem erforderlich.
@@ -80,7 +80,7 @@ Jeder Hook gibt eine `pluginapi.Decision` zurück:
 | `warn` | fortfahren; `Code`, `Message` und `Detail` im Request-Log festhalten und `X-GoModel-Guardrail: warn; code=<code>` zur Client-Response hinzufügen | `Code` `guardrail_warning` |
 
 `respond` ist das „Blockieren mit einer sicheren Nachricht“, das die meisten Guardrail-Produkte
-anbieten: Agent-Schleifen laufen weiter, statt einen 4xx-Fehler auszulösen. Verwenden Sie `block`,
+anbieten: Agent-Schleifen laufen weiter, statt einen 4xx-Fehler auszulösen. Verwende `block`,
 wenn der Aufrufer einen Fehler sehen soll.
 
 `Detail` wird im Request-Log-Eintrag gespeichert und darf keine Secrets enthalten.
@@ -88,7 +88,7 @@ wenn der Aufrufer einen Fehler sehen soll.
 `NoStore` bei einer beliebigen Entscheidung hält die Response aus dem
 [Response-Cache](/de/features/cache) heraus, sowohl exakt als auch semantisch, sodass der nächste
 Request mit gleichem oder ähnlichem Body die Plugins erneut durchläuft, statt eine gespeicherte
-Antwort wiederzugeben. Setzen Sie es, wenn die Antwort Request-spezifische Daten enthält, die ein
+Antwort wiederzugeben. Setze es, wenn die Antwort Request-spezifische Daten enthält, die ein
 Plugin auf dem Rückweg wiederherstellt, zum Beispiel ein De-Anonymisierer, der die
 personenbezogenen Daten des Aufrufers wieder in den Assistant-Text einsetzt: Eine gecachte Kopie
 würde diesen Text an jeden weitergeben, der als Nächstes einen passenden Prompt sendet. Es wird aus
@@ -148,7 +148,7 @@ beim Client. Panics innerhalb eines Plugins werden abgefangen und als Fehler beh
 **Timeouts werden zum Fristende durchgesetzt.** Ein Hook erhält einen Context, der bei
 `timeout_ms` endet (und wenn der Client die Verbindung trennt); GoModel hört in diesem Moment auf
 zu warten, unabhängig davon, ob der Hook zurückgekehrt ist. Ein Hook, der seinen Context
-ignoriert, läuft im Hintergrund weiter, ohne Auswirkung auf den Request – berücksichtigen Sie daher
+ignoriert, läuft im Hintergrund weiter, ohne Auswirkung auf den Request – berücksichtige daher
 `ctx.Done()` in allem, was blockiert. Ein aufgegebener Hook zählt als Fehler. Er schlägt nur dann
 im Modus `open` fehl, wenn er nichts von dem berühren konnte, womit der Request fortfährt: Ein
 nicht mutierender Hook läuft auf seiner eigenen Kopie des Exchange, die verworfen wird. Ein
@@ -157,7 +157,7 @@ Request immer fehlschlagen, selbst mit `fail_mode: open`, weil seinen Änderunge
 vertraut werden kann. `Init` hat eine feste Frist von 10 s, die genauso behandelt wird: Ein `Init`,
 das bis dahin nicht zurückgekehrt ist, lässt die Instanz fehlschlagen.
 
-Behalten Sie den Standardwert bei. Stellen Sie eine Instanz nur dann auf `open` um, wenn sie ein
+Behalte den Standardwert bei. Stelle eine Instanz nur dann auf `open` um, wenn sie ein
 Beobachter ist, dessen Ausfall akzeptabel ist (ein Header-Tagger, ein Klassifikator, der nur
 warnt).
 
@@ -280,7 +280,7 @@ Jeder Hook erhält einen `*pluginapi.Exchange`, in jeder Phase eines Requests da
 | `Response` | `*Completion` | die Response, `nil` bis zur Phase `response`: `Choices` mit demselben `Part`-Modell, `Usage`, Roh-Body. Bearbeitung über `SetText`, `ReplaceText`, `SetFinishReason`, `SetToolArguments`; `TextTargets` und `SetTargetText` funktionieren wie bei `Prompt` |
 | `Stream` | `*StreamState` | bisher angesammelter Text pro Choice und die Anzahl der Events; `nil` bei Requests ohne Streaming |
 | `Headers` | `*Headers` | `Request` (eingehend, Zugangsdaten geschwärzt; Änderungen in der Phase `prompt` gelten für den laufenden Request bei späteren Plugins und beim Request-Logging, nicht für den Provider-Aufruf), `Response` (wird auf die Client-Response angewendet; ein auf den leeren String gesetzter Header wird entfernt, einschließlich solcher, die das Gateway hinzufügt, wie `X-Request-Id`), `Upstream` (wird mit jeder Provider-Anfrage des Requests gesendet, die über den HTTP-Client des Gateways läuft; siehe [Upstream-Header](#upstream-header)) |
-| `Values` | `Values` | Request-bezogener Speicher, den alle Hooks des Requests gemeinsam nutzen; stellen Sie Keys den Plugin-Namen voran |
+| `Values` | `Values` | Request-bezogener Speicher, den alle Hooks des Requests gemeinsam nutzen; stelle Keys den Plugin-Namen voran |
 
 Änderungen erfolgen über Methoden, nicht über Feldzuweisungen, sodass GoModel nur das neu kodiert,
 was sich geändert hat, und unberührte Nachrichten jedes Provider-spezifische Feld behalten
@@ -316,8 +316,8 @@ etwa die von Helicone, oder ein organisatorisches Tag, nach dem ein Gateway vor 
 Provider routet. Zugangsdaten für einen Provider gehören nicht hierher: Header mit
 Zugangsdaten werden abgelehnt, ebenso die übrigen Namen, die dem Gateway gehören und
 unten aufgeführt sind. Einmal pro Request loggt das Host auf Debug-Level, wie viele
-Upstream-Header die erste Kette geschrieben hat, die sie setzt, nie deren Werte. Setzen Sie die Header in einem Hook der Phase `prompt`,
-bevor der Provider-Aufruf läuft. Die Map ist bereits angelegt: Rufen Sie `Set` darauf
+Upstream-Header die erste Kette geschrieben hat, die sie setzt, nie deren Werte. Setze die Header in einem Hook der Phase `prompt`,
+bevor der Provider-Aufruf läuft. Die Map ist bereits angelegt: Rufe `Set` darauf
 auf, statt eine neue zuzuweisen, damit Header, die frühere Plugins der Kette unter
 anderen Namen geschrieben haben, erhalten bleiben:
 
@@ -378,8 +378,8 @@ Was das Gateway damit macht:
 **Upgrade von einem Release, das diese Header festhielt, ohne sie zu senden.** Ein
 Plugin, das `Headers.Upstream` auf einem solchen Release bereits gesetzt hat, bekam
 seine Werte gespeichert und verworfen. Nach dem Upgrade erreichen sie zum ersten Mal
-den Provider oder den Proxy davor: Prüfen Sie, ob das Upstream sie akzeptiert, bevor
-Sie das Upgrade ausrollen.
+den Provider oder den Proxy davor: Prüfe, ob das Upstream sie akzeptiert, bevor
+du das Upgrade ausrollst.
 
 ## Konfiguration
 
@@ -396,14 +396,14 @@ keine Guardrails und keine Routing-Strategie-Plugins (ein virtuelles Modell mit
 `strategy: plugin` wird abgelehnt). `GET /admin/plugins` und die Endpunkte unter
 `/admin/guardrails` antworten mit `503` und dem Code `feature_unavailable`, und das Dashboard
 blendet die Seite Plugins & Guardrails aus. Guardrails sind Plugin-Instanzen, daher schaltet
-`GUARDRAILS_ENABLED=true` das Plugin-System implizit ein; setzen Sie `PLUGINS_ENABLED=true` allein,
+`GUARDRAILS_ENABLED=true` das Plugin-System implizit ein; setze `PLUGINS_ENABLED=true` allein,
 um Routing-Strategie-Plugins zu verwenden oder Guardrail-Definitionen zu verwalten, ohne sie
 auszuführen.
 
 ### Instanzen
 
 Instanzen werden in `guardrails.rules` deklariert oder im Dashboard erstellt; beide landen im
-selben Speicher. Die Einstellungen der einzelnen Typen finden Sie unter
+selben Speicher. Die Einstellungen der einzelnen Typen findest du unter
 [Guardrails](/de/advanced/guardrails).
 
 ```yaml
@@ -476,20 +476,20 @@ Das Go-Paket `plugin` gibt die Regeln vor, und sie sind streng:
 
 - **Plattform**: Linux, macOS und FreeBSD, und nur in einem Binary, das mit `CGO_ENABLED=1` gebaut
   wurde. Das Standard-Binary und das Standard-Image von GoModel sind statisch und lehnen
-  `.so`-Dateien mit einer entsprechenden Fehlermeldung ab. Verwenden Sie `make build-plugins`
+  `.so`-Dateien mit einer entsprechenden Fehlermeldung ab. Verwende `make build-plugins`
   (`bin/gomodel-plugins`) oder das Image `gomodel:<version>-plugins` (`make image-plugins`,
   gebaut aus `Dockerfile.plugins`, glibc-Laufzeit).
 - **Exakte Toolchain**: Das Plugin muss mit **derselben Go-Version**, **denselben Build-Flags**
   (`-trimpath`, `-race`, `-tags`) und **identischen Quellen jedes gemeinsam genutzten Pakets**
   gebaut werden. Nur die Standardbibliothek und `pluginapi` werden gemeinsam genutzt, daher
   wirken sich interne Änderungen an GoModel nie auf ein Plugin aus, aber jedes GoModel-Release und
-  jedes Update der Go-Toolchain (einschließlich Patch-Releases) erfordert einen Neubau. Machen Sie
+  jedes Update der Go-Toolchain (einschließlich Patch-Releases) erfordert einen Neubau. Mache
   daraus einen CI-Schritt.
 - **Kein Entladen**: Eine `.so` bleibt bis zum Neustart geladen. Änderungen an einer geladenen Datei
   werden beim Neustart wirksam; das Bearbeiten der Konfiguration einer Instanz führt `Init` ohne
   Neustart erneut auf einem frischen Wert aus.
 - **Vertrauenswürdiger Code**: Das Laden einer `.so` ist gleichbedeutend mit einer Änderung des
-  Binarys. Lassen Sie `search_paths` im Besitz von root und fixieren Sie im Produktivbetrieb
+  Binarys. Lass `search_paths` im Besitz von root und fixiere im Produktivbetrieb
   `sha256`.
 
 ### Bauen und prüfen
@@ -503,7 +503,7 @@ shasum -a 256 plugins/keyword_block.so     # Wert für plugins.load[].sha256
 `plugin build` führt `go build -buildmode=plugin` mit den Flags aus, die im ausführenden
 `gomodel`-Binary hinterlegt sind, erzwingt `CGO_ENABLED=1`, fixiert `GOTOOLCHAIN` auf die Go-Version
 des Hosts, prägt eine Variable `GoModelBuildInfo` in das Plugin ein und lehnt eine Ausgabe ab,
-deren Go-Version von der des Hosts abweicht. Bauen Sie immer mit dem Binary, das das Plugin laden
+deren Go-Version von der des Hosts abweicht. Baue immer mit dem Binary, das das Plugin laden
 wird. `plugin inspect` öffnet die Datei und gibt ihr Manifest, ihr Konfigurationsschema und ihre
 Build-Informationen aus. Ein abgelehnter Ladevorgang nennt beide Seiten:
 
@@ -514,8 +514,8 @@ this binary was built with go1.27.3, gomodel v0.1.91, flags (none). Rebuild it
 with `gomodel plugin build` from this GoModel version
 ```
 
-Bauen Sie in Docker das Target `plugin-builder` von `Dockerfile.plugins` und führen Sie es gegen
-Ihr Plugin-Verzeichnis aus:
+Baue in Docker das Target `plugin-builder` von `Dockerfile.plugins` und führe es gegen
+dein Plugin-Verzeichnis aus:
 
 ```sh
 docker build -f Dockerfile.plugins --target plugin-builder -t gomodel-plugin-builder .
@@ -524,7 +524,7 @@ docker run --rm -v "$PWD/my-plugin:/src" -v "$PWD/plugins:/out" \
 ```
 
 `gomodel --version` gibt die Go- und `pluginapi`-Versionen des Binarys aus.
-`docs/example_plugins/README.md` beschreibt, wie Sie ein Plugin in einem eigenen Go-Modul bauen.
+`docs/example_plugins/README.md` beschreibt, wie du ein Plugin in einem eigenen Go-Modul baust.
 
 ## Ein Plugin schreiben
 
@@ -616,24 +616,24 @@ Hinweise für Autoren:
   und kommen als JSON-Array an; `bool`-Felder akzeptieren `true`/`false` als Boolean oder Text und
   kommen als JSON-Boolean an. `Init` wird einmal pro konfigurierter Instanz aufgerufen und erneut,
   wenn die Instanz bearbeitet wird.
-- Lesen Sie die Konfiguration mit `pluginapi.ParseConfig` und dessen typisierten Lesemethoden
+- Lies die Konfiguration mit `pluginapi.ParseConfig` und dessen typisierten Lesemethoden
   (`String`, `Choice`, `Bool`, `Int`, `Float`, `OptionalFloat`, `List`, `Lines`, `Roles`,
   `BlockStatus`) statt mit einem Struct: Jede Lesemethode wendet dieselben Konvertierungen an, die
   das Dashboard und config.yaml benötigen, gibt bei einem Problem ihren Standardwert zurück, und
   `Err()` meldet das erste Problem mit dem betroffenen Key. Ein Decoder ist so eine einfache Liste
   von Zuweisungen plus eine Prüfung. `RoleOptions()` ist die Checkbox-Liste, die `Roles` versteht.
-- Geben Sie Befunde über `pluginapi.Enforcement` aus: Lesen Sie `action`, `message`,
+- Gib Befunde über `pluginapi.Enforcement` aus: Lies `action`, `message`,
   `block_status` und optional `respond_text` darin ein; anschließend liefert `Enforce(code, detail)`
   den Block-Fehler, die Respond-Completion oder die Warnung, und `Reject(code, detail)` liefert
   Block oder Respond, selbst wenn die Aktion `warn` ist (für einen Befund, der nicht durchgelassen
   werden darf). `BlockStatusField()` ist das übliche Feld `block_status`. Die eingebauten
   Guardrails nutzen dies gemeinsam, sodass sich ihr Block, Respond und Warn gleich verhalten.
-- Exportieren Sie einen **Konstruktor** (`func GoModelPlugin() pluginapi.Plugin`), damit eine Datei
+- Exportiere einen **Konstruktor** (`func GoModelPlugin() pluginapi.Plugin`), damit eine Datei
   mehrere Instanzen bedienen kann. Ein `var GoModelPlugin pluginapi.Plugin` funktioniert ebenfalls,
   beschränkt die Datei aber auf eine einzige Instanz.
-- Setzen Sie `Mutates: true`, wenn das Plugin `Prompt`, `Response` oder den Stream bearbeitet. Nicht
+- Setze `Mutates: true`, wenn das Plugin `Prompt`, `Response` oder den Stream bearbeitet. Nicht
   mutierende Plugins dürfen sich einen Step teilen und laufen parallel.
-- Setzen Sie `Guardrail: true`, wenn die Instanzen des Plugins Guardrails sind: Richtlinien, die
+- Setze `Guardrail: true`, wenn die Instanzen des Plugins Guardrails sind: Richtlinien, die
   auf Prompts, Responses oder Streams angewendet werden, unabhängig davon, ob sie blockieren,
   antworten, warnen oder umschreiben. Jedes eingebaute Traffic-Plugin setzt es (`llm_judge`,
   `string_replace`, `tag_replace`, `header_edit`, `system_prompt`, `llm_based_altering`);
@@ -646,11 +646,11 @@ Hinweise für Autoren:
   Präfix `plugin_<name>_`) und `HTTPClient()` für Aufrufe externer Dienste wie eines Klassifikators
   oder eines Detektors für personenbezogene Daten. Der Client wird von allen Instanzen gemeinsam
   genutzt, verwendet die Proxy-Umgebung und den Verbindungspool des Gateways und hat als
-  Absicherung einen Timeout von 60 s; erstellen Sie Requests mit `http.NewRequestWithContext`,
+  Absicherung einen Timeout von 60 s; erstelle Requests mit `http.NewRequestWithContext`,
   damit `timeout_ms` der Instanz jeden Aufruf begrenzt. `History()` gibt in diesem Release einen
   Fehler zurück.
-- Der Host implementiert außerdem das optionale `pluginapi.DecisionsHost`. Prüfen Sie es per
-  Type Assertion auf dem `Host` und rufen Sie dann `Decisions().Decide(ctx, req)` auf, um einem
+- Der Host implementiert außerdem das optionale `pluginapi.DecisionsHost`. Prüfe es per
+  Type Assertion auf dem `Host` und rufe dann `Decisions().Decide(ctx, req)` auf, um einem
   Decision-Modell typisierte Fragen zu einem Input zu stellen, so wie es `POST /v1/decisions` tut.
   Eine Frage ist ein Prädikat (Wahrscheinlichkeit für Ja), eine Auswahl oder eine Bewertung. Der
   Aufruf wird wie `Inference().Complete` eingegrenzt und erfasst.
@@ -668,10 +668,10 @@ Hinweise für Autoren:
   	// result.Answers[0].Probability, außer wenn result.Answers[0].Refused()
   }
   ```
-- Fügen Sie `Summarize(config json.RawMessage) string` hinzu, um in der Guardrail-Liste eine
+- Füge `Summarize(config json.RawMessage) string` hinzu, um in der Guardrail-Liste eine
   einzeilige Zusammenfassung darzustellen, und `Normalize(config) (json.RawMessage, error)`, um
   eine Konfiguration vor dem Speichern zu kanonisieren. Beides ist optional.
-- Implementieren Sie `pluginapi.HealthChecker` (`Health(ctx) error`), wenn eine Instanz von etwas
+- Implementiere `pluginapi.HealthChecker` (`Health(ctx) error`), wenn eine Instanz von etwas
   außerhalb des Prozesses abhängt, etwa einem Klassifikator-Sidecar. GoModel prüft dies außerhalb
   des Request-Pfads, sobald die Instanz erstellt ist, und bei jeder Guardrail-Aktualisierung
   (`workflows.refresh_interval`, standardmäßig eine Minute), mit einer Frist von 5 s. Eine
@@ -679,7 +679,7 @@ Hinweise für Autoren:
   `degraded`, mit dem Fehler als Begründung, und wird einmal pro Zustandswechsel geloggt; der
   Fehlertext darf keine Secrets enthalten und wird auf 256 Zeichen gekürzt. Der Zustand dient nur
   der Information: Der Traffic läuft weiterhin gemäß ihrem `fail_mode` durch die Instanz.
-- Implementieren Sie `pluginapi.ContentEditor` (`EditsContent() bool`), wenn ein Plugin, das
+- Implementiere `pluginapi.ContentEditor` (`EditsContent() bool`), wenn ein Plugin, das
   `Mutates` deklariert, so konfiguriert werden kann, dass es nicht bearbeitet, etwa ein Detektor,
   der markiert statt umzuschreiben. GoModel fragt eine konfigurierte Instanz vor Arbeiten, die es
   nur für bearbeitende Plugins ausführt – dem Wiedergeben des gespeicherten Verlaufs eines
@@ -687,18 +687,18 @@ Hinweise für Autoren:
   lassen. Es ändert nie, wie ein Hook läuft, und bei einem mutierenden Plugin ohne diese Methode
   wird davon ausgegangen, dass es bearbeitet.
 - Die Feld-Inputs `secret` und `model` gibt es für API-Keys externer Klassifikatoren und für
-  Modellauswahlen; ein `secret`-Wert wird in jeder Admin-Response maskiert. Verwenden Sie `bool`
+  Modellauswahlen; ein `secret`-Wert wird in jeder Admin-Response maskiert. Verwende `bool`
   für einen Schalter und `list` für eine offene Liste von Strings (Entitätstypen, eine Allowlist),
   statt diese in einem `select` oder einem `textarea` zu kodieren.
 - `InputRange` rendert einen Schieberegler, der durch `Min`, `Max` und `Step` am Feld begrenzt
   ist; ein `Max` von null bedeutet 1, und ein nicht gesetztes oder nicht positives `Step`
-  bedeutet eine Schrittweite von 0.01. Verwenden Sie ihn für eine
+  bedeutet eine Schrittweite von 0.01. Verwende ihn für eine
   begrenzte Zahl (ein Gewicht, einen Schwellenwert) statt einer Freitext-`number`, die der
   Operator außerhalb des Bereichs setzen kann. Die Grenzen sind nur Hinweise: Der Server
   speichert, was die Konfiguration deklariert, ein in YAML gesetzter Wert wird also nicht
   abgelehnt. Das Dashboard begrenzt nur, was der Schieberegler anzeigt; ein Wert außerhalb des
   Bereichs bleibt in der Konfiguration, bis der Operator den Schieberegler bewegt.
-- Fügen Sie Feldern, die zu einem virtuellen Modell statt zur Instanz gehören,
+- Füge Feldern, die zu einem virtuellen Modell statt zur Instanz gehören,
   `Scope: pluginapi.ScopeRoute` hinzu (nur bei Routing-Strategien).
 
 `docs/example_plugins/keywordblock/main.go` ist ein ausführlicheres, kommentiertes Beispiel mit
@@ -733,8 +733,8 @@ res, err := plugintest.RunStream(ctx, p.(pluginapi.StreamHook), plugintest.Excha
 // res.Text[0] == "my [x] is safe": Der auf zwei Deltas aufgeteilte Treffer wurde einmal umgeschrieben.
 ```
 
-Der gepufferte Modus setzt die Completion nur aus den Text- und Reasoning-Deltas zusammen; setzen
-Sie `x.Response` selbst, bevor Sie `RunStream` aufrufen, wenn der Hook Tool Calls, Nutzung oder
+Der gepufferte Modus setzt die Completion nur aus den Text- und Reasoning-Deltas zusammen; setze
+`x.Response` selbst, bevor du `RunStream` aufrufst, wenn der Hook Tool Calls, Nutzung oder
 einen Finish-Reason sehen muss.
 
 ## Routing-Strategie-Plugins
@@ -757,7 +757,7 @@ virtuellen Modells als JSON (`Prompt` ist in diesem Release `nil`). `Select` gib
 Erfolg, Status, Latenz und Timeouts, damit sich die Strategie anpassen kann. Failover-Ketten,
 Kapazitätsprüfungen und das Festlegen von Sessions bleiben Aufgabe von GoModel.
 
-Wählen Sie die Strategie am virtuellen Modell aus:
+Wähle die Strategie am virtuellen Modell aus:
 
 ```yaml
 virtual_models:
@@ -858,7 +858,7 @@ Definitionen erhalten `fail_mode` (`closed` | `open`, leer für den Standardwert
 `timeout_ms` (`0` für keinen); Ansichten enthalten zusätzlich `phases` (aus dem Plugin-Manifest),
 `summary` und `health` (`ok` | `degraded`, mit `health_error` und `health_checked_at` bei Plugins,
 die eine Zustandsprüfung implementieren). `PUT` akzeptiert beide neuen Felder. Ein gespeicherter
-`secret`-Wert wird als `********` zurückgegeben; senden Sie ihn unverändert zurück, um ihn zu
+`secret`-Wert wird als `********` zurückgegeben; sende ihn unverändert zurück, um ihn zu
 behalten, oder `""`, um ihn zu löschen.
 
 ### GET /admin/workflows/guardrails

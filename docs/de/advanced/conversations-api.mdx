@@ -1,6 +1,6 @@
 ---
 title: "Conversations API"
-description: "Erstellen, lesen und löschen Sie OpenAI-kompatible Konversationen und deren Items über GoModel, das sie im Gateway speichert, sodass jeder Provider genutzt werden kann."
+description: "Erstelle, lies und lösche OpenAI-kompatible Konversationen und deren Items über GoModel, das sie im Gateway speichert, sodass jeder Provider genutzt werden kann."
 icon: "messages-square"
 keywords: ["Conversations API", "conversations API", "/v1/conversations", "Konversationsverlauf", "conversation history", "zustandsbehaftete Requests", "stateful requests"]
 ---
@@ -13,7 +13,7 @@ GoModel stellt OpenAI-kompatible Endpunkte der Conversations API unter
 Konversationen sind eine **vom Gateway verwaltete Ressource**. Die OpenAI Conversations API ist
 Provider-spezifisch, daher erzeugt GoModel die Konversations-ID und speichert die Konversation
 selbst. So bleibt `/v1/conversations` verfügbar und konsistent, unabhängig davon, über welchen
-Provider Ihr Modell-Traffic geroutet wird, und es ist keine Provider-Konfiguration erforderlich.
+Provider dein Modell-Traffic geroutet wird, und es ist keine Provider-Konfiguration erforderlich.
 
 ## Unterstützte Endpunkte
 
@@ -55,7 +55,7 @@ bequeme Nachrichten-Strings, vergibt stabile Item-IDs und bewahrt neue oder Prov
 Item-Felder, damit sie später aufgelistet und erneut abgespielt werden können.
 
 Item-Listen sind standardmäßig nach Neuestem zuerst sortiert (`order=desc`), mit 20 Items pro
-Seite. Verwenden Sie die zurückgegebene `last_id` als `after`-Cursor des nächsten Requests. `limit`
+Seite. Verwende die zurückgegebene `last_id` als `after`-Cursor des nächsten Requests. `limit`
 akzeptiert bis zu 100 Items. Der optionale Parameter `include` akzeptiert dieselben Werte wie die
 OpenAI Conversations API, darunter `reasoning.encrypted_content` und
 `message.output_text.logprobs`. GoModel speichert vollständige Item-Payloads, sodass optionale
@@ -90,7 +90,7 @@ liefert ein Request ohne Streaming `500`; ein Streaming-Request endet, ohne
 fehlgeschlagenen Requests, sodass ein erneuter Versuch den Provider erneut aufrufen und erneut
 Kosten verursachen kann. Der fehlgeschlagene Austausch fehlt im Konversationsverlauf, daher lässt
 sich anhand des Verlaufs nicht zuverlässig feststellen, ob der Provider-Aufruf bereits ausgeführt
-wurde. Vermeiden Sie automatische Retries oder koordinieren Sie sie über einen unabhängigen,
+wurde. Vermeide automatische Retries oder koordiniere sie über einen unabhängigen,
 dauerhaften Idempotenzmechanismus, wenn doppelte Aufrufe erhebliche Kosten oder Nebenwirkungen
 haben.
 

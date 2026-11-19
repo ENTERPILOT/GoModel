@@ -1,7 +1,7 @@
 ---
 title: "OpenCode & andere Agents: OpenAI-kompatible Einrichtung"
 sidebarTitle: "Coding-Agents"
-description: "Verbinden Sie OpenCode, Cline, Roo Code und andere OpenAI-kompatible Coding-Agents über den Standard-Endpunkt /v1 und einen einzigen Gateway-Key mit GoModel."
+description: "Verbinde OpenCode, Cline, Roo Code und andere OpenAI-kompatible Coding-Agents über den Standard-Endpunkt /v1 und einen einzigen Gateway-Key mit GoModel."
 icon: "bot"
 keywords: ["OpenCode", "Cline", "Roo Code", "Coding-Agents", "coding agents", "OpenAI-kompatibel", "OpenAI-compatible", "Einrichtungsanleitung"]
 ---
@@ -13,16 +13,16 @@ Ablauf:
 
 `OpenCode / Cline / Roo Code / Kilo Code -> GoModel -> your upstream providers`
 
-## Bevor Sie beginnen
+## Bevor du beginnst
 
-- Wählen Sie einen GoModel-Master-Key, zum Beispiel `change-me`.
-- Starten Sie GoModel mit dem API-Key mindestens eines Upstream-Providers.
-- Verwenden Sie die Standard-URL von GoModel `http://localhost:8080/v1`, sofern
-  Ihr Client nicht ausdrücklich eine vollständige Endpunkt-URL verlangt.
+- Wähle einen GoModel-Master-Key, zum Beispiel `change-me`.
+- Starte GoModel mit dem API-Key mindestens eines Upstream-Providers.
+- Verwende die Standard-URL von GoModel `http://localhost:8080/v1`, sofern
+  dein Client nicht ausdrücklich eine vollständige Endpunkt-URL verlangt.
 
 ## 1. GoModel starten
 
-Starten Sie GoModel mit einem Master-Key und mindestens einem Upstream-Provider:
+Starte GoModel mit einem Master-Key und mindestens einem Upstream-Provider:
 
 ```bash
 docker run --rm -p 8080:8080 \
@@ -32,8 +32,8 @@ docker run --rm -p 8080:8080 \
 ```
 
 <Note>
-  Sie können `OPENAI_API_KEY` durch den API-Key eines anderen Providers
-  ersetzen, wenn Ihre Zielmodelle diesen verwenden. Wichtig ist nur, dass in
+  Du kannst `OPENAI_API_KEY` durch den API-Key eines anderen Providers
+  ersetzen, wenn deine Zielmodelle diesen verwenden. Wichtig ist nur, dass in
   GoModel mindestens ein Upstream-Provider konfiguriert ist.
 </Note>
 
@@ -89,11 +89,11 @@ console.log(completion.choices[0].message.content);
 
 Ist das Gateway korrekt angebunden, enthält die Response `ok`.
 
-## 3. Ihren Coding-Agent konfigurieren
+## 3. Deinen Coding-Agent konfigurieren
 
 ### OpenCode
 
-Erstellen Sie eine Datei `opencode.json` mit einem GoModel-Provider:
+Erstelle eine Datei `opencode.json` mit einem GoModel-Provider:
 
 ```json
 {
@@ -120,7 +120,7 @@ Erstellen Sie eine Datei `opencode.json` mit einem GoModel-Provider:
 }
 ```
 
-Exportieren Sie anschließend den GoModel-Key:
+Exportiere anschließend den GoModel-Key:
 
 ```bash
 export OPENAI_API_KEY=change-me
@@ -131,9 +131,9 @@ export OPENAI_API_KEY=change-me
 OpenCode zeigt Reasoning-Effort-Varianten (meist `low`, `medium`, `high`) für
 ein Modell eines eigenen Providers nur an, wenn der Modelleintrag
 `"reasoning": true` setzt. Ohne diesen Eintrag bietet OpenCode keine
-eingebauten Varianten an und `--variant` wirkt nicht. Ergänzen Sie ihn bei jedem
-Reasoning-Modell unter `provider.gomodel.models`, mit der Modell-ID, die Sie an
-GoModel senden:
+eingebauten Varianten an und `--variant` wirkt nicht. Ergänze ihn bei jedem
+Reasoning-Modell unter `provider.gomodel.models`, mit der Modell-ID, die du an
+GoModel sendest:
 
 ```jsonc
 "models": {
@@ -148,12 +148,12 @@ GoModel senden:
 }
 ```
 
-Wechseln Sie die Variante mit der OpenCode-Tastenbelegung `variant_cycle` oder
-übergeben Sie `--variant high` an `opencode run` (geprüft mit OpenCode
+Wechsle die Variante mit der OpenCode-Tastenbelegung `variant_cycle` oder
+übergib `--variant high` an `opencode run` (geprüft mit OpenCode
 1.19.5). OpenCode sendet die Auswahl als `reasoning_effort`.
 
-Um die Stufen an das Modell anzupassen, fügen Sie im selben Modelleintrag
-Varianten hinzu oder blenden Sie eine abgelehnte Stufe mit
+Um die Stufen an das Modell anzupassen, füge im selben Modelleintrag
+Varianten hinzu oder blende eine abgelehnte Stufe mit
 `"high": { "disabled": true }` aus:
 
 ```jsonc
@@ -165,12 +165,12 @@ Varianten hinzu oder blenden Sie eine abgelehnte Stufe mit
 }
 ```
 
-Um eine Stufe unabhängig vom Client im Gateway festzulegen, nutzen Sie den
+Um eine Stufe unabhängig vom Client im Gateway festzulegen, nutze den
 [Reasoning-Effort-Override](/de/features/virtual-models#reasoning-effort-erzwingen).
 
 ### Cline
 
-Wählen Sie in Cline:
+Wähle in Cline:
 
 - API Provider: `OpenAI Compatible`
 - Base URL: `http://localhost:8080/v1`
@@ -179,7 +179,7 @@ Wählen Sie in Cline:
 
 ### Roo Code
 
-Wählen Sie in Roo Code:
+Wähle in Roo Code:
 
 - API Provider: `OpenAI Compatible`
 - Base URL: `http://localhost:8080/v1`
@@ -187,13 +187,13 @@ Wählen Sie in Roo Code:
 - Model ID: ein Modell, das `GET /v1/models` zurückgibt
 
 <Note>
-  Roo Code erfordert natives Tool Calling. Wählen Sie ein Modell und einen
+  Roo Code erfordert natives Tool Calling. Wähle ein Modell und einen
   Provider-Pfad, die OpenAI-kompatibles Tool Calling unterstützen.
 </Note>
 
 ### Kilo Code
 
-Wählen Sie in Kilo Code:
+Wähle in Kilo Code:
 
 - API Provider: `OpenAI Compatible`
 - Base URL: `http://localhost:8080/v1`
@@ -206,8 +206,8 @@ Kilo Code unterstützt bei Bedarf auch eine vollständige Endpunkt-URL:
 http://localhost:8080/v1/chat/completions
 ```
 
-Beginnen Sie mit der einfacheren Base-URL und wechseln Sie nur dann zu einer
-vollständigen Endpunkt-URL, wenn Ihr Setup dies erfordert.
+Beginne mit der einfacheren Base-URL und wechsle nur dann zu einer
+vollständigen Endpunkt-URL, wenn dein Setup dies erfordert.
 
 ## 4. Einen Test-Prompt ausführen
 
@@ -224,8 +224,8 @@ Das geprüfte Ergebnis war:
 ok
 ```
 
-Speichern Sie für Cline, Roo Code und Kilo Code die obigen
-Provider-Einstellungen und senden Sie einen kleinen Prompt wie:
+Speichere für Cline, Roo Code und Kilo Code die obigen
+Provider-Einstellungen und sende einen kleinen Prompt wie:
 
 ```text
 Reply with exactly ok and no punctuation.
@@ -233,13 +233,13 @@ Reply with exactly ok and no punctuation.
 
 ## 5. Den Traffic in GoModel prüfen
 
-Öffnen Sie die Seite „Anfragen“ im GoModel Dashboard:
+Öffne die Seite „Anfragen“ im GoModel Dashboard:
 
 [http://localhost:8080/admin/dashboard/requests](http://localhost:8080/admin/dashboard/requests)
 
-So bestätigen Sie am schnellsten, dass Ihr Coding-Agent GoModel erreicht, und
-können jede Interaktion prüfen. Im selben Dashboard können Sie Ihren
-GoModel-Traffic und Ihre Nutzung weiter verfolgen.
+So bestätigst du am schnellsten, dass dein Coding-Agent GoModel erreicht, und
+kannst jede Interaktion prüfen. Im selben Dashboard kannst du deinen
+GoModel-Traffic und deine Nutzung weiter verfolgen.
 
 ## Aktueller Stand
 

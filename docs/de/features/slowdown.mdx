@@ -1,6 +1,6 @@
 ---
 title: "Slowdown"
-description: "Fügen Sie einem Modell oder virtuellen Modell künstliche Latenz hinzu, um Timeouts, Ladezustände und das Verhalten langsamerer Modelle zu testen."
+description: "Füge einem Modell oder virtuellen Modell künstliche Latenz hinzu, um Timeouts, Ladezustände und das Verhalten langsamerer Modelle zu testen."
 icon: "snail"
 keywords: ["Slowdown", "slowdown", "Latenz", "latency", "künstliche Verzögerung", "Testen", "Timeouts", "virtuelle Modelle"]
 ---
@@ -19,24 +19,24 @@ Die Einstellung ist ein Faktor für **zusätzliche** Zeit:
 | `1`    | 2 s           | ~4 s         |
 | `3`    | 2 s           | ~8 s         |
 
-Nutzen Sie es, um Client-Timeouts, Ladezustände und Retry-Logik zu testen oder
+Nutze es, um Client-Timeouts, Ladezustände und Retry-Logik zu testen oder
 um zu sehen, wie sich eine App mit einem langsameren Modell anfühlt, ohne den
-Provider zu wechseln. Lassen Sie es im Produktivbetrieb ungesetzt, wo es keinen
+Provider zu wechseln. Lass es im Produktivbetrieb ungesetzt, wo es keinen
 Zweck erfüllt.
 
 Slowdown ist standardmäßig aus.
 
 ## Slowdown konfigurieren
 
-Setzen Sie **Slowdown** für ein konkretes Modell oder einen Redirect (Alias).
+Setze **Slowdown** für ein konkretes Modell oder einen Redirect (Alias).
 Aktive Faktoren reichen von `0.1` bis `10`. `0` deaktiviert Slowdown explizit,
 auch einen vom Zielmodell geerbten. Ein leerer Wert lässt die Einstellung
 unbestimmt.
 
 ### Dashboard
 
-Öffnen Sie `Models`, bearbeiten Sie ein Modell oder virtuelles Modell und füllen
-Sie **Slowdown (extra inference time)** aus. Modelle mit aktivem Slowdown zeigen
+Öffne `Models`, bearbeite ein Modell oder virtuelles Modell und fülle
+**Slowdown (extra inference time)** aus. Modelle mit aktivem Slowdown zeigen
 ihn in ihrer Zeile an.
 
 ### config.yaml
@@ -79,7 +79,7 @@ Alias-Namen.
 - Das eigene Slowdown eines Alias gewinnt gegenüber dem Slowdown seines
   Zielmodells.
 - Ein Alias ohne Wert erbt das Slowdown des Zielmodells, zu dem er aufgelöst
-  wird. Setzen Sie den Alias auf `0`, um das abzuschalten.
+  wird. Setze den Alias auf `0`, um das abzuschalten.
 - Bei einem per Load Balancing verteilten virtuellen Modell richtet sich die
   Vererbung nach dem für diesen Request gewählten Ziel.
 - Das Slowdown eines Modells lässt sich exakt (`openai/gpt-4o`) oder modellweit
