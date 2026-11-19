@@ -59,6 +59,17 @@ func geminiModelSupportedMethods(modelID string, methods []string) (supportsGene
 	return supportsGenerate, slices.Contains(methods, "embedContent"), supportsImage
 }
 
+// isGeminiVideoModel recognizes Veo video generation models, which list only
+// predictLongRunning: generation is an asynchronous operation, not a
+// generateContent call. They are listed so the catalog can describe and price
+// them per second of video.
+func isGeminiVideoModel(modelID string, methods []string) bool {
+	if !strings.HasPrefix(normalizeGeminiModelID(modelID), "veo-") {
+		return false
+	}
+	return len(methods) == 0 || slices.Contains(methods, "predictLongRunning")
+}
+
 // isGeminiImageModelID recognizes generateContent models with image output
 // (gemini-2.5-flash-image, gemini-2.0-flash-preview-image-generation,
 // gemini-3-pro-image-preview, ...) by the -image marker Google uses in their
@@ -76,8 +87,8 @@ func isGeminiImageModelID(normalized string) bool {
 // name and description, the token limits, and thinking support. Registry
 // enrichment merges its entry underneath field by field, and operator config
 // on top, so a field the listing reports always wins over the catalog.
-func geminiDiscoveredMetadata(gm geminiModel, supportsGenerate, supportsEmbed, supportsImage bool) *core.ModelMetadata {
-	modes := make([]string, 0, 3)
+func geminiDiscoveredMetadata(gm geminiModel, supportsGenerate, supportsEmbed, supportsImage, supportsVideo bool) *core.ModelMetadata {
+	modes := make([]string, 0, 4)
 	if supportsGenerate {
 		modes = append(modes, "chat")
 	}
@@ -91,6 +102,9 @@ func geminiDiscoveredMetadata(gm geminiModel, supportsGenerate, supportsEmbed, s
 			// Imagen predict models generate from text alone.
 			modes = append(modes, "image_edit")
 		}
+	}
+	if supportsVideo {
+		modes = append(modes, "video_generation")
 	}
 	metadata := &core.ModelMetadata{
 		DisplayName: strings.TrimSpace(gm.DisplayName),
@@ -190,14 +204,15 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 			modelID := displayModelIDFromGemini(gm.Name, p.backend)
 
 			supportsGenerate, supportsEmbed, supportsImage := geminiModelSupportedMethods(modelID, gm.SupportedMethods)
+			supportsVideo := isGeminiVideoModel(modelID, gm.SupportedMethods)
 
-			if (supportsGenerate || supportsEmbed || supportsImage) && isGeminiExposedModel(modelID) {
+			if (supportsGenerate || supportsEmbed || supportsImage || supportsVideo) && isGeminiExposedModel(modelID) {
 				models = append(models, core.Model{
 					ID:       modelID,
 					Object:   "model",
 					OwnedBy:  "google",
 					Created:  now,
-					Metadata: geminiDiscoveredMetadata(gm, supportsGenerate, supportsEmbed, supportsImage),
+					Metadata: geminiDiscoveredMetadata(gm, supportsGenerate, supportsEmbed, supportsImage, supportsVideo),
 				})
 			}
 		}

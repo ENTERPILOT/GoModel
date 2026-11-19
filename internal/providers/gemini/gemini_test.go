@@ -557,6 +557,60 @@ func TestListModels_StampsDiscoveredModes(t *testing.T) {
 	assert.Nil(t, embed.Metadata.Capabilities)
 }
 
+// Veo models list only predictLongRunning. They must still be listed, in the
+// video category, so the catalog can price them per second of video.
+func TestListModels_ListsVeoAsVideoGeneration(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{
+		"models": [{
+			"name": "models/veo-3.1-generate-preview",
+			"displayName": "Veo 3.1",
+			"inputTokenLimit": 1024,
+			"supportedGenerationMethods": ["predictLongRunning"]
+		}, {
+			"name": "models/other-long-running",
+			"supportedGenerationMethods": ["predictLongRunning"]
+		}, {
+			"name": "models/veo-unknown",
+			"supportedGenerationMethods": ["countTokens"]
+		}]
+	}`)
+
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL + "/v1beta/openai")
+
+	resp, err := provider.ListModels(context.Background())
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 1, "only the Veo model is a video model: %+v", resp.Data)
+
+	veo := resp.Data[0]
+	assert.Equal(t, "veo-3.1-generate-preview", veo.ID)
+	require.NotNil(t, veo.Metadata)
+	assert.Equal(t, []string{"video_generation"}, veo.Metadata.Modes)
+	assert.Equal(t, []core.ModelCategory{core.CategoryVideo}, veo.Metadata.Categories)
+	assert.Equal(t, "Veo 3.1", veo.Metadata.DisplayName)
+	assert.Nil(t, veo.Metadata.MaxOutputTokens)
+}
+
+func TestIsGeminiVideoModel(t *testing.T) {
+	tests := []struct {
+		model   string
+		methods []string
+		want    bool
+	}{
+		{model: "veo-3.1-generate-preview", methods: []string{"predictLongRunning"}, want: true},
+		{model: "models/veo-2.0-generate-001", methods: []string{"predictLongRunning"}, want: true},
+		{model: "veo-3.0-generate-001", want: true},
+		{model: "veo-3.0-generate-001", methods: []string{"generateContent"}},
+		{model: "imagen-4.0-generate-001", methods: []string{"predictLongRunning"}},
+		{model: "gemini-2.5-flash", methods: []string{"generateContent"}},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, isGeminiVideoModel(tt.model, tt.methods), "%s %v", tt.model, tt.methods)
+	}
+}
+
 func TestVertexNativeChatUsesOAuthAuthorization(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
