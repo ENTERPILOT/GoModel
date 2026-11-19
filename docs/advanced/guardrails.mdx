@@ -142,7 +142,7 @@ Each sequential group receives the output of the previous group. Guardrails
 that **edit content** (`system_prompt`, `llm_based_altering`,
 `string_replace`, `presidio`) cannot share an order with another editing guardrail; only
 one editor per order, and any number of non-editing checks (`llm_judge`,
-`header_edit`) next to it. When several guardrails at one order decide
+`inference_hook`, `header_edit`) next to it. When several guardrails at one order decide
 differently, the most severe decision wins: `block` > `respond` > `warn` >
 `allow`.
 
@@ -201,7 +201,7 @@ the guardrail endpoints and the dashboard page are unavailable.
 
 ## Guardrail Types
 
-Six types ship with GoModel. Each is a built-in plugin; the tables list its
+Eight types ship with GoModel. Each is a built-in plugin; the tables list its
 config keys as they appear under `config:` and on the dashboard form.
 
 ### `system_prompt`
@@ -777,6 +777,111 @@ instance that runs, so give them the same format.
     entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
     restore: true
     restore_tools_exclude: ["web_search"]
+```
+
+### `inference_hook`
+
+Asks an AI security server for an allow or deny verdict, speaking Anthropic's
+[Inference hooks](https://platform.claude.com/docs/en/manage-claude/inference-hooks)
+protocol. Anthropic runs these hooks for Claude Enterprise apps only, not for
+API, Amazon Bedrock, or Google Cloud traffic. With this guardrail GoModel is
+the caller instead, so a server built for the protocol (your own, or a
+security vendor's) can police requests to any provider.
+
+GoModel sends a signed `POST` and waits for `{"action": "allow"}` or
+`{"action": "deny", "deny_reason": "..."}`:
+
+| Phase | Frame | Sent |
+| --- | --- | --- |
+| prompt | `prompt`: the conversation so far | Before every provider call. |
+| response, stream | `tool_call`: the assistant message and its tool calls | Only when the response calls tools, before the client can run them. |
+
+**Phases:** prompt, response, stream (buffered). **Edits content:** no; the
+protocol cannot rewrite a prompt.
+
+In the stream phase the whole stream is buffered until the verdict arrives,
+so no tool call reaches the client first.
+
+#### Settings
+
+| Key | Required | Default | Description |
+| --- | -------- | ------- | ----------- |
+| `endpoint_url` | Yes | | URL of the security server. The whole URL is the endpoint; redirects are not followed. Use `https://` unless the server is on localhost or a network you trust with the conversation. |
+| `signing_secret` | Yes | | [Standard Webhooks](https://www.standardwebhooks.com/) secret every request is signed with: base64, with or without the `whsec_` prefix. Configure the same value on the server. |
+| `auth_header` | No | `Authorization` | Name of the static header that carries `auth_value`. |
+| `auth_value` | No | | Value of the auth header, sent as written (`Bearer <token>`), for a server that also authenticates its callers. Needs an `https://` URL unless the server is on localhost. |
+| `tenant_id` | No | `null` | `tenant_id` of every frame, for a server that serves several organizations. |
+| `roles` | No | `["system", "user", "assistant", "tool"]` | Prompt messages sent in the prompt phase. Remove `system` to send what Anthropic sends; see [What is sent](#what-is-sent). A message with any other role is always sent. |
+| `action` | No | `block` | On a deny verdict: `block` rejects, `respond` answers with an assistant reply, `warn` continues and records the verdict. Use `warn` as a shadow mode to try a policy on live traffic. |
+| `message` | No | `This request was blocked by policy` | Used when the verdict has no `deny_reason`. Otherwise the client sees the server's `deny_reason` (at most 500 characters). |
+| `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. |
+| `verdict_timeout_ms` | No | `5000` | How long one verdict may take, connection included (1 to 60000). The rule's own `timeout_ms` still applies when it is lower. |
+
+Generate a signing secret with `echo "whsec_$(openssl rand -base64 32)"`.
+
+#### Failures and timeouts
+
+A verdict is HTTP 200 with `action` set to `allow` or `deny`. Everything
+else is a failure, never a deny: a timeout, a connection error, any other
+status (a redirect included), or a body that is unreadable or larger than
+64 KiB. The rule's `fail_mode` decides what a failure does:
+
+- `closed` (default): the request is rejected with HTTP 500 `plugin_failure`.
+  Nothing reaches the provider or the client uninspected.
+- `open`: the request continues without a verdict, and the failure is recorded
+  in the request log. Choose it only when availability matters more than
+  inspection.
+
+GoModel also sends the protocol's connection test (a `prompt` frame with
+`source.application` set to `config-test` and no request content) when the
+guardrail is built and on every guardrail refresh, one minute by default.
+Without a valid verdict, allow or deny, the guardrail shows as degraded on
+the dashboard. Failed requests are not retried.
+
+#### What is sent
+
+Each request carries `Content-Type: application/json`,
+`User-Agent: gomodel-inference-hook/1`, the auth header, and the
+`webhook-id`, `webhook-timestamp`, and `webhook-signature` headers a server
+verifies as [Anthropic documents](https://platform.claude.com/docs/en/manage-claude/inference-hooks-endpoint#verify-the-signature).
+The body follows the protocol's frame, with these values:
+
+| Field | Value |
+| --- | --- |
+| `request_id` | New for every frame; equals `webhook-id` and is stored in the request log as `hook_request_id`, next to the verdict's `reference_id`. |
+| `actor` | `{"type": "user", "id": <API key ID>}`; never the key itself. |
+| `source.application` | `gomodel` |
+| `model`, `session_id` | The resolved provider model and the detected session, or `null`. |
+| `metadata` | `gomodel_request_id`, `gomodel_user_path`, `gomodel_provider`. |
+| `messages` | Text, tool calls, and tool results. Each image, audio, or file part becomes an `attachment` block without content; media bytes and tool definitions are never sent. |
+
+Two things differ from the frames Anthropic sends:
+
+- **System and developer messages are sent**, under the `user` role. Through
+  a gateway the caller writes them, so leaving them out would let a caller
+  move content past the hook. Remove `system` from `roles` if your server's
+  policy must not see them.
+- **Reasoning the caller replays** in assistant turns is sent as text for the
+  same reason. The model's own reasoning in a `tool_call` frame is not.
+
+#### Example
+
+```yaml
+- name: "dlp"
+  type: "inference_hook"
+  order: 0
+  config:
+    endpoint_url: "https://security.example.com/hooks/verdict"
+    signing_secret: "${env:INFERENCE_HOOK_SECRET}"
+
+# Also check tool calls before the client runs them.
+- name: "dlp-tools"
+  type: "inference_hook"
+  phase: "response"
+  order: 0
+  config:
+    endpoint_url: "https://security.example.com/hooks/verdict"
+    signing_secret: "${env:INFERENCE_HOOK_SECRET}"
 ```
 
 ## Examples
