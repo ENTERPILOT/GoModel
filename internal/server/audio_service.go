@@ -142,12 +142,12 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	format := speechResponseFormat(req, resp)
 	return s.finishAudio(c, route, resp, started, audioUsageAccounting{
 		extract: func(data []byte, pricing *core.ModelPricing) *usage.UsageEntry {
-			return usage.ExtractFromSpeechRequest(spoken, data, format, route.requestID, route.model, route.providerType, pricing)
+			return usage.ExtractFromSpeechRequest(spoken(), data, format, route.requestID, route.model, route.providerType, pricing)
 		},
 		newStreamSink: func() audioUsageSink {
 			meter := usage.NewSpeechDurationMeter(format)
 			return audioStreamSink{Writer: meter, entry: func(pricing *core.ModelPricing) *usage.UsageEntry {
-				return usage.ExtractFromStreamedSpeechRequest(spoken, meter, format, route.requestID, route.model, route.providerType, pricing)
+				return usage.ExtractFromStreamedSpeechRequest(spoken(), meter, format, route.requestID, route.model, route.providerType, pricing)
 			}}
 		},
 	})

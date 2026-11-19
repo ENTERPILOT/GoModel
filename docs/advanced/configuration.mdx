@@ -49,7 +49,7 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `GOMODEL_DEMO_MODE`  | Enable public demo warnings in logs and the dashboard  | `false`                |
 | `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`), compressed and decompressed | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | Seconds one response write on a model route may wait for the client to read it; `0` disables | `60`                   |
-| `AUDIO_SPEECH_CHUNK_CHARS` | Most characters of [`/v1/audio/speech` input](/advanced/audio-api#long-input) sent to a provider in one request; longer `wav`/`pcm` input is split at sentence boundaries and returned as one audio stream. `0` never splits | `0`                    |
+| `AUDIO_SPEECH_CHUNK_CHARS` | Maximum number of characters of [`/v1/audio/speech` input](/advanced/audio-api#long-input) sent to a provider in one request; longer input with `response_format` `wav` or `pcm` (not SSE) is split at sentence boundaries and returned as one audio stream. `0` never splits | `0`                    |
 | `USER_PATH_HEADER`   | Header used to read/write request `user_path` values  | `X-GoModel-User-Path`  |
 | `SERVER_TRUSTED_PROXIES` | Networks your own proxies sit on; enables header-based client addresses | _(empty)_ |
 | `SERVER_CLIENT_IP_HEADER` | Header a trusted proxy passes the client address in | `X-Forwarded-For` |

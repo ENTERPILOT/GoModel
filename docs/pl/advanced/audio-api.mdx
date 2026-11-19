@@ -133,19 +133,20 @@ AUDIO_SPEECH_CHUNK_CHARS=4096
 - Tekst dłuższy niż limit jest dzielony na **granicach zdań**. Skróty, inicjały
   i liczby (`dr.`, `np.`, `3.14`) nie kończą zdania, a pisma, które kończą
   zdania bez spacji (`。！？`), są rozpoznawane. Zdanie dłuższe niż limit jest
-  dzielone na końcu linii, potem na przecinku, potem między słowami.
+  dzielone na końcu linii, potem na przecinku, potem między słowami,
+  a dopiero w ostateczności wewnątrz słowa (np. długiego URL-a).
 - Części są syntetyzowane **po kolei, z tymi samymi parametrami**, a ich audio
   wraca jako **jedna odpowiedź**. Pierwsze bajty przychodzą, gdy tylko pierwsza
   część jest gotowa.
 - To nadal **jeden request**: jeden wpis w logu requestów, jeden rekord użycia
-  z łączną liczbą znaków i łącznym czasem audio oraz jeden request w limitach
+  z liczbą znaków wysłanych do providera i łącznym czasem audio oraz jeden request w limitach
   GoModel. Provider widzi jeden request na każdą część.
 
 Dzielenie działa dla `response_format` `wav` i `pcm`, które da się połączyć bez
 dekodowania. Pozostałe formaty, w tym domyślny `mp3`, oraz
 `stream_format: "sse"` są przekazywane bez zmian, więc nadal obowiązuje dla nich
 limit providera. [audio.cpp](/pl/providers/audiocpp) odpowiada plikiem WAV
-niezależnie od żądanego formatu, więc proś go o `wav`. Połączony plik WAV
+niezależnie od żądanego formatu, o ile nie zbudowano go z frontendem MP3, więc proś go o `wav`. Połączony plik WAV
 zostawia w nagłówku otwartą długość, tak jak odpowiedzi WAV samego OpenAI;
 odtwarzacze czytają go do końca.
 

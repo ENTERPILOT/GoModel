@@ -201,10 +201,12 @@ func isAbbreviation(runes []rune, dot int) bool {
 		return true
 	}
 	// Initials and dotted shorthand: "J. K. Rowling", "e.g.", "U.S.", "z.B.".
+	// Pieces are kept to two letters so that file names and hosts ("main.go",
+	// "foo.com") still end a sentence.
 	pieces := strings.Split(word, ".")
 	for _, piece := range pieces {
 		letters := utf8.RuneCountInString(piece)
-		if letters == 0 || letters > 3 || strings.IndexFunc(piece, func(r rune) bool { return !unicode.IsLetter(r) }) >= 0 {
+		if letters == 0 || letters > 2 || strings.IndexFunc(piece, func(r rune) bool { return !unicode.IsLetter(r) }) >= 0 {
 			return false
 		}
 	}
@@ -245,8 +247,8 @@ func endsClause(runes []rune, i int) bool {
 // cut so a base character keeps its combining marks and joined emoji stay
 // whole.
 func hardCut(runes []rune, start, cut int) int {
-	for i := cut; i > start; i-- {
-		if !joinsNext(runes[i], runes[i+1]) {
+	for i := cut; i >= start; i-- {
+		if !joinsNext(runes, i) {
 			return i
 		}
 	}
@@ -255,8 +257,31 @@ func hardCut(runes []rune, start, cut int) int {
 
 const zeroWidthJoiner = '‍'
 
-// joinsNext reports whether r and the rune after it form one visible character.
-func joinsNext(r, next rune) bool {
-	return r == zeroWidthJoiner || next == zeroWidthJoiner || unicode.Is(unicode.M, next) ||
-		(next >= 0x1F3FB && next <= 0x1F3FF) // emoji skin tone modifiers
+// maxFlagRun bounds the scan for the regional indicators before a cut. Only
+// its parity matters, and no text has dozens of flags without a space.
+const maxFlagRun = 32
+
+// joinsNext reports whether runes[i] and the rune after it form one visible
+// character.
+func joinsNext(runes []rune, i int) bool {
+	r, next := runes[i], runes[i+1]
+	if r == zeroWidthJoiner || next == zeroWidthJoiner || unicode.Is(unicode.M, next) ||
+		(next >= 0x1F3FB && next <= 0x1F3FF) || // emoji skin tone modifiers
+		(next >= 0xE0020 && next <= 0xE007F) { // emoji tag sequences: 🏴 + tags
+		return true
+	}
+	if !isRegionalIndicator(r) || !isRegionalIndicator(next) {
+		return false
+	}
+	// Flags are pairs of regional indicators: r starts one when an even
+	// number of them come before it.
+	before := 0
+	for k := i - 1; k >= 0 && before < maxFlagRun && isRegionalIndicator(runes[k]); k-- {
+		before++
+	}
+	return before%2 == 0
+}
+
+func isRegionalIndicator(r rune) bool {
+	return r >= 0x1F1E6 && r <= 0x1F1FF
 }

@@ -212,7 +212,10 @@ func TestAudioSpeech_LongInputLaterPartFails(t *testing.T) {
 	assert.Equal(t, 44+24000, rec.Body.Len(), "the first part's audio reaches the client")
 	assert.Len(t, provider.requests, 2, "no part is requested after the one that failed")
 
+	// Only what the provider accepted is metered: the first part's characters
+	// and audio, not the part it refused or the one never requested.
 	require.Len(t, usageLogger.entries, 1)
+	assert.Equal(t, len(longSpeechParts[0]), usageLogger.entries[0].RawData["input_characters"])
 	assert.InDelta(t, 0.5, usageLogger.entries[0].RawData["audio_output_seconds"], 0.001)
 	assert.Equal(t, "stream_error", entry.ErrorType)
 	require.NotNil(t, entry.Data)

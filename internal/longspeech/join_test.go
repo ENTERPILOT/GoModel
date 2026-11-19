@@ -72,14 +72,14 @@ func joinedWAV(format []byte, samples ...[]byte) []byte {
 	return append(streamedWAVHeader(format), bytes.Join(samples, nil)...)
 }
 
-// closeRecorder reports whether a part's body was closed.
+// closeRecorder counts how often a part's body was closed.
 type closeRecorder struct {
 	io.Reader
-	closed bool
+	closes int
 }
 
 func (c *closeRecorder) Close() error {
-	c.closed = true
+	c.closes++
 	return nil
 }
 
@@ -115,6 +115,7 @@ func TestJoin_Audio(t *testing.T) {
 	stereo := wavFile{channels: 2}.format()
 	unknown := uint32(unknownSize)
 	zero := uint32(0)
+	overstated := uint32(0x7FFFFFFF)
 
 	tests := []struct {
 		name        string
@@ -146,6 +147,18 @@ func TestJoin_Audio(t *testing.T) {
 			responses: []*core.AudioResponse{
 				streamed("audio/wav", wavFile{samples: []byte("aaaa"), declared: &unknown}.bytes()),
 				streamed("audio/wav", wavFile{samples: []byte("bbbb"), declared: &zero}.bytes()),
+			},
+			wantType:    "audio/wav",
+			wantContent: joinedWAV(mono, []byte("aaaa"), []byte("bbbb")),
+		},
+		{
+			// A clean end before the declared size is a header that overstates
+			// (encoders that stream write placeholders), not a cut transfer:
+			// that one fails the read instead.
+			name: "a part that declares more than it carries is read to its end",
+			responses: []*core.AudioResponse{
+				streamed("audio/wav", wavFile{samples: []byte("aaaa"), declared: &overstated}.bytes()),
+				buffered("audio/wav", wavFile{samples: []byte("bbbb")}.bytes()),
 			},
 			wantType:    "audio/wav",
 			wantContent: joinedWAV(mono, []byte("aaaa"), []byte("bbbb")),
@@ -240,6 +253,7 @@ func TestJoin_FirstPartFailsBeforeAnyAudio(t *testing.T) {
 		{name: "mp3 by content type", response: buffered("audio/mpeg", []byte("\xff\xfb\x90\x00....")), want: "neither WAV nor PCM"},
 		{name: "mp3 by tag", response: buffered("audio/pcm", []byte("ID3\x04\x00\x00\x00\x00\x00\x00")), want: "neither WAV nor PCM"},
 		{name: "not audio", response: buffered("application/json", []byte(`{"error":"nope"}`)), want: "neither WAV nor PCM"},
+		{name: "labelled wav without a riff header", response: buffered("audio/wav", []byte("bbbbbbbbbbbbbbbb")), want: "neither WAV nor PCM"},
 		{name: "wav without samples", response: buffered("audio/wav", wavFile{}.bytes()[:36]), want: "WAV header that cannot be read"},
 		{name: "wav without a block size", response: buffered("audio/wav", zeroBlockAlign(wavFile{samples: []byte("aaaa")}.bytes())), want: "WAV header that cannot be read"},
 	}
@@ -290,6 +304,12 @@ func TestJoin_LaterPartFailureEndsTheStream(t *testing.T) {
 		{
 			name:     "not wav",
 			second:   buffered("audio/wav", []byte("bbbbbbbbbbbbbbbb")),
+			want:     "different format than the first part for part 2 of 3",
+			wantCode: http.StatusBadGateway,
+		},
+		{
+			name:     "wav with a broken header",
+			second:   buffered("audio/wav", wavFile{}.bytes()[:36]),
 			want:     "WAV header that cannot be read",
 			wantCode: http.StatusBadGateway,
 		},
@@ -321,6 +341,103 @@ func TestJoin_LaterPartFailureEndsTheStream(t *testing.T) {
 	}
 }
 
+// TestJoin_LaterPCMPartMustBePCM: headerless audio carries nothing that says
+// what it is, so every part is checked for what would otherwise be played as
+// samples.
+func TestJoin_LaterPCMPartMustBePCM(t *testing.T) {
+	tests := []struct {
+		name   string
+		second *core.AudioResponse
+		want   string
+	}{
+		{name: "wav", second: buffered("audio/wav", wavFile{samples: []byte("bbbb")}.bytes()), want: "different format than the first part"},
+		{name: "mp3", second: buffered("audio/mpeg", []byte("\xff\xfb\x90\x00....")), want: "neither WAV nor PCM"},
+		{name: "error body", second: buffered("application/json", []byte(`{"error":"nope"}`)), want: "neither WAV nor PCM"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synth := &scriptedSynthesizer{responses: []*core.AudioResponse{buffered("audio/pcm", []byte("aaaa")), tt.second}}
+			resp, err := Join(context.Background(), "acme", []string{"A", "B"}, synth.synthesize)
+			require.NoError(t, err)
+
+			got, err := io.ReadAll(resp.Stream)
+			require.ErrorContains(t, err, tt.want)
+			assert.Equal(t, "aaaa", string(got))
+		})
+	}
+}
+
+// blockingBody blocks its reader until it is closed, as a provider body does
+// while the model is still synthesizing.
+type blockingBody struct {
+	reading chan struct{}
+	closed  chan struct{}
+}
+
+func (b *blockingBody) Read([]byte) (int, error) {
+	close(b.reading)
+	<-b.closed
+	return 0, errors.New("body closed")
+}
+
+func (b *blockingBody) Close() error {
+	close(b.closed)
+	return nil
+}
+
+// TestJoin_CloseUnblocksARead: a relay that gives up (the client left) closes
+// the stream from another goroutine while a read is waiting on the provider.
+func TestJoin_CloseUnblocksARead(t *testing.T) {
+	second := &blockingBody{reading: make(chan struct{}), closed: make(chan struct{})}
+	synth := &scriptedSynthesizer{responses: []*core.AudioResponse{
+		buffered("audio/pcm", []byte("aaaa")),
+		{ContentType: "audio/pcm", Stream: second},
+	}}
+	resp, err := Join(context.Background(), "acme", []string{"A", "B", "C"}, synth.synthesize)
+	require.NoError(t, err)
+
+	read := make(chan error, 1)
+	go func() {
+		_, err := io.ReadAll(resp.Stream)
+		read <- err
+	}()
+	<-second.reading
+	require.NoError(t, resp.Stream.Close())
+
+	require.Error(t, <-read)
+	assert.Len(t, synth.texts, 2, "no part is requested once the stream is closed")
+}
+
+// TestJoin_CloseCancelsAPartBeingRequested: closing while the next part is
+// still being requested cancels that request, and a body that arrives anyway
+// is released.
+func TestJoin_CloseCancelsAPartBeingRequested(t *testing.T) {
+	requesting := make(chan struct{})
+	late := &closeRecorder{Reader: bytes.NewReader([]byte("bbbb"))}
+	calls := 0
+	synthesize := func(ctx context.Context, _ string) (*core.AudioResponse, error) {
+		if calls++; calls == 1 {
+			return buffered("audio/pcm", []byte("aaaa")), nil
+		}
+		close(requesting)
+		<-ctx.Done()
+		return &core.AudioResponse{ContentType: "audio/pcm", Stream: late}, nil
+	}
+	resp, err := Join(context.Background(), "acme", []string{"A", "B"}, synthesize)
+	require.NoError(t, err)
+
+	read := make(chan error, 1)
+	go func() {
+		_, err := io.ReadAll(resp.Stream)
+		read <- err
+	}()
+	<-requesting
+	require.NoError(t, resp.Stream.Close())
+
+	require.ErrorIs(t, <-read, io.ErrClosedPipe)
+	assert.Equal(t, 1, late.closes)
+}
+
 func TestJoin_CloseStopsRequestingParts(t *testing.T) {
 	body := &closeRecorder{Reader: bytes.NewReader([]byte("aaaa"))}
 	synth := &scriptedSynthesizer{responses: []*core.AudioResponse{{ContentType: "audio/pcm", Stream: body}}}
@@ -329,7 +446,7 @@ func TestJoin_CloseStopsRequestingParts(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, resp.Stream.Close())
 
-	assert.True(t, body.closed)
+	assert.Equal(t, 1, body.closes)
 	_, err = resp.Stream.Read(make([]byte, 8))
 	require.Error(t, err)
 	assert.Len(t, synth.texts, 1)
@@ -348,9 +465,11 @@ func TestJoin_ClosesEachPartOnceRead(t *testing.T) {
 	got, err := io.ReadAll(resp.Stream)
 	require.NoError(t, err)
 
+	require.NoError(t, resp.Stream.Close())
+
 	assert.Equal(t, "aaaabbbb", string(got))
-	assert.True(t, first.closed)
-	assert.True(t, second.closed)
+	assert.Equal(t, 1, first.closes)
+	assert.Equal(t, 1, second.closes)
 }
 
 func TestJoinable(t *testing.T) {

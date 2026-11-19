@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -53,7 +54,8 @@ func Joinable(responseFormat string) bool {
 // one before it has been read, and a failure there ends the stream with that
 // error. provider names the upstream in errors about the audio it returned.
 func Join(ctx context.Context, provider string, parts []string, synthesize Synthesizer) (*core.AudioResponse, error) {
-	stream := &joinedAudio{ctx: ctx, provider: provider, parts: parts, total: len(parts), synthesize: synthesize}
+	ctx, cancel := context.WithCancel(ctx)
+	stream := &joinedAudio{ctx: ctx, cancel: cancel, provider: provider, parts: parts, total: len(parts), synthesize: synthesize}
 	contentType, err := stream.openNext()
 	if err != nil {
 		_ = stream.Close()
@@ -62,9 +64,13 @@ func Join(ctx context.Context, provider string, parts []string, synthesize Synth
 	return &core.AudioResponse{ContentType: contentType, Stream: stream}, nil
 }
 
-// joinedAudio reads the audio of every part as one stream.
+// joinedAudio reads the audio of every part as one stream. Like an HTTP
+// response body, it may be closed while a Read is in flight: Close shares only
+// the body and the closed flag with Read, and everything else belongs to the
+// reader.
 type joinedAudio struct {
 	ctx        context.Context
+	cancel     context.CancelFunc
 	provider   string
 	synthesize Synthesizer
 	parts      []string // not synthesized yet
@@ -76,9 +82,12 @@ type joinedAudio struct {
 
 	pending   []byte    // bytes owed to the reader before the current part's audio
 	audio     io.Reader // the current part's samples
-	body      io.Closer // the current part's upstream body
 	partBytes int64
 	err       error
+
+	mu     sync.Mutex
+	body   io.Closer // the current part's upstream body
+	closed bool
 }
 
 func (j *joinedAudio) Read(p []byte) (int, error) {
@@ -86,6 +95,10 @@ func (j *joinedAudio) Read(p []byte) (int, error) {
 		return 0, nil
 	}
 	for j.err == nil {
+		if j.isClosed() {
+			j.err = io.ErrClosedPipe
+			break
+		}
 		if len(j.pending) > 0 {
 			n := copy(p, j.pending)
 			j.pending = j.pending[n:]
@@ -113,21 +126,45 @@ func (j *joinedAudio) Read(p []byte) (int, error) {
 	return 0, j.err
 }
 
-// Close releases the part being read and abandons the ones not requested yet.
+// Close releases the part being read, cancels one being requested, and
+// abandons the rest.
 func (j *joinedAudio) Close() error {
-	j.parts, j.audio, j.pending = nil, nil, nil
-	if j.err == nil {
-		j.err = io.ErrClosedPipe
-	}
+	j.mu.Lock()
+	j.closed = true
+	j.mu.Unlock()
+	j.cancel()
 	return j.closeBody()
 }
 
-func (j *joinedAudio) closeBody() error {
-	if j.body == nil {
-		return nil
+func (j *joinedAudio) isClosed() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.closed
+}
+
+// holdBody records the body of the part now being read. A stream closed while
+// that part was being requested has no reader left, so the body is released
+// instead.
+func (j *joinedAudio) holdBody(body io.Closer) error {
+	j.mu.Lock()
+	if j.closed {
+		j.mu.Unlock()
+		_ = body.Close()
+		return io.ErrClosedPipe
 	}
+	j.body = body
+	j.mu.Unlock()
+	return nil
+}
+
+func (j *joinedAudio) closeBody() error {
+	j.mu.Lock()
 	body := j.body
 	j.body = nil
+	j.mu.Unlock()
+	if body == nil {
+		return nil
+	}
 	return body.Close()
 }
 
@@ -161,7 +198,9 @@ func (j *joinedAudio) openNext() (string, error) {
 	if body == nil {
 		body = io.NopCloser(bytes.NewReader(resp.Data))
 	}
-	j.body = body
+	if err := j.holdBody(body); err != nil {
+		return "", err
+	}
 
 	in := bufio.NewReader(body)
 	head, err := in.Peek(12)
@@ -174,9 +213,15 @@ func (j *joinedAudio) openNext() (string, error) {
 	if number == 1 {
 		j.wav = isWAV(head)
 		j.frameBytes = pcmFrameBytes
-		if !j.wav && !rawPCM(resp.ContentType, head) {
-			return "", j.partError(number, "audio that is neither WAV nor PCM", nil)
-		}
+	}
+	// Every part is checked, not only the first: a provider that answers a
+	// later part with another container, or with an error body under a 200,
+	// would otherwise have those bytes played as samples.
+	switch {
+	case j.wav != isWAV(head) && number > 1:
+		return "", j.partError(number, "audio in a different format than the first part", nil)
+	case !j.wav && !rawPCM(resp.ContentType, head):
+		return "", j.partError(number, "audio that is neither WAV nor PCM", nil)
 	}
 	j.audio = in
 	if !j.wav {
@@ -235,7 +280,9 @@ func rawPCM(contentType string, head []byte) bool {
 	switch mediaType {
 	case "", "application/octet-stream":
 		return true
-	case "audio/mpeg", "audio/mp3", "audio/ogg", "audio/opus", "audio/aac", "audio/flac", "audio/x-flac", "audio/mp4", "audio/webm":
+	case "audio/mpeg", "audio/mp3", "audio/ogg", "audio/opus", "audio/aac", "audio/flac", "audio/x-flac", "audio/mp4", "audio/webm",
+		// Labelled WAV but without a RIFF header: a broken file, not samples.
+		"audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave":
 		return false
 	}
 	return strings.HasPrefix(mediaType, "audio/")

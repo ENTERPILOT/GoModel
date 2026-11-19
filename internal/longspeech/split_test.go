@@ -189,6 +189,30 @@ func TestSplit(t *testing.T) {
 			want:  []string{"é", "é", "é"},
 		},
 		{
+			name:  "a cut may fall right after the first character",
+			text:  "ae\u0301b",
+			limit: 2,
+			want:  []string{"a", "e\u0301", "b"},
+		},
+		{
+			name:  "a flag is not cut apart",
+			text:  "a🇩🇪🇵🇱b",
+			limit: 4,
+			want:  []string{"a🇩🇪", "🇵🇱b"},
+		},
+		{
+			name:  "a tag sequence flag is not cut apart",
+			text:  "ab🏴󠁧󠁢󠁥󠁮󠁧󠁿c",
+			limit: 8,
+			want:  []string{"ab", "🏴󠁧󠁢󠁥󠁮󠁧󠁿c"},
+		},
+		{
+			name:  "a file name ends a sentence",
+			text:  "Open main.go. Then run it.",
+			limit: 16,
+			want:  []string{"Open main.go.", "Then run it."},
+		},
+		{
 			name:  "a joined emoji is not cut apart",
 			text:  "ab👨‍👩‍👧cd",
 			limit: 6,

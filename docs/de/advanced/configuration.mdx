@@ -49,7 +49,7 @@ Der gängigste Weg, GoModel zu konfigurieren. Setzen Sie eine der folgenden Vari
 | `GOMODEL_DEMO_MODE`  | Aktiviert Warnungen für öffentliche Demos in den Logs und im Dashboard  | `false`                |
 | `BODY_SIZE_LIMIT`    | Maximale Größe des Request-Bodys (z. B. `10M`, `1024K`, `500KB`), komprimiert und dekomprimiert | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | Sekunden, die ein einzelner Response-Schreibvorgang auf einer Modellroute darauf warten darf, dass der Client ihn liest; `0` deaktiviert | `60`                   |
-| `AUDIO_SPEECH_CHUNK_CHARS` | Maximale Zeichenzahl der [`/v1/audio/speech`-Eingabe](/de/advanced/audio-api#lange-eingaben), die in einem Request an einen Provider geht; längere `wav`/`pcm`-Eingaben werden an Satzgrenzen geteilt und als ein Audiostream zurückgegeben. `0` teilt nie | `0`                    |
+| `AUDIO_SPEECH_CHUNK_CHARS` | Maximale Zeichenzahl der [`/v1/audio/speech`-Eingabe](/de/advanced/audio-api#lange-eingaben), die in einem Request an einen Provider geht; längere Eingaben mit `response_format` `wav` oder `pcm` (ohne SSE) werden an Satzgrenzen geteilt und als ein Audiostream zurückgegeben. `0` teilt nie | `0`                    |
 | `USER_PATH_HEADER`   | Header, über den `user_path`-Werte von Requests gelesen und geschrieben werden  | `X-GoModel-User-Path`  |
 | `SERVER_TRUSTED_PROXIES` | Netzwerke, in denen Ihre eigenen Proxys stehen; aktiviert Client-Adressen aus Headern | _(leer)_ |
 | `SERVER_CLIENT_IP_HEADER` | Header, in dem ein vertrauenswürdiger Proxy die Client-Adresse übergibt | `X-Forwarded-For` |
