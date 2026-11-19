@@ -618,7 +618,7 @@ GoModel 发送一个带签名的 `POST`，并等待 `{"action": "allow"}` 或
 
 | 阶段 | 帧 | 发送时机 |
 | --- | --- | --- |
-| prompt | `prompt`：到目前为止的对话 | 每次调用提供商之前。 |
+| prompt | `prompt`：到目前为止的对话 | 每个请求一次，在调用提供商之前。故障转移的重试不会再次发送。 |
 | response、stream | `tool_call`：助手消息及其工具调用 | 仅当响应调用工具时，在客户端能够执行它们之前。 |
 
 **阶段：** prompt、response、stream（缓冲）。**编辑内容：** 否；该协议无法改写提示词。
@@ -646,7 +646,7 @@ GoModel 发送一个带签名的 `POST`，并等待 `{"action": "allow"}` 或
 
 裁决是指 HTTP 200 且 `action` 为 `allow` 或 `deny`。其他任何情况都是失败，而绝不是拒绝：超时、连接错误、任何其他状态码（包括重定向），或者无法读取或大于 64 KiB 的响应体。失败后的行为由规则的 `fail_mode` 决定：
 
-- `closed`（默认）：请求以 HTTP 500 `plugin_failure` 被拒绝。任何内容都不会未经检查就到达提供商或客户端。
+- `closed`（默认）：请求以 HTTP 500 `plugin_failure` 被拒绝。在 prompt 阶段，提供商不会收到请求；在 response 和 stream 阶段，客户端不会收到响应。
 - `open`：请求在没有裁决的情况下继续，失败会记录在请求日志中。只有当可用性比检查更重要时才选择它。
 
 GoModel 还会在护栏构建时以及每次护栏刷新时（默认每分钟一次）发送协议定义的连接测试（一个 `source.application` 为 `config-test` 的 `prompt` 帧，携带一条固定的测试消息，而不含任何请求的内容）。如果没有得到有效裁决（allow 或 deny），护栏会在控制台中显示为降级状态。失败的请求不会重试。
@@ -663,6 +663,8 @@ GoModel 还会在护栏构建时以及每次护栏刷新时（默认每分钟一
 | `model`、`session_id` | 解析后的提供商模型和检测到的会话，或 `null`。 |
 | `metadata` | `gomodel_request_id`、`gomodel_user_path`、`gomodel_provider`。 |
 | `messages` | 文本、工具调用和工具结果。每个图像、音频或文件部分都会变成一个不含内容的 `attachment` 块：其字节绝不会发送，工具定义和其他请求参数也不会发送。GoModel 未建模的内容（例如 `/v1/responses` 的 reasoning 项）会作为 `attachment` 发送，其 JSON 放在 `text` 中。 |
+
+GoModel 不会提取文件中的文本。如果服务器不能放行未经读取的文件或图像，可以拒绝任何 `text` 为 `null` 的 `attachment`。
 
 与 Anthropic 发送的帧相比有两点不同：
 

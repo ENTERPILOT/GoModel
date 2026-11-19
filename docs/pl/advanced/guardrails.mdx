@@ -816,7 +816,7 @@ GoModel wysyła podpisany `POST` i czeka na `{"action": "allow"}` albo
 
 | Faza | Ramka | Wysyłana |
 | --- | --- | --- |
-| prompt | `prompt`: dotychczasowa rozmowa | Przed każdym wywołaniem providera. |
+| prompt | `prompt`: dotychczasowa rozmowa | Raz na request, przed wywołaniem providera. Próba failover nie wysyła jej ponownie. |
 | response, stream | `tool_call`: wiadomość asystenta i jej wywołania narzędzi | Tylko gdy odpowiedź wywołuje narzędzia, zanim klient zdąży je uruchomić. |
 
 **Fazy:** prompt, response, stream (buforowany). **Edytuje treść:** nie;
@@ -852,7 +852,8 @@ przekierowanie) albo body, którego nie da się odczytać lub które jest więks
 niż 64 KiB. O skutku awarii decyduje `fail_mode` reguły:
 
 - `closed` (domyślnie): request jest odrzucany z HTTP 500 `plugin_failure`.
-  Nic nie dociera do providera ani do klienta bez sprawdzenia.
+  W fazie prompt provider nigdy nie dostaje requestu; w fazach response i
+  stream klient nigdy nie dostaje odpowiedzi.
 - `open`: request jest kontynuowany bez werdyktu, a awaria trafia do logu
   requestów. Wybierz to tylko wtedy, gdy dostępność jest ważniejsza niż
   inspekcja.
@@ -879,6 +880,10 @@ Body ma kształt ramki z protokołu, z tymi wartościami:
 | `model`, `session_id` | Rozwiązany model providera i wykryta sesja albo `null`. |
 | `metadata` | `gomodel_request_id`, `gomodel_user_path`, `gomodel_provider`. |
 | `messages` | Tekst, wywołania narzędzi i wyniki narzędzi. Każda część z obrazem, dźwiękiem lub plikiem staje się blokiem `attachment` bez treści: jej bajty nigdy nie są wysyłane, podobnie jak definicje narzędzi i pozostałe parametry requestu. Treść, której GoModel nie modeluje, na przykład element reasoning z `/v1/responses`, jest wysyłana jako `attachment` z jej JSON-em w polu `text`. |
+
+GoModel nie wyciąga tekstu z plików. Serwer, który nie może przepuścić pliku
+ani obrazu bez przeczytania, może odrzucać każdy `attachment`, którego `text`
+ma wartość `null`.
 
 Dwie rzeczy różnią się od ramek wysyłanych przez Anthropic:
 

@@ -793,7 +793,7 @@ GoModel sends a signed `POST` and waits for `{"action": "allow"}` or
 
 | Phase | Frame | Sent |
 | --- | --- | --- |
-| prompt | `prompt`: the conversation so far | Before every provider call. |
+| prompt | `prompt`: the conversation so far | Once per request, before the provider is called. A failover attempt does not send it again. |
 | response, stream | `tool_call`: the assistant message and its tool calls | Only when the response calls tools, before the client can run them. |
 
 **Phases:** prompt, response, stream (buffered). **Edits content:** no; the
@@ -829,7 +829,8 @@ status (a redirect included), or a body that is unreadable or larger than
 64 KiB. The rule's `fail_mode` decides what a failure does:
 
 - `closed` (default): the request is rejected with HTTP 500 `plugin_failure`.
-  Nothing reaches the provider or the client uninspected.
+  In the prompt phase the provider never receives the request; in the response
+  and stream phases the client never receives the response.
 - `open`: the request continues without a verdict, and the failure is recorded
   in the request log. Choose it only when availability matters more than
   inspection.
@@ -856,6 +857,10 @@ The body follows the protocol's frame, with these values:
 | `model`, `session_id` | The resolved provider model and the detected session, or `null`. |
 | `metadata` | `gomodel_request_id`, `gomodel_user_path`, `gomodel_provider`. |
 | `messages` | Text, tool calls, and tool results. Each image, audio, or file part becomes an `attachment` block without content: its bytes are never sent, and neither are tool definitions or other request parameters. Content GoModel does not model, such as a `/v1/responses` reasoning item, is sent as an `attachment` with its JSON as `text`. |
+
+GoModel does not extract the text of files. A server that must not let a
+file or an image through unread can deny any `attachment` whose `text` is
+`null`.
 
 Two things differ from the frames Anthropic sends:
 

@@ -428,6 +428,30 @@ func TestOnPromptSendsUnmodelledContentAsJSON(t *testing.T) {
 	assert.Contains(t, user[1].(map[string]any)["text"], "also inspected")
 }
 
+func TestOnPromptSendsUnmodelledToolResultContent(t *testing.T) {
+	s := newSecurityServer(t, `{"action": "allow"}`)
+	p := newPlugin(t, s, `{}`)
+	x := plugintest.Exchange(plugintest.Prompt(pluginapi.Message{ID: "m1", Role: pluginapi.RoleTool, Parts: []pluginapi.Part{
+		{Kind: pluginapi.PartToolResult, ToolResult: &pluginapi.ToolResult{CallID: "call_1", IsError: true, Parts: []pluginapi.Part{
+			{Kind: pluginapi.PartText, Text: "lookup failed"},
+			{Kind: pluginapi.PartOpaque, Raw: json.RawMessage(`{"type":"future_block","note":"card 4111111111111111"}`)},
+			{Kind: pluginapi.PartAudio, MediaType: "audio/wav", Data: []byte("raw-bytes")},
+		}}},
+	}}), nil)
+
+	_, err := p.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+	frames := s.frames(t)
+	require.Len(t, frames, 1)
+	messages, err := json.Marshal(frames[0]["messages"])
+	require.NoError(t, err)
+	assert.JSONEq(t, `[{"role": "user", "content": [{
+		"type": "tool_result",
+		"content": "lookup failed\n{\"type\":\"future_block\",\"note\":\"card 4111111111111111\"}\n[audio]",
+		"is_error": true, "tool_name": null, "tool_use_id": "call_1"
+	}]}]`, string(messages))
+}
+
 func TestOnPromptWithoutPrompt(t *testing.T) {
 	s := newSecurityServer(t, `{"action": "deny"}`)
 	p := newPlugin(t, s, `{}`)

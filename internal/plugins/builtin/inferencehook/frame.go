@@ -254,16 +254,20 @@ func toolUse(call pluginapi.ToolCall, withInfo bool) toolUseBlock {
 	return block
 }
 
-// toolResult joins the result's text with newlines; other parts become a
+// toolResult joins the result's text with newlines. Content GoModel does
+// not model is sent as its JSON, as in [attachment]; media becomes a
 // placeholder marker, as the protocol replaces binary parts.
 func toolResult(result pluginapi.ToolResult, names map[string]string) toolResultBlock {
 	lines := make([]string, 0, len(result.Parts))
 	for _, part := range result.Parts {
-		if part.Kind == pluginapi.PartText {
+		switch {
+		case part.Kind == pluginapi.PartText:
 			lines = append(lines, part.Text)
-			continue
+		case part.Kind == pluginapi.PartOpaque && len(part.Raw) > 0:
+			lines = append(lines, string(part.Raw))
+		default:
+			lines = append(lines, "["+string(part.Kind)+"]")
 		}
-		lines = append(lines, "["+string(part.Kind)+"]")
 	}
 	return toolResultBlock{
 		Type:      "tool_result",

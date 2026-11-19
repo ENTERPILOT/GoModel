@@ -843,7 +843,7 @@ oder `{"action": "deny", "deny_reason": "..."}`:
 
 | Phase | Frame | Gesendet |
 | --- | --- | --- |
-| prompt | `prompt`: die bisherige Konversation | Vor jedem Provider-Aufruf. |
+| prompt | `prompt`: die bisherige Konversation | Einmal pro Request, bevor der Provider aufgerufen wird. Ein Failover-Versuch sendet ihn nicht erneut. |
 | response, stream | `tool_call`: die Assistant-Nachricht und ihre Tool-Calls | Nur wenn die Response Tools aufruft, bevor der Client sie ausführen kann. |
 
 **Phasen:** prompt, response, stream (gepuffert). **Bearbeitet Inhalte:** nein;
@@ -879,7 +879,8 @@ andere Status (auch ein Redirect) oder ein Body, der nicht lesbar oder größer
 als 64 KiB ist. Das `fail_mode` der Regel entscheidet, was ein Fehler bewirkt:
 
 - `closed` (Standard): Der Request wird mit HTTP 500 `plugin_failure`
-  abgelehnt. Nichts erreicht den Provider oder den Client ungeprüft.
+  abgelehnt. In der prompt-Phase erhält der Provider den Request nie; in der
+  response- und der stream-Phase erhält der Client die Response nie.
 - `open`: Der Request läuft ohne Urteil weiter, und der Fehler wird im
   Request-Log festgehalten. Wählen Sie das nur, wenn Verfügbarkeit wichtiger
   ist als die Prüfung.
@@ -907,6 +908,10 @@ Der Body folgt dem Frame des Protokolls, mit diesen Werten:
 | `model`, `session_id` | Das aufgelöste Provider-Modell und die erkannte Session, oder `null`. |
 | `metadata` | `gomodel_request_id`, `gomodel_user_path`, `gomodel_provider`. |
 | `messages` | Text, Tool-Calls und Tool-Ergebnisse. Jeder Bild-, Audio- oder Datei-Teil wird zu einem `attachment`-Block ohne Inhalt: Seine Bytes werden nie gesendet, Tool-Definitionen und andere Request-Parameter ebenfalls nicht. Inhalte, die GoModel nicht modelliert, etwa ein Reasoning-Item von `/v1/responses`, werden als `attachment` mit ihrem JSON als `text` gesendet. |
+
+GoModel extrahiert keinen Text aus Dateien. Ein Server, der keine Datei und
+kein Bild ungelesen durchlassen darf, kann jedes `attachment` ablehnen, dessen
+`text` `null` ist.
 
 Zwei Dinge unterscheiden sich von den Frames, die Anthropic sendet:
 
