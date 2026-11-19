@@ -16,7 +16,15 @@
     statusCodeClass,
   } from "./request-log-logic.js";
   import { labelChipStyle } from "$lib/utils/chartTheme.js";
-  import { ChartNoAxesColumnIncreasing, ChevronDown, ChevronLeft, ChevronRight } from "lucide";
+  import { playgroundOpener } from "$pages/playground/openInPlayground.svelte.js";
+  import { canOpenInPlayground } from "$pages/playground/playgroundSnapshot.js";
+  import {
+    ChartNoAxesColumnIncreasing,
+    ChevronDown,
+    ChevronLeft,
+    ChevronRight,
+    FlaskConical,
+  } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   // `thread` marks a session-thread head row (grouped mode):
@@ -67,6 +75,12 @@
     onusage?.();
   }
 
+  function openInPlayground(event) {
+    event.stopPropagation();
+    event.preventDefault();
+    playgroundOpener.openRequestLogEntry(entry);
+  }
+
   function threadDescription() {
     return m.requests_session_description({ count: Number(thread.count || 1) });
   }
@@ -115,12 +129,24 @@
     {#if onusage}
       <button
         type="button"
-        class="request-log-session-usage"
+        class="request-log-row-action"
         title={m.requests_view_session_usage()}
         aria-label={m.requests_view_session_usage()}
         onclick={openSessionUsage}
       >
-        <Icon icon={ChartNoAxesColumnIncreasing} class="request-log-session-usage-svg" />
+        <Icon icon={ChartNoAxesColumnIncreasing} class="request-log-row-action-svg" />
+      </button>
+    {/if}
+    {#if canOpenInPlayground(entry)}
+      <button
+        type="button"
+        class="request-log-row-action"
+        title={m.playground_open_request()}
+        aria-label={m.playground_open_request()}
+        disabled={playgroundOpener.pending === playgroundOpener.requestLogKey(entry)}
+        onclick={openInPlayground}
+      >
+        <Icon icon={FlaskConical} class="request-log-row-action-svg" />
       </button>
     {/if}
     {#if columns.status}
@@ -294,7 +320,7 @@
     font-weight: 600;
   }
 
-  .request-log-session-usage {
+  .request-log-row-action {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -309,12 +335,17 @@
     cursor: pointer;
   }
 
-  .request-log-session-usage:hover {
+  .request-log-row-action:hover:not(:disabled) {
     background: color-mix(in srgb, var(--accent) 20%, var(--bg));
     border-color: var(--accent);
   }
 
-  .request-log-session-usage :global(.request-log-session-usage-svg) {
+  .request-log-row-action:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .request-log-row-action :global(.request-log-row-action-svg) {
     width: 14px;
     height: 14px;
   }

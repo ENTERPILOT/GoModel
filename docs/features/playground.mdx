@@ -46,6 +46,26 @@ and per-token embeddings, such as vLLM's `token_embed`, to their first row; the
 result shows the number of token vectors next to each embedding. **Copy** still
 copies the full response.
 
+## Open a logged request
+
+Rows for `/v1/chat/completions`, `/v1/responses`, and `/v1/messages` requests on
+the **Requests** page, and in the request log of the **Usage** page, have an
+**Open in Playground** button. It loads the logged request into the Playground —
+endpoint, model, streaming setting, and the System, User, and Assistant text
+messages — so you can edit it and send it again. Nothing is sent until you press
+send.
+
+The button replays the request body kept in the request log, so it needs
+`LOGGING_LOG_BODIES=true` (the default) and an entry that is still within
+`LOGGING_RETENTION_DAYS`. On the Requests page it appears only for entries with
+a stored conversation; on the Usage page the entry is looked up when you click,
+and the dashboard tells you when no replayable body is stored.
+
+The Playground edits text conversations only. Tools, tool calls and their
+results, images, and parameters such as `temperature` or `max_tokens` are not
+carried over, and a notice says so when the request had any. The replay is sent
+with your dashboard key, not the original caller's key or user path.
+
 ## User path scoping
 
 Virtual models can be restricted to specific `user_paths`, and Playground requests

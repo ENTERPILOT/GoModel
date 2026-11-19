@@ -33,6 +33,19 @@ keywords: ["playground", "调试台", "控制台", "dashboard", "chat completion
 对于嵌入，只有当编码格式不是 `float` 时才会发送该参数。维度字段留空时不发送；否则必须为正整数，并以 JSON 整数发送。
 响应 JSON 中每个向量只显示前几个值（较长的 `base64` 向量只显示前几个字符），按 token 返回的嵌入（如 vLLM 的 `token_embed`）只显示第一行；结果区会在每个嵌入旁显示其 token 向量数。**复制** 仍会复制完整响应。
 
+## 打开已记录的请求
+
+在 **Requests** 页面以及 **Usage** 页面的请求日志中，`/v1/chat/completions`、`/v1/responses` 和 `/v1/messages`
+请求所在的行带有 **Open in Playground** 按钮。它会把已记录的请求加载到 Playground 中——端点、模型、流式设置以及
+System、User 和 Assistant 文本消息——以便您编辑后再次发送。在您点击发送之前不会发出任何请求。
+
+该按钮重放的是请求日志中保存的请求体，因此需要 `LOGGING_LOG_BODIES=true`（默认值），并且该条目仍在
+`LOGGING_RETENTION_DAYS` 保留期内。在 Requests 页面，只有保存了对话的条目才会显示该按钮；在 Usage 页面，
+点击时才会查找对应条目，如果没有可重放的请求体，控制台会给出提示。
+
+Playground 只能编辑文本对话。工具、工具调用及其结果、图片，以及 `temperature`、`max_tokens` 等参数不会带入；
+如果原请求包含这些内容，会显示提示。重放的请求使用您的控制台密钥发送，而不是原调用方的密钥或用户路径。
+
 ## 用户路径作用域
 
 虚拟模型可以被限定到特定的 `user_paths`，而使用主密钥认证的 Playground 请求可以通过模型选择器旁边的 **User path**
