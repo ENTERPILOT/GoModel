@@ -24,6 +24,13 @@ export function emptyProviderStatus() {
   };
 }
 
+// isProviderStatusPayload tells the gateway's answer from a 200 that carries
+// something else (a proxy's HTML page parses to null): only the former says
+// how many providers exist.
+export function isProviderStatusPayload(data) {
+  return Boolean(data) && typeof data === "object" && Array.isArray(data.providers);
+}
+
 // --- Preferences (details toggle + per-card overrides, localStorage) ---
 
 export function loadProviderPreferences(storage) {

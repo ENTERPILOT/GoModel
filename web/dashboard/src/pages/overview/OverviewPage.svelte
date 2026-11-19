@@ -35,6 +35,10 @@
   const scoped = $derived(access.scoped);
 
   function loadPage() {
+    // The checklist judges this visit (and this key) by its own answers, not
+    // by what the previous one left in the shared state.
+    providerStatusState.loadSucceeded = false;
+    calendarState.loadSucceeded = false;
     usageData.fetchUsage();
     requestStatsState.fetch();
     calendarState.fetch();
