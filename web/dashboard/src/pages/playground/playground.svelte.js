@@ -162,6 +162,10 @@ class PlaygroundStore {
 
   clear() {
     this.stop();
+    // Detach the aborted send: its teardown must not write its response
+    // summary back over the state reset here.
+    this.#abort = null;
+    this.sending = false;
     this.messages = [];
     this.error = "";
     this.response = null;
@@ -283,9 +287,9 @@ class PlaygroundStore {
       if (this.#abort === controller) {
         this.#abort = null;
         this.sending = false;
+        this.responseMeta = meta;
+        if (this.response !== null || this.error) this.panelTab = "response";
       }
-      this.responseMeta = meta;
-      if (this.response !== null || this.error) this.panelTab = "response";
     }
   }
 }

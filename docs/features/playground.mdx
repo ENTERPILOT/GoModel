@@ -56,8 +56,8 @@ messages — so you can edit it and send it again. Nothing is sent until you pre
 send.
 
 The button replays the request body kept in the request log, so it needs
-`LOGGING_LOG_BODIES=true` (the default) and an entry that is still within
-`LOGGING_RETENTION_DAYS`. On the Requests page it appears only for entries with
+`LOGGING_ENABLED=true` and `LOGGING_LOG_BODIES=true` (both the default) and an
+entry that is still within `LOGGING_RETENTION_DAYS`. On the Requests page it appears only for entries with
 a stored conversation; on the Usage page the entry is looked up when you click,
 and the dashboard tells you when no replayable body is stored.
 

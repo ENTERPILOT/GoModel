@@ -21,12 +21,14 @@ const CARRIED_FIELDS = {
 
 const TEXT_PART_TYPES = new Set(["text", "input_text", "output_text"]);
 
-const SNAPSHOT_ROLES = {
-  system: "system",
-  developer: "system",
-  user: "user",
-  assistant: "assistant",
-};
+// A Map, not an object: a logged role such as "constructor" must not resolve
+// to an inherited property.
+const SNAPSHOT_ROLES = new Map([
+  ["system", "system"],
+  ["developer", "system"],
+  ["user", "user"],
+  ["assistant", "assistant"],
+]);
 
 function plainObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -40,7 +42,7 @@ function createCollector() {
   // kept. A message left with no text, or with a role the Playground cannot
   // send (tool, function), is dropped whole.
   function add(role, content) {
-    const mapped = SNAPSHOT_ROLES[String(role || "")];
+    const mapped = SNAPSHOT_ROLES.get(role);
     let text = "";
     if (typeof content === "string") {
       text = content;
@@ -158,14 +160,65 @@ export function canOpenUsageEntryInPlayground(entry) {
   );
 }
 
-// Query for GET /admin/request-logs that finds the request log entry of a
+// How an admin fetch made for the button ended: "ok", "missing" (404),
+// "failed", or "silent" when the API client already dealt with it — a response
+// for a previous API key, or a 401 / dashboard-access 403 that opened the auth
+// dialog with its own explanation.
+export function requestLogFetchOutcome(result) {
+  if (!result) return "failed";
+  if (result.stale || result.status === 401) return "silent";
+  if (result.status === 403 && result.data?.error?.code === "dashboard_access_denied") {
+    return "silent";
+  }
+  if (result.status === 404) return "missing";
+  return result.ok ? "ok" : "failed";
+}
+
+// Request ids are not unique: the gateway keeps a caller-supplied
+// X-Request-Id, so retries or unrelated calls can share one. The lookup
+// therefore fetches several matches and usageRequestLogMatch picks the one the
+// usage row belongs to.
+const USAGE_LOOKUP_LIMIT = 20;
+// Usage is recorded when the response ends, on the clock that timed the
+// request; the slack covers rounding and the write itself.
+const USAGE_MATCH_SLACK_MS = 2000;
+
+// usageRequestLogMatch picks the request log entry of a usage row from the
+// entries sharing its request id: { entry, ambiguous }. A single entry on the
+// row's endpoint is the match. Several are narrowed to the one whose duration
+// spans the moment the usage was recorded; when that does not single one out —
+// or the page did not hold every match — the result is ambiguous and nothing
+// is opened, rather than some other request's conversation.
+export function usageRequestLogMatch(usageEntry, entries, total) {
+  const requestID = String(usageEntry?.request_id || "").trim();
+  const endpoint = followUpEndpointKind(usageEntry?.endpoint);
+  const list = Array.isArray(entries) ? entries : [];
+  const candidates = list.filter((entry) =>
+    entry && entry.id &&
+    String(entry.request_id || "").trim() === requestID &&
+    followUpEndpointKind(entry.path) === endpoint);
+  const complete = !(Number(total) > list.length);
+  if (complete && candidates.length <= 1) {
+    return { entry: candidates[0] || null, ambiguous: false };
+  }
+  const recordedAt = Date.parse(usageEntry?.timestamp);
+  const spanning = candidates.filter((entry) => {
+    const started = Date.parse(entry.timestamp);
+    const ended = started + Number(entry.duration_ns || 0) / 1e6;
+    return recordedAt >= started - USAGE_MATCH_SLACK_MS && recordedAt <= ended + USAGE_MATCH_SLACK_MS;
+  });
+  if (complete && spanning.length === 1) return { entry: spanning[0], ambiguous: false };
+  return { entry: null, ambiguous: true };
+}
+
+// Query for GET /admin/request-logs that finds the request log entries of a
 // usage row. The list defaults to the trailing 30 days, so the row's own day
 // is passed explicitly, widened by a day each side to cover every dashboard
 // timezone.
 export function usageEntryRequestLogQuery(entry) {
   const params = new URLSearchParams();
   params.set("request_id", String(entry?.request_id || "").trim());
-  params.set("limit", "1");
+  params.set("limit", String(USAGE_LOOKUP_LIMIT));
   const day = dateToDateKey(new Date(entry?.timestamp));
   if (day) {
     params.set("start_date", addDaysToDateKey(day, -1));

@@ -45,6 +45,7 @@
   "playground_open_request": "在 Playground 中打开",
   "playground_open_unavailable": "无法在 Playground 中打开此请求：请求日志中没有包含文本消息的请求体。",
   "playground_open_failed": "无法加载已记录的请求。请重试。",
+  "playground_open_ambiguous": "有多个已记录的请求使用了相同的请求 ID，无法确定此行对应哪一个。请改从请求页面打开。",
   "playground_open_partial": "已加载模型、流式设置和文本消息。工具、附件及其他请求参数不会带入。",
   "playground_json_show": "显示 JSON",
   "playground_json_hide": "隐藏 JSON",

@@ -60,8 +60,8 @@ System, User und Assistant –, sodass Sie ihn bearbeiten und erneut senden kön
 Gesendet wird erst, wenn Sie auf Senden klicken.
 
 Der Button spielt den im Request-Log gespeicherten Request-Body erneut ab. Dafür
-braucht es `LOGGING_LOG_BODIES=true` (Standard) und einen Eintrag, der noch
-innerhalb von `LOGGING_RETENTION_DAYS` liegt. Auf der Seite Requests erscheint er
+braucht es `LOGGING_ENABLED=true` und `LOGGING_LOG_BODIES=true` (beides Standard)
+sowie einen Eintrag, der noch innerhalb von `LOGGING_RETENTION_DAYS` liegt. Auf der Seite Requests erscheint er
 nur bei Einträgen mit gespeicherter Konversation; auf der Seite Usage wird der
 Eintrag erst beim Klick gesucht, und das Dashboard meldet, wenn kein abspielbarer
 Body gespeichert ist.

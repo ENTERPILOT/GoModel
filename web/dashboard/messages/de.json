@@ -45,6 +45,7 @@
   "playground_open_request": "Im Playground öffnen",
   "playground_open_unavailable": "Diese Anfrage kann nicht im Playground geöffnet werden: Das Anfrage-Log enthält dafür keinen Request-Body mit Textnachrichten.",
   "playground_open_failed": "Die protokollierte Anfrage konnte nicht geladen werden. Versuche es erneut.",
+  "playground_open_ambiguous": "Mehrere protokollierte Anfragen teilen sich diese Request-ID, daher lässt sich die Anfrage zu dieser Zeile nicht eindeutig bestimmen. Öffne sie stattdessen über die Seite Anfragen.",
   "playground_open_partial": "Modell, Streaming-Einstellung und Textnachrichten wurden geladen. Tools, Anhänge und andere Anfrageparameter werden nicht übernommen.",
   "playground_json_show": "JSON anzeigen",
   "playground_json_hide": "JSON ausblenden",

@@ -39,7 +39,7 @@ keywords: ["playground", "调试台", "控制台", "dashboard", "chat completion
 请求所在的行带有 **Open in Playground** 按钮。它会把已记录的请求加载到 Playground 中——端点、模型、流式设置以及
 System、User 和 Assistant 文本消息——以便您编辑后再次发送。在您点击发送之前不会发出任何请求。
 
-该按钮重放的是请求日志中保存的请求体，因此需要 `LOGGING_LOG_BODIES=true`（默认值），并且该条目仍在
+该按钮重放的是请求日志中保存的请求体，因此需要 `LOGGING_ENABLED=true` 和 `LOGGING_LOG_BODIES=true`（均为默认值），并且该条目仍在
 `LOGGING_RETENTION_DAYS` 保留期内。在 Requests 页面，只有保存了对话的条目才会显示该按钮；在 Usage 页面，
 点击时才会查找对应条目，如果没有可重放的请求体，控制台会给出提示。
 

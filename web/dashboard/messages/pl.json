@@ -45,6 +45,7 @@
   "playground_open_request": "Otwórz w Playground",
   "playground_open_unavailable": "Tego żądania nie można otworzyć w Playground: logi Request'ów nie zawierają dla niego treści żądania z wiadomościami tekstowymi.",
   "playground_open_failed": "Nie udało się wczytać zapisanego żądania. Spróbuj ponownie.",
+  "playground_open_ambiguous": "Kilka zapisanych żądań ma ten sam identyfikator requestu, więc nie da się wskazać tego, które odpowiada temu wierszowi. Otwórz je ze strony Requesty.",
   "playground_open_partial": "Wczytano model, ustawienie streamingu i wiadomości tekstowe. Narzędzia, załączniki i pozostałe parametry żądania nie są przenoszone.",
   "playground_json_show": "Pokaż JSON",
   "playground_json_hide": "Ukryj JSON",

@@ -7,32 +7,45 @@ import { flash } from "$lib/stores/flash.svelte.js";
 import { router } from "$lib/stores/router.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { playgroundStore } from "./playground.svelte.js";
-import { playgroundSnapshot, usageEntryRequestLogQuery } from "./playgroundSnapshot.js";
+import {
+  playgroundSnapshot,
+  requestLogFetchOutcome,
+  usageEntryRequestLogQuery,
+  usageRequestLogMatch,
+} from "./playgroundSnapshot.js";
 
-// A response for a previous API key, or a 401 (the auth dialog is already
-// opening): give up without telling the user anything.
+// The API client already dealt with the response (see requestLogFetchOutcome):
+// give up without telling the user anything.
 const SILENT = Symbol("silent");
+// Several logged requests share the usage row's request id and none can be
+// singled out.
+const AMBIGUOUS = Symbol("ambiguous");
 
-async function fetchRequestLogDetail(id) {
-  const result = await getJSON(
+// Resolves to the response data, null when there is none, or SILENT.
+async function fetchRequestLogs(path, label) {
+  const result = await getJSON(path, { label });
+  const outcome = requestLogFetchOutcome(result);
+  if (outcome === "silent") return SILENT;
+  if (outcome === "failed") throw new Error(label + ": HTTP " + result.status);
+  return outcome === "ok" ? result.data : null;
+}
+
+function fetchRequestLogDetail(id) {
+  return fetchRequestLogs(
     "/admin/request-logs/detail?log_id=" + encodeURIComponent(String(id || "")),
-    { label: "request log detail" },
+    "request log detail",
   );
-  if (result.stale || result.status === 401) return SILENT;
-  if (result.status === 404) return null;
-  if (!result.ok) throw new Error("request log detail: HTTP " + result.status);
-  return result.data;
 }
 
 async function fetchUsageRequestLogEntry(usageEntry) {
-  const result = await getJSON(
+  const page = await fetchRequestLogs(
     "/admin/request-logs?" + usageEntryRequestLogQuery(usageEntry),
-    { label: "request log lookup" },
+    "request log lookup",
   );
-  if (result.stale || result.status === 401) return SILENT;
-  if (!result.ok) throw new Error("request log lookup: HTTP " + result.status);
-  const found = Array.isArray(result.data?.entries) ? result.data.entries[0] : null;
-  return found && found.id ? fetchRequestLogDetail(found.id) : null;
+  if (page === SILENT) return SILENT;
+  const match = usageRequestLogMatch(usageEntry, page?.entries, page?.total);
+  if (match.ambiguous) return AMBIGUOUS;
+  return match.entry ? fetchRequestLogDetail(match.entry.id) : null;
 }
 
 class PlaygroundOpener {
@@ -78,6 +91,10 @@ class PlaygroundOpener {
     if (entry === SILENT) return;
     if (failed) {
       flash.error(m.playground_open_failed());
+      return;
+    }
+    if (entry === AMBIGUOUS) {
+      flash.error(m.playground_open_ambiguous());
       return;
     }
     const snapshot = playgroundSnapshot(entry);

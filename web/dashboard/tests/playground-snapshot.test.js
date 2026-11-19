@@ -5,7 +5,9 @@ import {
   canOpenInPlayground,
   canOpenUsageEntryInPlayground,
   playgroundSnapshot,
+  requestLogFetchOutcome,
   usageEntryRequestLogQuery,
+  usageRequestLogMatch,
 } from "../src/pages/playground/playgroundSnapshot.js";
 import { buildPlaygroundRequest } from "../src/pages/playground/playgroundLogic.js";
 
@@ -234,11 +236,82 @@ test("the usage row lookup pins the request id and a window around its day", () 
   );
   assert.deepEqual(Object.fromEntries(query), {
     request_id: "req 1",
-    limit: "1",
+    limit: "20",
     start_date: "2026-02-28",
     end_date: "2026-03-02",
   });
 
   const undated = new URLSearchParams(usageEntryRequestLogQuery({ request_id: "req-1" }));
-  assert.deepEqual(Object.fromEntries(undated), { request_id: "req-1", limit: "1" });
+  assert.deepEqual(Object.fromEntries(undated), { request_id: "req-1", limit: "20" });
+});
+
+test("roles are matched as own names, not inherited properties", () => {
+  const snapshot = playgroundSnapshot(
+    entry("/v1/chat/completions", {
+      model: "m",
+      messages: [
+        { role: "constructor", content: "x" },
+        { role: "toString", content: "y" },
+        { role: "user", content: "Hi" },
+      ],
+    }),
+  );
+  assert.equal(snapshot.partial, true);
+  assert.deepEqual(snapshot.messages, [{ role: "user", content: "Hi" }]);
+});
+
+test("a usage row matches the one request log entry it belongs to", () => {
+  const usageRow = { request_id: "req-1", endpoint: "/v1/chat/completions", timestamp: "2026-03-01T10:00:05Z" };
+  const logEntry = (id, timestamp, extra = {}) => ({
+    id,
+    request_id: "req-1",
+    path: "/v1/chat/completions",
+    timestamp,
+    duration_ns: 5e9,
+    ...extra,
+  });
+  const own = logEntry("log-own", "2026-03-01T10:00:00Z");
+  const later = logEntry("log-later", "2026-03-01T11:00:00Z");
+
+  assert.deepEqual(usageRequestLogMatch(usageRow, [own], 1), { entry: own, ambiguous: false });
+  assert.deepEqual(usageRequestLogMatch(usageRow, [], 0), { entry: null, ambiguous: false });
+  assert.deepEqual(usageRequestLogMatch(usageRow, null, undefined), { entry: null, ambiguous: false });
+
+  // A reused request id: the newest entry is listed first, the row's own one
+  // is found by the time its usage was recorded.
+  assert.deepEqual(usageRequestLogMatch(usageRow, [later, own], 2), { entry: own, ambiguous: false });
+
+  // Another endpoint or request id never matches.
+  const embeddings = logEntry("log-emb", "2026-03-01T10:00:00Z", { path: "/v1/embeddings" });
+  const otherID = logEntry("log-other", "2026-03-01T10:00:00Z", { request_id: "req-2" });
+  assert.deepEqual(usageRequestLogMatch(usageRow, [embeddings, otherID, own], 3), {
+    entry: own,
+    ambiguous: false,
+  });
+
+  const ambiguous = [
+    ["two entries span the usage time", [own, logEntry("log-twin", "2026-03-01T10:00:01Z")], 2],
+    ["no entry spans the usage time", [later, logEntry("log-early", "2026-03-01T08:00:00Z")], 2],
+    ["the page does not hold every match", [own], 21],
+    ["the usage row has no timestamp", [later, own], 2, { ...usageRow, timestamp: undefined }],
+  ];
+  for (const [name, entries, total, row = usageRow] of ambiguous) {
+    assert.deepEqual(usageRequestLogMatch(row, entries, total), { entry: null, ambiguous: true }, name);
+  }
+});
+
+test("fetch outcomes separate handled, missing and failed responses", () => {
+  const cases = [
+    ["ok", { ok: true, status: 200 }],
+    ["missing", { ok: false, status: 404 }],
+    ["failed", { ok: false, status: 500 }],
+    ["failed", { ok: false, status: 403, data: { error: { code: "forbidden" } } }],
+    ["failed", null],
+    ["silent", { ok: false, status: 401 }],
+    ["silent", { ok: true, stale: true, status: 200 }],
+    ["silent", { ok: false, status: 403, data: { error: { code: "dashboard_access_denied" } } }],
+  ];
+  for (const [want, result] of cases) {
+    assert.equal(requestLogFetchOutcome(result), want, JSON.stringify(result));
+  }
 });
