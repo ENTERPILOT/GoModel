@@ -96,6 +96,9 @@ virtual_models:
 设置 `FAILOVER_ENABLED=false`（或 `failover.enabled: false`）可全局关闭遍历；[工作流](/zh/advanced/workflows)也可以在其作用域内关闭它。
 此时仍会使用所选目标提供服务，但不会重试。
 
+在 [`REQUEST_CONTROL_HEADERS`](/zh/advanced/request-control-headers) 中允许之后，客户端可以通过 `X-GoModel-Failover: off` 请求头为单个请求关闭故障转移。
+该请求头默认会被忽略，并且永远无法开启故障转移。
+
 ## 调整故障转移策略
 
 上述默认值适合大多数部署。`failover` 下的三个设置（或对应的环境变量）可对其进行调整：

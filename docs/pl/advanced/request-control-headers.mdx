@@ -1,0 +1,87 @@
+---
+title: "Nagłówki sterujące requestem"
+description: "Pozwól klientom zmienić ustawienie gatewaya dla jednego requestu za pomocą nagłówka HTTP. Domyślnie wyłączone; to Ty wybierasz, które nagłówki są dozwolone."
+icon: "toggle-right"
+keywords: ["nagłówki sterujące requestem", "ustawienia per request", "request control headers", "X-GoModel-Failover", "REQUEST_CONTROL_HEADERS"]
+---
+
+## Przegląd
+
+Nagłówek sterujący requestem pozwala klientowi zmienić jedno ustawienie gatewaya
+dla własnego requestu, na przykład „obsłuż ten request bez failoveru”.
+
+O ustawieniach gatewaya decyduje operator, a nagłówek sterujący oddaje część tej
+decyzji każdemu klientowi. Dlatego nagłówki są **domyślnie wyłączone**: GoModel
+odczytuje nagłówek sterujący dopiero wtedy, gdy go wymienisz.
+
+## Dopuszczanie nagłówka
+
+Wymień nagłówki, które klienci mogą wysyłać, rozdzielając je przecinkami:
+
+```bash
+REQUEST_CONTROL_HEADERS=X-GoModel-Failover
+```
+
+Albo w `config.yaml`:
+
+```yaml
+server:
+  request_control_headers: ["X-GoModel-Failover"]
+```
+
+Domyślnie lista jest pusta: klienci niczym nie sterują. Nazwa, której GoModel nie
+zna, zatrzymuje start, więc literówka nie może po cichu zostawić nagłówka
+wyłączonego.
+
+Lista dotyczy całego gatewaya, a nie pojedynczych kluczy API. Dodaj nagłówek
+tylko wtedy, gdy może go używać każdy klient, który potrafi się uwierzytelnić.
+
+## Obsługiwane nagłówki
+
+| Nagłówek | Wartość | Efekt |
+| --- | --- | --- |
+| `X-GoModel-Failover` | `off` | Obsługuje request bez [failoveru](/pl/features/failover): gdy wybrany cel zawiedzie, zwracany jest jego błąd, a pozostałe cele nie są próbowane. `on` zostawia skonfigurowane zachowanie. |
+
+Przełączniki przyjmują `on`/`off`, `true`/`false` oraz `1`/`0`, bez względu na
+wielkość liter.
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "X-GoModel-Failover: off" \
+  -d '{"model": "resilient-chat", "messages": [{"role": "user", "content": "Hi"}]}'
+```
+
+## Zasady
+
+- **Niewymieniony znaczy ignorowany.** Nagłówek sterujący, którego nie
+  dopuszczono, niczego nie zmienia; request jest obsługiwany tak, jakby klient
+  go nie wysłał.
+- **Nigdy nie jest przekazywany dalej.** Nagłówki sterujące zostają w gatewayu,
+  niezależnie od tego, czy są na liście. Nie trafiają do providera, także na
+  trasach [passthrough](/pl/features/passthrough-api).
+- **Błędne wartości są odrzucane.** Dopuszczony nagłówek z wartością, której
+  GoModel nie potrafi odczytać, albo wysłany więcej niż raz, zwraca
+  `400 invalid_request_error`, zanim zostanie wywołany jakikolwiek provider.
+- **Tylko uwierzytelnieni klienci.** Nagłówki są odczytywane na trasach modeli po
+  uwierzytelnieniu. Nie wpływają na sprawdzanie kluczy API, dostęp do modeli,
+  [budżety](/pl/features/budgets) ani [rate limits](/pl/features/rate-limits).
+- **Tylko własny request klienta.** Wywołania, które gateway wykonuje podczas
+  obsługi requestu, na przykład model oceniający guardraila, zachowują
+  skonfigurowane ustawienia.
+- **Widoczne w logu requestów.** Wpis zapisuje efektywne ustawienie; request
+  obsłużony z `X-GoModel-Failover: off` ma `failover: false` w swoich
+  `workflow_features`.
+
+`X-GoModel-Failover` może failover jedynie wyłączyć. Nie włączy failoveru, który
+wyłączył model wirtualny, [workflow](/pl/advanced/workflows) albo
+`FAILOVER_ENABLED=false`.
+
+<Note>
+  Nagłówki, które GoModel odczytywał od zawsze, takie jak
+  [nagłówek user path](/pl/features/user-path#nagłówek-http), `Cache-Control` dla
+  [cache'u odpowiedzi](/pl/features/cache) i
+  [nagłówki tagujące](/pl/features/labelling#nagłówki-tagujące), nie są
+  nagłówkami sterującymi: działają bez tego ustawienia.
+</Note>

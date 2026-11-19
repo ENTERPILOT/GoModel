@@ -135,6 +135,11 @@ Ustaw `FAILOVER_ENABLED=false` (lub `failover.enabled: false`), aby globalnie wy
 przeglądanie celów; [workflow](/pl/advanced/workflows) również może je wyłączyć w swoim
 zakresie. Wybrany cel jest wtedy nadal obsługiwany, ale bez ponowień.
 
+Klient może wyłączyć failover dla pojedynczego requestu nagłówkiem
+`X-GoModel-Failover: off`, gdy dopuścisz go w
+[`REQUEST_CONTROL_HEADERS`](/pl/advanced/request-control-headers). Domyślnie nagłówek
+jest ignorowany i nigdy nie może failoveru włączyć.
+
 ## Dostrajanie polityki failoveru
 
 Opisane wyżej wartości domyślne pasują do większości wdrożeń. Można je dostosować

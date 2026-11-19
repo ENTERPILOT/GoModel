@@ -43,6 +43,13 @@ type ServerConfig struct {
 	// UserPathHeader is the inbound HTTP header used to read/write user paths.
 	// Default: X-GoModel-User-Path.
 	UserPathHeader string `yaml:"user_path_header" env:"USER_PATH_HEADER"`
+	// RequestControlHeaders lists the request control headers clients may send
+	// to change a gateway setting for their own request. A header that is not
+	// listed is ignored, and none of them is forwarded to a provider.
+	// Supported: X-GoModel-Failover (off serves the request without failover).
+	// Default: empty — clients steer nothing. List a header only when every
+	// client holding an API key may use it.
+	RequestControlHeaders []string `yaml:"request_control_headers" env:"REQUEST_CONTROL_HEADERS"`
 	// EnabledPassthroughProviders lists the provider types enabled on
 	// /p/{provider}/... passthrough routes. Default:
 	// ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner", "edenai", "jev"].

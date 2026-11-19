@@ -198,6 +198,11 @@ func skipPassthroughRequestHeader(key string, userPathHeader ...string) bool {
 	if strings.EqualFold(key, core.UserPathHeader) {
 		return true
 	}
+	// Request control headers steer the gateway, allowed or not; a provider
+	// has no use for them.
+	if core.IsRequestControlHeader(key) {
+		return true
+	}
 	for _, headerName := range userPathHeader {
 		if strings.EqualFold(key, headerName) {
 			return true

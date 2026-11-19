@@ -23,24 +23,29 @@ func ApplyWorkflowPolicy(ctx context.Context, workflow *core.Workflow, resolver 
 	return nil
 }
 
-// ApplyWorkflowContextOverrides applies request-origin-specific policy changes.
+// ApplyWorkflowContextOverrides applies request-specific policy changes: the
+// ones the request's origin implies, and the ones its client asked for through
+// request control headers.
 func ApplyWorkflowContextOverrides(ctx context.Context, workflow *core.Workflow) {
-	if workflow == nil || ctx == nil {
+	if workflow == nil || ctx == nil || workflow.Policy == nil {
 		return
 	}
 	switch core.GetRequestOrigin(ctx) {
 	case core.RequestOriginGuardrail, core.RequestOriginPlugin:
+		cloned := *workflow.Policy
+		cloned.Features.Guardrails = false
+		cloned.GuardrailsHash = ""
+		workflow.Policy = &cloned
 	default:
-		return
+		// A client's controls cover its own request only: inference the
+		// gateway issues on its behalf (a guardrail's judge call) inherits the
+		// context and keeps the configured policy.
+		if workflow.Policy.Features.Failover && core.RequestControlsFromContext(ctx).FailoverOff {
+			cloned := *workflow.Policy
+			cloned.Features.Failover = false
+			workflow.Policy = &cloned
+		}
 	}
-	if workflow.Policy == nil {
-		return
-	}
-
-	cloned := *workflow.Policy
-	cloned.Features.Guardrails = false
-	cloned.GuardrailsHash = ""
-	workflow.Policy = &cloned
 }
 
 // NormalizeWorkflowPolicyError converts policy lookup failures into gateway errors.

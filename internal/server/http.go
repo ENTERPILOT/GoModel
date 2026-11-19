@@ -118,6 +118,7 @@ type Config struct {
 	EnabledPassthroughProviders     []string                               // Provider types enabled on /p/{provider}/... passthrough routes
 	AllowPassthroughV1Alias         *bool                                  // Allow /p/{provider}/v1/... aliases; nil defaults to true
 	UserPathHeader                  string                                 // Header carrying the request user path (default: X-GoModel-User-Path)
+	RequestControlHeaders           []string                               // Request control headers clients may use to steer their own request (default: none)
 	AdminEndpointsEnabled           bool                                   // Whether admin API endpoints are enabled
 	AdminUIEnabled                  bool                                   // Whether admin dashboard UI is enabled
 	AdminHandler                    *admin.Handler                         // Admin API handler (nil if disabled)
@@ -440,6 +441,13 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 			UserPathHeader:        userPathHeaderName,
 			RequireCredential:     cfg.MasterKeyDisabled,
 		}))
+	}
+
+	// Request control headers are read post-auth (only authenticated clients
+	// steer the gateway) and before the body, so a bad value is refused
+	// without reading it. Not registered unless the operator allowed some.
+	if cfg != nil && len(cfg.RequestControlHeaders) > 0 {
+		e.Use(requestControls(cfg.RequestControlHeaders))
 	}
 
 	// The body is read only once the caller is authenticated: a request
