@@ -68,7 +68,7 @@ CLINE_MODELS=cline-pass/qwen3.7-max,cline-pass/kimi-k3
 CLINE_MODELS_MODE=merge
 ```
 
-Without `CLINE_MODELS_MODE=merge`, only the models in `CLINE_MODELS` are
+In the default `allowlist` mode, only the models in `CLINE_MODELS` are
 served. See [Models modes](/advanced/config-yaml#models-modes), and the
 [ClinePass page](https://docs.cline.bot/getting-started/clinepass) for the
 current model IDs.
@@ -93,8 +93,9 @@ See [Coding Agents](/guides/opencode-and-other-agents) for the full walkthrough.
   GoModel sends `"stream": false` and the `X-Response-Format: openai` header.
   Clients need no changes.
 - **Costs come from GoModel's pricing data**, not from the `usage.cost` figure
-  Cline reports. Token usage is always recorded; a model without a known price
-  has no cost until you set a
+  Cline reports. Token usage is always recorded; a model that no
+  [pricing source](/advanced/model-metadata) covers has no cost until you add
+  pricing in `config.yaml` or set a
   [pricing override](/features/cost-tracking#override-pricing).
 - **Passthrough is opt-in.** Add `cline` to `ENABLED_PASSTHROUGH_PROVIDERS` to
   expose `/p/cline/...`. GoModel adds `X-Response-Format: openai` unless the

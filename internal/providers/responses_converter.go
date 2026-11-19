@@ -611,26 +611,29 @@ func chatUsageToResponsesUsage(raw json.RawMessage) (responsesStreamUsage, bool)
 	var chatUsage struct {
 		PromptTokens            int                           `json:"prompt_tokens"`
 		CompletionTokens        int                           `json:"completion_tokens"`
-		TotalTokens             int                           `json:"total_tokens"`
+		TotalTokens             *int                          `json:"total_tokens"`
 		PromptTokensDetails     *core.PromptTokensDetails     `json:"prompt_tokens_details"`
 		CompletionTokensDetails *core.CompletionTokensDetails `json:"completion_tokens_details"`
 	}
 	chatUsage.PromptTokens = -1
 	chatUsage.CompletionTokens = -1
-	chatUsage.TotalTokens = -1
 	if err := json.Unmarshal(raw, &chatUsage); err != nil {
 		return responsesStreamUsage{}, false
 	}
 	if chatUsage.PromptTokens < 0 || chatUsage.CompletionTokens < 0 {
 		return responsesStreamUsage{}, false
 	}
-	if chatUsage.TotalTokens < 0 {
-		chatUsage.TotalTokens = chatUsage.PromptTokens + chatUsage.CompletionTokens
+	total := chatUsage.PromptTokens + chatUsage.CompletionTokens
+	if chatUsage.TotalTokens != nil {
+		if *chatUsage.TotalTokens < 0 {
+			return responsesStreamUsage{}, false
+		}
+		total = *chatUsage.TotalTokens
 	}
 	return responsesStreamUsage{
 		InputTokens:         chatUsage.PromptTokens,
 		OutputTokens:        chatUsage.CompletionTokens,
-		TotalTokens:         chatUsage.TotalTokens,
+		TotalTokens:         total,
 		InputTokensDetails:  chatUsage.PromptTokensDetails,
 		OutputTokensDetails: chatUsage.CompletionTokensDetails,
 	}, true

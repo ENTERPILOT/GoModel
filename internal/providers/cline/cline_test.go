@@ -50,6 +50,7 @@ func TestChatCompletion_RequestsBufferedOpenAIShape(t *testing.T) {
 	resp, err := provider.ChatCompletion(context.Background(), req)
 	require.NoError(t, err)
 
+	assert.Equal(t, 1, capture.Count())
 	sent := capture.Last(t)
 	assert.Equal(t, "openai", sent.Header.Get("X-Response-Format"))
 	assert.Equal(t, "Bearer cline-key", sent.Header.Get("Authorization"))

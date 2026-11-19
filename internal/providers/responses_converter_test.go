@@ -881,28 +881,47 @@ data: [DONE]
 }
 
 // Some upstreams (Cline) report only prompt and completion counts. That usage
-// is complete enough to keep: the total is their sum.
-func TestOpenAIResponsesStreamConverter_DerivesMissingTotalTokens(t *testing.T) {
-	mockStream := `data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":14,"completion_tokens":8,"cost":0.000066}}
+// is complete enough to keep: the total is their sum. A total that is present
+// but negative is still malformed, so the usage is omitted.
+func TestOpenAIResponsesStreamConverter_MissingTotalTokens(t *testing.T) {
+	tests := []struct {
+		name      string
+		usage     string
+		wantTotal any
+	}{
+		{name: "absent total is derived", usage: `{"prompt_tokens":14,"completion_tokens":8,"cost":0.000066}`, wantTotal: float64(22)},
+		{name: "null total is derived", usage: `{"prompt_tokens":14,"completion_tokens":8,"total_tokens":null}`, wantTotal: float64(22)},
+		{name: "upstream total is kept", usage: `{"prompt_tokens":14,"completion_tokens":8,"total_tokens":30}`, wantTotal: float64(30)},
+		{name: "negative total omits usage", usage: `{"prompt_tokens":14,"completion_tokens":8,"total_tokens":-5}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStream := `data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}],"usage":` + tt.usage + `}
 
 data: [DONE]
 `
-	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "cline")
-	raw, err := io.ReadAll(converter)
-	require.NoError(t, err)
+			converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "cline")
+			raw, err := io.ReadAll(converter)
+			require.NoError(t, err)
 
-	var usage map[string]any
-	for _, event := range parseTestSSEEvents(t, string(raw)) {
-		if event.Done || event.Name != "response.completed" {
-			continue
-		}
-		response, _ := event.Payload["response"].(map[string]any)
-		usage, _ = response["usage"].(map[string]any)
+			var completed map[string]any
+			for _, event := range parseTestSSEEvents(t, string(raw)) {
+				if !event.Done && event.Name == "response.completed" {
+					completed, _ = event.Payload["response"].(map[string]any)
+				}
+			}
+			require.NotNil(t, completed, "stream must end with response.completed")
+			usage, _ := completed["usage"].(map[string]any)
+			if tt.wantTotal == nil {
+				assert.Nil(t, usage)
+				return
+			}
+			require.NotNil(t, usage, "response.completed must carry usage")
+			assert.Equal(t, float64(14), usage["input_tokens"])
+			assert.Equal(t, float64(8), usage["output_tokens"])
+			assert.Equal(t, tt.wantTotal, usage["total_tokens"])
+		})
 	}
-	require.NotNil(t, usage, "response.completed must carry usage")
-	assert.Equal(t, float64(14), usage["input_tokens"])
-	assert.Equal(t, float64(8), usage["output_tokens"])
-	assert.Equal(t, float64(22), usage["total_tokens"])
 }
 
 func TestOpenAIResponsesStreamConverter_PropagatesStreamError(t *testing.T) {

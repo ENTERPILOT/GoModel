@@ -69,7 +69,7 @@ CLINE_MODELS=cline-pass/qwen3.7-max,cline-pass/kimi-k3
 CLINE_MODELS_MODE=merge
 ```
 
-Bez `CLINE_MODELS_MODE=merge` udostępniane są tylko modele z `CLINE_MODELS`.
+W domyślnym trybie `allowlist` udostępniane są tylko modele z `CLINE_MODELS`.
 Zobacz [Tryby modeli](/pl/advanced/config-yaml#tryby-modeli) oraz
 [stronę ClinePass](https://docs.cline.bot/getting-started/clinepass) z
 aktualnymi identyfikatorami modeli.
@@ -95,8 +95,9 @@ Pełny opis znajdziesz w przewodniku
   wysyła `"stream": false` i nagłówek `X-Response-Format: openai`. Klienci nie
   muszą niczego zmieniać.
 - **Koszty pochodzą z danych cenowych GoModel**, a nie z wartości `usage.cost`
-  raportowanej przez Cline. Użycie tokenów jest zawsze zapisywane; model bez
-  znanej ceny nie ma kosztu, dopóki nie ustawisz
+  raportowanej przez Cline. Użycie tokenów jest zawsze zapisywane; model, którego
+  nie obejmuje żadne [źródło cen](/pl/advanced/model-metadata), nie ma kosztu,
+  dopóki nie dodasz ceny w `config.yaml` lub nie ustawisz
   [nadpisania cennika](/pl/features/cost-tracking#nadpisywanie-cennika).
 - **Passthrough trzeba włączyć.** Dodaj `cline` do
   `ENABLED_PASSTHROUGH_PROVIDERS`, żeby udostępnić `/p/cline/...`. GoModel
