@@ -24,8 +24,8 @@ const (
 	// defaultJobTimeout bounds one transcription from upload to transcript. It
 	// matches the default HTTP_TIMEOUT other providers' single calls get.
 	defaultJobTimeout = 10 * time.Minute
-	// Speechmatics asks for at least a second between status requests for one
-	// job; the gap then grows so a long job costs few requests.
+	// Status requests share a per-account limit (50 per second), so polls
+	// start a second apart and the gap grows, keeping a long job cheap.
 	defaultPollInterval    = time.Second
 	defaultMaxPollInterval = 5 * time.Second
 	// cancelTimeout bounds the request that terminates an abandoned job.
