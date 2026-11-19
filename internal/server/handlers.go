@@ -257,6 +257,14 @@ func (h *Handler) images() *imageService {
 	return svc
 }
 
+func (h *Handler) moderations() *moderationService {
+	svc := &moderationService{modelCallService: h.modelCalls()}
+	if h.logger != nil {
+		svc.logBodies = h.logger.Config().LogBodies
+	}
+	return svc
+}
+
 func (h *Handler) nativeResponses() *nativeResponseService {
 	return &nativeResponseService{
 		provider:                 h.provider,

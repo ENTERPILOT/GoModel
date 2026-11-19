@@ -12,7 +12,7 @@ und eine Reihe von Betriebsendpunkten bereit. Admin- und Dashboard-Routen sind s
 Details zu Requests und Responses finden Sie in den jeweiligen Leitfäden:
 [Responses API](/de/advanced/responses-api), [Conversations API](/de/advanced/conversations-api),
 [Anthropic Messages API](/de/advanced/anthropic-messages-api),
-[Audio API](/de/advanced/audio-api), [Images API](/de/advanced/images-api),
+[Audio API](/de/advanced/audio-api), [Images API](/de/advanced/images-api), [Moderations API](/de/advanced/moderations-api),
 [Decisions API](/de/advanced/decisions-api), [System One API](/de/advanced/systemone-api)
 und [Usage API](/de/advanced/usage-api).
 
@@ -43,6 +43,7 @@ und [Usage API](/de/advanced/usage-api).
 | `/v1/audio/transcriptions`        | POST   | Speech-to-Text aus einem Multipart-Upload                                                                       |
 | `/v1/images/generations`          | POST   | Bildgenerierung aus einem Text-Prompt (DALL·E, gpt-image-1, grok-2-image, Imagen, Gemini-Bildmodelle)                                     |
 | `/v1/images/edits`                | POST   | Bildbearbeitung / Inpainting aus einem Multipart-Upload (Bild, optionale Maske, Prompt)                             |
+| `/v1/moderations`                 | POST   | Inhaltsmoderation für Text und Bilder (OpenAI omni-moderation, Mistral moderation); `model` ist standardmäßig `omni-moderation-latest` |
 | `/v1/realtime`                    | GET    | Websocket-Upgrade für Realtime-Speech-to-Speech; `?call_id=` verbindet sich als Sideband-Kanal mit einem bestehenden WebRTC/SIP-Call (wenn `REALTIME_ENABLED`) |
 | `/v1/realtime/calls`              | POST   | Realtime-WebRTC-SDP-Austausch: `application/sdp`-Offer mit `?model=` oder Multipart-Felder `sdp` + `session` (wenn `REALTIME_ENABLED`)            |
 | `/v1/realtime/client_secrets`     | POST   | Ein kurzlebiges Realtime-Client-Secret für Browser-Clients ausstellen, geroutet über `session.model` (wenn `REALTIME_ENABLED`)                                |

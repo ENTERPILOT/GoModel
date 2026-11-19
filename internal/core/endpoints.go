@@ -30,6 +30,7 @@ const (
 	OperationAudioTranslations   Operation = "audio_translations"
 	OperationImageGenerations    Operation = "image_generations"
 	OperationImageEdits          Operation = "image_edits"
+	OperationModerations         Operation = "moderations"
 	OperationRealtime            Operation = "realtime"
 	OperationProviderPassthrough Operation = "provider_passthrough"
 	OperationMCP                 Operation = "mcp"
@@ -171,6 +172,14 @@ func describeEndpointPath(path string) EndpointDescriptor {
 			Dialect:          "openai_compat",
 			Operation:        OperationImageEdits,
 		}
+	case path == "/v1/moderations":
+		// Moderation calls a provider, so it is a model interaction. Like
+		// images it is not IngressManaged: the handler decodes the JSON body.
+		return EndpointDescriptor{
+			ModelInteraction: true,
+			Dialect:          "openai_compat",
+			Operation:        OperationModerations,
+		}
 	case path == "/v1/systemone" || path == "/v1/systemone/permute" || path == "/v1/systemone/separate":
 		// TypeSafe's System One decision API (Jev, Kev) and the diagnostic
 		// variants Kev servers add. It has no canonical translation: the body
@@ -261,7 +270,7 @@ func bodyModeForEndpoint(method, path string, operation Operation) BodyMode {
 			return BodyModeMultipart
 		}
 		return BodyModeNone
-	case OperationAudioSpeech, OperationImageGenerations, OperationSystemOne, OperationDecisions:
+	case OperationAudioSpeech, OperationImageGenerations, OperationModerations, OperationSystemOne, OperationDecisions:
 		return BodyModeJSON
 	case OperationAudioTranscriptions, OperationAudioTranslations, OperationImageEdits:
 		return BodyModeMultipart

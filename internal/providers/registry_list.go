@@ -108,7 +108,7 @@ func (r *ModelRegistry) ListUnqualifiedPublicModels() []core.Model {
 
 // providerCanServeModel reports whether the owning provider implements the
 // capabilities a model needs. Upstream inventories and the metadata registry
-// can list audio-only (TTS/STT) or image-only models for providers whose
+// can list audio-only (TTS/STT), image-only, or moderation models for providers whose
 // gateway adapter has no audio or image support; advertising those invites
 // calls that can only fail with "does not support audio operations" or "does
 // not support image generation". Models without mode metadata are kept —
@@ -120,6 +120,10 @@ func providerCanServeModel(info *ModelInfo) bool {
 	}
 	if isImageOnlyModel(info.Model) {
 		_, ok := info.Provider.(core.ImageProvider)
+		return ok
+	}
+	if onlyHasModes(info.Model, "moderation") {
+		_, ok := info.Provider.(core.ModerationProvider)
 		return ok
 	}
 	return true

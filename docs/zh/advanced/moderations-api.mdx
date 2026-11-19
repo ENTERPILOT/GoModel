@@ -1,0 +1,86 @@
+---
+title: "Moderations API"
+description: "通过 GoModel 使用 OpenAI 的内容审核端点对文本和图像进行分类，由 OpenAI 或 Mistral 应答，并与聊天共享访问规则、预算和用量统计。"
+icon: "shield-alert"
+keywords: ["Moderations API", "内容审核", "moderation", "omni-moderation-latest", "mistral-moderation-latest", "分类", "安全"]
+---
+
+`POST /v1/moderations` 提供 [OpenAI 的内容审核端点](https://platform.openai.com/docs/api-reference/moderations)：
+它按类别告诉你文本或图像是否有害。已经调用 OpenAI moderations 的客户端和
+SDK 无需修改即可接入 GoModel。
+
+请求通过与聊天相同的注册表**按模型**路由，因此模型选择器、`provider` 提示、
+虚拟模型、按密钥的模型访问、[预算](/zh/features/budgets)、
+[速率限制](/zh/features/rate-limits)、请求日志和用量统计都同样适用。
+
+| Provider | 模型 | 输入 |
+| --- | --- | --- |
+| `openai` | `omni-moderation-latest`（默认）、`omni-moderation-2024-09-26` | 文本和图像，原样转发 |
+| `mistral` | `mistral-moderation-latest` | 仅文本，转换为 OpenAI 的响应格式 |
+
+其他 provider 没有内容审核端点。针对其模型的请求会收到 `400`
+`invalid_request_error`，说明该模型不支持 moderations。
+
+## 请求
+
+`model` 可选，默认为 `omni-moderation-latest`，与 OpenAI 一致。当审核模型
+位于其他 provider 时请显式设置，例如 `mistral/mistral-moderation-latest`。
+
+```bash
+curl -s http://localhost:8080/v1/moderations \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input": ["Have a nice day", "I will hurt you"]}'
+```
+
+`input` 接受：
+
+- 字符串：一个结果；
+- 字符串数组：每个字符串一个结果；
+- 由 `text` 和 `image_url` 部分组成的数组：整个组合输入一个结果。图像需要
+  OpenAI omni 模型。
+
+```json
+{
+  "model": "omni-moderation-latest",
+  "input": [
+    {"type": "text", "text": "Is this picture OK?"},
+    {"type": "image_url", "image_url": {"url": "https://example.com/photo.png"}}
+  ]
+}
+```
+
+## 响应
+
+响应保持 OpenAI 的格式，并附加处理该请求的 `provider`：
+
+```json
+{
+  "id": "modr-0d3b",
+  "model": "omni-moderation-latest",
+  "provider": "openai",
+  "results": [
+    {
+      "flagged": true,
+      "categories": {"violence": true, "harassment": false, "...": false},
+      "category_scores": {"violence": 0.93, "harassment": 0.02, "...": 0.0},
+      "category_applied_input_types": {"violence": ["text"], "harassment": ["text"], "...": ["text"]}
+    }
+  ]
+}
+```
+
+Mistral 的结果保留 Mistral 自己的类别名（`violence_and_threats`、
+`hate_and_discrimination`、`pii` 等）。只要任一类别命中，GoModel 就将
+`flagged` 设为 true，并把 `text` 列为每个类别的输入类型。
+
+## 模型与用量
+
+审核模型会以 `moderation` 模式和 `utility` 类别出现在 `GET /v1/models` 中，
+且只为能够提供它们的 provider 列出。
+
+每次调用都会为 `/v1/moderations` 记录一条用量，包含被分类的输入数量。两个
+provider 在此都不报告 token 用量：OpenAI 的内容审核免费；按 token 定价的
+模型会被标记为未计算成本，而不是显示 $0。
+
+Guardrails 不在此端点上运行。

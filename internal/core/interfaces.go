@@ -70,6 +70,13 @@ type ImageEditProvider interface {
 	CreateImageEdit(ctx context.Context, req *ImageEditRequest) (*ImageGenerationResponse, error)
 }
 
+// ModerationProvider is implemented by providers that classify content
+// through the OpenAI-compatible moderation endpoint (POST /v1/moderations). It
+// is optional; the router discovers support by interface assertion.
+type ModerationProvider interface {
+	CreateModeration(ctx context.Context, req *ModerationRequest) (*ModerationResponse, error)
+}
+
 // NativeBatchProvider is implemented by providers that support native discounted batching.
 // This is intentionally separate from Provider so unsupported providers can still implement
 // regular synchronous APIs without batch capabilities.
