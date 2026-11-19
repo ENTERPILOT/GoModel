@@ -147,6 +147,20 @@ przez providera upstream.
   odpowiedzi. Aby to nadpisać, wyślij `reasoning_format` samodzielnie (`raw` lub
   `hidden`). Z odpowiedzi JSON dla transkrypcji i tłumaczeń usuwane jest
   specyficzne dla Groqa pole `x_groq`, aby pasowały do formatu OpenAI.
+- **Ponownie wysyłane wiadomości asystenta** – klienty dopisują wiadomość
+  asystenta do historii w takiej postaci, w jakiej zwróciło ją API, więc
+  zawiera ona `refusal`, `annotations`, `audio` i `function_call` z OpenAI oraz
+  `reasoning_content` z GoModel. Niektórzy providerzy odpowiadają na te pola
+  błędem 400. GoModel dostosowuje tylko to, co dany provider odrzuca, a resztę
+  przekazuje bez zmian: Groq dostaje `reasoning_content` jako `reasoning` (w
+  modelach bez reasoningu pole jest usuwane) i nie dostaje `refusal`,
+  `annotations`, `audio` ani `function_call` o wartości null; Fireworks nie
+  dostaje `annotations`, `audio` ani `function_call`; Gemini w trybie
+  `openai_compatible` nie dostaje `refusal`, `audio` ani `function_call` o
+  wartości null; xAI nie dostaje `name` w wiadomościach system i developer.
+  Reguły dla Mistrala opisuje strona [Mistral AI](/pl/providers/mistral).
+  W Groq dzięki temu pętla narzędzi przez `/v1/responses` może ponownie
+  wysyłać swoje elementy reasoning.
 - **Regiony MiniMax i aktualne modele tekstowe** – domyślny globalny endpoint to
   `https://api.minimax.io/v1`; konta na platformie chińskiej powinny ustawić
   `MINIMAX_BASE_URL=https://api.minimaxi.com/v1`. Aktualne ID modeli tekstowych

@@ -109,6 +109,14 @@ a provider starts accepting a field.
 | `verbosity` | Anthropic | 4 | dropped |
 | `temperature` together with `top_p` | Anthropic | 4 | `top_p` dropped, `temperature` kept |
 | `metadata` | xAI `/responses` | 4 | dropped |
+| `refusal`, `annotations`, `audio` on an assistant message | Groq | 4 | dropped |
+| `function_call: null` on an assistant message | Groq | 4 | dropped; a legacy function call keeps the member |
+| `reasoning_content` on an assistant message | Groq | 3 | sent as `reasoning` on the gpt-oss and qwen3 families, dropped on other models |
+| `annotations`, `audio`, `function_call` on an assistant message | Fireworks | 4 | dropped |
+| `refusal`, `audio`, `function_call` on an assistant message, when null | Gemini, OpenAI-compatible mode | 4 | dropped |
+| any message member outside Mistral's schema for the role | Mistral | 4 | dropped |
+| `reasoning_content` on an assistant message | Mistral | 3 | sent as a `thinking` chunk in `content` |
+| `name` on a system or developer message | xAI | 4 | dropped |
 | `stream_options.include_usage` | any | reserved | set by the gateway when usage tracking is on |
 | `provider` | any | reserved | set by the gateway |
 
@@ -119,6 +127,57 @@ not change what the caller asked for, and rule 5 would lock OpenAI SDKs that
 fill in both sampling defaults out of Anthropic entirely. The dropped value is
 logged. `metadata` is removed only from the outbound provider request, so the
 gateway can still echo the member back to the client.
+
+### Replayed assistant messages
+
+An assistant message reaches the gateway as the client copied it out of an
+earlier response, so it carries members the client never chose to send:
+`refusal`, `annotations`, `audio` and `function_call` from OpenAI, and
+`reasoning_content`, the gateway's own name for a reasoning trace. Most
+upstreams ignore what they do not read. Some validate each message against a
+closed schema and fail the whole request. Checked in November 2026 by sending
+such a message to each upstream; the Mistral row comes from its published
+OpenAPI schema:
+
+| Upstream | Answer |
+|---|---|
+| OpenAI, DeepSeek, DeepInfra, Chutes | accept every member above |
+| Groq | 400 `property 'refusal' is unsupported`, the same for `annotations`, `audio`, `reasoning_content` and any member it does not define; 400 `Value is not nullable` for `function_call: null` |
+| Fireworks | 400 `Extra inputs are not permitted` for `annotations`, `audio`, `function_call` and any member it does not define; accepts `refusal` and `reasoning_content` |
+| Gemini, OpenAI-compatible mode | 400 `Value is not a string: null` for a null `refusal`, `Value is not a struct: null` for a null `audio` or `function_call` |
+| Mistral | closed: the schema sets `additionalProperties: false` on every message |
+| xAI | accepts every member above; 400 ``Only message of role `user` can have a name`` for `name` on a system or developer message |
+
+The failure does not need a second provider. Groq returns its trace as
+`reasoning`, the gateway hands it to the client as `reasoning_content`, and
+Groq then rejects that member on the next turn. A `/v1/responses` tool loop
+hits the same 400, because the translation attaches a replayed reasoning item
+to the tool-call turn under that name.
+
+These members are known fields, so the ladder applies:
+
+- An echo the target cannot read is rule 4. Dropping it does not change what
+  the client asked for.
+- `reasoning_content` on Groq is rule 3. Groq reads the trace as `reasoning`
+  on its reasoning models; the other models reject that member too, so there
+  the trace is dropped.
+- A member the gateway has no rule for stays rule 1, also on a closed-schema
+  upstream. The provider's 400 names the member, and a silent drop could hide
+  one that meant something to the request (rule 5). Mistral's adapter goes
+  further and keeps only the members its published schema lists for the role.
+
+There is no gateway-wide list of members to remove. The upstreams disagree
+about every one of them, and a blanket removal would withhold a member from
+the upstreams that define it: `refusal` on OpenAI, a legacy `function_call` on
+Groq. Each adapter lists what its own upstream was seen to reject, next to the
+error text and the date, and `providers.DropMessageMembers` and
+`providers.DropNullMessageMembers` do the removal. That settles the "three
+adapters" question from "Where the rules live" for this case: the operation is
+shared, the lists are not.
+
+Add an upstream to this section only after reproducing the rejection. A strict
+upstream that was not tested keeps receiving the members and answers for
+itself.
 
 ### Response direction
 
