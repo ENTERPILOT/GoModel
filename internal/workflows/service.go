@@ -425,8 +425,9 @@ func (s *Service) ChainsForWorkflow(workflow *core.Workflow) *plugins.Chains {
 	// request is in flight runs as its current instance.
 	chains, _, err := compiled.requestChains(workflow.RequestGuardrails)
 	if err != nil {
+		// The names came from the request, so they stay out of the log.
 		slog.Warn("request guardrails are no longer offered by the workflow; running its fixed steps",
-			"version_id", compiled.Version.ID, "guardrails", workflow.RequestGuardrails, "error", err)
+			"version_id", compiled.Version.ID, "requested", len(workflow.RequestGuardrails))
 		return compiled.Chains
 	}
 	return chains

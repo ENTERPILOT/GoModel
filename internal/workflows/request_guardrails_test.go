@@ -1,7 +1,9 @@
 package workflows
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"testing"
 
@@ -254,4 +256,26 @@ func TestServiceChainsForWorkflow_ResolvesRequestGuardrailsFromTheLiveWorkflow(t
 	assert.Equal(t, chainNames(before.Prompt), chainNames(after.Prompt))
 	live := service.snapshot().byScope[scopeRef{}]
 	assert.Same(t, live.Offered.Prompt.Instances()[1], after.Prompt.Instances()[1])
+}
+
+// A selection the live workflow no longer offers falls back to the fixed
+// steps, which always run. The names came from the request, so the warning
+// does not repeat them.
+func TestServiceChainsForWorkflow_FallsBackToTheFixedStepsWithoutLoggingRequestNames(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	service := requestGuardrailService(t, core.DefaultWorkflowFeatures())
+	workflow := matchedWorkflow(t, service)
+	workflow.RequestGuardrails = []string{"gone\nforged=line"}
+
+	chains := service.ChainsForWorkflow(workflow)
+
+	assert.Same(t, service.snapshot().byScope[scopeRef{}].Chains, chains)
+	assert.Contains(t, logs.String(), "request guardrails are no longer offered")
+	assert.Contains(t, logs.String(), "requested=1")
+	assert.NotContains(t, logs.String(), "gone")
+	assert.NotContains(t, logs.String(), "forged")
 }
