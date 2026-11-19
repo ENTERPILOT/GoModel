@@ -119,21 +119,33 @@ function applyModerationInputOneOf() {
   }
   input.oneOf = [
     { type: "string" },
-    { type: "array", items: { type: "string" } },
+    { type: "array", minItems: 1, items: { type: "string" } },
     {
       type: "array",
+      minItems: 1,
       items: {
-        type: "object",
-        required: ["type"],
-        properties: {
-          type: { type: "string", enum: ["text", "image_url"] },
-          text: { type: "string" },
-          image_url: {
+        oneOf: [
+          {
             type: "object",
-            required: ["url"],
-            properties: { url: { type: "string" } },
+            required: ["type", "text"],
+            properties: {
+              type: { type: "string", enum: ["text"] },
+              text: { type: "string" },
+            },
           },
-        },
+          {
+            type: "object",
+            required: ["type", "image_url"],
+            properties: {
+              type: { type: "string", enum: ["image_url"] },
+              image_url: {
+                type: "object",
+                required: ["url"],
+                properties: { url: { type: "string" } },
+              },
+            },
+          },
+        ],
       },
     },
   ];

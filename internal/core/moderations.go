@@ -19,7 +19,7 @@ type ModerationRequest struct {
 	Model string `json:"model,omitempty"`
 	// Input is a string, an array of strings, or an array of text and
 	// image_url parts.
-	Input json.RawMessage `json:"input" swaggertype:"object"`
+	Input json.RawMessage `json:"input" binding:"required" swaggertype:"object"`
 
 	// Provider is gateway routing metadata, stripped before dispatching upstream.
 	Provider string `json:"provider,omitempty"`

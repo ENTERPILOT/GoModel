@@ -12934,6 +12934,9 @@ const docTemplate = `{
         },
         "core.ModerationRequest": {
             "type": "object",
+            "required": [
+                "input"
+            ],
             "properties": {
                 "input": {
                     "description": "Input is a string, an array of strings, or an array of text and\nimage_url parts.",
@@ -12943,40 +12946,61 @@ const docTemplate = `{
                         },
                         {
                             "type": "array",
+                            "minItems": 1,
                             "items": {
                                 "type": "string"
                             }
                         },
                         {
                             "type": "array",
+                            "minItems": 1,
                             "items": {
-                                "type": "object",
-                                "required": [
-                                    "type"
-                                ],
-                                "properties": {
-                                    "type": {
-                                        "type": "string",
-                                        "enum": [
-                                            "text",
-                                            "image_url"
-                                        ]
-                                    },
-                                    "text": {
-                                        "type": "string"
-                                    },
-                                    "image_url": {
+                                "oneOf": [
+                                    {
                                         "type": "object",
                                         "required": [
-                                            "url"
+                                            "type",
+                                            "text"
                                         ],
                                         "properties": {
-                                            "url": {
+                                            "type": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "text"
+                                                ]
+                                            },
+                                            "text": {
                                                 "type": "string"
                                             }
                                         }
+                                    },
+                                    {
+                                        "type": "object",
+                                        "required": [
+                                            "type",
+                                            "image_url"
+                                        ],
+                                        "properties": {
+                                            "type": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "image_url"
+                                                ]
+                                            },
+                                            "image_url": {
+                                                "type": "object",
+                                                "required": [
+                                                    "url"
+                                                ],
+                                                "properties": {
+                                                    "url": {
+                                                        "type": "string"
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
-                                }
+                                ]
                             }
                         }
                     ]
