@@ -78,6 +78,10 @@ M365_COPILOT_BASE_URL=https://graph.microsoft.com/beta/copilot
 
 当 Copilot 的负责任 AI 检查结束对话时，回答的 `finish_reason` 为 `"content_filter"`。
 
+回答是 Copilot 的原始文本，包括 `[^1^]` 等引用标记。其背后的来源（`attributions`）和自适应卡片不会转发。
+
+如果 Copilot 改写了已流式发送的文本且之后没有再续写，流会以错误分块结束；如需最终回答，请以非流式方式发送请求。提示不会重试，因为重试会增加第二轮对话。
+
 ## 模型
 
 该提供商只列出一个模型 `m365-copilot`。Copilot 没有模型选择，因此该名称只用于将请求路由到这里。设置 `M365_COPILOT_MODELS` 可以将其他名称路由到这里，例如 `M365_COPILOT_MODELS=copilot`。

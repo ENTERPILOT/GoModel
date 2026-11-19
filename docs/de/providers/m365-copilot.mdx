@@ -105,6 +105,15 @@ sind, denn Copilot liest damit „morgen“ oder „9 Uhr“.
 Wenn die Responsible-AI-Prüfungen von Copilot die Unterhaltung beenden, hat die
 Antwort `finish_reason: "content_filter"`.
 
+Die Antwort ist der Text von Copilot unverändert, einschließlich seiner
+Quellenmarkierungen wie `[^1^]`. Die zugehörigen Quellen (`attributions`) und
+Adaptive Cards werden nicht weitergegeben.
+
+Ein Stream endet mit einem Fehler-Chunk, wenn Copilot bereits gestreamten Text
+umschreibt und ihn nicht wieder fortsetzt; senden Sie den Request ohne
+Streaming, um die endgültige Antwort zu erhalten. Prompts werden nicht
+wiederholt, da ein Retry eine zweite Gesprächsrunde hinzufügen würde.
+
 ## Modelle
 
 Der Provider listet ein Modell, `m365-copilot`. Copilot bietet keine

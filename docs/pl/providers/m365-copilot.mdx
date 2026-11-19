@@ -102,6 +102,15 @@ indziej, bo Copilot na jego podstawie rozumie „jutro” czy „9 rano”.
 Gdy kontrole responsible AI Copilota zakończą rozmowę, odpowiedź ma
 `finish_reason: "content_filter"`.
 
+Odpowiedź to tekst Copilota bez zmian, łącznie ze znacznikami cytowań, takimi
+jak `[^1^]`. Źródła za nimi (`attributions`) ani karty adaptacyjne nie są
+przekazywane.
+
+Stream kończy się chunkiem błędu, jeśli Copilot przepisze już wysłany tekst i
+go ponownie nie rozszerzy; aby dostać ostateczną odpowiedź, wyślij request bez
+streamingu. Prompty nie są ponawiane, bo ponowienie dodałoby drugą turę
+rozmowy.
+
 ## Modele
 
 Provider listuje jeden model, `m365-copilot`. Copilot nie daje wyboru modelu,

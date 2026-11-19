@@ -13,7 +13,8 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
-// maxStreamEventBytes bounds one line of the upstream stream. Every event
+// maxStreamEventBytes bounds one event of the upstream stream, across all
+// of its lines. Every event
 // repeats the whole answer so far together with its citations and cards.
 const maxStreamEventBytes = 8 * 1024 * 1024
 
@@ -68,6 +69,10 @@ func convertChatStream(body io.ReadCloser, out *io.PipeWriter, state *streamStat
 			data.WriteByte('\n')
 			data.WriteString(line)
 		}
+		if data.Len() > maxStreamEventBytes {
+			state.fail(out, core.NewProviderError(state.provider, http.StatusBadGateway, "a Microsoft 365 Copilot stream event exceeds the size limit", nil))
+			return
+		}
 	}
 	if err := state.consume(out, data.String()); err != nil {
 		state.fail(out, err)
@@ -101,6 +106,9 @@ type streamState struct {
 	sent string
 	// disengaged records that Copilot's content checks ended the conversation.
 	disengaged bool
+	// revised records that the latest answer rewrote text already sent, so
+	// what the client holds is not the answer.
+	revised bool
 }
 
 // streamEvent is one event: a conversation snapshot, or an error object.
@@ -111,7 +119,8 @@ type streamEvent struct {
 
 // consume forwards the text one event adds to the answer. A snapshot that
 // rewrites text already forwarded cannot be expressed as a delta and is
-// skipped; forwarding resumes with the next snapshot that extends it.
+// skipped; forwarding resumes with the next snapshot that extends it, and the
+// stream fails if none does.
 func (s *streamState) consume(out io.Writer, raw string) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "[DONE]" {
@@ -128,7 +137,15 @@ func (s *streamState) consume(out io.Writer, raw string) error {
 		s.disengaged = true
 	}
 	text, ok := event.answer(s.prompt)
-	if !ok || len(text) <= len(s.sent) || !strings.HasPrefix(text, s.sent) {
+	if !ok {
+		return nil
+	}
+	if !strings.HasPrefix(text, s.sent) {
+		s.revised = true
+		return nil
+	}
+	s.revised = false
+	if len(text) == len(s.sent) {
 		return nil
 	}
 	delta := map[string]any{"content": text[len(s.sent):]}
@@ -144,6 +161,10 @@ func (s *streamState) consume(out io.Writer, raw string) error {
 func (s *streamState) finish(out *io.PipeWriter) {
 	if s.sent == "" && !s.disengaged {
 		s.fail(out, core.NewProviderError(s.provider, http.StatusBadGateway, "the Microsoft 365 Copilot stream ended without an answer", nil))
+		return
+	}
+	if s.revised {
+		s.fail(out, core.NewProviderError(s.provider, http.StatusBadGateway, "Microsoft 365 Copilot revised text it had already streamed; retry without streaming for the final answer", nil))
 		return
 	}
 	var usage map[string]any

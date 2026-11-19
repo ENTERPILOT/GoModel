@@ -151,6 +151,15 @@ func TestChatCompletion_CreatesAConversationThenSendsThePrompt(t *testing.T) {
 	assert.Zero(t, resp.Usage.TotalTokens)
 }
 
+func TestChatCompletion_DoesNotRetryThePrompt(t *testing.T) {
+	provider, capture := copilotServer(t, jsonHandler(http.StatusBadGateway, `{"error":{"message":"upstream timeout"}}`), nil)
+
+	_, err := provider.ChatCompletion(context.Background(), userRequest(prompt))
+	require.Error(t, err)
+	// One conversation and one prompt: a retry could add a second turn.
+	assert.Equal(t, 2, capture.Count())
+}
+
 func TestChatCompletion_UsesOneTokenForBothCalls(t *testing.T) {
 	srv, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
 		"/conversations": jsonHandler(http.StatusCreated, createdConversation),
@@ -643,6 +652,17 @@ func TestStreamChatCompletion_FailuresBecomeAnErrorChunk(t *testing.T) {
 			name:    "an event that is not JSON",
 			body:    "data: " + snapshot(t, "active", "Hi") + "\n\ndata: {not json\n\n",
 			message: "failed to parse a Microsoft 365 Copilot stream event",
+		},
+		{
+			name: "a final answer that rewrites streamed text",
+			body: "data: " + snapshot(t, "active", "The answer is 4") + "\n\n" +
+				"data: " + snapshot(t, "active", "The answer is 5") + "\n\n",
+			message: "revised text it had already streamed",
+		},
+		{
+			name:    "an event over the size limit",
+			body:    "data: {\n" + strings.Repeat(strings.Repeat("x", 1<<20)+"\n", 9) + "\n",
+			message: "exceeds the size limit",
 		},
 		{
 			name:    "no answer before the stream ends",

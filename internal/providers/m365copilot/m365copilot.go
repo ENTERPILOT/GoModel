@@ -77,10 +77,14 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	if len(p.models) == 0 {
 		p.models = []string{defaultModel}
 	}
+	// Sending a prompt adds a turn to a conversation, so a retry after an
+	// ambiguous failure could ask (and bill) the same prompt twice.
+	retry := opts.Resilience.Retry
+	retry.MaxRetries = 0
 	p.client = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, llmclient.Config{
 		ProviderName:   p.providerName,
 		BaseURL:        providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
-		Retry:          opts.Resilience.Retry,
+		Retry:          retry,
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}, nil)

@@ -102,6 +102,15 @@ read "tomorrow" or "9 AM".
 When Copilot's responsible-AI checks end the conversation, the reply has
 `finish_reason: "content_filter"`.
 
+The reply is Copilot's text as-is, including its citation markers such as
+`[^1^]`. The sources behind them (`attributions`) and adaptive cards are not
+forwarded.
+
+A stream fails with an error chunk if Copilot rewrites text it has already
+streamed and does not extend it again; send the request without streaming to
+get the final answer. Prompts are not retried, because a retry would add a
+second turn.
+
 ## Models
 
 The provider lists one model, `m365-copilot`. Copilot has no model choice, so
