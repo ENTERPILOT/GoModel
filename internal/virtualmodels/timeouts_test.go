@@ -35,18 +35,27 @@ func TestResolveTimeouts(t *testing.T) {
 			name:      "alias overrides model policy",
 			rows:      []VirtualModel{alias("extract", new(300), nil), exact},
 			requested: core.NewRequestedModelSelector("extract", ""),
+			route:     []string{"extract"},
 			want:      core.UpstreamTimeouts{Timeout: 300 * time.Second},
 		},
 		{
 			name:      "fields resolve independently",
 			rows:      []VirtualModel{alias("extract", new(300), nil), wide},
 			requested: core.NewRequestedModelSelector("extract", ""),
+			route:     []string{"extract"},
 			want:      core.UpstreamTimeouts{Timeout: 300 * time.Second, ResponseHeaderTimeout: 15 * time.Second},
 		},
 		{
 			name:      "alias inherits model policy when omitted",
 			rows:      []VirtualModel{alias("plain", nil, nil), exact},
 			requested: core.NewRequestedModelSelector("plain", ""),
+			route:     []string{"plain"},
+			want:      core.UpstreamTimeouts{Timeout: 20 * time.Second},
+		},
+		{
+			name:      "a redirect routing did not apply sets nothing",
+			rows:      []VirtualModel{alias("extract", new(300), nil), exact},
+			requested: core.NewRequestedModelSelector("extract", ""),
 			want:      core.UpstreamTimeouts{Timeout: 20 * time.Second},
 		},
 		{

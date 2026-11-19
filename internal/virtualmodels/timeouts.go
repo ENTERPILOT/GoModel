@@ -16,8 +16,7 @@ func (v VirtualModel) setsTimeouts() bool {
 // Each field resolves on its own, as slowdown does: the redirects routing
 // passed through win, outermost first, then the resolved model's exact
 // policy, then its model-wide one. A zero field inherits the gateway-wide
-// HTTP timeout. route is the virtual-model path recorded by resolution;
-// without one the requested redirect is looked up by name.
+// HTTP timeout. route is the virtual-model path recorded by resolution.
 func (s *Service) ResolveTimeouts(
 	ctx context.Context,
 	requested core.RequestedModelSelector,
@@ -30,14 +29,11 @@ func (s *Service) ResolveTimeouts(
 	snap := s.snapshot()
 	userPath := core.UserPathFromContext(ctx)
 
+	// Only redirects routing actually applied count: a redirect that sets a
+	// timeout turns on route recording, so an empty route means none did.
 	var chain []*redirectEntry
 	if !requested.ExplicitProvider {
 		chain = snap.routeChain(route)
-		if len(chain) == 0 {
-			if redirect, ok := snap.findRedirect(requested.Model, userPath, true); ok {
-				chain = append(chain, redirect)
-			}
-		}
 	}
 	// Each field is looked up on its own, so a row that sets only one field
 	// never decides the other.
