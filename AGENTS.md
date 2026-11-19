@@ -85,7 +85,7 @@ Show defaults, explain when to change them, and include minimal examples when us
 
 English is the source for the docs and the dashboard; German, Polish, and Chinese follow it.
 
-- Docs: each page under `docs/` has a copy at the same path in `docs/de/`, `docs/pl/`, and `docs/zh/`, and `docs/docs.json` lists it once per language. Change the copies in the same PR as the English page.
+- Docs: each page in the `docs/docs.json` navigation has a copy at the same path in `docs/de/`, `docs/pl/`, and `docs/zh/`, with its own navigation entry per language. Change the copies in the same PR as the English page. Files outside the navigation (`docs/adr/`, `docs/dev/`, `docs/DEVELOPMENT.md`) are English only.
 - Dashboard: strings live in `web/dashboard/messages/`, with `en.json` as the source. Add each key to every catalog with the same placeholders; `make test-dashboard` fails otherwise. See `web/dashboard/src/lib/i18n/README.md`.
 - Translate prose, headings, navigation labels, and code comments. Keep the meaning, and leave code, endpoint paths, field and config names, placeholders, and markup as they are. Link to the translated page and its translated heading anchor (`/de/...`).
 - Follow the form of address and terminology the surrounding page or catalog already uses. Conventions differ per language; do not apply one language's to another.
