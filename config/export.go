@@ -135,10 +135,11 @@ func (r *LoadResult) ExportYAML(doc ExportDocument, environ []string) ([]byte, e
 	// one counts as a secret wherever else it appears.
 	survey := newExporter(r.Secrets, environ, doc, r.expanded)
 	survey.survey, survey.blocks = true, blocks
-	survey.walk("", value, &surveyed, exportPlain, "")
+	defaults := reflect.ValueOf(exportRoot{Config: buildDefaultConfig()})
+	survey.walk("", value, defaults, &surveyed, exportPlain, "")
 	e := newExporter(r.Secrets, environ, doc, r.expanded)
 	e.secretPaths, e.secretValues, e.blocks = survey.secretPaths, survey.secretValues, blocks
-	e.walk("", value, &root, exportPlain, "")
+	e.walk("", value, defaults, &root, exportPlain, "")
 	root.HeadComment = doc.Header
 
 	var buf bytes.Buffer
@@ -218,15 +219,21 @@ func newExporter(secrets *Secrets, environ []string, doc ExportDocument, expande
 	return e
 }
 
-// walk visits node, encoded from v found at path. class is how the field
-// holding v is exported and envName the variable that sets it, if any. A nil
-// slice, map, or pointer under a mapping is dropped: it encodes as [], {}, or
-// null, which config.yaml does not always read as unset. A nil value in a
-// free-form map is kept: it is a null the configuration states, such as a
-// parameter a virtual model strips from requests.
-func (e *exporter) walk(path string, v reflect.Value, node *yaml.Node, class exportClass, envName string) {
+// walk visits node, encoded from v found at path. def is the default v
+// takes when config.yaml leaves it out, invalid when that is the zero value.
+// class is how the field holding v is exported and envName the variable that
+// sets it, if any. A nil slice, map, or pointer under a mapping is dropped: it
+// encodes as [], {}, or null, which config.yaml does not always read as
+// unset. So is a struct field that is empty, as its default is: it reads back
+// the same left out. A nil value in a free-form map is kept: it is a null the
+// configuration states, such as a parameter a virtual model strips from
+// requests.
+func (e *exporter) walk(path string, v, def reflect.Value, node *yaml.Node, class exportClass, envName string) {
 	for v.Kind() == reflect.Pointer {
 		v = v.Elem()
+	}
+	for def.Kind() == reflect.Pointer {
+		def = def.Elem()
 	}
 	if !v.IsValid() {
 		return
@@ -249,7 +256,8 @@ func (e *exporter) walk(path string, v reflect.Value, node *yaml.Node, class exp
 			return
 		}
 		for i, item := range node.Content {
-			e.walk(path+"["+strconv.Itoa(i)+"]", v.Index(i), item, class, "")
+			// A slice item config.yaml declares starts from its zero value.
+			e.walk(path+"["+strconv.Itoa(i)+"]", v.Index(i), reflect.Value{}, item, class, "")
 		}
 	case yaml.MappingNode:
 		kept := node.Content[:0]
@@ -266,20 +274,29 @@ func (e *exporter) walk(path string, v reflect.Value, node *yaml.Node, class exp
 				if class == exportPlain && credentialKey(key.Value) {
 					childClass = exportSecret
 				}
-				e.walk(childPath, child, value, childClass, "")
+				// As does a map value.
+				e.walk(childPath, child, reflect.Value{}, value, childClass, "")
 			case reflect.Struct:
 				field, child, ok := yamlField(v, key.Value)
 				if !ok {
 					e.walkUntyped(childPath, value, false)
 					break
 				}
-				if isNil(child) {
+				var defChild reflect.Value
+				if def.Kind() == reflect.Struct {
+					_, defChild, _ = yamlField(def, key.Value)
+				}
+				if isNil(child) || isEmpty(child) && isEmpty(defChild) {
 					continue
 				}
 				if field.Tag.Get("secrets") == secretsDeferred || field.Type == yamlNodeType || field.Type.Kind() == reflect.Map && field.Type.Elem() == yamlNodeType {
 					e.unresolved = append(e.unresolved, childPath)
 				}
-				e.walk(childPath, child, value, exportClassOf(field), field.Tag.Get("env"))
+				e.walk(childPath, child, defChild, value, exportClassOf(field), field.Tag.Get("env"))
+				// Every field of a struct left empty is dropped too.
+				if value.Kind == yaml.MappingNode && len(value.Content) == 0 && child.Kind() == reflect.Struct && isEmpty(defChild) {
+					continue
+				}
 			}
 			e.key(key)
 			kept = append(kept, key, value)
@@ -294,6 +311,19 @@ func isNil(v reflect.Value) bool {
 		return true
 	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Interface:
 		return v.IsNil()
+	}
+	return false
+}
+
+// isEmpty reports whether v is a zero value or an empty slice or map. A
+// pointer to a zero value is not empty: it states the value.
+func isEmpty(v reflect.Value) bool {
+	if !v.IsValid() || v.IsZero() {
+		return true
+	}
+	switch v.Kind() {
+	case reflect.Map, reflect.Slice:
+		return v.Len() == 0
 	}
 	return false
 }
