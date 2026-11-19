@@ -77,8 +77,11 @@ func TestDoAppliesTimeoutOverride(t *testing.T) {
 			client := testClient(tt.client, 0)
 			err := sendWithTimeouts(t, client, server.URL, AttemptTimeouts{Timeout: tt.override})
 			if tt.wantErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), "Client.Timeout exceeded")
+				// The message depends on where the deadline fires (dial,
+				// headers or body), so check the error kind, not its text.
+				var netErr net.Error
+				require.ErrorAs(t, err, &netErr)
+				assert.True(t, netErr.Timeout(), "want a timeout, got %v", err)
 			} else {
 				require.NoError(t, err)
 			}
