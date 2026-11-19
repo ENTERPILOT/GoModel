@@ -27,6 +27,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/enterpilot/gomodel/internal/workflows"
 )
 
 type routeObservationSelector struct {
@@ -321,6 +322,25 @@ func TestDefaultWorkflowInput_IncludesConfiguredGuardrailsMissingFromLoadedCatal
 	require.Len(t, input.Payload.Steps, 1)
 	got := input.Payload.Steps[0].Ref
 	require.Equal(t, "policy-system", got)
+}
+
+func TestDefaultWorkflowInput_CarriesOnRequestRules(t *testing.T) {
+	cfg := &config.Config{
+		Guardrails: config.GuardrailsConfig{
+			Enabled: true,
+			Rules: []config.GuardrailRuleConfig{
+				{Name: "policy-system", Type: "system_prompt", Order: 10},
+				{Name: "policy-judge", Type: "llm_judge", Phase: "response", Order: 20, OnRequest: true},
+			},
+		},
+	}
+
+	input := defaultWorkflowInput(cfg, nil, nil)
+
+	require.Equal(t, []workflows.Step{
+		{Ref: "policy-system", Phase: workflows.PhasePrompt, Step: 10},
+		{Ref: "policy-judge", Phase: workflows.PhaseResponse, Step: 20, OnRequest: true},
+	}, input.Payload.Steps)
 }
 
 func TestDefaultWorkflowInput_TrimsConfiguredGuardrailRefs(t *testing.T) {

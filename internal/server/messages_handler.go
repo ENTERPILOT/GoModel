@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/goccy/go-json"
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/ext"
@@ -172,6 +173,10 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 		}
 	}
 
+	if err := carryMessagesGuardrails(decoded, req); err != nil {
+		return handleError(c, err)
+	}
+
 	ctx := core.WithRequestDialect(promptEditCaptureContext(c, s.logger), core.RequestDialectAnthropicMessages)
 	ctx, prepared, workflow, err := prepareChatCompletionRequest(s, ctx, req, translatedRequestMeta(c))
 	if err != nil {
@@ -197,13 +202,32 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 	// the translated pipeline can actually carry the request: content it cannot
 	// represent (server-tool history, …) still belongs upstream verbatim.
 	unsignedThinking := translateErr == nil && anthropicapi.HasUnsignedThinking(decoded)
-	if s.canForwardMessagesNatively(ctx, workflow, unsignedThinking) {
+	// The native path forwards the client's bytes, guardrails field included,
+	// so a body that carries the field (even an empty one) is translated.
+	if len(decoded.Guardrails) == 0 && s.canForwardMessagesNatively(ctx, workflow, unsignedThinking) {
 		return s.dispatchMessagesNative(c, prepared, workflow)
 	}
 	if translateErr != nil {
 		return handleError(c, translateErr)
 	}
 	return handleWithCache(s, c, prepared, workflow, s.dispatchMessages)
+}
+
+// carryMessagesGuardrails copies the gateway's guardrails field from a
+// Messages request onto its chat translation, where request preparation
+// validates it, applies it and takes it out again before any provider call.
+func carryMessagesGuardrails(decoded *anthropicapi.MessagesRequest, req *core.ChatRequest) error {
+	if len(decoded.Guardrails) == 0 {
+		return nil
+	}
+	extra, err := core.MergeUnknownJSONFields(req.ExtraFields, map[string]json.RawMessage{
+		core.RequestGuardrailsField: decoded.Guardrails,
+	})
+	if err != nil {
+		return core.NewInvalidRequestError("invalid guardrails field: "+err.Error(), err).WithParam(core.RequestGuardrailsField)
+	}
+	req.ExtraFields = extra
+	return nil
 }
 
 // CountMessageTokens answers a Messages token count. The provider that owns
@@ -260,6 +284,11 @@ func (s *translatedInferenceService) countMessageTokensUpstream(ctx context.Cont
 	// block or redact), so the count is estimated locally instead. Response-
 	// and stream-only rules never see the prompt and keep exact counts.
 	if core.GetWorkflow(ctx).PromptGuardrailsHash() != "" {
+		return 0, false, nil
+	}
+	// A count that names guardrails is estimated too: the inference request
+	// it stands for would run them over the prompt first.
+	if raw := req.Guardrails; len(raw) > 0 && !core.IsJSONNull(raw) {
 		return 0, false, nil
 	}
 	model := selector.QualifiedModel()

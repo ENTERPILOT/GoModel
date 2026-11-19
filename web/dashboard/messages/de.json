@@ -1205,6 +1205,8 @@
   "workflows_edit_guardrail_action": "Guardrail {name} bearbeiten",
   "workflows_guardrail_reference": "Guardrail-Referenz",
   "workflows_step": "Schritt",
+  "workflows_on_request": "Auf Anfrage",
+  "workflows_on_request_help": "Ein Schritt mit \"Auf Anfrage\" läuft nur für Anfragen, die sein Guardrail im Body-Feld \"guardrails\" nennen; alle anderen Schritte laufen bei jeder Anfrage und können vom Client nicht abgeschaltet werden.",
   "workflows_remove": "Entfernen",
   "workflows_no_phase_steps": "Noch keine {phase}-Guardrails konfiguriert.",
   "rate_limits_edit_title": "Rate-Limit bearbeiten",

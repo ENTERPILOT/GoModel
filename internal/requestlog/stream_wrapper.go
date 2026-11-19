@@ -299,6 +299,7 @@ func CreateStreamEntry(ctx context.Context, baseEntry *LogEntry) *LogEntry {
 			RequestBodyTooBigToHandle: baseEntry.Data.RequestBodyTooBigToHandle,
 			RequestRevisions:          copyRequestRevisions(baseEntry.Data.RequestRevisions),
 			Guardrails:                slices.Clone(baseEntry.Data.Guardrails),
+			RequestedGuardrails:       slices.Clone(baseEntry.Data.RequestedGuardrails),
 			Attempts:                  normalizeAttemptSnapshots(baseEntry.Data.Attempts),
 		}
 		if baseEntry.Data.WorkflowFeatures != nil {

@@ -138,3 +138,19 @@ func TestHasRecordedError(t *testing.T) {
 	}
 	require.False(t, HasRecordedError(nil))
 }
+
+// The guardrails a request added through its guardrails field are recorded
+// on the entry, next to the workflow they were added to.
+func TestEnrichLogEntryWithWorkflow_RecordsRequestedGuardrails(t *testing.T) {
+	policy := &core.ResolvedWorkflowPolicy{VersionID: "v1", Features: core.DefaultWorkflowFeatures()}
+
+	entry := &LogEntry{}
+	EnrichLogEntryWithWorkflow(entry, &core.Workflow{Policy: policy, RequestGuardrails: []string{"pii", "judge"}})
+	require.NotNil(t, entry.Data)
+	require.Equal(t, []string{"pii", "judge"}, entry.Data.RequestedGuardrails)
+
+	plain := &LogEntry{}
+	EnrichLogEntryWithWorkflow(plain, &core.Workflow{Policy: policy})
+	require.NotNil(t, plain.Data)
+	require.Empty(t, plain.Data.RequestedGuardrails)
+}

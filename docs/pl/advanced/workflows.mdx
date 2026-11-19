@@ -83,7 +83,8 @@ Każdy krok wskazuje instancję (`ref`), fazę, w której działa, i swoją pozy
     { "ref": "policy-judge", "phase": "prompt",   "step": 10 },
     { "ref": "safety-prompt","phase": "prompt",   "step": 20 },
     { "ref": "mask-keys",    "phase": "response", "step": 10 },
-    { "ref": "mask-keys",    "phase": "stream",   "step": 10 }
+    { "ref": "mask-keys",    "phase": "stream",   "step": 10 },
+    { "ref": "answer-judge", "phase": "response", "step": 20, "on_request": true }
   ]
 }
 ```
@@ -95,6 +96,12 @@ Każdy krok wskazuje instancję (`ref`), fazę, w której działa, i swoją pozy
   liczba całkowita); kroki o równych wartościach `step` działają równolegle.
   Ten sam `step` może współdzielić najwyżej jedna instancja edytująca treść.
 - Ten sam `ref` może wystąpić raz na fazę.
+- `on_request: true` (domyślnie `false`) uruchamia krok tylko dla requestów,
+  które wskażą instancję w polu `guardrails` w treści requestu. Kroki bez tego
+  ustawienia działają przy każdym requeście i request nie może ich wyłączyć.
+  Kroki „na żądanie” są walidowane razem z pozostałymi, więc obowiązuje je ta
+  sama reguła najwyżej jednej instancji edytującej treść na krok. Zobacz
+  [Guardrails na poziomie requestu](/pl/advanced/guardrails#guardrails-na-poziomie-requestu).
 - `features.guardrails: false` wyłącza wszystkie kroki workflow.
 
 Payloady w wersji 1 (`"schema_version": 1` z `"guardrails": [{"ref", "step"}]`)
@@ -107,6 +114,9 @@ Tożsamość skompilowanego łańcucha jest częścią obu kluczy cache’u odpo
 więc zmiana guardraila w dowolnej fazie unieważnia odpowiedzi z cache’u
 wygenerowane według starych reguł, a dwa workflow z różnymi łańcuchami nigdy
 nie współdzielą odpowiedzi z cache’u.
+`chain_hashes` obejmuje kroki działające przy każdym requeście; request, który
+dodaje kroki „na żądanie”, trafia do cache’u pod hashem łańcucha, który dla
+niego zadziałał.
 
 ## Przykłady
 

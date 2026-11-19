@@ -121,6 +121,10 @@ koloruje wykres workflow wpisu logu requestów na podstawie tej listy, a jego
 zakładka „Guardrails” wyświetla wyniki. Lista to ścieżka decyzji; opisane niżej
 rewizje requestu to ścieżka treści.
 
+Gdy klient dodał guardrails przez
+[pole `guardrails`](/pl/advanced/guardrails#guardrails-na-poziomie-requestu)
+requestu, wpis zawiera ich nazwy w `data.requested_guardrails`.
+
 Decyzje z fazy prompt są też dopisywane do łańcucha rewizji requestu (tego samego
 miejsca, w którym zapisywane są przepisania requestu), jeden wpis na instancję w kolejności kroków.
 Instancja, która edytowała prompt, to zmieniona rewizja zawierająca request

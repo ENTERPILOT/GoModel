@@ -177,6 +177,42 @@ func (c *Chains) instances() []*Instance {
 	return out
 }
 
+// Filter returns the chains restricted to the instances keep accepts, each
+// at its step, with the hashes of what remains. A workflow uses it to leave
+// out the steps a request did not ask for.
+func (c *Chains) Filter(keep func(phase pluginapi.Kind, instance string) bool) (*Chains, error) {
+	if c == nil {
+		return nil, nil
+	}
+	filtered := &Chains{}
+	var err error
+	if filtered.Prompt, err = c.Prompt.filter(keep); err != nil {
+		return nil, err
+	}
+	if filtered.Response, err = c.Response.filter(keep); err != nil {
+		return nil, err
+	}
+	if filtered.Stream, err = c.Stream.filter(keep); err != nil {
+		return nil, err
+	}
+	return filtered, nil
+}
+
+func (c *Chain) filter(keep func(phase pluginapi.Kind, instance string) bool) (*Chain, error) {
+	if c.Empty() {
+		return nil, nil
+	}
+	var refs []Ref
+	for _, step := range c.Steps {
+		for _, inst := range step.Instances {
+			if keep(c.Phase, inst.Name) {
+				refs = append(refs, Ref{Instance: inst, Step: step.Order})
+			}
+		}
+	}
+	return BuildChain(c.Phase, refs)
+}
+
 // Hashes returns the non-empty chain hashes keyed by phase.
 func (c *Chains) Hashes() map[string]string {
 	if c == nil {

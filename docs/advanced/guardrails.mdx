@@ -160,6 +160,7 @@ guardrails:
       user_path: "/team/privacy" # Optional base path for internal auxiliary calls
       phase: "prompt"            # prompt (default) | response | stream
       order: 0                   # Step within the phase
+      on_request: false          # true = run only for requests that name it
       fail_mode: "closed"        # closed (default) | open
       timeout_ms: 0              # Per-call timeout; 0 = none (default)
       config:                    # Plugin settings, validated against the plugin's schema
@@ -195,9 +196,77 @@ the guardrail endpoints and the dashboard page are unavailable.
 | `user_path` | No | Optional base user path for internal auxiliary requests. |
 | `phase` | No | `prompt`, `response`, or `stream`. Default `prompt`. |
 | `order` | No | Execution order within the phase. Default `0`. Same value = parallel, different = sequential. |
+| `on_request` | No | `true` runs the guardrail only for requests that name it in their `guardrails` field. Default `false`: it runs on every request. See [Select Guardrails per Request](#select-guardrails-per-request). |
 | `config` | No | Plugin settings. Keys, defaults, and validation come from the plugin (`GET /admin/guardrails/types`). |
 | `fail_mode` | No | `closed` rejects the request with HTTP 500 when the guardrail errors or times out; `open` continues without it. Default `closed`. |
 | `timeout_ms` | No | Upper bound for each call of the guardrail, enforced at the deadline. Default `0` (none). A guardrail that edits content and overruns its timeout fails the request even with `fail_mode: open`; see [Fail modes and timeouts](/advanced/plugins#fail-modes-and-timeouts). |
+
+## Select Guardrails per Request
+
+A guardrail runs on every request its workflow matches. To run one only when
+the client asks for it, mark it `on_request`:
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "safety-prompt" # runs on every request
+      type: "system_prompt"
+      order: 0
+      system_prompt:
+        content: "Always respond safely and respectfully."
+
+    - name: "pii" # runs only for requests that name it
+      type: "presidio"
+      order: 1
+      on_request: true
+```
+
+The client then names it in the `guardrails` field of the request body:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "Write to jane@example.com"}],
+    "guardrails": ["pii"]
+  }'
+```
+
+How the field combines with the workflow:
+
+- **It only adds.** A request can add the on-request steps of the workflow it
+  matched. Every other step runs whatever the request sends; nothing in a
+  request turns a guardrail off.
+- **The workflow decides what is on offer.** `on_request` is a property of a
+  [workflow step](/advanced/workflows#guardrail-steps), so a workflow scoped to
+  a user path, provider, or model offers its guardrails only to the requests
+  it matches. In the dashboard, tick **On request** on the step. A rule in
+  `config.yaml` sets it for the default workflow.
+- **Phase and order come from the step.** A name with on-request steps in
+  several phases, such as the prompt and the response, adds all of them.
+- **A name that cannot run is an error.** A guardrail the matched workflow
+  does not offer answers `400 invalid_request_error` with `param: "guardrails"`
+  and code `guardrail_not_available`, before any provider call. An unknown
+  name and a guardrail that exists elsewhere read the same, so the answer does
+  not reveal which guardrails are configured. With `GUARDRAILS_ENABLED` off,
+  every name is refused.
+- **A guardrail that already runs is accepted.** Naming a step that runs on
+  every request changes nothing.
+
+The field is read on `/v1/chat/completions`, `/v1/responses` (with its
+`input_tokens` and `compact` routes) and `/v1/messages`, and is removed before
+the request goes to a provider. It must be an array of names; `[]` and `null`
+name none. Other endpoints, `/v1/batches` items included, do not read it.
+
+The [response cache](/features/cache) keys on the chain that runs, so a request
+that adds a guardrail never shares an entry with one that does not. The request
+log entry lists the added names under `data.requested_guardrails`; their
+outcomes are in `data.guardrails` with the others. A
+`/v1/messages/count_tokens` request that names guardrails is estimated locally,
+so the prompt is not sent to a provider unchecked.
 
 ## Guardrail Types
 

@@ -195,6 +195,11 @@ type LogData struct {
 	// outcome did not run (an earlier block, a cache hit).
 	Guardrails []GuardrailOutcomeSnapshot `json:"guardrails,omitempty" bson:"guardrails,omitempty"`
 
+	// RequestedGuardrails lists the guardrails the client added through the
+	// request's guardrails field, on top of the steps its workflow always
+	// runs. Their outcomes are in Guardrails with the others.
+	RequestedGuardrails []string `json:"requested_guardrails,omitempty" bson:"requested_guardrails,omitempty"`
+
 	// Request parameters
 	Temperature *float64 `json:"temperature,omitempty" bson:"temperature,omitempty"`
 	MaxTokens   *int     `json:"max_tokens,omitempty" bson:"max_tokens,omitempty"`

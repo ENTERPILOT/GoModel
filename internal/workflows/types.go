@@ -80,6 +80,10 @@ type Step struct {
 	Ref   string `json:"ref" bson:"ref"`
 	Phase string `json:"phase,omitempty" bson:"phase,omitempty"`
 	Step  int    `json:"step" bson:"step"`
+	// OnRequest makes the step run only for requests that name the guardrail
+	// in their guardrails field. A step without it runs on every request and
+	// a request cannot turn it off.
+	OnRequest bool `json:"on_request,omitempty" bson:"on_request,omitempty"`
 }
 
 // EffectiveSteps returns the steps to compile regardless of schema version:

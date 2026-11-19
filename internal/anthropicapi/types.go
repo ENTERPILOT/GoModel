@@ -28,6 +28,11 @@ type MessagesRequest struct {
 	OutputConfig *OutputConfig `json:"output_config,omitempty"`
 	// OutputFormat is the deprecated top-level form of output_config.format.
 	OutputFormat json.RawMessage `json:"output_format,omitempty" swaggertype:"object"`
+	// Guardrails names guardrails to run for this request in addition to the
+	// ones its workflow always runs. It is a gateway field: POST /v1/messages
+	// reads it and it is never sent to a provider. Kept raw so the shared
+	// ingress check validates it.
+	Guardrails json.RawMessage `json:"guardrails,omitempty" swaggertype:"array,string"`
 }
 
 // OutputConfig is the Anthropic output configuration: the effort level and a

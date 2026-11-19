@@ -43,6 +43,12 @@ type GuardrailRuleConfig struct {
 	// Default: "prompt"
 	Phase string `yaml:"phase"`
 
+	// OnRequest makes the default workflow run this instance only for
+	// requests that name it in their "guardrails" body field, instead of on
+	// every request.
+	// Default: false
+	OnRequest bool `yaml:"on_request"`
+
 	// Config is the plugin's own configuration, validated against the
 	// plugin's config schema (see GET /admin/guardrails/types). The typed
 	// system_prompt and llm_based_altering blocks below are folded into it.

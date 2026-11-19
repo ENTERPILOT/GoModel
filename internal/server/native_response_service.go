@@ -279,8 +279,18 @@ func (s *nativeResponseService) utilityRequest(c *echo.Context) (*core.Responses
 		return nil, "", core.NewInvalidRequestError("responses request body is required", errors.New("responses request body is null"))
 	}
 
+	requestedGuardrails, err := gateway.TakeResponsesRequestGuardrails(req)
+	if err != nil {
+		return nil, "", err
+	}
+
 	workflow, err := ensureTranslatedRequestWorkflowWithAuthorizer(c, s.provider, s.modelResolver, s.modelAuthorizer, s.workflowPolicyResolver, &req.Model, &req.Provider)
 	if err != nil {
+		return nil, "", err
+	}
+	// The utility routes send the prompt to the provider too, so the
+	// guardrails the request names run over it like on POST /v1/responses.
+	if err := gateway.SelectRequestGuardrails(s.workflowPolicyResolver, workflow, requestedGuardrails); err != nil {
 		return nil, "", err
 	}
 
