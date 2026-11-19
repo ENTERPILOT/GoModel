@@ -116,7 +116,8 @@ docker run -d --name gomodel -p 8080:8080 \
   registry.internal/enterpilot/gomodel:X.Y.Z
 ```
 
-如果您的模型服务器或数据库使用内部证书颁发机构，请添加 `HTTP_TLS_CA_FILE`；参见[私有 CA 与代理](/zh/guides/production#私有-ca-与代理)。
+如果您的模型服务器使用内部证书颁发机构，请添加 `HTTP_TLS_CA_FILE`；参见[私有 CA 与代理](/zh/guides/production#私有-ca-与代理)。
+该设置只作用于网关的 HTTP 客户端：PostgreSQL 和 MongoDB 的 CA 由各自的连接 URL 指定（`sslrootcert`、`tlsCAFile`）。
 
 ## 3. 提供模型目录
 

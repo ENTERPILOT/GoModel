@@ -56,6 +56,9 @@ func TestOutboundCallsTheGatewayMakesOnItsOwn(t *testing.T) {
 		env                []string
 		want               []string
 		wantVersionEnabled bool
+		// wantLogs are startup lines that settle the question without
+		// timing: the gateway logs them instead of starting the call.
+		wantLogs []string
 	}{
 		{
 			name:               "a default install tries the model catalog and the release host",
@@ -65,6 +68,11 @@ func TestOutboundCallsTheGatewayMakesOnItsOwn(t *testing.T) {
 		{
 			name: "offline mode tries nothing",
 			env:  []string{"GOMODEL_OFFLINE=true"},
+			wantLogs: []string{
+				// The line docs/guides/air-gapped.mdx tells operators to look for.
+				"offline mode: update check, remote model catalog download, and allowlist metadata listing disabled",
+				"model list downloads disabled",
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -87,12 +95,12 @@ func TestOutboundCallsTheGatewayMakesOnItsOwn(t *testing.T) {
 				"HTTPS_PROXY=" + proxy.url,
 			}, tt.env...))
 
-			// The catalog download is started while the gateway is built, so
-			// a gateway that answers has already had its chance to try it.
+			// Readiness answers 200 before the provider's models are loaded,
+			// so wait for the models component, not only for the status.
 			require.Eventually(t, func() bool {
-				status, _ := gateway.get("/health/ready")
-				return status == http.StatusOK
-			}, 30*time.Second, 20*time.Millisecond, "the gateway never became ready")
+				status, body := gateway.get("/health/ready")
+				return status == http.StatusOK && strings.Contains(body, `"models":"ok"`)
+			}, 30*time.Second, 20*time.Millisecond, "the gateway never loaded the local provider's models")
 
 			// A dashboard's first visit of the day is what asks for an update
 			// check right away; the schedule waits out a startup delay first.
@@ -111,6 +119,9 @@ func TestOutboundCallsTheGatewayMakesOnItsOwn(t *testing.T) {
 			}
 			gateway.stop(t)
 			assert.ElementsMatch(t, tt.want, proxy.hosts(), "hosts the gateway tried beyond the configured provider")
+			for _, line := range tt.wantLogs {
+				assert.Contains(t, gateway.output.String(), line)
+			}
 		})
 	}
 }
@@ -208,6 +219,8 @@ type egressProbe struct {
 	stdin io.Closer
 	// exited is closed once the child's stdout reaches EOF.
 	exited <-chan struct{}
+	// output is the child's log and test output so far.
+	output *lockedBuffer
 	client *http.Client
 }
 
@@ -259,6 +272,7 @@ func startEgressProbe(t *testing.T, env []string) *egressProbe {
 		cmd:    cmd,
 		stdin:  stdin,
 		exited: exited,
+		output: output,
 		// Never through the proxy the child was given, or any other.
 		client: &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{}},
 	}

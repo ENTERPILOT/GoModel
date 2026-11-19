@@ -132,9 +132,11 @@ docker run -d --name gomodel -p 8080:8080 \
   registry.internal/enterpilot/gomodel:X.Y.Z
 ```
 
-If your model servers or database use an internal certificate authority, add
+If your model servers use an internal certificate authority, add
 `HTTP_TLS_CA_FILE`; see
-[Private CAs and proxies](/guides/production#private-cas-and-proxies).
+[Private CAs and proxies](/guides/production#private-cas-and-proxies). It
+covers the gateway's HTTP clients only: PostgreSQL and MongoDB take their CA
+from their own connection URL (`sslrootcert`, `tlsCAFile`).
 
 ## 3. Supply the model catalog
 
