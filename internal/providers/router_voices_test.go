@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -194,8 +195,11 @@ func TestRouterListCustomVoices(t *testing.T) {
 
 // OpenAI's own voice list is a control-plane read like the per-model listing,
 // so its failures must not open the breaker inference shares with it.
+// The upstream is a plain httptest server for the import-cycle reason above.
 func TestRouterListCustomVoices_BypassesCircuitBreaker(t *testing.T) {
+	var hits atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{}`))
 	}))
@@ -223,8 +227,10 @@ func TestRouterListCustomVoices_BypassesCircuitBreaker(t *testing.T) {
 		_, err = router.ListCustomVoices(context.Background(), "openai", core.AudioCustomVoicesParams{})
 		require.Error(t, err)
 	}
+	require.Equal(t, int32(3), hits.Load(), "each listing failed at the upstream")
 
 	_, err = client.DoRaw(context.Background(), request)
 	require.Error(t, err)
-	assert.NotErrorIs(t, err, llmclient.ErrCircuitOpen)
+	require.NotErrorIs(t, err, llmclient.ErrCircuitOpen)
+	assert.Equal(t, int32(4), hits.Load(), "the breaker let the inference call through")
 }
