@@ -229,6 +229,10 @@ Dla administratora zakresowego:
   `"enabled": false`, aby go dezaktywować.
 - Widoczne i edytowalne są tylko budżety i rate limity dla ścieżek użytkownika; reguły dla etykiet,
   providerów i modeli obowiązują w całym gatewayu.
+- `GET /admin/models` zwraca wszystkie modele, ale `access` pokazuje tylko ścieżki
+  użytkownika wewnątrz zakresu (ścieżka obejmująca cały zakres jest pokazana jako
+  korzeń zakresu) i nie zawiera wiersza `override`. Model ograniczony do innych
+  ścieżek ma `effective_enabled: false`.
 - Endpointy obejmujące cały gateway zwracają `403` z kodem `admin_scope_denied`: status
   providerów i dane uwierzytelniające, ustawienia runtime i ich odświeżanie, import kluczy API,
   ustawienia tagowania, modele wirtualne, workflow, guardrails, serwery MCP, nadpisania
