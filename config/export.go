@@ -224,8 +224,8 @@ func newExporter(secrets *Secrets, environ []string, doc ExportDocument, expande
 // class is how the field holding v is exported and envName the variable that
 // sets it, if any. A nil slice, map, or pointer under a mapping is dropped: it
 // encodes as [], {}, or null, which config.yaml does not always read as
-// unset. So is a struct field that is empty, as its default is: it reads back
-// the same left out. A nil value in a free-form map is kept: it is a null the
+// unset. So is a struct field holding the zero value, as its default does:
+// it reads back the same left out. A nil value in a free-form map is kept: it is a null the
 // configuration states, such as a parameter a virtual model strips from
 // requests.
 func (e *exporter) walk(path string, v, def reflect.Value, node *yaml.Node, class exportClass, envName string) {
@@ -286,7 +286,10 @@ func (e *exporter) walk(path string, v, def reflect.Value, node *yaml.Node, clas
 				if def.Kind() == reflect.Struct {
 					_, defChild, _ = yamlField(def, key.Value)
 				}
-				if isNil(child) || isEmpty(child) && isEmpty(defChild) {
+				// A value environment expansion wrote is kept as written, empty
+				// or not: it reads the variable on the next load.
+				_, expanded := e.expanded[childPath]
+				if isNil(child) || !expanded && isEmpty(child) && isEmpty(defChild) {
 					continue
 				}
 				if field.Tag.Get("secrets") == secretsDeferred || field.Type == yamlNodeType || field.Type.Kind() == reflect.Map && field.Type.Elem() == yamlNodeType {
@@ -315,17 +318,11 @@ func isNil(v reflect.Value) bool {
 	return false
 }
 
-// isEmpty reports whether v is a zero value or an empty slice or map. A
-// pointer to a zero value is not empty: it states the value.
+// isEmpty reports whether v is a zero value. A pointer to a zero value, or
+// an empty but non-nil slice or map, is not: it states the value, as
+// retry_on_statuses: [] disables the statuses a nil list inherits.
 func isEmpty(v reflect.Value) bool {
-	if !v.IsValid() || v.IsZero() {
-		return true
-	}
-	switch v.Kind() {
-	case reflect.Map, reflect.Slice:
-		return v.Len() == 0
-	}
-	return false
+	return !v.IsValid() || v.IsZero()
 }
 
 // walkUntyped visits a node no Go type describes. Strings under a key that

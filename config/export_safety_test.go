@@ -96,6 +96,21 @@ opentelemetry:
 	assert.Equal(t, first.Config.OpenTelemetry, second.Config.OpenTelemetry)
 }
 
+func TestExportYAMLKeepsExpansionThatIsEmpty(t *testing.T) {
+	// An expansion that is empty here may not be on the next instance.
+	clearAllConfigEnvVars(t)
+	first := loadYAML(t, []byte(`
+server:
+  body_size_limit: "${GOMODEL_TEST_BODY_LIMIT:-}"
+`))
+	require.Empty(t, first.Config.Server.BodySizeLimit)
+
+	out, err := first.ExportYAML(ExportDocument{Config: first.Config}, os.Environ())
+	require.NoError(t, err)
+
+	assert.Contains(t, string(out), "body_size_limit: \"${GOMODEL_TEST_BODY_LIMIT:-}\"")
+}
+
 func TestExportYAMLRedactsCredentialsOutsideSecretFields(t *testing.T) {
 	var ext yaml.Node
 	require.NoError(t, yaml.Unmarshal([]byte("auth: ext-auth\ncookie: ext-cookie\npass: ext-pass\nregion: eu\n"), &ext))
