@@ -139,7 +139,8 @@ func (s *audioService) listCustomVoices(c *echo.Context, query url.Values) error
 
 // customVoicesProvider picks the instance to list from among those that serve
 // the list: the first one, or the one requested names by instance name or by
-// provider type.
+// provider type. A configured instance name is never read as a type, so an
+// instance that does not serve the list is not swapped for another account.
 func (s *audioService) customVoicesProvider(serving []string, requested string) (string, bool) {
 	if requested == "" {
 		if len(serving) == 0 {
@@ -149,6 +150,9 @@ func (s *audioService) customVoicesProvider(serving []string, requested string) 
 	}
 	if slices.Contains(serving, requested) {
 		return requested, true
+	}
+	if s.providerTypeForName(requested) != "" {
+		return "", false
 	}
 	for _, name := range serving {
 		if s.providerTypeForName(name) == requested {

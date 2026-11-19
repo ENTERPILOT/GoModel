@@ -377,6 +377,18 @@ func TestAudioVoices_WithoutModelErrors(t *testing.T) {
 			wantMsg:    `provider "kokoro-local" does not support listing custom voices`,
 		},
 		{
+			// A self-hosted instance named after the type is not read as the
+			// type, which would list openai-main's voices instead.
+			name:   "an instance named like a type that does not serve it",
+			target: "/v1/audio/voices?provider=openai",
+			mutate: func(m *customVoicesMockProvider) {
+				m.providerTypes["openai/kokoro"] = "openai"
+				m.providerNames["openai/kokoro"] = "openai"
+			},
+			wantStatus: http.StatusBadRequest,
+			wantMsg:    `provider "openai" does not support listing custom voices`,
+		},
+		{
 			name:       "an unknown provider",
 			target:     "/v1/audio/voices?provider=nope",
 			wantStatus: http.StatusBadRequest,
