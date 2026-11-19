@@ -19,6 +19,10 @@ import {
   modelAccessSummary,
 } from "./routing.js";
 
+// Redirect sources resolve by exact trimmed name (case-sensitive) on the
+// backend, so ownership and suppression use the same key.
+const exactAliasName = (name) => String(name || "").trim();
+
 export function buildDisplayModels({
   models,
   aliases,
@@ -30,7 +34,7 @@ export function buildDisplayModels({
   const redirectsBySource = new Map();
   if (virtualModelsAvailable) {
     for (const alias of safeAliases) {
-      const aliasName = normalizedAliasName(alias && alias.name);
+      const aliasName = exactAliasName(alias && alias.name);
       if (!aliasName || alias.enabled === false || !alias.valid) {
         continue;
       }
@@ -39,17 +43,23 @@ export function buildDisplayModels({
   }
 
   const concreteModelsByKey = new Map();
+  // Model rows by their own qualified name. A redirect matches the requested
+  // name exactly, so a virtual model folds into a row only when it is named
+  // like that row. One named like a bare upstream ID (qwen/x for
+  // openrouter/qwen/x) is a separate model and gets its own row.
+  const modelsByOwnName = new Map();
   const rows = safeModels.map((model) => {
     const displayName = qualifiedModelName(model);
-    let maskingAlias = null;
+    const ownName = exactAliasName(displayName);
+    if (ownName && !modelsByOwnName.has(ownName)) {
+      modelsByOwnName.set(ownName, model);
+    }
     for (const key of modelKeys(model)) {
       if (!concreteModelsByKey.has(key)) {
         concreteModelsByKey.set(key, model);
       }
-      if (!maskingAlias && redirectsBySource.has(key)) {
-        maskingAlias = redirectsBySource.get(key);
-      }
     }
+    const maskingAlias = (ownName && redirectsBySource.get(ownName)) || null;
     const access = model && model.access ? model.access : null;
     return {
       key: "model:" + displayName,
@@ -74,12 +84,17 @@ export function buildDisplayModels({
   }
 
   for (const alias of safeAliases) {
+    if (
+      alias &&
+      alias.enabled !== false &&
+      alias.valid &&
+      modelsByOwnName.has(exactAliasName(alias.name))
+    ) {
+      continue;
+    }
     const sourceModel = concreteModelsByKey.get(
       normalizedAliasName(alias && alias.name),
     );
-    if (alias && alias.enabled !== false && alias.valid && sourceModel) {
-      continue;
-    }
     let targetModel = null;
     for (const key of aliasKeys(alias)) {
       targetModel = concreteModelsByKey.get(key) || null;
