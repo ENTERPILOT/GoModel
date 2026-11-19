@@ -132,6 +132,8 @@ func TestMapStopReason(t *testing.T) {
 		{"context_window_exceeded", brtypes.StopReasonModelContextWindowExceeded, false, "length"},
 		{"tool_use_with_calls", brtypes.StopReasonToolUse, true, "tool_calls"},
 		{"tool_use_no_calls", brtypes.StopReasonToolUse, false, "tool_use"},
+		{"guardrail_intervened", brtypes.StopReasonGuardrailIntervened, false, "content_filter"},
+		{"content_filtered", brtypes.StopReasonContentFiltered, false, "content_filter"},
 		{"unknown", "weird_reason", false, "weird_reason"},
 	}
 	for _, tc := range cases {
