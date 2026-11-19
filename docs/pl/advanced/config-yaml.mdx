@@ -155,7 +155,8 @@ sufiksem stosują tę samą regułę co inne zmienne środowiskowe providerów:
 Efektywne pierwszeństwo:
 
 1. zmienne środowiskowe
-2. opcjonalny `config/config.yaml` lub `config.yaml`
+2. opcjonalny `config/config.yaml` lub `config.yaml`, wraz z plikami, które
+   [dołącza](#dzielenie-pliku)
 3. wbudowane wartości domyślne z kodu
 
 `.env` nie jest osobną warstwą priorytetu. To tylko wygodny sposób na
@@ -233,6 +234,92 @@ Jeśli nowego pliku nie da się załadować, nic się nie zmienia. Wyjątkami s�
 `server.port` i `server.pid_file`: oba są stałe przez cały czas życia procesu,
 więc przeładowanie loguje ostrzeżenie i zachowuje bieżące wartości do restartu
 gatewaya.
+
+## Dzielenie pliku
+
+Domyślnie konfiguracja to jeden plik. Gdy robi się zbyt duży, by przejrzeć go w
+całości, albo gdy klucze providerów mają trafić do Secretu Kubernetes, a reszta
+do ConfigMapy, wymień kolejne pliki pod `include` w `config.yaml`:
+
+```yaml
+# config/config.yaml
+include:
+  - providers.yaml
+  - "secrets/*.yaml"
+
+server:
+  port: "8080"
+```
+
+```yaml
+# config/providers.yaml
+providers:
+  openai-eu:
+    type: openai
+    base_url: https://eu.api.openai.com/v1
+```
+
+```yaml
+# config/secrets/openai-eu.yaml
+providers:
+  openai-eu:
+    api_key: "sk-..."
+```
+
+GoModel odczytuje `config.yaml`, potem każdy dołączony plik w podanej
+kolejności, i scala je w jedną konfigurację:
+
+- **Ścieżki** są względne wobec katalogu `config.yaml`; ścieżki bezwzględne
+  też działają. `${VAR}` jest rozwijane we wpisach i w każdym dołączonym pliku.
+- **Wzorce** (`*`, `?`, `[...]`) wskazują wszystkie pasujące pliki, odczytywane
+  w kolejności nazw. Wzorzec, do którego nic nie pasuje, także gdy katalog nie
+  istnieje, nie jest błędem. Wpis bez wzorca wskazuje jeden plik, który musi
+  istnieć.
+- **Sekcje są scalane klucz po kluczu**, na każdej głębokości: każdy plik może
+  dodać providerów, a jeden provider może być rozłożony na kilka plików, jak
+  wyżej.
+- **Wartość lub listę ustawia tylko jeden plik.** Ustawienie jej w drugim pliku
+  zatrzymuje start, zamiast wybierać zwycięzcę. Klucz pozostawiony pusty
+  (`providers:` bez zawartości) się nie liczy.
+- **Tylko `config.yaml` może zawierać `include`.** Dołączone pliki nie mogą
+  dołączać kolejnych.
+
+Każdy plik jest walidowany osobno, więc błędy wskazują plik i wiersz:
+
+```text
+failed to parse config/secrets/openai-eu.yaml: line 4: providers.openai-eu.base_url is already set in config/providers.yaml (line 5); a setting can be set in only one config file
+```
+
+Zmienne środowiskowe nadal nadpisują każdy plik, `gomodel --reload` odczytuje
+ponownie wszystkie, a `gomodel config export` wypisuje scalony wynik jako jeden
+plik bez `include`. Przy starcie wpis `config file loaded` wymienia odczytane
+pliki w polu `included`.
+
+<Warning>
+  Trzymaj pliki pasujące do wzorca w osobnym katalogu. `"*.yaml"` obok
+  `config.yaml` obejmuje też każdy inny plik YAML w tym katalogu, a obraz
+  Dockera zawiera `/app/config/config.example.yaml`.
+</Warning>
+
+W chartcie Helm zamontuj Secret obok `config.yaml`:
+
+```yaml
+config: |
+  include: ["secrets/*.yaml"]
+  providers:
+    openai-eu:
+      type: openai
+      base_url: https://eu.api.openai.com/v1
+
+extraVolumes:
+  - name: provider-keys
+    secret:
+      secretName: gomodel-provider-keys # klucze: openai-eu.yaml, ...
+extraVolumeMounts:
+  - name: provider-keys
+    mountPath: /app/config/secrets
+    readOnly: true
+```
 
 ## Docker
 

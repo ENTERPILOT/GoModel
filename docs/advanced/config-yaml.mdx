@@ -146,7 +146,8 @@ other provider env vars: `OPENROUTER_EU_MODEL_FILTER_INCLUDE` configures
 Effective precedence is:
 
 1. environment variables
-2. optional `config/config.yaml` or `config.yaml`
+2. optional `config/config.yaml` or `config.yaml`, with the files it
+   [includes](#splitting-the-file)
 3. built-in defaults from code
 
 `.env` is not a separate priority layer. It is just a convenient way to load
@@ -217,6 +218,90 @@ see [CLI Operations](/advanced/cli#configuration-reload). Nothing changes if the
 new file fails to load. `server.port` and `server.pid_file` are the exceptions:
 both are fixed for the life of the process, so a reload logs a warning and keeps
 the running values until the gateway is restarted.
+
+## Splitting the File
+
+By default the configuration is one file. When it grows too large to review in
+one piece, or when provider keys belong in a Kubernetes Secret and the rest in
+a ConfigMap, list further files under `include` in `config.yaml`:
+
+```yaml
+# config/config.yaml
+include:
+  - providers.yaml
+  - "secrets/*.yaml"
+
+server:
+  port: "8080"
+```
+
+```yaml
+# config/providers.yaml
+providers:
+  openai-eu:
+    type: openai
+    base_url: https://eu.api.openai.com/v1
+```
+
+```yaml
+# config/secrets/openai-eu.yaml
+providers:
+  openai-eu:
+    api_key: "sk-..."
+```
+
+GoModel reads `config.yaml`, then each included file in the order listed, and
+merges them into one configuration:
+
+- **Paths** are relative to the directory of `config.yaml`; absolute paths work
+  too. `${VAR}` is expanded in the entries and in every included file.
+- **Patterns** (`*`, `?`, `[...]`) name every matching file, read in name
+  order. A pattern that matches nothing, or whose directory does not exist, is
+  not an error. An entry without a pattern names one file, which must exist.
+- **Sections merge key by key**, at any depth: each file can add providers, and
+  one provider can be spread over several files, as above.
+- **A value or a list is set in one file only.** Setting it in a second file
+  stops startup instead of picking a winner. A key left empty (`providers:`
+  with nothing under it) does not count.
+- **Only `config.yaml` may hold `include`.** Included files cannot include
+  others.
+
+Every file is validated by itself, so errors name the file and line:
+
+```text
+failed to parse config/secrets/openai-eu.yaml: line 4: providers.openai-eu.base_url is already set in config/providers.yaml (line 5); a setting can be set in only one config file
+```
+
+Environment variables still override every file, `gomodel --reload` re-reads
+all of them, and `gomodel config export` prints the merged result as one file
+without `include`. At startup, `config file loaded` lists the files read under
+`included`.
+
+<Warning>
+  Keep the files a pattern matches in their own directory. `"*.yaml"` beside
+  `config.yaml` also matches every other YAML file there, and the Docker image
+  ships `/app/config/config.example.yaml`.
+</Warning>
+
+With the Helm chart, mount the Secret next to `config.yaml`:
+
+```yaml
+config: |
+  include: ["secrets/*.yaml"]
+  providers:
+    openai-eu:
+      type: openai
+      base_url: https://eu.api.openai.com/v1
+
+extraVolumes:
+  - name: provider-keys
+    secret:
+      secretName: gomodel-provider-keys # keys: openai-eu.yaml, ...
+extraVolumeMounts:
+  - name: provider-keys
+    mountPath: /app/config/secrets
+    readOnly: true
+```
 
 ## Exporting the Effective Configuration
 

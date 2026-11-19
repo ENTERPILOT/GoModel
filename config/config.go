@@ -9,8 +9,10 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -87,11 +89,11 @@ type LoadResult struct {
 	// more schemes in its configuration hook before ResolveSecrets runs.
 	Secrets *Secrets
 
-	// expanded holds the config.yaml strings environment expansion rewrote,
-	// as written, for ExportYAML. expandedUnknown reports that config.yaml
+	// expanded holds the config file strings environment expansion rewrote,
+	// as written, for ExportYAML. expandedUnknown names a config file that
 	// parses only once expanded, so they are not known.
 	expanded        map[string]writtenScalar
-	expandedUnknown bool
+	expandedUnknown string
 
 	secretsResolved bool
 	secretsErr      error
@@ -446,9 +448,20 @@ var configFilePaths = []string{
 }
 
 // IsConfigFile reports whether info describes one of the config files Load
-// searches for.
+// searches for, or a file the one it reads includes.
 func IsConfigFile(info os.FileInfo) bool {
-	for _, path := range configFilePaths {
+	paths := slices.Clone(configFilePaths)
+	if path, data, err := readConfigFile(); err == nil && data != nil {
+		var doc struct {
+			Include []string `yaml:"include"`
+		}
+		// A file that does not parse includes nothing Load would read.
+		if yaml.Unmarshal([]byte(expandString(string(data))), &doc) == nil {
+			included, _ := includedFiles(path, doc.Include)
+			paths = append(paths, included...)
+		}
+	}
+	for _, path := range paths {
 		if candidate, err := os.Stat(path); err == nil && os.SameFile(info, candidate) {
 			return true
 		}
@@ -489,13 +502,24 @@ type yamlLayer struct {
 	// variable.
 	masterKeyUnresolved bool
 	// expanded holds the strings environment expansion rewrote, as written;
-	// expandedUnknown reports that the file does not parse unexpanded.
+	// expandedUnknown names a file that does not parse unexpanded.
 	expanded        map[string]writtenScalar
-	expandedUnknown bool
+	expandedUnknown string
 }
 
-// applyYAML reads an optional config file and overlays it onto cfg.
-// If no config file is found, this is a no-op (not an error).
+// yamlDocument mirrors Config for YAML unmarshaling, using RawProviderConfig
+// for providers so nullable resilience overrides are preserved.
+type yamlDocument struct {
+	*Config      `yaml:",inline"`
+	RawProviders map[string]RawProviderConfig `yaml:"providers"`
+	// Include lists further files merged into the config file, by path or
+	// glob pattern. Only the config file itself may set it.
+	Include []string `yaml:"include"`
+}
+
+// applyYAML reads an optional config file, and the files it includes, and
+// overlays them onto cfg. If no config file is found, this is a no-op (not an
+// error).
 //
 // When strict, an unknown key is an error rather than a silently ignored one. A
 // misindented section — the classic `providers:` followed by entries at column
@@ -512,42 +536,64 @@ func applyYAML(cfg *Config, strict bool) (yamlLayer, error) {
 		return yamlLayer{providers: map[string]RawProviderConfig{}}, nil
 	}
 
-	// yamlTarget is a local struct that mirrors Config for YAML unmarshaling,
-	// using RawProviderConfig for providers so nullable resilience overrides are preserved.
-	type yamlTarget struct {
-		*Config      `yaml:",inline"`
-		RawProviders map[string]RawProviderConfig `yaml:"providers"`
-	}
-
-	target := yamlTarget{Config: cfg}
-	decoder := yaml.NewDecoder(strings.NewReader(expandString(string(data))))
-	// Unknown keys are always detected. Whether they are fatal is decided below,
-	// so the lax mode can still name each one instead of dropping it in silence.
-	decoder.KnownFields(true)
-	// A file holding only comments decodes to nothing; that is an empty overlay,
-	// not a failure.
-	decodeErr := decoder.Decode(&target)
-	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
-		if err := reportYAMLDecodeError(path, decodeErr, strict); err != nil {
-			return yamlLayer{}, err
-		}
-	}
-	if err := ensureSingleDocument(path, decoder); err != nil {
+	files, err := readConfigFiles(path, data, strict)
+	if err != nil {
 		return yamlLayer{}, err
 	}
-
-	slog.Info("config file loaded", "path", path, "providers", len(target.RawProviders))
-
+	merged, err := mergeConfigFiles(files)
+	if err != nil {
+		return yamlLayer{}, err
+	}
+	// Each file passed the strict decode by itself, which reports a problem
+	// against the file and line that holds it; this decode applies them merged.
+	target := yamlDocument{Config: cfg}
+	if merged != nil {
+		if err := merged.Decode(&target); err != nil {
+			return yamlLayer{}, formatYAMLError(path, err)
+		}
+	}
 	if target.RawProviders == nil {
 		target.RawProviders = map[string]RawProviderConfig{}
 	}
-	expanded, ok := expandedScalars(data)
-	return yamlLayer{
-		providers:           target.RawProviders,
-		masterKeyUnresolved: masterKeyReadsUnsetVariable(data, cfg.Server.MasterKey),
-		expanded:            expanded,
-		expandedUnknown:     !ok,
-	}, nil
+
+	layer := yamlLayer{providers: target.RawProviders, expanded: map[string]writtenScalar{}}
+	for _, file := range files {
+		layer.masterKeyUnresolved = layer.masterKeyUnresolved || masterKeyReadsUnsetVariable(file.data, cfg.Server.MasterKey)
+		expanded, ok := expandedScalars(file.data)
+		maps.Copy(layer.expanded, expanded)
+		if !ok && layer.expandedUnknown == "" {
+			layer.expandedUnknown = file.path
+		}
+	}
+
+	included := make([]string, 0, len(files)-1)
+	for _, file := range files[1:] {
+		included = append(included, file.path)
+	}
+	slog.Info("config file loaded", "path", path, "included", included, "providers", len(target.RawProviders))
+	return layer, nil
+}
+
+// decodeConfigFile checks one config file, with environment variables
+// expanded, by decoding it strictly. Unknown keys are always detected: whether
+// they are fatal is decided by reportYAMLDecodeError, so the lax mode can still
+// name each one instead of dropping it in silence.
+func decodeConfigFile(path, text string, strict bool) (yamlDocument, error) {
+	doc := yamlDocument{Config: &Config{}}
+	decoder := yaml.NewDecoder(strings.NewReader(text))
+	decoder.KnownFields(true)
+	// A file holding only comments decodes to nothing; that is an empty overlay,
+	// not a failure.
+	decodeErr := decoder.Decode(&doc)
+	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
+		if err := reportYAMLDecodeError(path, decodeErr, strict); err != nil {
+			return yamlDocument{}, err
+		}
+	}
+	if err := ensureSingleDocument(path, decoder); err != nil {
+		return yamlDocument{}, err
+	}
+	return doc, nil
 }
 
 // masterKeyReadsUnsetVariable reports whether the master key decoded from
@@ -650,7 +696,7 @@ func readConfigFile() (string, []byte, error) {
 }
 
 // yamlTypeSuffix matches the Go type name yaml.v3 appends to unknown-field errors
-// ("field foo not found in type config.yamlTarget"). It names an internal struct
+// ("field foo not found in type config.yamlDocument"). It names an internal struct
 // the operator cannot act on, so it is stripped.
 var yamlTypeSuffix = regexp.MustCompile(` in type \S+`)
 

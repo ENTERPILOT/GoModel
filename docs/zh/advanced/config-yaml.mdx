@@ -120,7 +120,7 @@ OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK=0
 实际生效的优先级为：
 
 1. 环境变量
-2. 可选的 `config/config.yaml` 或 `config.yaml`
+2. 可选的 `config/config.yaml` 或 `config.yaml`，以及它[包含](#拆分文件)的文件
 3. 代码中的内置默认值
 
 `.env` 并不是单独的优先级层。它只是在启动前加载环境变量的一种便捷方式。
@@ -176,6 +176,75 @@ INFO  providers resolved total=1 from_config_file=0 from_env=1
 该命令会重新读取文件和环境变量，并原地重建网关——
 参见 [CLI 操作](/zh/advanced/cli#配置重新加载)。如果新文件加载失败，则不会发生任何变化。`server.port` 和 `server.pid_file` 是例外：
 两者在进程生命周期内固定不变，因此重载时会输出警告，并保留当前运行值，直到网关重启。
+
+## 拆分文件
+
+默认情况下，配置只有一个文件。当文件大到难以整体审阅，或者提供商密钥应放在 Kubernetes Secret 中、其余内容放在 ConfigMap 中时，请在 `config.yaml` 的 `include` 下列出其他文件：
+
+```yaml
+# config/config.yaml
+include:
+  - providers.yaml
+  - "secrets/*.yaml"
+
+server:
+  port: "8080"
+```
+
+```yaml
+# config/providers.yaml
+providers:
+  openai-eu:
+    type: openai
+    base_url: https://eu.api.openai.com/v1
+```
+
+```yaml
+# config/secrets/openai-eu.yaml
+providers:
+  openai-eu:
+    api_key: "sk-..."
+```
+
+GoModel 先读取 `config.yaml`，再按列出的顺序读取每个被包含的文件，并将它们合并为一份配置：
+
+- **路径**相对于 `config.yaml` 所在目录；也可以使用绝对路径。条目和每个被包含的文件中的 `${VAR}` 都会展开。
+- **通配模式**（`*`、`?`、`[...]`）指向所有匹配的文件，按文件名顺序读取。模式没有匹配到任何文件（包括目录不存在）不算错误。不含模式的条目指向一个文件，该文件必须存在。
+- **配置段按键逐层合并**：每个文件都可以添加提供商，同一个提供商也可以像上面那样分散在多个文件中。
+- **一个值或一个列表只能在一个文件中设置**。在第二个文件中再次设置会中止启动，而不是挑选其中一个。留空的键（下面没有内容的 `providers:`）不计入。
+- **只有 `config.yaml` 可以包含 `include`**。被包含的文件不能再包含其他文件。
+
+每个文件都会单独校验，因此错误信息会指出文件和行号：
+
+```text
+failed to parse config/secrets/openai-eu.yaml: line 4: providers.openai-eu.base_url is already set in config/providers.yaml (line 5); a setting can be set in only one config file
+```
+
+环境变量仍然覆盖所有文件，`gomodel --reload` 会重新读取全部文件，`gomodel config export` 会将合并后的结果输出为一个不含 `include` 的文件。启动时，`config file loaded` 会在 `included` 中列出已读取的文件。
+
+<Warning>
+  请把模式匹配的文件放在单独的目录中。与 `config.yaml` 同目录的 `"*.yaml"` 也会匹配该目录下的其他 YAML 文件，而 Docker 镜像自带 `/app/config/config.example.yaml`。
+</Warning>
+
+使用 Helm chart 时，请将 Secret 挂载到 `config.yaml` 旁边：
+
+```yaml
+config: |
+  include: ["secrets/*.yaml"]
+  providers:
+    openai-eu:
+      type: openai
+      base_url: https://eu.api.openai.com/v1
+
+extraVolumes:
+  - name: provider-keys
+    secret:
+      secretName: gomodel-provider-keys # 键: openai-eu.yaml, ...
+extraVolumeMounts:
+  - name: provider-keys
+    mountPath: /app/config/secrets
+    readOnly: true
+```
 
 ## Docker
 
