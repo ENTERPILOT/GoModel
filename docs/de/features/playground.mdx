@@ -18,10 +18,11 @@ gestreamte Responses werden in dieselbe Form zusammengesetzt, die ein Aufruf
 ohne Streaming zurückgibt. Für Requests gelten dieselben Budgets, Rate-Limits,
 Guardrails und dasselbe Request-Logging wie für jeden anderen Client des Gateways.
 
-Die Modellauswahl listet zuerst Ihre aktivierten
+Die Modellauswahl listet zuerst Ihre
 [virtuellen Modelle](/de/features/virtual-models) auf, gekennzeichnet mit
-**Virtuelles Modell**, danach die Modelle Ihrer Provider. Sie können auch einen
-beliebigen Modellnamen eingeben. Einem Dashboard-Key, der an einen User-Path
+**Virtuelles Modell**, danach die Modelle Ihrer Provider. Ein virtuelles Modell
+wird aufgeführt, wenn es aktiviert ist und ein verfügbares Ziel hat. Sie können
+auch einen beliebigen Modellnamen eingeben. Einem Dashboard-Key, der an einen User-Path
 gebunden ist, werden keine virtuellen Modelle angezeigt; geben Sie deren Namen
 stattdessen ein.
 
@@ -30,7 +31,9 @@ stattdessen ein.
 Mit dem Schalter **Modus** über der Modellauswahl lassen sich auch Medienmodelle
 testen. Jeder Modus ruft den OpenAI-kompatiblen Endpunkt des Gateways auf und
 listet Modelle, deren Metadaten diesen Modus ausweisen, zuerst auf; Sie können
-weiterhin jedes beliebige Modell oder jeden Alias eingeben.
+weiterhin jedes beliebige Modell oder jeden Alias eingeben. Ein virtuelles
+Modell wird in einem Modus nur dann ausgeblendet, wenn jedes seiner Ziele ein
+bekanntes Modell ist, das andere Modi ausweist.
 
 | Modus | Endpunkt | Eingabe | Ergebnis |
 | --- | --- | --- | --- |

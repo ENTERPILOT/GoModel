@@ -6,11 +6,7 @@
 // speech-to-text and embeddings. Each mode has one request builder and, where
 // the response is JSON, one reader for what the UI renders.
 
-import {
-  playgroundModelOptions,
-  playgroundVirtualModelOptions,
-  withVirtualModelOptions,
-} from "./playgroundLogic.js";
+import { playgroundModelOptions, playgroundPickerOptions } from "./playgroundLogic.js";
 
 export const DEFAULT_MODE = "chat";
 
@@ -53,12 +49,7 @@ export function normalizeMode(id) {
 // Virtual models that can serve the mode lead the list in every mode.
 export function modeModelOptions(inventory, modeID, virtualModels = []) {
   const mode = mediaModeById(modeID);
-  if (!mode) {
-    return withVirtualModelOptions(
-      playgroundVirtualModelOptions(virtualModels, inventory),
-      playgroundModelOptions(inventory),
-    );
-  }
+  if (!mode) return playgroundPickerOptions(virtualModels, inventory, playgroundModelOptions(inventory));
   const wanted = new Set(mode.modelModes);
   const advertised = new Set(
     (Array.isArray(inventory) ? inventory : [])
@@ -66,10 +57,11 @@ export function modeModelOptions(inventory, modeID, virtualModels = []) {
       .map((entry) => String(entry?.selector || entry?.model?.id || "").trim()),
   );
   const options = playgroundModelOptions(inventory, wanted);
-  return withVirtualModelOptions(playgroundVirtualModelOptions(virtualModels, inventory, wanted), [
+  const ordered = [
     ...options.filter((option) => advertised.has(option.id)),
     ...options.filter((option) => !advertised.has(option.id)),
-  ]);
+  ];
+  return playgroundPickerOptions(virtualModels, inventory, ordered, wanted);
 }
 
 function text(value) {

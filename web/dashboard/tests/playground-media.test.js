@@ -62,12 +62,15 @@ test("the model picker lists virtual models first in every mode they can serve (
   const virtualModels = [
     { name: "test-alias", targets: [{ provider: "openai", model: "gpt-4o" }], enabled: true, valid: true },
     { name: "painter", targets: [{ provider: "openai", model: "gpt-image-1" }], enabled: true, valid: true },
-    // Named like an inventory model: it answers that name, so it is listed once.
+    // Named like an inventory model: it answers that name, so it is listed
+    // once in chat and the inventory option is gone in the modes it cannot serve.
     { name: "ollama/local", targets: [{ provider: "openai", model: "gpt-4o" }], enabled: true, valid: true },
+    // Without an available target the gateway falls through to the inventory model.
+    { name: "openai/gpt-image-1", targets: [{ provider: "gone", model: "x" }], enabled: true, valid: false },
   ];
   const ids = (mode) => modeModelOptions(inventory, mode, virtualModels).map((o) => o.id);
   assert.deepEqual(ids("chat"), ["ollama/local", "test-alias", "openai/gpt-4o"]);
-  assert.deepEqual(ids("image"), ["painter", "openai/gpt-image-1", "ollama/local"]);
+  assert.deepEqual(ids("image"), ["painter", "openai/gpt-image-1"]);
 
   const chat = modeModelOptions(inventory, "chat", virtualModels);
   assert.deepEqual(chat[1], { id: "test-alias", label: "test-alias", provider: "", virtual: true });

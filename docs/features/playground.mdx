@@ -16,16 +16,19 @@ streamed responses are assembled into the same shape a non-streaming call return
 Requests are subject to the same budgets, rate limits, guardrails, and request logging
 as any other client of the gateway.
 
-The model picker lists your enabled [virtual models](/features/virtual-models)
-first, tagged **Virtual model**, then the models of your providers. You can also
-type any model name. With a dashboard key bound to a user path, the picker lists
-provider models only; type a virtual model's name instead.
+The model picker lists your [virtual models](/features/virtual-models) first,
+tagged **Virtual model**, then the models of your providers. A virtual model is
+listed when it is enabled and has an available target. You can also type any
+model name. With a dashboard key bound to a user path, the picker lists provider
+models only; type a virtual model's name instead.
 
 ## Image, speech, transcription, and embeddings
 
 The **Mode** switch above the model picker tests media models too. Each mode
 calls the gateway's OpenAI-compatible endpoint and lists models whose metadata
-advertises that mode first; you can still type any model or alias.
+advertises that mode first; you can still type any model or alias. A virtual
+model is hidden in a mode only when every one of its targets is a known model
+that advertises other modes.
 
 | Mode | Endpoint | Input | Result |
 | --- | --- | --- | --- |

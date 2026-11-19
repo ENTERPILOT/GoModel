@@ -26,6 +26,7 @@ import {
   normalizeEndpoint,
   normalizeRole,
   playgroundUserPathHeader,
+  syncedUserPath,
 } from "./playgroundLogic.js";
 import { normalizeMode } from "./playgroundMedia.js";
 import { virtualModels as virtualModelsStore } from "../models/virtualModels.svelte.js";
@@ -84,6 +85,8 @@ class PlaygroundStore {
 
   #abort = null;
   #nextID = 1;
+  // The default last written to userPath, to tell it from a typed path.
+  #defaultUserPath = "";
 
   get endpointPath() {
     return endpointById(this.endpoint)?.path || "";
@@ -113,7 +116,7 @@ class PlaygroundStore {
     this.mode = mode;
     writeStored(STORAGE.mode, mode);
     this.model = readStored(modelStorageKey(mode), "") || "";
-    this.userPath = defaultUserPathForModel(modelsStore.models, this.model.trim(), this.virtualModels);
+    this.#resetUserPath();
   }
 
   setEndpoint(id) {
@@ -124,7 +127,24 @@ class PlaygroundStore {
   setModel(model) {
     this.model = String(model || "");
     writeStored(modelStorageKey(this.mode), this.model);
-    this.userPath = defaultUserPathForModel(modelsStore.models, this.model.trim(), this.virtualModels);
+    this.#resetUserPath();
+  }
+
+  #modelUserPath() {
+    return defaultUserPathForModel(modelsStore.models, this.model.trim(), this.virtualModels);
+  }
+
+  #resetUserPath() {
+    this.#defaultUserPath = this.#modelUserPath();
+    this.userPath = this.#defaultUserPath;
+  }
+
+  // Follows the selected model's default user path when the inventory or the
+  // virtual models arrive or change, without replacing a path the user typed.
+  syncUserPath() {
+    const next = this.#modelUserPath();
+    this.userPath = syncedUserPath(this.userPath, this.#defaultUserPath, next);
+    this.#defaultUserPath = next;
   }
 
   setUserPath(value) {

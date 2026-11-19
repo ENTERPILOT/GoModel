@@ -21,6 +21,7 @@ import {
   playgroundUserPathOptions,
   playgroundVirtualModelOptions,
   sendableMessages,
+  syncedUserPath,
   streamErrorMessage,
 } from "../src/pages/playground/playgroundLogic.js";
 
@@ -414,26 +415,42 @@ test("playgroundUserPathOptions skips non-string user_paths entries without thro
 });
 
 test("playgroundUserPathOptions reads the user_paths of a selected virtual model", () => {
-  const inventory = [
-    { selector: "openai/gpt-4o", model: { id: "gpt-4o" }, access: { user_paths: ["/team/model"] } },
-    { selector: "openai/gpt-5", model: { id: "gpt-5" }, access: { user_paths: ["/team/model"] } },
-  ];
+  const restricted = (id) => ({ selector: "openai/" + id, model: { id }, access: { user_paths: ["/team/model"] } });
+  const inventory = [restricted("gpt-4o"), restricted("gpt-5"), restricted("gpt-5-mini"), restricted("o3")];
   const virtualModels = [
     { name: "team-alias", enabled: true, valid: true, user_paths: ["/team/alpha", "/team/beta"] },
     { name: "open-alias", enabled: true, valid: true, user_paths: [] },
     { name: "openai/gpt-4o", enabled: true, valid: true, user_paths: ["/team/redirect"] },
     { name: "openai/gpt-5", enabled: false, valid: true, user_paths: ["/team/redirect"] },
+    { name: "openai/gpt-5-mini", enabled: true, valid: false, user_paths: ["/team/redirect"] },
+    { name: "openai/o3", enabled: true, valid: true, user_paths: [] },
   ];
   const values = (selector) =>
     playgroundUserPathOptions(inventory, selector, virtualModels).map((option) => option.value);
   assert.deepEqual(values(" team-alias "), ["/team/alpha", "/team/beta"]);
   assert.deepEqual(values("open-alias"), []);
-  // An enabled virtual model named like an inventory model answers the request.
+  // A virtual model named like an inventory model answers the request, so its
+  // paths apply, also when it has none.
   assert.deepEqual(values("openai/gpt-4o"), ["/team/redirect"]);
+  assert.deepEqual(values("openai/o3"), []);
+  // Disabled or without an available target, it does not answer: the gateway
+  // falls through to the inventory model.
   assert.deepEqual(values("openai/gpt-5"), ["/team/model"]);
+  assert.deepEqual(values("openai/gpt-5-mini"), ["/team/model"]);
   assert.deepEqual(playgroundUserPathOptions(inventory, "team-alias"), []);
   assert.deepEqual(playgroundUserPathOptions(inventory, "team-alias", "nope"), []);
   assert.equal(defaultUserPathForModel(inventory, "team-alias", virtualModels), "/team/alpha");
+});
+
+test("syncedUserPath follows the model default until the user types a path", () => {
+  // Nothing chosen yet: take the default.
+  assert.equal(syncedUserPath("", "", "/team/model"), "/team/model");
+  // Still the previous default (the inventory arrived first): follow the new one.
+  assert.equal(syncedUserPath("/team/model", "/team/model", "/team/redirect"), "/team/redirect");
+  assert.equal(syncedUserPath("/team/model", "/team/model", ""), "");
+  // A typed path stays.
+  assert.equal(syncedUserPath("/team/mine", "/team/model", "/team/redirect"), "/team/mine");
+  assert.equal(syncedUserPath(undefined, undefined, undefined), "");
 });
 
 test("defaultUserPathForModel returns the first allowed path or empty", () => {
