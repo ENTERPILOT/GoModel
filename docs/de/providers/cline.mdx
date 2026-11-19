@@ -1,0 +1,109 @@
+---
+title: "Cline"
+description: "Leiten Sie die Modelle eines Cline-Kontos (Cline-Guthaben und ClinePass) über GoModel, damit ihre Nutzung erfasst wird."
+icon: "bot"
+tag: "Beta"
+keywords: ["Cline", "ClinePass", "Cline API", "Coding-Agent", "coding agent", "integrierte Modelle", "built-in models", "Provider-Einrichtung", "provider setup"]
+---
+
+<Warning>
+  Die Unterstützung für Cline befindet sich in der Beta-Phase. Sie folgt der
+  öffentlichen Dokumentation der Cline API und ist durch automatisierte Tests
+  gegen eine simulierte API abgedeckt, Chat-Anfragen wurden aber noch nicht mit
+  dem echten Cline-Dienst geprüft. Bitte melden Sie Probleme, auf die Sie
+  stoßen.
+</Warning>
+
+Der Provider `cline` ruft die [Cline API](https://docs.cline.bot/api/overview)
+auf, den Modelldienst hinter den integrierten Providern **Cline**
+(nutzungsbasiertes Guthaben) und **ClinePass** (Abonnement) des Cline-Agents.
+Die Nutzung wird über Ihr Cline-Konto abgerechnet, und jede Anfrage erscheint
+in GoModel:
+
+`Cline -> GoModel -> Cline API`
+
+| GoModel-Endpunkt | Cline API |
+| ---------------- | --------- |
+| `/v1/chat/completions` | `/chat/completions` |
+| `/v1/responses` | übersetzt über Chat Completions |
+| `/v1/embeddings` | nicht unterstützt (liefert `invalid_request_error`) |
+
+## Konfiguration
+
+Erstellen Sie auf [app.cline.bot](https://app.cline.bot) unter
+**Settings > API Keys** einen API-Key und setzen Sie:
+
+```bash
+CLINE_API_KEY=...
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  cline:
+    type: cline
+    api_key: "${CLINE_API_KEY}"
+    # base_url ist standardmäßig "https://api.cline.bot/api/v1".
+```
+
+## Modelle
+
+GoModel liest die `/models`-Liste von Cline. Modell-IDs haben die Form
+`provider/model` und werden unverändert weitergeleitet. Stellen Sie den
+Providernamen voran, um die Route festzulegen; das ist immer dann nötig, wenn
+die ID mit dem Namen eines anderen konfigurierten Providers beginnt:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "cline/anthropic/claude-sonnet-4-6", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+### ClinePass-Modelle
+
+Die Liste von Cline enthält die ClinePass-Modelle (`cline-pass/...`) nicht.
+Nennen Sie die Modelle, die Sie verwenden, und setzen Sie den Modus `merge`,
+damit die gelisteten Modelle erhalten bleiben:
+
+```bash
+CLINE_MODELS=cline-pass/qwen3.7-max,cline-pass/kimi-k3
+CLINE_MODELS_MODE=merge
+```
+
+Ohne `CLINE_MODELS_MODE=merge` werden nur die Modelle aus `CLINE_MODELS`
+bereitgestellt. Siehe [Modellmodi](/de/advanced/config-yaml#modellmodi) und die
+[ClinePass-Seite](https://docs.cline.bot/getting-started/clinepass) für die
+aktuellen Modell-IDs.
+
+## Cline weiter mit seinen integrierten Modellen nutzen
+
+Um den Traffic des Cline-Agents selbst zu erfassen, richten Sie ihn auf GoModel
+aus, statt seinen integrierten Provider zu wählen:
+
+- API Provider: `OpenAI Compatible`
+- Base URL: `http://localhost:8080/v1`
+- API Key: Ihr GoModel-Key
+- Model ID: `cline/anthropic/claude-sonnet-4-6` oder ein anderes Modell aus
+  `GET /v1/models`
+
+Die vollständige Anleitung finden Sie unter
+[Coding-Agents](/de/guides/opencode-and-other-agents).
+
+## Hinweise zum Verhalten
+
+- **Gepufferte Antworten werden ausdrücklich angefordert.** Die Cline API
+  streamt, solange nichts anderes verlangt wird, und verpackt gepufferte
+  Antworten standardmäßig in einen älteren Umschlag. Deshalb sendet GoModel
+  `"stream": false` und den Header `X-Response-Format: openai`. Clients müssen
+  nichts ändern.
+- **Kosten stammen aus den Preisdaten von GoModel**, nicht aus dem Wert
+  `usage.cost`, den Cline meldet. Die Token-Nutzung wird immer erfasst; ein
+  Modell ohne bekannten Preis hat keine Kosten, bis Sie eine
+  [Preisüberschreibung](/de/features/cost-tracking#preise-überschreiben)
+  setzen.
+- **Passthrough ist opt-in.** Fügen Sie `cline` zu
+  `ENABLED_PASSTHROUGH_PROVIDERS` hinzu, um `/p/cline/...` freizugeben. GoModel
+  ergänzt `X-Response-Format: openai`, sofern der Aufrufer keinen eigenen Wert
+  sendet, und leitet den Body unverändert weiter.

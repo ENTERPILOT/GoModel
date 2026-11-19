@@ -1,0 +1,79 @@
+---
+title: "Cline"
+description: "让 Cline 账号的模型（Cline 额度和 ClinePass）经由 GoModel 转发，以便追踪其用量。"
+icon: "bot"
+tag: "Beta"
+keywords: ["Cline", "ClinePass", "Cline API", "编程智能体", "内置模型", "提供商配置", "coding agent", "built-in models", "provider setup"]
+---
+
+<Warning>
+  Cline 支持目前处于 Beta 阶段。它依据公开的 Cline API 文档实现，并已通过针对模拟 API 的自动化测试，但聊天请求尚未在真实的
+  Cline 服务上验证。如遇问题，请反馈给我们。
+</Warning>
+
+`cline` 提供商调用 [Cline API](https://docs.cline.bot/api/overview)，即 Cline 智能体内置的 **Cline**（按量付费额度）和 **ClinePass**（订阅）提供商背后的模型服务。用量计入您的 Cline 账号，同时每个请求都会出现在 GoModel 中：
+
+`Cline -> GoModel -> Cline API`
+
+| GoModel 端点 | Cline API |
+| ---------------- | --------- |
+| `/v1/chat/completions` | `/chat/completions` |
+| `/v1/responses` | 通过聊天补全转换处理 |
+| `/v1/embeddings` | 不支持（返回 `invalid_request_error`） |
+
+## 配置
+
+在 [app.cline.bot](https://app.cline.bot) 的 **Settings > API Keys** 中创建一个 API 密钥，然后设置：
+
+```bash
+CLINE_API_KEY=...
+```
+
+或者在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  cline:
+    type: cline
+    api_key: "${CLINE_API_KEY}"
+    # base_url 默认为 "https://api.cline.bot/api/v1"。
+```
+
+## 模型
+
+GoModel 会读取 Cline 的 `/models` 列表。模型 ID 采用 `provider/model` 形式，并原样转发。加上提供商名称前缀可以固定路由；当模型 ID 以另一个已配置提供商的名称开头时，必须加上前缀：
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "cline/anthropic/claude-sonnet-4-6", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+### ClinePass 模型
+
+Cline 的列表不包含 ClinePass 模型（`cline-pass/...`）。请列出您使用的模型，并使用 `merge` 模式以同时保留列表中的模型：
+
+```bash
+CLINE_MODELS=cline-pass/qwen3.7-max,cline-pass/kimi-k3
+CLINE_MODELS_MODE=merge
+```
+
+如果不设置 `CLINE_MODELS_MODE=merge`，则只提供 `CLINE_MODELS` 中的模型。参见[模型模式](/zh/advanced/config-yaml#模型模式)，当前的模型 ID 见 [ClinePass 页面](https://docs.cline.bot/getting-started/clinepass)。
+
+## 继续在 Cline 中使用其内置模型
+
+要追踪 Cline 智能体自身的流量，请让它指向 GoModel，而不是选择其内置提供商：
+
+- API Provider：`OpenAI Compatible`
+- Base URL：`http://localhost:8080/v1`
+- API Key：您的 GoModel 密钥
+- Model ID：`cline/anthropic/claude-sonnet-4-6`，或 `GET /v1/models` 返回的其他模型
+
+完整步骤参见[编程智能体](/zh/guides/opencode-and-other-agents)。
+
+## 行为说明
+
+- **显式请求非流式响应。** Cline API 默认以流式返回，并且默认把非流式响应包装在旧版格式中，因此 GoModel 会发送 `"stream": false` 和 `X-Response-Format: openai` 请求头。客户端无需任何改动。
+- **成本来自 GoModel 的定价数据**，而不是 Cline 返回的 `usage.cost`。Token 用量始终会被记录；没有已知价格的模型不会有成本，直到您设置[定价覆盖](/zh/features/cost-tracking#覆盖定价)。
+- **透传需要手动启用。** 将 `cline` 添加到 `ENABLED_PASSTHROUGH_PROVIDERS` 即可开放 `/p/cline/...`。除非调用方发送了自己的值，否则 GoModel 会添加 `X-Response-Format: openai`，并原样转发请求体。

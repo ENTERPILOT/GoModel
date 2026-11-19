@@ -603,7 +603,10 @@ func (sc *OpenAIResponsesStreamConverter) appendFailedEvents(raw json.RawMessage
 
 // chatUsageToResponsesUsage renames a valid Chat Completions usage object into
 // the conservative Responses API shape. Malformed usage is omitted rather than
-// making clients reject an otherwise successful response.completed event.
+// making clients reject an otherwise successful response.completed event. A
+// missing total is not malformed: some upstreams (Cline) report only the
+// prompt and completion counts, so the total is derived from them, as the
+// usage log does.
 func chatUsageToResponsesUsage(raw json.RawMessage) (responsesStreamUsage, bool) {
 	var chatUsage struct {
 		PromptTokens            int                           `json:"prompt_tokens"`
@@ -618,8 +621,11 @@ func chatUsageToResponsesUsage(raw json.RawMessage) (responsesStreamUsage, bool)
 	if err := json.Unmarshal(raw, &chatUsage); err != nil {
 		return responsesStreamUsage{}, false
 	}
-	if chatUsage.PromptTokens < 0 || chatUsage.CompletionTokens < 0 || chatUsage.TotalTokens < 0 {
+	if chatUsage.PromptTokens < 0 || chatUsage.CompletionTokens < 0 {
 		return responsesStreamUsage{}, false
+	}
+	if chatUsage.TotalTokens < 0 {
+		chatUsage.TotalTokens = chatUsage.PromptTokens + chatUsage.CompletionTokens
 	}
 	return responsesStreamUsage{
 		InputTokens:         chatUsage.PromptTokens,

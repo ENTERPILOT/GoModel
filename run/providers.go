@@ -12,6 +12,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/bedrockmantle"
 	"github.com/enterpilot/gomodel/internal/providers/chatgpt"
 	"github.com/enterpilot/gomodel/internal/providers/chutes"
+	"github.com/enterpilot/gomodel/internal/providers/cline"
 	"github.com/enterpilot/gomodel/internal/providers/cohere"
 	"github.com/enterpilot/gomodel/internal/providers/deepinfra"
 	"github.com/enterpilot/gomodel/internal/providers/deepseek"
@@ -64,6 +65,7 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(bedrockmantle.Registration)
 	factory.Add(chatgpt.Registration)
 	factory.Add(chutes.Registration)
+	factory.Add(cline.Registration)
 	factory.Add(cohere.Registration)
 	factory.Add(deepinfra.Registration)
 	factory.Add(deepseek.Registration)

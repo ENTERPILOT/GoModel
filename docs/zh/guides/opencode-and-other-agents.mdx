@@ -163,6 +163,8 @@ export OPENAI_API_KEY=change-me
 - API Key：`change-me`
 - Model ID：`GET /v1/models` 返回的某个模型
 
+如需继续使用 Cline 账号的模型，请参见[追踪智能体的内置模型](#追踪智能体的内置模型)。
+
 ### Roo Code
 
 在 Roo Code 中选择：
@@ -221,6 +223,26 @@ Reply with exactly ok and no punctuation.
 [http://localhost:8080/admin/dashboard/requests](http://localhost:8080/admin/dashboard/requests)
 
 这是确认编程智能体已连接到 GoModel 并查看每次交互的最快方式。在同一个控制台中，您还可以持续跟踪 GoModel 的流量和用量。
+
+## 追踪智能体的内置模型
+
+当您选择智能体的内置提供商（它自己的账号、额度或订阅）时，智能体会直接调用该服务，GoModel 完全看不到这些流量。要保留这些模型并仍然记录其用量，请把同一个服务作为提供商添加到 GoModel，并让智能体改为指向 GoModel：
+
+`Agent -> GoModel -> 智能体的模型服务`
+
+| 内置提供商 | GoModel 提供商 | 配置 |
+| ---------- | -------------- | ---- |
+| Cline（额度）和 ClinePass | `cline` | [Cline](/zh/providers/cline) |
+| OpenCode Go | `opencode_go` | [OpenCode Go](/zh/providers/opencode-go) |
+| Kilo Gateway（Kilo Code） | `kilo` | [提供商概览](/zh/providers/overview) |
+| GitHub Copilot | `github-copilot` | [GitHub Copilot](/zh/providers/github-copilot) |
+| ChatGPT 订阅（Codex） | `chatgpt` | [Codex](/zh/guides/codex) |
+| Claude 订阅（Claude Code） | `anthropic` | [Claude Code](/zh/guides/claude-code) |
+| Kimi Code | `kimicode` | [Kimi Code CLI](/zh/guides/kimi-code-cli) |
+
+例如，要让 Cline 继续使用计入您 Cline 账号的模型，请使用 `CLINE_API_KEY` 启动 GoModel，并将 Cline 的 Model ID 设置为 `cline/anthropic/claude-sonnet-4-6`。
+
+这只适用于提供可供其他客户端使用的凭据的服务。没有这类凭据的内置模型（例如 Cursor 的内置模型）无法经由 GoModel 转发，OpenCode Zen 的按量付费目录目前也还没有专门的提供商。
 
 ## 当前状态
 

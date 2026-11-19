@@ -880,6 +880,31 @@ data: [DONE]
 	}
 }
 
+// Some upstreams (Cline) report only prompt and completion counts. That usage
+// is complete enough to keep: the total is their sum.
+func TestOpenAIResponsesStreamConverter_DerivesMissingTotalTokens(t *testing.T) {
+	mockStream := `data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":14,"completion_tokens":8,"cost":0.000066}}
+
+data: [DONE]
+`
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "cline")
+	raw, err := io.ReadAll(converter)
+	require.NoError(t, err)
+
+	var usage map[string]any
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done || event.Name != "response.completed" {
+			continue
+		}
+		response, _ := event.Payload["response"].(map[string]any)
+		usage, _ = response["usage"].(map[string]any)
+	}
+	require.NotNil(t, usage, "response.completed must carry usage")
+	assert.Equal(t, float64(14), usage["input_tokens"])
+	assert.Equal(t, float64(8), usage["output_tokens"])
+	assert.Equal(t, float64(22), usage["total_tokens"])
+}
+
 func TestOpenAIResponsesStreamConverter_PropagatesStreamError(t *testing.T) {
 	tests := []struct {
 		name        string

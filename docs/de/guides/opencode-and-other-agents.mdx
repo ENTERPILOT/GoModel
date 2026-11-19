@@ -177,6 +177,9 @@ Wählen Sie in Cline:
 - API Key: `change-me`
 - Model ID: ein Modell, das `GET /v1/models` zurückgibt
 
+Wie Sie die Modelle Ihres Cline-Kontos weiter nutzen, lesen Sie unter
+[Integrierte Modelle eines Agents erfassen](#integrierte-modelle-eines-agents-erfassen).
+
 ### Roo Code
 
 Wählen Sie in Roo Code:
@@ -240,6 +243,35 @@ Reply with exactly ok and no punctuation.
 So bestätigen Sie am schnellsten, dass Ihr Coding-Agent GoModel erreicht, und
 können jede Interaktion prüfen. Im selben Dashboard können Sie Ihren
 GoModel-Traffic und Ihre Nutzung weiter verfolgen.
+
+## Integrierte Modelle eines Agents erfassen
+
+Wenn Sie den integrierten Provider eines Agents wählen (sein eigenes Konto,
+Guthaben oder Abonnement), ruft der Agent diesen Dienst direkt auf und GoModel
+sieht den Traffic nie. Um diese Modelle zu behalten und ihre Nutzung trotzdem
+zu erfassen, fügen Sie denselben Dienst als Provider zu GoModel hinzu und
+richten Sie den Agent stattdessen auf GoModel aus:
+
+`Agent -> GoModel -> Modelldienst des Agents`
+
+| Integrierter Provider | GoModel-Provider | Einrichtung |
+| --------------------- | ---------------- | ----------- |
+| Cline (Guthaben) und ClinePass | `cline` | [Cline](/de/providers/cline) |
+| OpenCode Go | `opencode_go` | [OpenCode Go](/de/providers/opencode-go) |
+| Kilo Gateway (Kilo Code) | `kilo` | [Provider-Übersicht](/de/providers/overview) |
+| GitHub Copilot | `github-copilot` | [GitHub Copilot](/de/providers/github-copilot) |
+| ChatGPT-Abonnement (Codex) | `chatgpt` | [Codex](/de/guides/codex) |
+| Claude-Abonnement (Claude Code) | `anthropic` | [Claude Code](/de/guides/claude-code) |
+| Kimi Code | `kimicode` | [Kimi Code CLI](/de/guides/kimi-code-cli) |
+
+Um Cline zum Beispiel weiter mit einem Modell zu nutzen, das über Ihr
+Cline-Konto abgerechnet wird, starten Sie GoModel mit `CLINE_API_KEY` und
+setzen Sie die Model ID in Cline auf `cline/anthropic/claude-sonnet-4-6`.
+
+Das funktioniert nur bei Diensten, die Zugangsdaten ausgeben, die auch andere
+Clients verwenden dürfen. Integrierte Modelle ohne solche Zugangsdaten, etwa
+die von Cursor, lassen sich nicht über GoModel leiten, und für den
+Pay-as-you-go-Katalog von OpenCode Zen gibt es noch keinen eigenen Provider.
 
 ## Aktueller Stand
 
