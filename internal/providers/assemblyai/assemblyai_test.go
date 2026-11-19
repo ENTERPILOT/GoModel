@@ -2,13 +2,16 @@ package assemblyai
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
@@ -89,21 +92,40 @@ func TestUnsupportedCapabilities_ReturnInvalidRequestErrors(t *testing.T) {
 }
 
 func TestPassthrough_ForwardsOpaqueRequest(t *testing.T) {
-	server, capture := providertest.JSONServer(t, http.StatusOK, `{"transcripts":[]}`)
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"id":"abc","status":"queued"}`)
+	var started llmclient.RequestInfo
+	opts := providertest.Options(llmclient.Hooks{
+		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
+			started = info
+			return ctx
+		},
+	})
+	opts.HTTPClient = server.Client()
+	provider := New(providers.ProviderConfig{APIKey: "aai_test", BaseURL: server.URL}, opts).(*Provider)
 
-	provider := newTestProvider("aai_test", server.URL, server.Client())
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
-		Method:   http.MethodGet,
-		Endpoint: "v2/transcript",
-		Headers:  http.Header{},
+		Method:          http.MethodPost,
+		Endpoint:        "v2/transcript?limit=5",
+		Operation:       "audio_transcription",
+		Model:           "universal-2",
+		StreamUncertain: true,
+		Body:            io.NopCloser(strings.NewReader(`{"audio_url":"https://example.com/a.mp3"}`)),
+		Headers:         http.Header{"Content-Type": {"application/json"}, "X-Caller": {"kept"}},
 	})
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
 	req := capture.Last(t)
+	assert.Equal(t, http.MethodPost, req.Method)
 	assert.Equal(t, "/v2/transcript", req.Path)
+	assert.Equal(t, "5", req.Query.Get("limit"))
 	assert.Equal(t, "aai_test", req.Header.Get("Authorization"))
+	assert.Equal(t, "kept", req.Header.Get("X-Caller"))
+	assert.JSONEq(t, `{"audio_url":"https://example.com/a.mp3"}`, string(req.Body))
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "audio_transcription", started.Operation)
+	assert.Equal(t, "universal-2", started.Model)
+	assert.True(t, started.StreamUncertain)
 
 	_, err = provider.Passthrough(context.Background(), nil)
 	require.Error(t, err)

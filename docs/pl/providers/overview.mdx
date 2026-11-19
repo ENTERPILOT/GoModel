@@ -165,8 +165,8 @@ przez providera upstream.
   `FIREWORKS_MODELS`.
 - **AssemblyAI** – provider speech-to-text: `/v1/audio/transcriptions` jest
   obsługiwany, ale chat, `/v1/responses`, embeddingi i `/v1/audio/speech` nie.
-  Po każdym żądaniu GoModel usuwa z AssemblyAI transkrypcję i przesłane dla niej
-  audio. Modele, formaty odpowiedzi i endpoint EU opisuje
+  Po każdym żądaniu GoModel próbuje usunąć z AssemblyAI transkrypcję i przesłane
+  dla niej audio. Modele, formaty odpowiedzi i endpoint EU opisuje
   [przewodnik AssemblyAI](/pl/providers/assemblyai).
 - **ElevenLabs** – provider wyłącznie głosowy: `/v1/audio/speech` (text-to-speech)
   i `/v1/audio/transcriptions` (speech-to-text) są obsługiwane, ale chat,

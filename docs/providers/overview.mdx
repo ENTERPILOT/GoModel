@@ -161,8 +161,8 @@ support, not every individual model capability exposed by an upstream provider.
   in `FIREWORKS_MODELS`.
 - **AssemblyAI** — a speech-to-text provider: `/v1/audio/transcriptions` is
   supported, but chat, `/v1/responses`, embeddings, and `/v1/audio/speech` are
-  not. GoModel deletes each transcript, and the audio uploaded for it, from
-  AssemblyAI after the request. See the [AssemblyAI guide](/providers/assemblyai)
+  not. After each request GoModel tries to delete the transcript, and the audio
+  uploaded for it, from AssemblyAI. See the [AssemblyAI guide](/providers/assemblyai)
   for models, response formats, and the EU endpoint.
 - **ElevenLabs** — a voice-only provider: `/v1/audio/speech` (text-to-speech)
   and `/v1/audio/transcriptions` (speech-to-text) are supported, but chat,

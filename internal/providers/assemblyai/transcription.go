@@ -1,13 +1,17 @@
 package assemblyai
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -84,11 +88,18 @@ func (p *Provider) CreateTranscription(ctx context.Context, req *core.AudioTrans
 	if err != nil {
 		return nil, err
 	}
+	body, err := json.Marshal(params)
+	if err != nil {
+		return nil, core.NewInvalidRequestError("failed to encode the assemblyai transcript request", err)
+	}
 	job := &transcript{}
 	if err := p.client.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/v2/transcript",
-		Body:     params,
+		Headers:  http.Header{"Content-Type": {"application/json"}},
+		// A one-shot body is sent once and never retried: a retry after a lost
+		// response would create a second job whose id nothing knows to delete.
+		RawBodyReader: bytes.NewReader(body),
 	}, job); err != nil {
 		return nil, err
 	}
@@ -154,8 +165,9 @@ func newTranscriptParams(req *core.AudioTranscriptionRequest) (*transcriptParams
 		Prompt:       strings.TrimSpace(req.Prompt),
 	}
 	if raw := strings.TrimSpace(req.Temperature); raw != "" {
+		// ParseFloat accepts NaN and Inf, which cannot be sent as JSON.
 		temperature, err := strconv.ParseFloat(raw, 64)
-		if err != nil {
+		if err != nil || math.IsNaN(temperature) || math.IsInf(temperature, 0) {
 			return nil, core.NewInvalidRequestError("temperature must be a number", err).WithParam("temperature")
 		}
 		params.Temperature = &temperature
@@ -284,8 +296,11 @@ func (p *Provider) sentences(ctx context.Context, id string) ([]transcriptSpan, 
 // the audio uploaded for it. AssemblyAI otherwise keeps both for its retention
 // period. It runs for failed, timed out, and canceled jobs too, and a failure
 // is logged rather than returned: the caller's transcript is already complete.
+// The call bypasses the circuit breaker, so a breaker that the job's own
+// failures or other requests opened cannot skip the deletion.
 func (p *Provider) deleteTranscript(ctx context.Context, id string) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deleteTimeout)
+	ctx = llmclient.WithoutCircuitBreaker(context.WithoutCancel(ctx))
+	ctx, cancel := context.WithTimeout(ctx, deleteTimeout)
 	defer cancel()
 	if _, err := p.client.DoRaw(ctx, llmclient.Request{
 		Method:   http.MethodDelete,

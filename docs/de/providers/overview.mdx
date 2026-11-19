@@ -152,8 +152,8 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   `accounts/fireworks/models/gpt-oss-120b`; verwenden Sie sie unverändert in Requests und in
   `FIREWORKS_MODELS`.
 - **AssemblyAI** – ein Speech-to-Text-Provider: `/v1/audio/transcriptions` wird unterstützt,
-  Chat, `/v1/responses`, Embeddings und `/v1/audio/speech` dagegen nicht. GoModel löscht jedes
-  Transkript und das dafür hochgeladene Audio nach der Anfrage bei AssemblyAI. Modelle,
+  Chat, `/v1/responses`, Embeddings und `/v1/audio/speech` dagegen nicht. Nach jeder Anfrage
+  versucht GoModel, das Transkript und das dafür hochgeladene Audio bei AssemblyAI zu löschen. Modelle,
   Antwortformate und den EU-Endpunkt beschreibt der
   [AssemblyAI-Leitfaden](/de/providers/assemblyai).
 - **ElevenLabs** – ein reiner Sprach-Provider: `/v1/audio/speech` (Text-to-Speech) und

@@ -66,7 +66,7 @@ curl https://your-gateway/v1/audio/transcriptions \
 
 - `srt` 和 `vtt` 由 AssemblyAI 的字幕导出生成。
 - `verbose_json` 返回由 AssemblyAI 的句子构成的 `segments`。添加
-  `timestamp_granularities[]=word` 可获得 `words` 数组。AssemblyAI 没有 Whisper 解码数据，因此分段字段
+  `timestamp_granularities[]=word` 可获得 `words` 数组；只请求 `word` 时不返回 `segments`。AssemblyAI 没有 Whisper 解码数据，因此分段字段
   `seek`、`tokens`、`temperature`、`avg_logprob`、`compression_ratio` 和 `no_speech_prob`
   始终为零或为空。`language` 是 AssemblyAI 的语言代码，例如 `en_us`。
 
@@ -83,15 +83,16 @@ GoModel 最多等待任务 10 分钟，之后返回 `504`。AssemblyAI 无法转
 ## 数据保留
 
 AssemblyAI 会保存上传的音频和完成的转录，直到其
-[保留期](https://www.assemblyai.com/docs/data-retention-and-model-training)结束。GoModel
-不会把它们留在那里：每次请求之后（包括失败、超时和被取消的请求），它都会删除转录，同时也会删除上传的音频。删除失败时会连同转录
+[保留期](https://www.assemblyai.com/docs/data-retention-and-model-training)结束。每次请求之后（包括失败、超时和被取消的请求），GoModel
+都会尝试删除转录，同时也会删除上传的音频。删除失败时会连同转录
 ID 一起记入日志，不会导致请求失败。
 
 如果转录任务未能创建，对应的音频没有可删除的转录，会一直保留到 AssemblyAI 的保留机制将其移除。
 
 ## 成本追踪
 
-AssemblyAI 按音频小时数计费。GoModel 会记录 AssemblyAI 为每次请求报告的音频时长，但 AssemblyAI
+AssemblyAI 按音频小时数计费。对于 `json` 和 `verbose_json`，GoModel 会记录 AssemblyAI 报告的音频时长；`text`、`srt` 和 `vtt`
+不包含时长，因此 GoModel 会测量上传的文件（仅限 WAV 和 MP3）。AssemblyAI
 的模型不在模型目录中，因此需要自行设置价格：添加带有 `per_second_input` 的
 [定价覆盖](/zh/features/cost-tracking#覆盖定价)，其值为
 [AssemblyAI 定价](https://www.assemblyai.com/pricing)中的每小时价格除以 3600。

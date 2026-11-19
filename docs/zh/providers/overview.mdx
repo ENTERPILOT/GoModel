@@ -75,7 +75,7 @@ GoModel 通过一个网关将兼容 OpenAI 的请求路由到众多 AI 提供商
 - **MiniMax 区域与当前文本模型**：默认的全球端点为 `https://api.minimax.io/v1`；中国大陆平台的账户应设置 `MINIMAX_BASE_URL=https://api.minimaxi.com/v1`。当前的文本模型 ID 为 `MiniMax-M3`（1,000,000 Token 上下文；支持文本、图片和视频输入）和 `MiniMax-M2.7`（204,800 Token 上下文；支持文本输入）。按每百万 Token 计的美元定价：M3 输入 $0.60、输出 $2.40、缓存输入 $0.12；M2.7 输入 $0.30、输出 $1.20、缓存输入 $0.06、缓存写入 $0.375。M3 支持自适应思考或禁用思考；M2.7 始终进行思考。
 - **Amazon Bedrock Mantle**：GPT-5.6 Sol、Terra 和 Luna 在 Mantle 上只接受 Responses API。GoModel 会将 `/v1/responses` 请求直接发送到 AWS，并选择所需的 `/openai/v1/responses` 上游路径。
 - **Fireworks AI**：模型 ID 是账户作用域的路径，例如 `accounts/fireworks/models/gpt-oss-120b`；请在请求和 `FIREWORKS_MODELS` 中原样使用。
-- **AssemblyAI**：语音转文本提供商：支持 `/v1/audio/transcriptions`，但不支持聊天、`/v1/responses`、嵌入和 `/v1/audio/speech`。每次请求结束后，GoModel 都会从 AssemblyAI 删除转录及为其上传的音频。有关模型、响应格式和欧盟端点，请参阅 [AssemblyAI 指南](/zh/providers/assemblyai)。
+- **AssemblyAI**：语音转文本提供商：支持 `/v1/audio/transcriptions`，但不支持聊天、`/v1/responses`、嵌入和 `/v1/audio/speech`。每次请求结束后，GoModel 都会尝试从 AssemblyAI 删除转录及为其上传的音频。有关模型、响应格式和欧盟端点，请参阅 [AssemblyAI 指南](/zh/providers/assemblyai)。
 - **ElevenLabs**：仅语音的提供商：支持 `/v1/audio/speech`（文本转语音）和 `/v1/audio/transcriptions`（语音转文本），但不支持聊天、`/v1/responses` 和嵌入（上表中的 ❌ 反映的是这一点，而不是网关的限制）。OpenAI 的 `voice` 字段必须是 ElevenLabs 的 voice_id。有关支持的音频格式和语音转文本模型，请参阅 [ElevenLabs 指南](/zh/providers/elevenlabs)。
 - **Chutes AI**：默认使用 `https://llm.chutes.ai/v1`，并从实时目录中发现其当前的模型 ID、上下文限制、能力和定价。GoModel 会将 `/v1/responses` 请求转换为 Chat Completions；Chutes 的共享 LLM 端点不提供嵌入。透传支持需要运维人员显式启用，即将 `chutes` 添加到 `ENABLED_PASSTHROUGH_PROVIDERS`。
 - **Meta (Muse Spark)**：Meta Model API 兼容 OpenAI；设置 `META_API_KEY` 并路由到 `muse-spark-1.1`。Muse Spark 模型尚未进入上游模型目录，因此如果需要成本追踪和上下文窗口报告，请在 `config.yaml` 的 `providers.meta.models` 元数据下声明 `context_window` 和 `pricing`。

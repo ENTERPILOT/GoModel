@@ -72,7 +72,8 @@ und `vtt`:
 
 - `srt` und `vtt` erzeugt der Untertitel-Export von AssemblyAI.
 - `verbose_json` liefert `segments`, die aus den Sätzen von AssemblyAI gebildet
-  werden. Mit `timestamp_granularities[]=word` kommt das Array `words` hinzu.
+  werden. Mit `timestamp_granularities[]=word` kommt das Array `words` hinzu;
+  wird nur `word` angefordert, entfällt `segments`.
   AssemblyAI hat keine Whisper-Dekodierdaten, daher sind die Segmentfelder
   `seek`, `tokens`, `temperature`, `avg_logprob`, `compression_ratio` und
   `no_speech_prob` immer `0` oder leer. `language` ist der Sprachcode von
@@ -99,9 +100,8 @@ liefert `502`.
 
 AssemblyAI speichert hochgeladenes Audio und fertige Transkripte bis zum Ende
 seiner [Aufbewahrungsfrist](https://www.assemblyai.com/docs/data-retention-and-model-training).
-GoModel lässt sie dort nicht liegen: Nach jeder Anfrage, auch nach
-fehlgeschlagenen, abgelaufenen und abgebrochenen, löscht es das Transkript und
-damit auch das hochgeladene Audio. Ein fehlgeschlagenes Löschen wird mit der
+Nach jeder Anfrage, auch nach fehlgeschlagenen, abgelaufenen und abgebrochenen,
+versucht GoModel, das Transkript und damit auch das hochgeladene Audio zu löschen. Ein fehlgeschlagenes Löschen wird mit der
 Transkript-ID protokolliert und lässt die Anfrage nicht scheitern.
 
 Audio, dessen Transkript-Job nicht angelegt werden konnte, hat kein Transkript,
@@ -110,9 +110,10 @@ AssemblyAI es entfernt.
 
 ## Kostenverfolgung
 
-AssemblyAI rechnet pro Stunde Audio ab. GoModel zeichnet die Audiodauer auf, die
-AssemblyAI für jede Anfrage meldet, die Modelle von AssemblyAI stehen aber nicht
-im Modellkatalog. Der Preis muss daher gesetzt werden: als
+AssemblyAI rechnet pro Stunde Audio ab. Bei `json` und `verbose_json` zeichnet
+GoModel die Audiodauer auf, die AssemblyAI meldet; `text`, `srt` und `vtt`
+enthalten keine, daher misst GoModel dort die hochgeladene Datei (nur WAV und
+MP3). Die Modelle von AssemblyAI stehen nicht im Modellkatalog. Der Preis muss daher gesetzt werden: als
 [Preisüberschreibung](/de/features/cost-tracking#preise-überschreiben) mit
 `per_second_input`, dem Stundenpreis aus den
 [AssemblyAI-Preisen](https://www.assemblyai.com/pricing) geteilt durch 3600.

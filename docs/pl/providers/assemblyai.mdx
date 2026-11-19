@@ -71,7 +71,8 @@ i `vtt`:
 
 - `srt` i `vtt` generuje eksport napisów AssemblyAI.
 - `verbose_json` zwraca `segments` zbudowane ze zdań AssemblyAI. Dodaj
-  `timestamp_granularities[]=word`, aby dostać tablicę `words`. AssemblyAI nie
+  `timestamp_granularities[]=word`, aby dostać tablicę `words`; samo `word`
+  pomija `segments`. AssemblyAI nie
   ma danych dekodowania Whispera, więc pola segmentu `seek`, `tokens`,
   `temperature`, `avg_logprob`, `compression_ratio` i `no_speech_prob` są zawsze
   zerowe lub puste. `language` to kod języka AssemblyAI, na przykład `en_us`.
@@ -96,9 +97,8 @@ zadanie zakończone wewnętrznym błędem AssemblyAI zwraca `502`.
 
 AssemblyAI przechowuje przesłane audio i gotowe transkrypcje do końca swojego
 [okresu retencji](https://www.assemblyai.com/docs/data-retention-and-model-training).
-GoModel ich tam nie zostawia: po każdym żądaniu, także nieudanym, przerwanym
-przez limit czasu i anulowanym, usuwa transkrypcję, a wraz z nią przesłane
-audio. Nieudane usunięcie jest logowane z identyfikatorem transkrypcji i nie
+Po każdym żądaniu, także nieudanym, przerwanym przez limit czasu i anulowanym,
+GoModel próbuje usunąć transkrypcję, a wraz z nią przesłane audio. Nieudane usunięcie jest logowane z identyfikatorem transkrypcji i nie
 powoduje błędu żądania.
 
 Audio, dla którego nie udało się utworzyć zadania transkrypcji, nie ma
@@ -107,9 +107,10 @@ AssemblyAI.
 
 ## Śledzenie kosztów
 
-AssemblyAI rozlicza się za godzinę audio. GoModel zapisuje czas trwania audio
-raportowany przez AssemblyAI dla każdego żądania, ale modeli AssemblyAI nie ma
-w katalogu modeli, więc cenę ustaw samodzielnie: dodaj
+AssemblyAI rozlicza się za godzinę audio. Dla `json` i `verbose_json` GoModel
+zapisuje czas trwania audio raportowany przez AssemblyAI; `text`, `srt` i `vtt`
+go nie zawierają, więc GoModel mierzy wtedy przesłany plik (tylko WAV i MP3).
+Modeli AssemblyAI nie ma w katalogu modeli, więc cenę ustaw samodzielnie: dodaj
 [nadpisanie cennika](/pl/features/cost-tracking#nadpisywanie-cennika) z
 `per_second_input`, czyli ceną za godzinę z
 [cennika AssemblyAI](https://www.assemblyai.com/pricing) podzieloną przez 3600.

@@ -128,10 +128,14 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 		return nil, core.NewInvalidRequestError("passthrough request is required", nil)
 	}
 	resp, err := p.client.DoPassthrough(ctx, llmclient.Request{
-		Method:        req.Method,
-		Endpoint:      providers.PassthroughEndpoint(req.Endpoint),
-		RawBodyReader: req.Body,
-		Headers:       req.Headers,
+		Method:          req.Method,
+		Endpoint:        providers.PassthroughEndpoint(req.Endpoint),
+		Operation:       req.Operation,
+		Model:           req.Model,
+		Stream:          req.Stream,
+		StreamUncertain: req.StreamUncertain,
+		RawBodyReader:   req.Body,
+		Headers:         req.Headers,
 	})
 	if err != nil {
 		return nil, err

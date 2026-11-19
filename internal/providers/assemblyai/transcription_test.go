@@ -343,6 +343,57 @@ func TestCreateTranscription_MapsUpstreamErrors(t *testing.T) {
 	}
 }
 
+// A retried job creation could leave a second job behind that nothing deletes,
+// so the submit is sent once even when its status is retryable.
+func TestCreateTranscription_SubmitsTheJobOnce(t *testing.T) {
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v2/upload" {
+			_, _ = io.WriteString(w, `{"upload_url":"`+testUploadURL+`"}`)
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"error":"Service unavailable"}`)
+	})
+
+	_, err := newTestProvider("key", server.URL, server.Client()).CreateTranscription(context.Background(), transcriptionRequest())
+
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusServiceUnavailable, gatewayErr.StatusCode)
+	assert.Equal(t, []string{"POST /v2/upload", "POST /v2/transcript"}, calls(capture))
+	assert.Equal(t, "application/json", capture.Last(t).Header.Get("Content-Type"))
+}
+
+// The poll failure opens the circuit breaker, and the cleanup must still
+// reach AssemblyAI.
+func TestCreateTranscription_DeletesJobWhenBreakerIsOpen(t *testing.T) {
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "POST /v2/upload":
+			_, _ = io.WriteString(w, `{"upload_url":"`+testUploadURL+`"}`)
+		case "POST /v2/transcript":
+			_, _ = io.WriteString(w, `{"id":"`+testTranscriptID+`","status":"queued"}`)
+		case "GET " + transcriptPath:
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":"Internal server error"}`)
+		default:
+			_, _ = io.WriteString(w, `{}`)
+		}
+	})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = server.Client()
+	opts.Resilience.CircuitBreaker.FailureThreshold = 1
+	provider := New(providers.ProviderConfig{APIKey: "key", BaseURL: server.URL}, opts).(*Provider)
+	provider.pollInterval = time.Millisecond
+
+	_, err := provider.CreateTranscription(context.Background(), transcriptionRequest())
+	require.Error(t, err)
+
+	assert.Equal(t, []string{"POST /v2/upload", "POST /v2/transcript", "GET " + transcriptPath, "DELETE " + transcriptPath}, calls(capture))
+}
+
 func TestCreateTranscription_RejectsUnusableUpstreamAnswers(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -416,6 +467,8 @@ func TestCreateTranscription_ValidatesRequest(t *testing.T) {
 		{"missing file", func(r *core.AudioTranscriptionRequest) { r.File = nil }, "file is required"},
 		{"unsupported response format", func(r *core.AudioTranscriptionRequest) { r.ResponseFormat = "diarized_json" }, "response formats"},
 		{"temperature that is not a number", func(r *core.AudioTranscriptionRequest) { r.Temperature = "warm" }, "temperature must be a number"},
+		{"temperature that is NaN", func(r *core.AudioTranscriptionRequest) { r.Temperature = "NaN" }, "temperature must be a number"},
+		{"temperature that is infinite", func(r *core.AudioTranscriptionRequest) { r.Temperature = "+Inf" }, "temperature must be a number"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

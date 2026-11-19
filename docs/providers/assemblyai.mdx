@@ -71,7 +71,8 @@ curl https://your-gateway/v1/audio/transcriptions \
 
 - `srt` and `vtt` are rendered by AssemblyAI's subtitle export.
 - `verbose_json` returns `segments` built from AssemblyAI's sentences. Add
-  `timestamp_granularities[]=word` for the `words` array. AssemblyAI has no
+  `timestamp_granularities[]=word` for the `words` array; requesting `word`
+  alone omits `segments`. AssemblyAI has no
   Whisper decoding data, so the segment fields `seek`, `tokens`, `temperature`,
   `avg_logprob`, `compression_ratio`, and `no_speech_prob` are always zero or
   empty. `language` is AssemblyAI's language code, such as `en_us`.
@@ -95,9 +96,8 @@ failed with an internal AssemblyAI error returns `502`.
 
 AssemblyAI stores uploaded audio and finished transcripts until its
 [retention period](https://www.assemblyai.com/docs/data-retention-and-model-training)
-ends. GoModel does not leave them there: after every request, including failed,
-timed out, and canceled ones, it deletes the transcript, which also deletes the
-uploaded audio. A delete that fails is logged with the transcript ID and does
+ends. After every request, including failed, timed out, and canceled ones,
+GoModel tries to delete the transcript, which also deletes the uploaded audio. A delete that fails is logged with the transcript ID and does
 not fail the request.
 
 Audio whose transcript job could not be created has no transcript to delete and
@@ -105,9 +105,11 @@ stays until AssemblyAI's retention removes it.
 
 ## Cost tracking
 
-AssemblyAI bills per hour of audio. GoModel records the audio duration
-AssemblyAI reports for each request, but AssemblyAI's models are not in the
-model catalog, so set the price yourself: add a
+AssemblyAI bills per hour of audio. For `json` and `verbose_json` responses
+GoModel records the audio duration AssemblyAI reports; `text`, `srt`, and `vtt`
+carry none, so GoModel measures the uploaded file instead (WAV and MP3 only).
+AssemblyAI's models are not in the model catalog, so set the price yourself:
+add a
 [pricing override](/features/cost-tracking#override-pricing) with
 `per_second_input`, the hourly price from
 [AssemblyAI's pricing](https://www.assemblyai.com/pricing) divided by 3600.
