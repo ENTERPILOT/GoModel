@@ -1097,7 +1097,10 @@ func messageItemExtraContent(t *testing.T, raw string) (done, terminal any, seen
 				seen++
 			}
 		case "response.completed":
-			output, _ := event.Payload["response"].(map[string]any)["output"].([]any)
+			response, ok := event.Payload["response"].(map[string]any)
+			require.True(t, ok, "response.completed carries no response object: %v", event.Payload)
+			output, ok := response["output"].([]any)
+			require.True(t, ok, "response.completed carries no output array: %v", response)
 			for _, entry := range output {
 				if item, _ := entry.(map[string]any); item["type"] == "message" {
 					terminal = item["extra_content"]
@@ -1291,6 +1294,56 @@ data: [DONE]
 			}
 		})
 	}
+}
+
+// Chunks that arrive after a tool call closed the message item must not
+// change that item: its output_item.done is already out, and the terminal
+// output has to restate it as it was. They get a message item of their own.
+func TestOpenAIResponsesStreamConverter_MistralContentChunksAfterMessageClosed(t *testing.T) {
+	mockStream := `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Checking.","mistral_content_chunks":[{"type":"reference","reference_ids":[1]}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"mistral_content_chunks":[{"type":"reference","reference_ids":[2]}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "mistral-large-4-0", "mistral")
+	raw, err := io.ReadAll(converter)
+	require.NoError(t, err)
+
+	events := parseTestSSEEvents(t, string(raw))
+	requireNormalizedResponsesStream(t, events)
+	doneItems := map[float64]any{}
+	var terminal []any
+	for _, event := range events {
+		switch event.Name {
+		case "response.output_item.done":
+			index, ok := event.Payload["output_index"].(float64)
+			require.True(t, ok)
+			require.NotContains(t, doneItems, index, "output index %v closed twice", index)
+			doneItems[index] = event.Payload["item"]
+		case "response.completed":
+			response, ok := event.Payload["response"].(map[string]any)
+			require.True(t, ok)
+			terminal, ok = response["output"].([]any)
+			require.True(t, ok)
+		}
+	}
+	require.Len(t, terminal, 3)
+	for index, item := range terminal {
+		assert.Equal(t, doneItems[float64(index)], item, "terminal output item %d must restate its output_item.done", index)
+	}
+	first, ok := terminal[0].(map[string]any)
+	require.True(t, ok)
+	last, ok := terminal[2].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "message", first["type"])
+	assert.Equal(t, mistralContentChunks(map[string]any{"type": "reference", "reference_ids": []any{float64(1)}}), first["extra_content"])
+	assert.Equal(t, "function_call", terminal[1].(map[string]any)["type"])
+	assert.Equal(t, "message", last["type"])
+	assert.NotEqual(t, first["id"], last["id"])
+	assert.Equal(t, mistralContentChunks(map[string]any{"type": "reference", "reference_ids": []any{float64(2)}}), last["extra_content"])
 }
 
 // eventNames lists the SSE event names in stream order, with "[DONE]" for the

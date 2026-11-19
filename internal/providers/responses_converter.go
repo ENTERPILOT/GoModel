@@ -294,7 +294,7 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	// so the state lands on the item it arrived with.
 	sc.openMessageAfterImage(choice.Delta.Content != "", choice.Delta.ExtraContent)
 	sc.setMessageExtraContent(choice.Delta.ExtraContent)
-	sc.output.AppendAssistantContentChunks(choice.Delta.ContentChunks)
+	sc.appendContentChunks(choice.Delta.ContentChunks)
 	// "reasoning_content" wins over the vendor "reasoning" member (Groq,
 	// OpenRouter), the same precedence the streaming codec applies.
 	if reasoning := cmp.Or(choice.Delta.ReasoningContent, choice.Delta.Reasoning); reasoning != "" {
@@ -322,6 +322,22 @@ func (sc *OpenAIResponsesStreamConverter) setMessageExtraContent(raw json.RawMes
 	if extra := bytes.TrimSpace(raw); len(extra) > 0 && !bytes.Equal(extra, []byte("null")) {
 		sc.output.SetAssistantExtraContent(extra)
 	}
+}
+
+// appendContentChunks records the content chunks of a delta
+// (MistralContentChunksField) for the message item. Callers record them
+// before the rest of the delta, so a tool call in the same delta closes the
+// item with them. Chunks that arrive after the item closed go to a new
+// message item, opened at the end of the stream at the latest, instead of
+// changing one whose output_item.done is already out.
+func (sc *OpenAIResponsesStreamConverter) appendContentChunks(chunks []json.RawMessage) {
+	if len(chunks) == 0 {
+		return
+	}
+	if sc.output.AssistantDone() {
+		sc.output.StartNextAssistantMessage(sc.assistantOutputIndex)
+	}
+	sc.output.AppendAssistantContentChunks(chunks)
 }
 
 // processChunkTolerant mirrors processChunk with per-field type assertions, so
@@ -365,7 +381,7 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 		sc.openMessageAfterImage(content != "", extra)
 		sc.setMessageExtraContent(extra)
 		if _, ok := delta[MistralContentChunksField]; ok {
-			sc.output.AppendAssistantContentChunks(rawDeltaContentChunks(data))
+			sc.appendContentChunks(rawDeltaContentChunks(data))
 		}
 		reasoning, _ := delta["reasoning_content"].(string)
 		if reasoning == "" {
