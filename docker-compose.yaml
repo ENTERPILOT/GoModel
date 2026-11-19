@@ -39,7 +39,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     ports:
       - "6379:6379"
     volumes:
@@ -86,7 +86,7 @@ services:
       start_period: 10s
 
   adminer:
-    image: adminer:5
+    image: adminer:6
     ports:
       - "8081:8080"
     depends_on:
