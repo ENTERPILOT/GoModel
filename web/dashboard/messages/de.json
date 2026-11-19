@@ -857,7 +857,7 @@
   "models_response_header_timeout_field": "Timeout für Antwort-Header (Sekunden)",
   "models_inherit": "Erben",
   "models_timeout_invalid": "Timeouts müssen ganze Sekunden von 1 bis 86400 sein.",
-  "models_timeouts_help": "Überschreibt HTTP_TIMEOUT und HTTP_RESPONSE_HEADER_TIMEOUT für dieses Modell oder diese Weiterleitung. Gilt pro Upstream-Versuch; Wiederholungen und Failover erhalten ein neues Budget. Leer erbt von anderen Weiterleitungen auf der Route, dann von der Richtlinie des Zielmodells, dann vom Gateway-Standard.",
+  "models_timeouts_help": "Überschreibt HTTP_TIMEOUT und HTTP_RESPONSE_HEADER_TIMEOUT für dieses Modell oder diese Weiterleitung. Gilt pro Upstream-Versuch; Wiederholungen und Failover erhalten ein neues Budget. Leer erbt von anderen Weiterleitungen auf der Route, dann von der Richtlinie des Zielmodells, dann vom Gateway-Standard. Gilt nicht für Bedrock-SDK-Aufrufe und Realtime-Handshakes.",
   "models_upstream_timeouts": "Timeouts",
   "models_timeout_per_attempt": "{value} s pro Versuch",
   "models_timeout_headers": "{value} s bis zu den Headern",
