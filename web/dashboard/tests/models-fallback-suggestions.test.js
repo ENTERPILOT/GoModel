@@ -107,6 +107,40 @@ test("a provider prefers its exact copy of the model and is not suggested twice"
   );
 });
 
+test("only a text model matches under a vendor prefix; an embedding model needs the same ID", () => {
+  // The gateway fails an embedding request over only to a target with the
+  // primary's exact model ID, so a prefixed copy would never be used.
+  const embedding = { price: [0.02, 0], categories: ["embedding"] };
+  const models = [
+    model("openai", "text-embedding-3-small", embedding),
+    model("azure", "text-embedding-3-small", embedding),
+    model("openrouter", "openai/text-embedding-3-small", embedding),
+    model("vertex", "Text-Embedding-3-Small", embedding),
+    model("voyage", "voyage-3", embedding), // same price, another model
+  ];
+  assert.deepEqual(
+    suggestFallbackTargets(failoverForm("openai/text-embedding-3-small"), models, []),
+    [{ target: "azure/text-embedding-3-small", reason: "same_model" }],
+  );
+
+  // A model the registry does not describe is matched by its exact ID too.
+  const unknown = { categories: [] };
+  assert.deepEqual(
+    targets(
+      suggestFallbackTargets(
+        failoverForm("ollama/nomic-embed"),
+        [
+          model("ollama", "nomic-embed", unknown),
+          model("lmstudio", "nomic-embed", unknown),
+          model("openrouter", "nomic/nomic-embed", unknown),
+        ],
+        [],
+      ),
+    ),
+    ["lmstudio/nomic-embed"],
+  );
+});
+
 test("price-tier suggestions are capped, need a priced text source, and break price ties by newest", () => {
   const peers = ["a", "b", "c", "d", "e"].map((provider, index) =>
     model(provider, "chat-" + provider, { price: [2 + index, 8] }),
@@ -168,6 +202,31 @@ test("a model replaced by a redirect is skipped; one only protected by its own c
   assert.deepEqual(targets(suggestFallbackTargets(failoverForm(SOURCE), models, aliases)), [
     "azure/gpt-4o",
   ]);
+
+  // Disabling the redirect does not bring the model back: the gateway still
+  // reads the name as that redirect and skips it as an unavailable target.
+  aliases[1].enabled = false;
+  assert.deepEqual(targets(suggestFallbackTargets(failoverForm(SOURCE), models, aliases)), [
+    "azure/gpt-4o",
+  ]);
+});
+
+test("price-tier picks avoid providers a listed target reaches without being in the catalog", () => {
+  const models = [
+    GPT_4O,
+    model("anthropic", "claude-sonnet", { price: [3, 15] }),
+    model("gemini", "gemini-pro", { price: [2, 10] }),
+    model("mistral", "mistral-large", { price: [2, 6] }),
+    model("xai", "grok", { price: [3, 9] }),
+  ];
+  const aliases = [{ name: "smart", targets: [{ provider: "gemini", model: "gemini-pro" }] }];
+  const form = failoverForm(SOURCE, [
+    "anthropic/claude-tts", // not loaded (another category tab), provider known
+    "smart", // a virtual model that reaches gemini
+  ]);
+  // A target pinned to a provider by the API, under a name the catalog lacks.
+  form.targets.push({ provider: "mistral", model: "mistral/unlisted", weight: 1, reasoning_effort: "" });
+  assert.deepEqual(targets(suggestFallbackTargets(form, models, aliases)), ["xai/grok"]);
 });
 
 test("suggestions are offered only for a catalog model's own failover chain", () => {
@@ -215,7 +274,7 @@ test("the note names what was added per reason", () => {
       { target: "gemini/gemini-2.5-pro", reason: "similar_price" },
       { target: "anthropic/claude-sonnet", reason: "similar_price" },
     ]),
-    "Added the same model on another provider: azure/gpt-4o. " +
+    "Added the same model on other providers: azure/gpt-4o. " +
       "Added similarly priced models: gemini/gemini-2.5-pro, anthropic/claude-sonnet. " +
       "Review the list, then save to apply it.",
   );

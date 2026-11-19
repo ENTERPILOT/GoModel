@@ -747,7 +747,7 @@
   "models_suggest_fallbacks_same_model": "已添加其他提供商上的同一模型：{targets}。",
   "models_suggest_fallbacks_similar_price": "已添加价格相近的模型：{targets}。",
   "models_suggest_fallbacks_review": "请检查列表，然后保存以应用。",
-  "models_suggest_fallbacks_none": "没有可添加的模型：列表之外没有已启用的模型具有相同的 ID 或相近的价格。",
+  "models_suggest_fallbacks_none": "在此页面已加载的模型中未找到更多可用的回退模型。",
   "models_strategy": "负载均衡策略",
   "models_strategy_pending_hint": "列出两个及以上目标后生效。",
   "models_strategy_help_label": "负载均衡策略说明",

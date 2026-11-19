@@ -10,6 +10,7 @@ import { qualifyTarget } from "./routing.js";
 import { flattenFormTargets } from "./vmForm.js";
 
 const TEXT_GENERATION = "text_generation";
+const EMBEDDING = "embedding";
 
 // A model is in the source's price tier when its price is within this factor
 // of the source's, either way.
@@ -36,16 +37,24 @@ function providerOf(model) {
 }
 
 function modelID(model) {
-  return String((model && model.model && model.model.id) || "")
-    .trim()
-    .toLowerCase();
+  return String((model && model.model && model.model.id) || "").trim();
 }
 
-// baseModelID drops a vendor prefix, so an aggregator's "openai/gpt-4o" is
-// recognized as the "gpt-4o" another provider serves.
+// baseModelID drops a vendor prefix and case, so an aggregator's
+// "openai/gpt-4o" is recognized as the "gpt-4o" another provider serves.
 function baseModelID(model) {
-  const id = modelID(model);
+  const id = modelID(model).toLowerCase();
   return id.slice(id.lastIndexOf("/") + 1);
+}
+
+// matchesByBaseID: a text model is the same model under a vendor prefix. Any
+// other model must carry the very same ID: the gateway fails an embedding
+// request over only to a target whose model ID equals the primary's (see
+// FailoverSelectors in internal/gateway/failover.go), so a prefixed copy
+// would be a fallback that is never used.
+function matchesByBaseID(source) {
+  const categories = categoriesOf(source);
+  return categories.includes(TEXT_GENERATION) && !categories.includes(EMBEDDING);
 }
 
 function finitePrice(value) {
@@ -145,14 +154,35 @@ export function suggestFallbackTargets(form, models, aliases) {
     if (name) redirects.set(name, alias);
   }
 
-  const listed = new Set([source]);
-  for (const target of flattenFormTargets(form)) {
-    const selector = String(target.model || "").trim();
-    if (selector) listed.add(selector);
-  }
+  // usedProviders are the providers the chain already reaches, so the
+  // price-tier picks go elsewhere. A listed target may be missing from the
+  // loaded catalog (a category tab is active, or it names a virtual model):
+  // its pinned provider, the targets of the virtual model it names, or the
+  // provider prefix of its selector then stand in for it.
+  const knownProviders = new Set();
+  for (const model of catalog.values()) knownProviders.add(providerOf(model));
   const usedProviders = new Set();
-  for (const selector of listed) {
-    if (catalog.has(selector)) usedProviders.add(providerOf(catalog.get(selector)));
+  const noteProvider = (selector, pinned, seen) => {
+    if (catalog.has(selector)) {
+      usedProviders.add(providerOf(catalog.get(selector)));
+    } else if (pinned) {
+      usedProviders.add(pinned);
+    } else if (redirects.has(selector) && !seen.has(selector)) {
+      seen.add(selector);
+      for (const target of redirectTargets(redirects.get(selector))) {
+        noteProvider(target, "", seen);
+      }
+    } else if (selector.includes("/")) {
+      const prefix = selector.slice(0, selector.indexOf("/"));
+      if (knownProviders.has(prefix)) usedProviders.add(prefix);
+    }
+  };
+  const listed = new Set();
+  for (const row of [{ model: source }, ...flattenFormTargets(form)]) {
+    const selector = String(row.model || "").trim();
+    if (!selector) continue;
+    listed.add(selector);
+    noteProvider(selector, String(row.provider || "").trim(), new Set());
   }
 
   const eligible = (selector, model) =>
@@ -162,19 +192,23 @@ export function suggestFallbackTargets(form, models, aliases) {
 
   // One per provider: an exact ID match beats a vendor-prefixed one, and a
   // provider whose copy of the model is already listed is done.
+  const sourceID = modelID(sourceModel);
   const sourceBase = baseModelID(sourceModel);
+  const byBaseID = matchesByBaseID(sourceModel);
+  const isSameModel = (model) =>
+    modelID(model) === sourceID ||
+    (byBaseID && sourceBase !== "" && baseModelID(model) === sourceBase);
   const covered = new Set();
   for (const selector of listed) {
     const model = catalog.get(selector);
-    if (model && baseModelID(model) === sourceBase) covered.add(providerOf(model));
+    if (model && isSameModel(model)) covered.add(providerOf(model));
   }
   const sameModel = new Map();
   for (const [selector, model] of catalog) {
     const provider = providerOf(model);
-    if (covered.has(provider) || !sourceBase) continue;
-    if (baseModelID(model) !== sourceBase) continue;
+    if (covered.has(provider) || !isSameModel(model)) continue;
     if (!sameMode(sourceModel, model) || !eligible(selector, model)) continue;
-    const exact = modelID(model) === modelID(sourceModel);
+    const exact = modelID(model) === sourceID;
     const current = sameModel.get(provider);
     if (!current || (exact && !current.exact)) {
       sameModel.set(provider, { selector, exact });
