@@ -96,6 +96,38 @@ opentelemetry:
 	assert.Equal(t, first.Config.OpenTelemetry, second.Config.OpenTelemetry)
 }
 
+func TestExportYAMLKeepsExpansionThatIsEmpty(t *testing.T) {
+	// An expansion that is empty here may not be on the next instance.
+	clearAllConfigEnvVars(t)
+	t.Setenv("GOMODEL_TEST_EMPTY", "")
+	first := loadYAML(t, []byte(`
+server:
+  body_size_limit: "${GOMODEL_TEST_EMPTY:-}"
+storage:
+  mongodb:
+    database: "${GOMODEL_TEST_EMPTY:-}"
+cache:
+  response:
+    simple:
+      enabled: ${GOMODEL_TEST_EMPTY:-}
+`))
+	require.Empty(t, first.Config.Server.BodySizeLimit)
+	require.Empty(t, first.Config.Storage.MongoDB.Database)
+
+	out, err := first.ExportYAML(ExportDocument{Config: first.Config}, os.Environ())
+	require.NoError(t, err)
+	body := string(out)
+
+	assert.Contains(t, body, "body_size_limit: \"${GOMODEL_TEST_EMPTY:-}\"")
+	assert.Contains(t, body, "mongodb:\n    database: \"${GOMODEL_TEST_EMPTY:-}\"", "a section holding an expansion is kept")
+	assert.Contains(t, body, "enabled: ${GOMODEL_TEST_EMPTY:-}", "an expansion that leaves a pointer nil is kept")
+
+	t.Setenv("GOMODEL_TEST_EMPTY", "")
+	second := loadYAML(t, out)
+	assert.Equal(t, first.Config.Cache.Response, second.Config.Cache.Response)
+	assert.Equal(t, first.Config.Storage.MongoDB, second.Config.Storage.MongoDB)
+}
+
 func TestExportYAMLRedactsCredentialsOutsideSecretFields(t *testing.T) {
 	var ext yaml.Node
 	require.NoError(t, yaml.Unmarshal([]byte("auth: ext-auth\ncookie: ext-cookie\npass: ext-pass\nregion: eu\n"), &ext))
