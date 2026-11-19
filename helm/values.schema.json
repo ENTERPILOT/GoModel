@@ -20,13 +20,11 @@
         "image": {
           "type": "object",
           "properties": {
-            "repository": { "type": "string", "minLength": 1 },
-            "tag": { "type": "string", "minLength": 1 }
-          },
-          "required": ["repository", "tag"]
+            "repository": { "type": "string" },
+            "tag": { "type": "string" }
+          }
         }
-      },
-      "required": ["image"]
+      }
     },
     "nameOverride": { "type": "string" },
     "fullnameOverride": { "type": "string" },

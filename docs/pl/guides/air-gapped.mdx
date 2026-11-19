@@ -21,10 +21,13 @@ Domyślna instalacja otwiera dwa połączenia, których nie konfigurujesz:
 | [Sprawdzanie aktualizacji](/pl/advanced/version-awareness) | `gomodel.enterpilot.io` | Numer najnowszego releasu. Raz dziennie oraz przy pierwszej wizycie w dashboardzie danego dnia. |
 
 Oba działają na zasadzie best-effort: gdy się nie powiodą, gateway startuje,
-zgłasza gotowość i obsługuje żądania. Nie ma telemetrii ani sprawdzania
-licencji. Dashboard nie ładuje niczego z CDN, a jego Content-Security-Policy
-trzyma przeglądarkę w obrębie originu samego gatewaya. Na zewnątrz prowadzą
-tylko linki do dokumentacji.
+zgłasza gotowość i obsługuje żądania. Żadne z nich nie przesyła niczego o Twoim
+ruchu; sprawdzanie aktualizacji wysyła uruchomioną wersję i anonimowy
+identyfikator instalacji (zobacz
+[Co wysyła sprawdzenie](/pl/advanced/version-awareness#co-wysyła-sprawdzenie)).
+Nie ma sprawdzania licencji. Dashboard nie ładuje niczego z CDN, a jego
+Content-Security-Policy trzyma przeglądarkę w obrębie originu samego gatewaya.
+Na zewnątrz prowadzą tylko linki do dokumentacji.
 
 Wszystko inne, z czym łączy się gateway, deklarujesz samodzielnie: providerzy,
 baza danych, Redis, kolektor OTLP, upstreamy MCP, magazyny wektorowe, usługi
@@ -46,6 +49,7 @@ Przypnij wersję; nie mirroruj `latest`.
     Na maszynie z dostępem do internetu:
 
     ```bash
+    # --platform to platforma hostów, na których obraz będzie działał
     docker pull --platform linux/amd64 enterpilot/gomodel:X.Y.Z
     docker save enterpilot/gomodel:X.Y.Z -o gomodel-X.Y.Z.tar
     ```
@@ -58,8 +62,9 @@ Przypnij wersję; nie mirroruj `latest`.
     docker push registry.internal/enterpilot/gomodel:X.Y.Z
     ```
 
-    Obraz jest publikowany dla `linux/amd64`, `linux/arm64` i `linux/arm/v7`.
-    Gdy jeden host widzi oba rejestry,
+    Obraz jest publikowany dla `linux/amd64`, `linux/arm64` i `linux/arm/v7`;
+    archiwum zawiera tylko tę jedną platformę, którą pobierasz. Gdy jeden host
+    widzi oba rejestry,
     `skopeo copy --all docker://enterpilot/gomodel:X.Y.Z docker://registry.internal/enterpilot/gomodel:X.Y.Z`
     kopiuje wszystkie platformy w jednym kroku.
   </Tab>
@@ -143,7 +148,8 @@ własnego URL-a połączenia (`sslrootcert`, `tlsCAFile`).
 ## 3. Dostarcz katalog modeli
 
 Bez katalogu model nie ma cen, chyba że raportuje je provider albo
-zadeklarujesz je samodzielnie. [Śledzenie kosztów](/pl/features/cost-tracking)
+zadeklarujesz je samodzielnie (w `config.yaml` lub jako nadpisanie cen w
+dashboardzie). [Śledzenie kosztów](/pl/features/cost-tracking)
 nie zapisuje wtedy żadnych kosztów, a [budżety](/pl/features/budgets) nie mają
 czego egzekwować.
 
@@ -158,9 +164,9 @@ Dwie alternatywy:
   air-gapped i ustaw na niego `MODEL_LIST_URL`. Tryb offline pomija URL-e
   katalogu HTTP, więc zostaw `GOMODEL_OFFLINE` nieustawione i ustaw zamiast
   tego `GOMODEL_VERSION_CHECK_ENABLED=false`.
-- **Ceny w konfiguracji.** Zadeklaruj
+- **Ceny deklarowane samodzielnie.** Ustaw
   `providers.<name>.models[].metadata.pricing` w `config.yaml` dla modeli,
-  które serwujesz.
+  które serwujesz, albo nadpisanie cen na stronie **Models** dashboardu.
 
 ## 4. Zweryfikuj
 

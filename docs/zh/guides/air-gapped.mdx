@@ -17,8 +17,9 @@ GoModel 是一个内嵌控制台的静态二进制文件。搭配 [Ollama](/zh/p
 | [模型目录](/zh/advanced/model-metadata) | `raw.githubusercontent.com` | 定价、上下文窗口和能力信息。在启动时及每次缓存刷新时获取。 |
 | [更新检查](/zh/advanced/version-awareness) | `gomodel.enterpilot.io` | 最新的发布版本号。每天一次，以及每天首次访问控制台时。 |
 
-两者都是尽力而为的：失败时，网关照常启动、报告就绪并处理请求。没有遥测，也没有许可证检查。控制台不会从 CDN 加载任何资源，
-其 Content-Security-Policy 将浏览器限制在网关自身的源内。只有指向文档的链接会指向外部。
+两者都是尽力而为的：失败时，网关照常启动、报告就绪并处理请求。两者都不会携带任何与您的流量有关的信息；
+更新检查会发送当前运行的版本和一个匿名安装 ID（参见[检查时发送的内容](/zh/advanced/version-awareness#检查时发送的内容)）。
+没有许可证检查。控制台不会从 CDN 加载任何资源，其 Content-Security-Policy 将浏览器限制在网关自身的源内。只有指向文档的链接会指向外部。
 
 网关访问的其他一切都是您自行声明的：提供商、数据库、Redis、OTLP 采集器、MCP 上游、向量存储、护栏服务。
 
@@ -36,6 +37,7 @@ GoModel 是一个内嵌控制台的静态二进制文件。搭配 [Ollama](/zh/p
     在联网机器上：
 
     ```bash
+    # --platform 是将要运行该镜像的主机的平台
     docker pull --platform linux/amd64 enterpilot/gomodel:X.Y.Z
     docker save enterpilot/gomodel:X.Y.Z -o gomodel-X.Y.Z.tar
     ```
@@ -48,7 +50,7 @@ GoModel 是一个内嵌控制台的静态二进制文件。搭配 [Ollama](/zh/p
     docker push registry.internal/enterpilot/gomodel:X.Y.Z
     ```
 
-    镜像发布了 `linux/amd64`、`linux/arm64` 和 `linux/arm/v7` 三个平台。如果有一台主机能同时访问两个镜像仓库，
+    镜像发布了 `linux/amd64`、`linux/arm64` 和 `linux/arm/v7` 三个平台；归档文件只包含您拉取的那一个平台。如果有一台主机能同时访问两个镜像仓库，
     `skopeo copy --all docker://enterpilot/gomodel:X.Y.Z docker://registry.internal/enterpilot/gomodel:X.Y.Z`
     可以一步复制所有平台。
   </Tab>
@@ -121,7 +123,7 @@ docker run -d --name gomodel -p 8080:8080 \
 
 ## 3. 提供模型目录
 
-没有目录时，除非提供商报告价格或您自行声明价格，否则模型没有定价；此时[成本追踪](/zh/features/cost-tracking)不会记录任何成本，
+没有目录时，除非提供商报告价格，或您自行声明价格（在 `config.yaml` 中，或通过控制台中的价格覆盖），否则模型没有定价；此时[成本追踪](/zh/features/cost-tracking)不会记录任何成本，
 [预算](/zh/features/budgets)也无从执行。
 
 以文件路径（或 `file://` URL）给出的目录是从磁盘读取的，不会发起网络请求，因此在离线模式下仍然生效。每次缓存刷新时都会重新读取该文件
@@ -131,7 +133,7 @@ docker run -d --name gomodel -p 8080:8080 \
 
 - **内部镜像站。** 在隔离环境内通过 HTTP 提供该文件，并将 `MODEL_LIST_URL` 指向它。离线模式会丢弃 HTTP 目录 URL，
   因此不要设置 `GOMODEL_OFFLINE`，而是改为设置 `GOMODEL_VERSION_CHECK_ENABLED=false`。
-- **在配置中声明价格。** 在 `config.yaml` 中为您提供的模型声明 `providers.<name>.models[].metadata.pricing`。
+- **自行声明价格。** 在 `config.yaml` 中为您提供的模型设置 `providers.<name>.models[].metadata.pricing`，或在控制台的 **Models** 页面设置价格覆盖。
 
 ## 4. 验证
 

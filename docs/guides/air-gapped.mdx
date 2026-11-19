@@ -21,10 +21,12 @@ A default install opens two connections you did not configure:
 | [Update check](/advanced/version-awareness) | `gomodel.enterpilot.io` | Latest release number. Daily, and on the first dashboard visit of a day. |
 
 Both are best-effort: when they fail, the gateway starts, reports ready, and
-serves requests. There is no telemetry and no license check. The dashboard
-loads nothing from a CDN, and its Content-Security-Policy keeps the browser on
-the gateway's own origin. Links to the documentation are the only thing that
-point outside.
+serves requests. Neither carries anything about your traffic; the update check
+sends the running version and an anonymous install id (see
+[what the check sends](/advanced/version-awareness#what-the-check-sends)).
+There is no license check. The dashboard loads nothing from a CDN, and its
+Content-Security-Policy keeps the browser on the gateway's own origin. Links
+to the documentation are the only thing that point outside.
 
 Everything else the gateway reaches is something you declared: providers, the
 database, Redis, an OTLP collector, MCP upstreams, vector stores, guardrail
@@ -45,6 +47,7 @@ Pin a version; do not mirror `latest`.
     On a connected machine:
 
     ```bash
+    # --platform is the platform of the hosts that will run it
     docker pull --platform linux/amd64 enterpilot/gomodel:X.Y.Z
     docker save enterpilot/gomodel:X.Y.Z -o gomodel-X.Y.Z.tar
     ```
@@ -58,7 +61,8 @@ Pin a version; do not mirror `latest`.
     ```
 
     The image is published for `linux/amd64`, `linux/arm64`, and
-    `linux/arm/v7`. When one host can reach both registries,
+    `linux/arm/v7`; the archive holds the one platform you pulled. When one
+    host can reach both registries,
     `skopeo copy --all docker://enterpilot/gomodel:X.Y.Z docker://registry.internal/enterpilot/gomodel:X.Y.Z`
     copies every platform in one step.
   </Tab>
@@ -141,8 +145,9 @@ from their own connection URL (`sslrootcert`, `tlsCAFile`).
 ## 3. Supply the model catalog
 
 Without the catalog, a model has no pricing unless its provider reports prices
-or you declare them, so [cost tracking](/features/cost-tracking) records no
-cost and [budgets](/features/budgets) have nothing to enforce.
+or you declare them (in `config.yaml`, or as a dashboard pricing override), so
+[cost tracking](/features/cost-tracking) records no cost and
+[budgets](/features/budgets) have nothing to enforce.
 
 A catalog given as a file path (or `file://` URL) is read, never fetched, so
 it stays active in offline mode. The file is re-read on every cache refresh
@@ -155,9 +160,9 @@ Two alternatives:
   `MODEL_LIST_URL` to it. Offline mode drops HTTP catalog URLs, so leave
   `GOMODEL_OFFLINE` unset and set `GOMODEL_VERSION_CHECK_ENABLED=false`
   instead.
-- **Prices in configuration.** Declare
-  `providers.<name>.models[].metadata.pricing` in `config.yaml` for the models
-  you serve.
+- **Prices you declare.** Set `providers.<name>.models[].metadata.pricing` in
+  `config.yaml` for the models you serve, or a pricing override on the
+  dashboard's **Models** page.
 
 ## 4. Verify
 

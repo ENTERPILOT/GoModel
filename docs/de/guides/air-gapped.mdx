@@ -22,10 +22,13 @@ haben:
 | [Update-Prüfung](/de/advanced/version-awareness) | `gomodel.enterpilot.io` | Neueste Release-Nummer. Täglich und beim ersten Dashboard-Besuch eines Tages. |
 
 Beide sind Best-Effort: Schlagen sie fehl, startet das Gateway, meldet sich
-bereit und bedient Anfragen. Es gibt keine Telemetrie und keine Lizenzprüfung.
-Das Dashboard lädt nichts von einem CDN, und seine Content-Security-Policy hält
-den Browser auf dem eigenen Origin des Gateways. Nur die Links zur
-Dokumentation zeigen nach außen.
+bereit und bedient Anfragen. Keiner von beiden überträgt etwas über Ihren
+Traffic; die Update-Prüfung sendet die laufende Version und eine anonyme
+Installations-ID (siehe
+[Was die Prüfung sendet](/de/advanced/version-awareness#was-die-prüfung-sendet)).
+Es gibt keine Lizenzprüfung. Das Dashboard lädt nichts von einem CDN, und seine
+Content-Security-Policy hält den Browser auf dem eigenen Origin des Gateways.
+Nur die Links zur Dokumentation zeigen nach außen.
 
 Alles andere, was das Gateway erreicht, haben Sie selbst deklariert: Provider,
 die Datenbank, Redis, einen OTLP-Collector, MCP-Upstreams, Vector Stores,
@@ -47,6 +50,7 @@ Pinnen Sie eine Version; spiegeln Sie nicht `latest`.
     Auf einer Maschine mit Internetzugang:
 
     ```bash
+    # --platform ist die Plattform der Hosts, auf denen das Image laufen soll
     docker pull --platform linux/amd64 enterpilot/gomodel:X.Y.Z
     docker save enterpilot/gomodel:X.Y.Z -o gomodel-X.Y.Z.tar
     ```
@@ -60,7 +64,8 @@ Pinnen Sie eine Version; spiegeln Sie nicht `latest`.
     ```
 
     Das Image wird für `linux/amd64`, `linux/arm64` und `linux/arm/v7`
-    veröffentlicht. Erreicht ein Host beide Registries, kopiert
+    veröffentlicht; das Archiv enthält nur die eine Plattform, die Sie gezogen
+    haben. Erreicht ein Host beide Registries, kopiert
     `skopeo copy --all docker://enterpilot/gomodel:X.Y.Z docker://registry.internal/enterpilot/gomodel:X.Y.Z`
     alle Plattformen in einem Schritt.
   </Tab>
@@ -146,7 +151,8 @@ beziehen ihre CA aus der eigenen Verbindungs-URL (`sslrootcert`, `tlsCAFile`).
 ## 3. Modellkatalog bereitstellen
 
 Ohne den Katalog hat ein Modell keine Preise, sofern sein Provider keine meldet
-oder Sie keine deklarieren. Die [Kostenerfassung](/de/features/cost-tracking)
+oder Sie keine deklarieren (in `config.yaml` oder als Preisüberschreibung im
+Dashboard). Die [Kostenerfassung](/de/features/cost-tracking)
 zeichnet dann keine Kosten auf, und [Budgets](/de/features/budgets) haben
 nichts, was sie durchsetzen könnten.
 
@@ -162,9 +168,10 @@ Zwei Alternativen:
   HTTP bereit und setzen Sie `MODEL_LIST_URL` darauf. Der Offline-Modus verwirft
   HTTP-URLs für den Katalog; lassen Sie `GOMODEL_OFFLINE` daher ungesetzt und
   setzen Sie stattdessen `GOMODEL_VERSION_CHECK_ENABLED=false`.
-- **Preise in der Konfiguration.** Deklarieren Sie
+- **Preise, die Sie deklarieren.** Setzen Sie
   `providers.<name>.models[].metadata.pricing` in `config.yaml` für die
-  Modelle, die Sie bereitstellen.
+  Modelle, die Sie bereitstellen, oder eine Preisüberschreibung auf der Seite
+  **Models** des Dashboards.
 
 ## 4. Prüfen
 
