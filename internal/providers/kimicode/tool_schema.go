@@ -27,11 +27,12 @@ import (
 //     branch each.
 //
 // Releases of the validator before v0.1.15 (2026-08) were stricter, and which
-// one an endpoint runs is not observable. Their rules are covered where the repair
-// is what the current validator's own canonicalization does: enum values the
-// declared type rules out are dropped, a type beside anyOf moves into the
-// branches, a type beside $ref is dropped, and required names missing from
-// properties are pruned.
+// one an endpoint runs is not observable. Their rules are covered where the
+// repair is what the current validator's own canonicalization does: enum
+// values the declared type rules out are dropped, a type or enum beside anyOf
+// moves into the branches, and required names missing from properties are
+// pruned. A type or enum beside $ref is dropped, since the definition cannot
+// take it without changing for every other reference.
 //
 // Keywords MFJS does not support (oneOf, allOf, const, format and so on) are
 // accepted and ignored upstream, so they pass through untouched. A schema
@@ -78,11 +79,7 @@ func sanitizeTool(tool map[string]any) (map[string]any, bool) {
 // sanitizeParameters repairs the "parameters" schema of a function
 // definition, returning a copy of the definition when the schema changed.
 func sanitizeParameters(function map[string]any) (map[string]any, bool) {
-	schema, ok := function["parameters"].(map[string]any)
-	if !ok {
-		return function, false
-	}
-	repaired, changed := sanitizeSchema(schema)
+	repaired, changed := sanitizeSubschema(function["parameters"])
 	if !changed {
 		return function, false
 	}
@@ -123,12 +120,15 @@ func (e *schemaEdit) drop(key string) {
 func sanitizeSchema(in map[string]any) (map[string]any, bool) {
 	e := &schemaEdit{node: in}
 
-	// Both run before the walk, so a branch they hand a type to is repaired
-	// with it.
+	// These run before the walk, so a branch that was handed a type or an enum
+	// is repaired with it.
+	repairAnyOfSiblings(e)
+	repairRefSiblings(e)
 	repairEnum(e)
-	repairSiblingType(e)
 
-	for _, key := range []string{"properties", "$defs"} {
+	// "definitions" is where draft-07 keeps what later drafts call "$defs";
+	// the validator resolves references into both.
+	for _, key := range []string{"properties", "$defs", "definitions"} {
 		if members, ok := e.node[key].(map[string]any); ok {
 			if repaired, changed := sanitizeSchemaMap(members); changed {
 				e.set(key, repaired)
@@ -233,14 +233,6 @@ func repairEnum(e *schemaEdit) {
 	if !ok {
 		return
 	}
-	// An enum needs a type beside it, and older validators allow none beside
-	// anyOf or $ref. The enum gives way there: the branches or the referenced
-	// definition carry the constraint.
-	if e.node["anyOf"] != nil || e.node["$ref"] != nil {
-		e.drop("enum")
-		return
-	}
-
 	declared := typeNames(e.node["type"])
 	ruledOut := func(value any) bool {
 		kind := enumType(value)
@@ -376,37 +368,99 @@ func enumTypeDeclared(declared []string) bool {
 	return false
 }
 
-// repairSiblingType takes a type away from beside $ref or anyOf, where older
-// validators reject it. JSON Schema applies such a type together with the
-// reference or with whichever branch matches, so beside anyOf it moves into
-// the branches that declare none. A reference, as a schema or as a branch,
-// takes its type from the definition.
-func repairSiblingType(e *schemaEdit) {
-	declared, ok := e.node["type"]
-	if !ok {
-		return
-	}
-	if e.node["$ref"] != nil {
-		e.drop("type")
-		return
-	}
+// repairAnyOfSiblings moves a type and an enum from beside anyOf into the
+// branches: older validators reject a type there, and an enum needs one.
+// JSON Schema applies both together with whichever branch matches, so every
+// branch is limited by them. A branch whose own type shares nothing with the
+// outer one can never match and is dropped. A branch that is a reference is
+// left to its definition, and a branch keeps an enum of its own.
+func repairAnyOfSiblings(e *schemaEdit) {
 	branches, ok := e.node["anyOf"].([]any)
 	if !ok {
 		return
 	}
-	typed := make([]any, len(branches))
-	for i, member := range branches {
-		typed[i] = member
+	outerType, typed := e.node["type"]
+	values, enumerated := e.node["enum"].([]any)
+	if !typed && !enumerated {
+		return
+	}
+
+	limited := make([]any, 0, len(branches))
+	for _, member := range branches {
 		branch, ok := member.(map[string]any)
-		if !ok || branch["type"] != nil || branch["$ref"] != nil {
+		if member == true {
+			branch, ok = map[string]any{}, true
+		}
+		if !ok || branch["$ref"] != nil {
+			limited = append(limited, member)
 			continue
 		}
-		withType := maps.Clone(branch)
-		withType["type"] = declared
-		typed[i] = withType
+		branch = maps.Clone(branch)
+		if typed {
+			narrowed, overlaps := narrowType(outerType, branch["type"])
+			if !overlaps {
+				continue
+			}
+			branch["type"] = narrowed
+		}
+		if enumerated && branch["enum"] == nil {
+			branch["enum"] = values
+		}
+		limited = append(limited, branch)
 	}
-	e.set("anyOf", typed)
+	if len(limited) == 0 {
+		// No branch can match; the type and enum are what is left to say.
+		e.drop("anyOf")
+		return
+	}
+	e.set("anyOf", limited)
 	e.drop("type")
+	e.drop("enum")
+}
+
+// narrowType limits a branch's own type to what the type beside its anyOf
+// admits, treating integer as part of number. It reports false when the two
+// share nothing. A branch without a type takes the outer one.
+func narrowType(outer, own any) (any, bool) {
+	if own == nil {
+		return outer, true
+	}
+	outerNames, ownNames := typeNames(outer), typeNames(own)
+	if len(outerNames) == 0 || len(ownNames) == 0 {
+		return own, true // not a type this code can read; leave it as written
+	}
+	shared := make([]any, 0, len(ownNames))
+	narrowed := false
+	for _, name := range ownNames {
+		switch {
+		case slices.Contains(outerNames, name), name == "integer" && slices.Contains(outerNames, "number"):
+			shared = append(shared, name)
+		case name == "number" && slices.Contains(outerNames, "integer"):
+			shared = append(shared, "integer")
+			narrowed = true
+		default:
+			narrowed = true
+		}
+	}
+	switch {
+	case len(shared) == 0:
+		return nil, false
+	case !narrowed:
+		return own, true
+	case len(shared) == 1:
+		return shared[0], true
+	}
+	return shared, true
+}
+
+// repairRefSiblings drops a type and an enum from beside $ref. Older
+// validators reject the type, and an enum cannot stay without one. The
+// referenced definition applies on its own, which may accept more.
+func repairRefSiblings(e *schemaEdit) {
+	if e.node["$ref"] != nil {
+		e.drop("type")
+		e.drop("enum")
+	}
 }
 
 // repairRequired prunes required names the schema does not declare under

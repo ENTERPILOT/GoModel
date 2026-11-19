@@ -81,14 +81,16 @@ Agent-Frameworks funktionieren dadurch unverändert:
 | --- | --- |
 | `enum` ohne `type` | `type` wird aus den Werten abgeleitet; Werte mehrerer Typen werden zu typisierten `anyOf`-Zweigen |
 | Tupel-`items` (ein Array von Schemas) | Ein Schema, das jedes der Elemente akzeptiert |
-| Boolesches Schema (`true`, `false`) | `{}`, `{"not": {}}` |
-| `type` neben `anyOf` | `type` wandert in die Zweige |
+| Boolesches Schema (`true`, `false`) für eine Property, `items`, einen `anyOf`-Zweig oder eine Definition | `{}`, `{"not": {}}` |
+| `type` oder `enum` neben `anyOf` | Wandert in die Zweige |
 | `type` oder `enum` neben `$ref` | Entfernt; es gilt die referenzierte Definition |
 | `required`-Namen, die in `properties` fehlen | Entfernt |
 
 Schlüsselwörter, die Kimi akzeptiert und ignoriert, etwa `oneOf`, `const` und `format`,
-werden unverändert weitergeleitet. Passthrough-Requests werden so weitergeleitet, wie sie
-gesendet wurden.
+werden unverändert weitergeleitet. Ein Schema, das sich nicht reparieren lässt, etwa eines
+mit einem nicht auflösbaren `$ref`, wird wie gesendet weitergeleitet, und Kimi kann es
+weiterhin ablehnen. `response_format`-Schemas und Passthrough-Requests werden nicht
+umgeschrieben.
 
 ## Embeddings
 

@@ -78,13 +78,15 @@ the validator rejects before forwarding, on `/v1/chat/completions`, `/v1/respons
 | --- | --- |
 | `enum` without `type` | `type` inferred from the values; values of several types become typed `anyOf` branches |
 | Tuple `items` (an array of schemas) | One schema accepting any of the members |
-| Boolean schema (`true`, `false`) | `{}`, `{"not": {}}` |
-| `type` beside `anyOf` | `type` moved into the branches |
+| Boolean schema (`true`, `false`) for a property, `items`, an `anyOf` branch, or a definition | `{}`, `{"not": {}}` |
+| `type` or `enum` beside `anyOf` | Moved into the branches |
 | `type` or `enum` beside `$ref` | Dropped; the referenced definition applies |
 | `required` names missing from `properties` | Pruned |
 
 Keywords Kimi accepts and ignores, such as `oneOf`, `const`, and `format`, are forwarded
-unchanged. Passthrough requests are forwarded as sent.
+unchanged. A schema that cannot be repaired, such as one with an unresolvable `$ref`, is
+forwarded as sent, and Kimi may still reject it. `response_format` schemas and passthrough
+requests are not rewritten.
 
 ## Embeddings
 

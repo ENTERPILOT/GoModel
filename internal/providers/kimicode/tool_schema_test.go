@@ -116,19 +116,30 @@ var sanitizeCases = []struct {
 			"additionalProperties":false}`,
 	},
 	{
-		name: "type beside anyOf moves into the branches that declare none",
+		name: "type beside anyOf moves into the branches",
 		in: `{"type":"object","properties":{"value":{"type":"string","description":"d","anyOf":[
 			{"minLength":1},
-			{"type":"null"},
 			{"$ref":"#/$defs/Name"},
-			{"enum":["a",1]}]}},
+			{"enum":["a",1]},
+			true]}},
 			"$defs":{"Name":{"type":"string"}}}`,
 		want: `{"type":"object","properties":{"value":{"description":"d","anyOf":[
 			{"type":"string","minLength":1},
-			{"type":"null"},
 			{"$ref":"#/$defs/Name"},
-			{"type":"string","enum":["a"]}]}},
+			{"type":"string","enum":["a"]},
+			{"type":"string"}]}},
 			"$defs":{"Name":{"type":"string"}}}`,
+	},
+	{
+		name: "branch type is limited to the type beside anyOf",
+		in: `{"type":"object","properties":{
+			"value":{"type":["string","null"],"anyOf":[{"type":"integer"},{"type":["string","integer"]},{"type":"null"}]},
+			"amount":{"type":"integer","anyOf":[{"type":"number","minimum":0},{"type":"string"}]},
+			"never":{"type":"string","anyOf":[{"type":"integer"},{"type":"null"}]}}}`,
+		want: `{"type":"object","properties":{
+			"value":{"anyOf":[{"type":"string"},{"type":"null"}]},
+			"amount":{"anyOf":[{"type":"integer","minimum":0}]},
+			"never":{"type":"string"}}}`,
 	},
 	{
 		name: "type beside anyOf at the root",
@@ -138,9 +149,19 @@ var sanitizeCases = []struct {
 			"anyOf":[{"type":"object"},{"type":"object"}]}`,
 	},
 	{
-		name: "enum beside anyOf gives way to the branches",
-		in:   `{"type":"object","properties":{"value":{"enum":["a"],"anyOf":[{"type":"string"},{"type":"null"}]}}}`,
-		want: `{"type":"object","properties":{"value":{"anyOf":[{"type":"string"},{"type":"null"}]}}}`,
+		name: "enum beside anyOf moves into the branches",
+		in: `{"type":"object","properties":{
+			"value":{"enum":["a",1],"anyOf":[{"type":"string"},{"minimum":0},{"enum":["b"]},{"$ref":"#/$defs/Name"}]},
+			"typed":{"type":"string","enum":["a","b"],"anyOf":[{"maxLength":1},{"type":"null"}]}},
+			"$defs":{"Name":{"type":"string"}}}`,
+		want: `{"type":"object","properties":{
+			"value":{"anyOf":[
+				{"type":"string","enum":["a"]},
+				{"minimum":0,"anyOf":[{"type":"string","enum":["a"]},{"type":"integer","enum":[1]}]},
+				{"type":"string","enum":["b"]},
+				{"$ref":"#/$defs/Name"}]},
+			"typed":{"anyOf":[{"type":"string","enum":["a","b"],"maxLength":1}]}},
+			"$defs":{"Name":{"type":"string"}}}`,
 	},
 	{
 		name: "required names missing from properties are pruned",
@@ -158,11 +179,13 @@ var sanitizeCases = []struct {
 		in: `{"type":"object",
 			"properties":{"map":{"type":"object","additionalProperties":{"enum":["a"]}},
 				"list":{"type":"array","items":{"type":"object","properties":{"k":{"enum":[1]}}}}},
-			"$defs":{"Status":{"enum":["on","off"]}}}`,
+			"$defs":{"Status":{"enum":["on","off"]}},
+			"definitions":{"Pair":{"type":"array","items":[{"type":"string"},{"type":"string"}]}}}`,
 		want: `{"type":"object",
 			"properties":{"map":{"type":"object","additionalProperties":{"type":"string","enum":["a"]}},
 				"list":{"type":"array","items":{"type":"object","properties":{"k":{"type":"integer","enum":[1]}}}}},
-			"$defs":{"Status":{"type":"string","enum":["on","off"]}}}`,
+			"$defs":{"Status":{"type":"string","enum":["on","off"]}},
+			"definitions":{"Pair":{"type":"array","items":{"anyOf":[{"type":"string"},{"type":"string"}]}}}}`,
 	},
 	{
 		name: "properties named like keywords stay properties",
@@ -261,6 +284,22 @@ func TestSanitizeTools(t *testing.T) {
 			assert.JSONEq(t, encodeJSON(t, tools[i]), encodeJSON(t, got[i]))
 		}
 		assert.JSONEq(t, before, encodeJSON(t, tools), "the caller's tools must not be mutated")
+	})
+
+	t.Run("repairs a boolean schema in place of the parameters", func(t *testing.T) {
+		tools := []map[string]any{
+			{"type": "function", "function": map[string]any{"name": "chat_any", "parameters": true}},
+			{"type": "function", "name": "responses_any", "parameters": true},
+			{"type": "function", "function": map[string]any{"name": "chat_never", "parameters": false}},
+		}
+
+		got, changed := sanitizeTools(tools)
+
+		require.True(t, changed)
+		assert.JSONEq(t, `{}`, encodeJSON(t, got[0]["function"].(map[string]any)["parameters"]))
+		assert.JSONEq(t, `{}`, encodeJSON(t, got[1]["parameters"]))
+		assert.JSONEq(t, `{"not":{}}`, encodeJSON(t, got[2]["function"].(map[string]any)["parameters"]))
+		assert.JSONEq(t, `true`, encodeJSON(t, tools[0]["function"].(map[string]any)["parameters"]), "the caller's tools must not be mutated")
 	})
 
 	t.Run("reports no change when every schema is accepted", func(t *testing.T) {
