@@ -37,8 +37,10 @@ type RequestModelResolution struct {
 }
 
 // UpstreamTimeouts overrides the gateway-wide upstream HTTP timeouts for
-// every attempt of one request, including retries and failovers. Each attempt
-// gets a fresh budget. A zero field inherits the gateway-wide setting.
+// each attempt of one request, including retries and failovers, on paths
+// that apply them (native Bedrock SDK calls and realtime handshakes do not).
+// Each attempt gets a fresh budget. A zero field inherits the gateway-wide
+// setting.
 type UpstreamTimeouts struct {
 	Timeout               time.Duration
 	ResponseHeaderTimeout time.Duration

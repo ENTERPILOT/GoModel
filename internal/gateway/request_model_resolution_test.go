@@ -386,7 +386,7 @@ func TestResolveRequestModelCarriesVirtualModelPath(t *testing.T) {
 }
 
 type requestTimeoutsResolver struct {
-	requestAliasResolver
+	requestRouteResolver
 	timeouts core.UpstreamTimeouts
 	route    []string
 }
@@ -400,6 +400,7 @@ func TestResolveRequestModelCarriesResolvedTimeouts(t *testing.T) {
 	want := core.UpstreamTimeouts{Timeout: 30 * time.Second, ResponseHeaderTimeout: 5 * time.Second}
 	resolver := &requestTimeoutsResolver{
 		requestAliasResolver: requestAliasResolver{"smart": {Provider: "openai", Model: "gpt-4o"}},
+		path:                 []string{"smart", "inner"},
 		timeouts:             want,
 	}
 
@@ -409,6 +410,7 @@ func TestResolveRequestModelCarriesResolvedTimeouts(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Equal(t, want, resolution.Timeouts)
+	assert.Equal(t, []string{"smart", "inner"}, resolver.route, "the recorded route reaches the timeouts resolver")
 
 	resolution, err = ResolveRequestModelWithAuthorizer(
 		context.Background(), newRequestRefreshProvider(1), requestAliasResolver{}, nil,

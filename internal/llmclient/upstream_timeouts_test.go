@@ -55,6 +55,7 @@ func TestClient_AppliesResolvedUpstreamTimeouts(t *testing.T) {
 		{name: "gateway-wide timeout without a workflow", client: 50 * time.Millisecond, ctx: context.Background(), wantErr: true},
 		{name: "longer model timeout", client: 50 * time.Millisecond, ctx: workflowWithTimeouts(core.UpstreamTimeouts{Timeout: 2 * time.Second})},
 		{name: "shorter model timeout", client: 2 * time.Second, ctx: workflowWithTimeouts(core.UpstreamTimeouts{Timeout: 50 * time.Millisecond}), wantErr: true},
+		{name: "shorter model response header timeout", client: 2 * time.Second, ctx: workflowWithTimeouts(core.UpstreamTimeouts{ResponseHeaderTimeout: 50 * time.Millisecond}), wantErr: true},
 		{
 			name:   "explicit context overrides win over the workflow",
 			client: 50 * time.Millisecond,
@@ -80,7 +81,7 @@ func TestClient_AppliesResolvedUpstreamTimeouts(t *testing.T) {
 func TestClient_RetryGetsFreshTimeoutBudget(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		delayHeaders(r, 100*time.Millisecond)
+		delayHeaders(r, 150*time.Millisecond)
 		if calls.Add(1) == 1 {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
@@ -90,8 +91,9 @@ func TestClient_RetryGetsFreshTimeoutBudget(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := newTimeoutTestClient(t, server.URL, 2*time.Second)
-	// Two attempts take ~200ms in total; each fits its own 150ms budget.
-	ctx := workflowWithTimeouts(core.UpstreamTimeouts{Timeout: 150 * time.Millisecond})
+	// Two attempts take ~300ms in total, more than one 250ms budget; each
+	// fits its own with ~100ms to spare.
+	ctx := workflowWithTimeouts(core.UpstreamTimeouts{Timeout: 250 * time.Millisecond})
 	err := client.Do(ctx, Request{Method: http.MethodPost, Endpoint: "/chat/completions", Body: map[string]any{}}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), calls.Load())
