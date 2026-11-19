@@ -9,7 +9,8 @@ Der Provider `m365-copilot` sendet Chat-Requests über die
 [Work IQ REST API](https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/rest/overview)
 an Microsoft 365 Copilot. Copilot ist ein Assistent, kein Modell-Endpunkt: Er
 antwortet als ein angemeldeter Benutzer und stützt jede Antwort auf dessen
-E-Mails, Besprechungen, Dateien, Teams-Chats und das Web.
+E-Mails, Besprechungen, Dateien und Teams-Chats sowie auf das Web, sofern ein
+Request das Web-Grounding nicht abschaltet.
 
 Nutzen Sie ihn, um Copilot-Antworten hinter dasselbe Gateway, dieselben Keys
 und dieselben Audit-Logs wie Ihre anderen Modelle zu stellen. Er ist kein
@@ -69,7 +70,7 @@ Jeder Request öffnet eine neue Copilot-Unterhaltung und sendet einen Prompt:
 | OpenAI-Request | An Copilot gesendet als |
 | -------------- | ----------------------- |
 | Letzte Nachricht (muss `user` sein) | Der Prompt |
-| Frühere Nachrichten mit `system`, `developer`, `user` und `assistant` | `additionalContext`, nach Rolle beschriftet |
+| Frühere Nachrichten mit `system`, `developer`, `user` und `assistant` | `additionalContext`, nach Rolle beschriftet (`developer` als Systemanweisungen) |
 | `stream: true` | `chatOverStream`, weitergeleitet als Chat-Completion-Chunks |
 | `/v1/responses` | In einen Chat-Request übersetzt und zurück |
 
@@ -116,10 +117,11 @@ wiederholt, da ein Retry eine zweite Gesprächsrunde hinzufügen würde.
 
 ## Modelle
 
-Der Provider listet ein Modell, `m365-copilot`. Copilot bietet keine
-Modellauswahl, daher leitet der Name einen Request nur hierher. Setzen Sie
-`M365_COPILOT_MODELS`, um andere Namen hierher zu leiten, zum Beispiel
-`M365_COPILOT_MODELS=copilot`.
+Standardmäßig listet der Provider ein Modell, `m365-copilot`. Copilot bietet
+keine Modellauswahl, daher leitet der Name einen Request nur hierher.
+`M365_COPILOT_MODELS` ersetzt diese Liste, zum Beispiel bedient
+`M365_COPILOT_MODELS=copilot` stattdessen `copilot` (siehe
+[Modellmodi](/de/advanced/config-yaml#modellmodi)).
 
 Embeddings, Dateien, Batches und Passthrough sind nicht verfügbar.
 

@@ -9,7 +9,8 @@ Provider `m365-copilot` wysyła requesty czatu do Microsoft 365 Copilot przez
 [Work IQ REST API](https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/rest/overview).
 Copilot to asystent, a nie endpoint modelu: odpowiada w imieniu jednego
 zalogowanego użytkownika i opiera każdą odpowiedź na jego poczcie,
-spotkaniach, plikach, czatach w Teams oraz sieci.
+spotkaniach, plikach i czatach w Teams, a także na sieci, o ile request nie
+wyłączy groundingu w sieci.
 
 Używaj go, aby odpowiedzi Copilota przechodziły przez ten sam gateway, te same
 klucze i te same logi audytowe co inne modele. Nie jest to LLM ogólnego
@@ -67,7 +68,7 @@ Każdy request otwiera nową rozmowę z Copilotem i wysyła jeden prompt:
 | Request OpenAI | Wysyłane do Copilota jako |
 | -------------- | ------------------------- |
 | Ostatnia wiadomość (musi być `user`) | Prompt |
-| Wcześniejsze wiadomości `system`, `developer`, `user` i `assistant` | `additionalContext`, opisane według roli |
+| Wcześniejsze wiadomości `system`, `developer`, `user` i `assistant` | `additionalContext`, opisane według roli (`developer` jako instrukcje systemowe) |
 | `stream: true` | `chatOverStream`, przekazywane jako chunki chat completion |
 | `/v1/responses` | Tłumaczone na request czatu i z powrotem |
 
@@ -113,9 +114,10 @@ rozmowy.
 
 ## Modele
 
-Provider listuje jeden model, `m365-copilot`. Copilot nie daje wyboru modelu,
-więc nazwa jedynie kieruje request tutaj. Ustaw `M365_COPILOT_MODELS`, aby
-kierować tu inne nazwy, na przykład `M365_COPILOT_MODELS=copilot`.
+Domyślnie provider listuje jeden model, `m365-copilot`. Copilot nie daje
+wyboru modelu, więc nazwa jedynie kieruje request tutaj. `M365_COPILOT_MODELS`
+zastępuje tę listę, na przykład `M365_COPILOT_MODELS=copilot` obsługuje
+`copilot` zamiast niego (zobacz [Tryby modeli](/pl/advanced/config-yaml#tryby-modeli)).
 
 Embeddingi, pliki, batche i passthrough nie są dostępne.
 

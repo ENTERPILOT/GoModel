@@ -42,8 +42,9 @@ func (s *chatStream) Close() error {
 //
 // The reference prints each event's JSON indented, with "data:" on its first
 // line only. Lines that are neither blank nor an SSE field are therefore read
-// as a continuation of the event's data, so the stream parses whether the
-// service sends the JSON on one line or as printed.
+// as a continuation of the event's data when they look like indented JSON, so
+// the stream parses whether the service sends the JSON on one line or as
+// printed.
 // https://learn.microsoft.com/microsoft-365-copilot/extensibility/api/ai-services/chat/copilotconversation-chatoverstream
 func convertChatStream(body io.ReadCloser, out *io.PipeWriter, state *streamState) {
 	defer func() { _ = body.Close() }()
@@ -64,8 +65,7 @@ func convertChatStream(body io.ReadCloser, out *io.PipeWriter, state *streamStat
 				data.WriteByte('\n')
 			}
 			data.WriteString(strings.TrimPrefix(line, "data:"))
-		case isSSEField(line):
-		case data.Len() > 0:
+		case data.Len() > 0 && isJSONContinuation(line):
 			data.WriteByte('\n')
 			data.WriteString(line)
 		}
@@ -85,12 +85,13 @@ func convertChatStream(body io.ReadCloser, out *io.PipeWriter, state *streamStat
 	state.finish(out)
 }
 
-// isSSEField reports whether line is a comment or a field other than data.
-func isSSEField(line string) bool {
-	for _, prefix := range []string{":", "id:", "event:", "retry:"} {
-		if strings.HasPrefix(line, prefix) {
-			return true
-		}
+// isJSONContinuation reports whether line continues an event's indented JSON:
+// it is indented or closes an object or array. Any other line is an SSE
+// comment or a field other than data, and is ignored.
+func isJSONContinuation(line string) bool {
+	switch line[0] {
+	case ' ', '\t', '}', ']':
+		return true
 	}
 	return false
 }

@@ -325,6 +325,13 @@ func TestChatCompletion_RejectsWhatCopilotCannotServe(t *testing.T) {
 			message: "the last message must be a user message with text",
 		},
 		{
+			name: "a tool call on a user message",
+			req: &core.ChatRequest{Messages: []core.Message{
+				{Role: "user", Content: "Hello", ToolCalls: []core.ToolCall{{ID: "call_1"}}},
+			}},
+			message: "messages[0]: tool calls are not supported",
+		},
+		{
 			name:    "an unknown role",
 			req:     &core.ChatRequest{Messages: []core.Message{{Role: "narrator", Content: "Hello"}}},
 			message: `messages[0]: role "narrator" is not supported`,
@@ -543,7 +550,7 @@ func TestStreamChatCompletion_ForwardsWhatEachSnapshotAdds(t *testing.T) {
 			body: func() string {
 				var b strings.Builder
 				for i, event := range events {
-					b.WriteString("data: " + event + "\nid:" + string(rune('1'+i)) + "\n\n")
+					b.WriteString(": keep-alive\ndata: " + event + "\nid:" + string(rune('1'+i)) + "\nx-extension:1\n\n")
 				}
 				return b.String()
 			},
@@ -661,7 +668,7 @@ func TestStreamChatCompletion_FailuresBecomeAnErrorChunk(t *testing.T) {
 		},
 		{
 			name:    "an event over the size limit",
-			body:    "data: {\n" + strings.Repeat(strings.Repeat("x", 1<<20)+"\n", 9) + "\n",
+			body:    "data: {\n" + strings.Repeat(" "+strings.Repeat("x", 1<<20)+"\n", 9) + "\n",
 			message: "exceeds the size limit",
 		},
 		{
@@ -716,6 +723,25 @@ func TestResponses_GoThroughChat(t *testing.T) {
 	body, err := json.Marshal(resp.Output)
 	require.NoError(t, err)
 	assert.Contains(t, string(body), "Contoso Engineering Standup")
+}
+
+func TestResponses_RejectHostedTools(t *testing.T) {
+	provider, capture := copilotServer(t, jsonHandler(http.StatusOK, chatConversation), sseHandler(""))
+	req := &core.ResponsesRequest{
+		Model: defaultModel,
+		Input: prompt,
+		Tools: []map[string]any{{"type": "web_search"}},
+	}
+
+	_, err := provider.Responses(context.Background(), req)
+	assertInvalidRequest(t, err, "tools are not supported")
+	_, err = provider.StreamResponses(context.Background(), req)
+	assertInvalidRequest(t, err, "tools are not supported")
+	assert.Zero(t, capture.Count())
+
+	req.ToolChoice = "none"
+	_, err = provider.Responses(context.Background(), req)
+	require.NoError(t, err)
 }
 
 func TestListModels(t *testing.T) {

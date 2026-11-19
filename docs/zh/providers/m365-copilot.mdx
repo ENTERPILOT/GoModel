@@ -6,7 +6,7 @@ keywords: ["Microsoft 365 Copilot", "Work IQ", "Copilot Chat API", "Entra ID", "
 ---
 
 `m365-copilot` 提供商通过 [Work IQ REST API](https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/rest/overview)
-将聊天请求发送到 Microsoft 365 Copilot。Copilot 是一个助手，而不是模型端点：它以一名已登录用户的身份回答，并以该用户的邮件、会议、文件、Teams 聊天和网络内容作为每个回答的依据。
+将聊天请求发送到 Microsoft 365 Copilot。Copilot 是一个助手，而不是模型端点：它以一名已登录用户的身份回答，并以该用户的邮件、会议、文件和 Teams 聊天作为每个回答的依据；除非请求关闭了网络依据，还会使用网络内容。
 
 用它可以让 Copilot 的回答与其他模型共用同一个网关、同一套密钥和审计日志。它不是通用 LLM：没有模型选择，没有工具调用，也没有 JSON 模式。
 
@@ -52,7 +52,7 @@ M365_COPILOT_BASE_URL=https://graph.microsoft.com/beta/copilot
 | OpenAI 请求 | 发送给 Copilot 的形式 |
 | ----------- | --------------------- |
 | 最后一条消息（必须是 `user`） | 提示 |
-| 之前的 `system`、`developer`、`user` 和 `assistant` 消息 | `additionalContext`，按角色标注 |
+| 之前的 `system`、`developer`、`user` 和 `assistant` 消息 | `additionalContext`，按角色标注（`developer` 视为系统指令） |
 | `stream: true` | `chatOverStream`，以 Chat Completion 分块转发 |
 | `/v1/responses` | 转换为聊天请求再转换回来 |
 
@@ -84,7 +84,7 @@ M365_COPILOT_BASE_URL=https://graph.microsoft.com/beta/copilot
 
 ## 模型
 
-该提供商只列出一个模型 `m365-copilot`。Copilot 没有模型选择，因此该名称只用于将请求路由到这里。设置 `M365_COPILOT_MODELS` 可以将其他名称路由到这里，例如 `M365_COPILOT_MODELS=copilot`。
+默认情况下，该提供商只列出一个模型 `m365-copilot`。Copilot 没有模型选择，因此该名称只用于将请求路由到这里。`M365_COPILOT_MODELS` 会替换该列表，例如 `M365_COPILOT_MODELS=copilot` 会改为提供 `copilot`（参见[模型模式](/zh/advanced/config-yaml#模型模式)）。
 
 不支持 Embeddings、文件、批处理和透传。
 

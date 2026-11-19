@@ -231,8 +231,9 @@ przez providera upstream.
   rozliczany w Copilot Credits, których GoModel nie wycenia. Ustaw
   `M365_COPILOT_API_KEY` na delegowany token Entra ID (scope
   `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`); wygasa po około godzinie
-  i nie jest odświeżany. Tylko czat tekstowy: narzędzia, obrazy, `n > 1` i
-  wyjście JSON są odrzucane.
+  i nie jest odświeżany. Tylko czat tekstowy: narzędzia (chyba że
+  `tool_choice` to `none`), wywołania narzędzi, obrazy, dźwięk, pliki, `n > 1`
+  i wyjście JSON są odrzucane.
 - **Kimi Code** – brak cen za token; limit odnawia się co tydzień i jest dodatkowo
   ograniczony kroczącym oknem 5-godzinnym. Śledzenie kosztów użycia raportuje
   zero dla Kimi Code, więc load balancing `cost` nie może go wycenić; preferuj

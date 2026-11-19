@@ -104,14 +104,13 @@ var contextDescriptions = map[string]string{
 // for anything the Chat API has no place for.
 func messageText(message core.Message) (role, text string, err error) {
 	role = strings.ToLower(strings.TrimSpace(message.Role))
+	if len(message.ToolCalls) > 0 {
+		return "", "", fmt.Errorf("tool calls are not supported by Microsoft 365 Copilot")
+	}
 	switch role {
 	case "developer":
 		role = "system"
-	case "system", "user":
-	case "assistant":
-		if len(message.ToolCalls) > 0 {
-			return "", "", fmt.Errorf("tool calls are not supported by Microsoft 365 Copilot")
-		}
+	case "system", "user", "assistant":
 	case "tool", "function":
 		return "", "", fmt.Errorf("tool results are not supported by Microsoft 365 Copilot")
 	default:

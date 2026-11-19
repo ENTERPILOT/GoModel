@@ -227,8 +227,9 @@ support, not every individual model capability exposed by an upstream provider.
   Credits, which GoModel cannot price. Set `M365_COPILOT_API_KEY` to a
   delegated Entra ID token (scope
   `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`); it expires after about
-  an hour and is not refreshed. Text chat only: tools, images, `n > 1`, and
-  JSON output are rejected.
+  an hour and is not refreshed. Text chat only: tools (unless
+  `tool_choice` is `none`), tool calls, images, audio, files, `n > 1`, and JSON
+  output are rejected.
 - **Kimi Code** — no per-token pricing; quota refreshes weekly and is also
   constrained by a rolling 5-hour window. Usage-cost tracking reports zero for
   Kimi Code, so `cost` load-balancing cannot price it; prefer conservative

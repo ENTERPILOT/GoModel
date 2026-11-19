@@ -8,8 +8,8 @@ keywords: ["Microsoft 365 Copilot", "Work IQ", "Copilot Chat API", "Entra ID", "
 The `m365-copilot` provider sends chat requests to Microsoft 365 Copilot
 through the [Work IQ REST API](https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/rest/overview).
 Copilot is an assistant, not a model endpoint: it answers as one signed-in
-user and grounds every answer in that user's email, meetings, files, Teams
-chats, and the web.
+user and grounds every answer in that user's email, meetings, files, and Teams
+chats, plus the web unless a request turns web grounding off.
 
 Use it to put Copilot answers behind the same gateway, keys, and audit logs as
 your other models. It is not a general-purpose LLM: there is no model choice,
@@ -67,7 +67,7 @@ Each request opens a new Copilot conversation and sends one prompt:
 | OpenAI request | Sent to Copilot as |
 | -------------- | ------------------ |
 | Last message (must be `user`) | The prompt |
-| Earlier `system`, `developer`, `user`, and `assistant` messages | `additionalContext`, labelled by role |
+| Earlier `system`, `developer`, `user`, and `assistant` messages | `additionalContext`, labelled by role (`developer` as system instructions) |
 | `stream: true` | `chatOverStream`, forwarded as chat completion chunks |
 | `/v1/responses` | Translated to a chat request and back |
 
@@ -113,9 +113,10 @@ second turn.
 
 ## Models
 
-The provider lists one model, `m365-copilot`. Copilot has no model choice, so
-the name only routes a request here. Set `M365_COPILOT_MODELS` to route other
-names, for example `M365_COPILOT_MODELS=copilot`.
+By default the provider lists one model, `m365-copilot`. Copilot has no model
+choice, so the name only routes a request here. `M365_COPILOT_MODELS` replaces
+that list, for example `M365_COPILOT_MODELS=copilot` serves `copilot` instead
+(see [Models modes](/advanced/config-yaml#models-modes)).
 
 Embeddings, files, batches, and passthrough are not available.
 

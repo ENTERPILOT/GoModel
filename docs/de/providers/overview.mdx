@@ -213,7 +213,8 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   Microsoft-365-Daten eines Benutzers und das Web; abgerechnet in Copilot Credits, die GoModel
   nicht bepreisen kann. Setzen Sie `M365_COPILOT_API_KEY` auf ein delegiertes Entra-ID-Token
   (Scope `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`); es läuft nach etwa einer Stunde ab
-  und wird nicht erneuert. Nur Text-Chat: Tools, Bilder, `n > 1` und JSON-Ausgabe werden abgelehnt.
+  und wird nicht erneuert. Nur Text-Chat: Tools (außer bei
+  `tool_choice: none`), Tool Calls, Bilder, Audio, Dateien, `n > 1` und JSON-Ausgabe werden abgelehnt.
 - **Kimi Code** – keine Preise pro Token; das Kontingent wird wöchentlich erneuert und ist zusätzlich
   durch ein rollierendes 5-Stunden-Fenster begrenzt. Die Kostenerfassung meldet für Kimi Code null,
   daher kann `cost`-Load-Balancing es nicht bepreisen; bevorzugen Sie konservative

@@ -129,12 +129,31 @@ func (p *Provider) ListModels(_ context.Context) (*core.ModelsResponse, error) {
 
 // Responses translates the OpenAI Responses API through Copilot chat.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+	if err := rejectResponsesTools(req); err != nil {
+		return nil, err
+	}
 	return providers.ResponsesViaChat(ctx, p, req, p.providerName)
 }
 
 // StreamResponses is Responses for streaming requests.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
+	if err := rejectResponsesTools(req); err != nil {
+		return nil, err
+	}
 	return providers.StreamResponsesViaChat(ctx, p, req, p.providerName)
+}
+
+// rejectResponsesTools fails a Responses request that declares tools before
+// the translation to chat, which drops hosted tools such as web_search.
+func rejectResponsesTools(req *core.ResponsesRequest) error {
+	if req == nil || len(req.Tools) == 0 {
+		return nil
+	}
+	if choice, ok := req.ToolChoice.(string); ok && choice == "none" {
+		return nil
+	}
+	return core.NewInvalidRequestError(
+		"tools are not supported: Microsoft 365 Copilot's Chat API has no tool calling", nil).WithParam("tools")
 }
 
 // Embeddings is unsupported: the Chat API exposes no embeddings endpoint.
