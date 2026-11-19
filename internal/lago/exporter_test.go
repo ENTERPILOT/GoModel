@@ -292,6 +292,51 @@ func TestExporterHalvesABatchLagoRefusesWithoutNamingEvents(t *testing.T) {
 	assert.Equal(t, 1.0, testutil.ToFloat64(eventsDropped.WithLabelValues(dropRejected))-rejected)
 }
 
+// A batch Lago keeps refusing without naming events is halved into up to 199
+// POSTs. Close stops that splitting and leaves the rest to the shutdown
+// attempt, so its timeout bounds how long Close takes.
+func TestExporterCloseStopsSplittingARefusedBatch(t *testing.T) {
+	firstCh := make(chan struct{})
+	releaseFirst := sync.OnceFunc(func() { close(firstCh) })
+	t.Cleanup(releaseFirst)
+	var requests atomic.Int32
+	server, _ := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
+		readBatch(t, r)
+		if requests.Add(1) == 1 {
+			<-firstCh
+		}
+		select { // a slow answer, so splitting all the way would take seconds
+		case <-r.Context().Done():
+		case <-time.After(20 * time.Millisecond):
+		}
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+	})
+	short := idleTiming
+	short.shutdown = 100 * time.Millisecond
+	exporter := startExporter(t, server.URL, short)
+
+	for i := range 50 { // 100 events: one full batch, sent at once
+		exporter.Record(testEntry("e" + strconv.Itoa(i)))
+	}
+	require.Eventually(t, func() bool { return requests.Load() == 1 }, 5*time.Second, time.Millisecond)
+
+	closed := make(chan struct{})
+	started := time.Now()
+	go func() {
+		exporter.Close()
+		close(closed)
+	}()
+	require.Eventually(t, exporter.stopping, 5*time.Second, time.Millisecond)
+	releaseFirst()
+
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		require.Fail(t, "Close kept splitting the refused batch")
+	}
+	assert.Less(t, time.Since(started), 2*time.Second)
+}
+
 func TestExporterCloseSendsWhatIsBuffered(t *testing.T) {
 	lago := &lagoServer{}
 	server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
@@ -329,11 +374,13 @@ func TestExporterCloseDuringARetryWaitCountsWhatIsLost(t *testing.T) {
 }
 
 func TestExporterDropsNewRequestsWhenTheBufferIsFull(t *testing.T) {
-	release := make(chan struct{})
+	releaseCh := make(chan struct{})
+	release := sync.OnceFunc(func() { close(releaseCh) })
+	t.Cleanup(release) // runs before the server cleanup, so a failed wait never hangs it
 	lago := &lagoServer{}
 	server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 		events := readBatch(t, r)
-		<-release
+		<-releaseCh
 		lago.accept(w, events)
 	})
 	exporter := newExporter(Options{
@@ -353,7 +400,7 @@ func TestExporterDropsNewRequestsWhenTheBufferIsFull(t *testing.T) {
 	exporter.Record(testEntry("e3"))
 
 	assert.Equal(t, 2.0, testutil.ToFloat64(eventsDropped.WithLabelValues(dropBufferFull))-dropped)
-	close(release)
+	release()
 	exporter.Close()
 	assert.Equal(t, []string{"e1_tok_input", "e1_tok_output", "e2_tok_input", "e2_tok_output"}, lago.acceptedIDs())
 }

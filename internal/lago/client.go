@@ -19,6 +19,11 @@ const maxBatchSize = 100
 // of maxBatchSize events lists each of them in a few dozen bytes.
 const maxErrorBody = 64 << 10
 
+// maxDrainBody caps how much of a successful response is read and discarded.
+// Lago repeats the batch in it, which can pass maxErrorBody; a body read to
+// its end lets the connection be reused.
+const maxDrainBody = 4 << 20
+
 // duplicateTransaction is the error Lago gives an event whose transaction_id
 // it already holds.
 const duplicateTransaction = "value_already_exist"
@@ -61,7 +66,7 @@ func (c *client) send(ctx context.Context, events []Event) (status int, body []b
 	defer resp.Body.Close()
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		// Drained so the connection is reused; the answer repeats the events.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrorBody))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrainBody))
 		return resp.StatusCode, nil, nil
 	}
 	body, _ = io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))

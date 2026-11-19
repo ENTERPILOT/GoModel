@@ -99,7 +99,8 @@ subskrypcji.
 
 Jeden event na każdy rodzaj tokenów z dodatnim licznikiem, wysyłany na
 [`POST /events/batch`](https://getlago.com/docs/api-reference/events/batch)
-w batchach do 100 eventów, najpóźniej 5 sekund po requeście:
+w batchach do 100 eventów. Niepełny batch jest wysyłany co 5 sekund; gdy
+Lago działa wolno albo batch jest ponawiany, kolejne eventy czekają za nim:
 
 ```json
 {
@@ -133,7 +134,7 @@ Nie są wysyłane:
 
 GoModel wysyła liczbę tokenów, nie ceny.
 [Narzuty](/pl/features/cost-tracking#narzuty-i-koszt-rozliczeniowy) i
-`billed_cost` pozostają w widokach użycia GoModel; ceny dla klienta
+zapisany przez GoModel `billed_cost` pozostają w widokach użycia GoModel; ceny dla klienta
 rozliczanego przez Lago ustaw w Lago.
 
 ## Dostarczanie
@@ -160,7 +161,7 @@ Każda replika gatewaya wysyła własne requesty. Obserwuj oba liczniki (zobacz
 | Metryka | Znaczenie |
 | --- | --- |
 | `gomodel_lago_events_sent_total` | Eventy, które ma Lago |
-| `gomodel_lago_events_dropped_total{reason}` | Eventy, które nigdy nie dotarły do Lago: `buffer_full`, `rejected` albo `shutdown`. Ich użycia brakuje na fakturze |
+| `gomodel_lago_events_dropped_total{reason}` | Eventy, których Lago nie przechowuje: `buffer_full`, `rejected` (Lago je odrzuciło) albo `shutdown`. Ich użycia brakuje na fakturze |
 
 ```promql
 sum(increase(gomodel_lago_events_dropped_total[5m])) by (reason) > 0

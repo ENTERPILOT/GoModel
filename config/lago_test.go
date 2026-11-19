@@ -92,11 +92,16 @@ func TestLoadLagoRejectsInvalidSettings(t *testing.T) {
 		{"key from an unset variable", "  api_key: ${LAGO_KEY_NOT_SET}\n  subscriptions:\n    /acme: sub_acme\n", nil, "environment variable that is not set"},
 		{"no subscriptions", "  api_key: k\n", nil, "lago.subscriptions (LAGO_SUBSCRIPTIONS) is empty"},
 		{"url without scheme", valid + "  api_url: lago.internal/api/v1\n", nil, "lago.api_url (LAGO_API_URL) must be an http or https URL"},
+		{"url with a query", valid + "  api_url: https://lago.internal/api/v1?x=1\n", nil, "must not have a query or fragment"},
+		{"url with a fragment", valid + "  api_url: https://lago.internal/api/v1#x\n", nil, "must not have a query or fragment"},
 		{"root user path", "  api_key: k\n  subscriptions:\n    /: sub_all\n", nil, "would bill every request to one subscription"},
 		{"invalid user path", "  api_key: k\n  subscriptions:\n    /acme/../globex: sub\n", nil, "user path cannot contain"},
 		{"empty subscription id", "  api_key: k\n  subscriptions:\n    /acme: \"\"\n", nil, "subscription id is required"},
 		{"same user path twice", "  api_key: k\n  subscriptions:\n    /acme: a\n    acme/: b\n", nil, "configured more than once"},
+		{"same user path twice beside an environment entry", "  api_key: k\n  subscriptions:\n    /acme: a\n    acme/: b\n",
+			map[string]string{"LAGO_SUBSCRIPTIONS": "/globex=sub_globex"}, "configured more than once"},
 		{"environment entry without id", valid, map[string]string{"LAGO_SUBSCRIPTIONS": "/acme"}, "is not user_path=subscription_id"},
+		{"same user path twice in the environment", valid, map[string]string{"LAGO_SUBSCRIPTIONS": "/globex=a,globex/=b"}, "is listed more than once"},
 		{"environment entry with invalid path", valid, map[string]string{"LAGO_SUBSCRIPTIONS": "/a:b=sub"}, "invalid value for LAGO_SUBSCRIPTIONS"},
 	}
 	for _, tt := range tests {
@@ -119,9 +124,46 @@ func TestLoadLagoDisabledSkipsValidation(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
+		t.Setenv("LAGO_SUBSCRIPTIONS", "/acme")
 		result := loadConfigYAML(t, dir, "lago:\n  enabled: false\n  api_url: not-a-url\n  subscriptions:\n    /: sub_all\n")
 		assert.False(t, result.Config.Lago.Enabled)
 	})
+}
+
+// A value read from a secret reference is checked once it is resolved, so an
+// export that could never deliver does not start.
+func TestResolveSecretsChecksResolvedLagoSettings(t *testing.T) {
+	tests := []struct {
+		name    string
+		secrets map[string]string
+		wantErr string
+	}{
+		{"valid", map[string]string{"url": "https://lago.internal/api/v1/", "key": "lago-key"}, ""},
+		{"url without scheme", map[string]string{"url": "lago.internal/api/v1", "key": "lago-key"}, "lago.api_url (LAGO_API_URL) must be an http or https URL"},
+		{"empty key", map[string]string{"url": "https://lago.internal/api/v1", "key": " "}, "lago.api_key: the value resolved from its secret reference is empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := buildDefaultConfig()
+			cfg.Lago = LagoConfig{
+				Enabled:       true,
+				APIURL:        "${vault:url}",
+				APIKey:        "${vault:key}",
+				Subscriptions: map[string]string{"/acme": "sub_acme"},
+			}
+			require.NoError(t, normalizeLagoConfig(&cfg.Lago), "a reference is accepted at load time")
+
+			err := (&LoadResult{Config: cfg, Secrets: vaultSecrets(t, tt.secrets)}).ResolveSecrets(t.Context())
+
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "https://lago.internal/api/v1", cfg.Lago.APIURL)
+			assert.Equal(t, "lago-key", cfg.Lago.APIKey)
+		})
+	}
 }
 
 func TestExportYAMLRedactsLagoAPIKey(t *testing.T) {

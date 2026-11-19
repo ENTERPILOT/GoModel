@@ -44,6 +44,9 @@ func (r *LoadResult) resolveSecrets(ctx context.Context) error {
 	if err := checkResolvedServerTLS(configuredServer, r.Config.Server); err != nil {
 		return err
 	}
+	if err := validateResolvedLago(&r.Config.Lago); err != nil {
+		return err
+	}
 	return validateResolvedMCP(&r.Config.MCP)
 }
 

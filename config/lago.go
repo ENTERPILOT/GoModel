@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"strings"
@@ -48,20 +49,18 @@ type LagoConfig struct {
 }
 
 // applyLagoEnv merges LAGO_SUBSCRIPTIONS into lago.subscriptions; an entry
-// replaces the config.yaml entry of the same user path. The generic env
-// overlay skips maps, so the variable is applied explicitly.
+// replaces the config.yaml entries of the same user path. The generic env
+// overlay skips maps, so the variable is applied explicitly. It is not read
+// while the export is off.
+//
+// config.yaml keys are kept as written: normalizeLagoConfig still has to see
+// two spellings of one path, such as "/acme" and "acme/", to reject them.
 func applyLagoEnv(cfg *Config) error {
 	raw := strings.TrimSpace(os.Getenv("LAGO_SUBSCRIPTIONS"))
-	if raw == "" {
+	if raw == "" || !cfg.Lago.Enabled {
 		return nil
 	}
-	merged := make(map[string]string, len(cfg.Lago.Subscriptions))
-	for userPath, id := range cfg.Lago.Subscriptions {
-		if canonical, err := core.NormalizeUserPath(userPath); err == nil {
-			userPath = canonical
-		}
-		merged[userPath] = id
-	}
+	fromEnv := make(map[string]string)
 	for item := range strings.SplitSeq(raw, ",") {
 		if strings.TrimSpace(item) == "" {
 			continue
@@ -74,15 +73,29 @@ func applyLagoEnv(cfg *Config) error {
 		if err != nil {
 			return fmt.Errorf("invalid value for LAGO_SUBSCRIPTIONS: %w", err)
 		}
+		if _, dup := fromEnv[userPath]; dup {
+			return fmt.Errorf("invalid value for LAGO_SUBSCRIPTIONS: user path %q is listed more than once", userPath)
+		}
+		fromEnv[userPath] = id
+	}
+
+	merged := make(map[string]string, len(cfg.Lago.Subscriptions)+len(fromEnv))
+	for userPath, id := range cfg.Lago.Subscriptions {
+		if canonical, err := core.NormalizeUserPath(userPath); err == nil {
+			if _, replaced := fromEnv[canonical]; replaced {
+				continue
+			}
+		}
 		merged[userPath] = id
 	}
+	maps.Copy(merged, fromEnv)
 	cfg.Lago.Subscriptions = merged
 	return nil
 }
 
 // normalizeLagoConfig validates the Lago export settings and rewrites the
-// subscription user paths to their canonical form. A disabled export is left
-// alone, so settings kept for later never stop startup.
+// subscription user paths to their canonical form. A disabled export is not
+// validated, so settings kept for later do not stop startup.
 func normalizeLagoConfig(cfg *LagoConfig) error {
 	if !cfg.Enabled {
 		return nil
@@ -91,11 +104,11 @@ func normalizeLagoConfig(cfg *LagoConfig) error {
 	if cfg.APIURL == "" {
 		cfg.APIURL = DefaultLagoAPIURL
 	}
-	// A secret reference is resolved later and cannot be parsed here.
+	// A secret reference cannot be parsed yet; validateResolvedLago checks
+	// what it resolves to.
 	if !HasSecretReference(cfg.APIURL) {
-		parsed, err := url.Parse(cfg.APIURL)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return fmt.Errorf("lago.api_url (LAGO_API_URL) must be an http or https URL")
+		if err := validateLagoAPIURL(cfg.APIURL); err != nil {
+			return err
 		}
 	}
 	if strings.TrimSpace(cfg.APIKey) == "" {
@@ -134,5 +147,37 @@ func normalizeLagoConfig(cfg *LagoConfig) error {
 		subscriptions[userPath] = id
 	}
 	cfg.Subscriptions = subscriptions
+	return nil
+}
+
+// validateResolvedLago finishes the checks normalizeLagoConfig deferred for
+// values holding a secret reference, now that they are resolved. An export
+// started on a URL or key that can never work would retry until its buffer
+// fills, and then drop usage.
+func validateResolvedLago(cfg *LagoConfig) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	cfg.APIURL = strings.TrimRight(strings.TrimSpace(cfg.APIURL), "/")
+	if err := validateLagoAPIURL(cfg.APIURL); err != nil {
+		return err
+	}
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		return resolvedValueError("lago.api_key", "is empty")
+	}
+	return nil
+}
+
+// validateLagoAPIURL never repeats the value: a URL may carry credentials.
+// The exporter appends /events/batch to it, so a query or fragment would end
+// up in front of that path.
+func validateLagoAPIURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("lago.api_url (LAGO_API_URL) must be an http or https URL")
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" || strings.ContainsAny(raw, "?#") {
+		return fmt.Errorf("lago.api_url (LAGO_API_URL) must not have a query or fragment")
+	}
 	return nil
 }

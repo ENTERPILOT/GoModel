@@ -444,10 +444,10 @@ Bills token usage in [Lago](/guides/lago). Off by default.
 
 | Variable             | Description                                                                                         | Default                          |
 | -------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------- |
-| `LAGO_ENABLED`       | Send each billable request to Lago as usage events; needs `USAGE_ENABLED=true`                      | `false`                          |
+| `LAGO_ENABLED`       | Send the token usage of billable, uncached requests of mapped customers to Lago; needs `USAGE_ENABLED=true` | `false`                          |
 | `LAGO_API_URL`       | Lago API base URL; change it for the EU cluster or a self-hosted instance                           | `https://api.getlago.com/api/v1` |
 | `LAGO_API_KEY`       | Lago API key; required when enabled                                                                 | none                             |
-| `LAGO_SUBSCRIPTIONS` | Comma-separated `user_path=external_subscription_id` list; requests no path covers are not sent     | none                             |
+| `LAGO_SUBSCRIPTIONS` | Comma-separated `user_path=external_subscription_id` list; required when enabled; requests that no configured path covers are not sent | none                             |
 | `LAGO_BUFFER_SIZE`   | Requests that may wait while Lago is slow or unreachable; later ones are dropped and counted        | `10000`                          |
 
 #### Budgets

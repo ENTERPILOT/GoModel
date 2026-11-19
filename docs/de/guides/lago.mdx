@@ -100,7 +100,9 @@ aktiviert ist.
 
 Ein Event je Token-Art mit positivem Zähler, gesendet an
 [`POST /events/batch`](https://getlago.com/docs/api-reference/events/batch)
-in Batches von bis zu 100, spätestens 5 Sekunden nach dem Request:
+in Batches von bis zu 100. Ein unvollständiger Batch wird alle 5 Sekunden
+gesendet; solange Lago langsam ist oder ein Batch wiederholt wird, warten
+spätere Events dahinter:
 
 ```json
 {
@@ -135,7 +137,7 @@ Nicht gesendet werden:
 
 GoModel sendet Token-Zähler, keine Preise.
 [Aufschläge](/de/features/cost-tracking#aufschläge-und-abgerechnete-kosten) und
-`billed_cost` bleiben in den Nutzungsansichten von GoModel; legen Sie die
+von GoModel erfasste `billed_cost`-Werte bleiben in den Nutzungsansichten von GoModel; legen Sie die
 Preise eines über Lago abgerechneten Kunden in Lago fest.
 
 ## Zustellung
@@ -164,7 +166,7 @@ Zähler (siehe [Prometheus-Metriken](/de/guides/prometheus-metrics)):
 | Metrik | Bedeutung |
 | --- | --- |
 | `gomodel_lago_events_sent_total` | Events, die Lago hat |
-| `gomodel_lago_events_dropped_total{reason}` | Events, die Lago nie erreicht haben: `buffer_full`, `rejected` oder `shutdown`. Ihre Nutzung fehlt auf der Rechnung |
+| `gomodel_lago_events_dropped_total{reason}` | Events, die Lago nicht als Nutzung übernommen hat: `buffer_full`, `rejected` (von Lago abgelehnt) oder `shutdown`. Ihre Nutzung fehlt auf der Rechnung |
 
 ```promql
 sum(increase(gomodel_lago_events_dropped_total[5m])) by (reason) > 0

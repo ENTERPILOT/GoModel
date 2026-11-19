@@ -325,8 +325,9 @@ pricing:
   #     "/": 0
 
 # Bill token usage in Lago (https://getlago.com). Each billable request of a
-# mapped customer is sent as usage events to POST /events/batch, one event per
-# token kind: llm_input_tokens, llm_output_tokens, llm_cached_input_tokens and
+# mapped customer, except response-cache hits, is sent as usage events to
+# POST /events/batch, one event per token kind with a positive count:
+# llm_input_tokens, llm_output_tokens, llm_cached_input_tokens and
 # llm_cache_creation_tokens. Needs usage.enabled.
 lago:
   enabled: false # env: LAGO_ENABLED

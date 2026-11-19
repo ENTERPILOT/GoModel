@@ -252,6 +252,11 @@ func (e *Exporter) shutdown(pending []Event) {
 func (e *Exporter) deliver(ctx context.Context, batch []Event, retry bool) (unsent []Event) {
 	wait := e.timing.retryMin
 	for len(batch) > 0 {
+		// Once Close is called, what a rejection left to send goes to the
+		// shutdown attempt, under its timeout.
+		if retry && e.stopping() {
+			return batch
+		}
 		status, body, err := e.send(ctx, batch)
 		if err == nil && status >= http.StatusOK && status < http.StatusMultipleChoices {
 			eventsSent.Add(float64(len(batch)))

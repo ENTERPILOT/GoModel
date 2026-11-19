@@ -97,7 +97,8 @@ Startup fails when the export is on without an API key or a subscription.
 
 One event per token kind with a positive count, sent to
 [`POST /events/batch`](https://getlago.com/docs/api-reference/events/batch)
-in batches of up to 100, at the latest 5 seconds after the request:
+in batches of up to 100. A partial batch is flushed every 5 seconds; while
+Lago is slow or a batch is being retried, later events wait behind it:
 
 ```json
 {
@@ -130,7 +131,7 @@ Not sent:
 - Requests that report no tokens, such as MCP tool calls.
 
 GoModel sends token counts, not prices. [Markups](/features/cost-tracking#markups-and-billed-cost)
-and `billed_cost` stay in GoModel's own usage views; set the prices of a
+and any `billed_cost` GoModel records stay in GoModel's own usage views; set the prices of a
 Lago-billed customer in Lago.
 
 ## Delivery
@@ -155,7 +156,7 @@ Each gateway replica sends its own requests. Watch the two counters (see
 | Metric | Meaning |
 | --- | --- |
 | `gomodel_lago_events_sent_total` | Events Lago holds |
-| `gomodel_lago_events_dropped_total{reason}` | Events that never reached Lago: `buffer_full`, `rejected`, or `shutdown`. Their usage is missing from the invoice |
+| `gomodel_lago_events_dropped_total{reason}` | Events Lago does not hold: `buffer_full`, `rejected` (Lago refused them), or `shutdown`. Their usage is missing from the invoice |
 
 ```promql
 sum(increase(gomodel_lago_events_dropped_total[5m])) by (reason) > 0

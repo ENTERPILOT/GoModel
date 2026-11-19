@@ -78,7 +78,7 @@ lago:
 
 ## 发送的内容
 
-每种计数为正的 Token 类型对应一个事件，以每批最多 100 个的方式发送到 [`POST /events/batch`](https://getlago.com/docs/api-reference/events/batch)，最迟在请求结束 5 秒后发出：
+每种计数为正的 Token 类型对应一个事件，以每批最多 100 个的方式发送到 [`POST /events/batch`](https://getlago.com/docs/api-reference/events/batch)。未满的批次每 5 秒发送一次；当 Lago 响应缓慢或某个批次正在重试时，后续事件会在其后等待：
 
 ```json
 {
@@ -105,7 +105,7 @@ lago:
 - 由 GoModel [响应缓存](/zh/features/cache)返回的响应：它们没有消耗提供商 Token。
 - 不报告 Token 的请求，例如 MCP 工具调用。
 
-GoModel 发送的是 Token 计数，而不是价格。[加价](/zh/features/cost-tracking#加价与计费成本)和 `billed_cost` 仍保留在 GoModel 自己的用量视图中；通过 Lago 计费的客户，其价格请在 Lago 中设置。
+GoModel 发送的是 Token 计数，而不是价格。[加价](/zh/features/cost-tracking#加价与计费成本)和 GoModel 记录的 `billed_cost` 仍保留在 GoModel 自己的用量视图中；通过 Lago 计费的客户，其价格请在 Lago 中设置。
 
 ## 投递
 
@@ -120,7 +120,7 @@ GoModel 发送的是 Token 计数，而不是价格。[加价](/zh/features/cost
 | 指标 | 含义 |
 | --- | --- |
 | `gomodel_lago_events_sent_total` | Lago 已持有的事件 |
-| `gomodel_lago_events_dropped_total{reason}` | 从未到达 Lago 的事件：`buffer_full`、`rejected` 或 `shutdown`。它们的用量不会出现在账单中 |
+| `gomodel_lago_events_dropped_total{reason}` | Lago 未保存的事件：`buffer_full`、`rejected`（被 Lago 拒绝）或 `shutdown`。它们的用量不会出现在账单中 |
 
 ```promql
 sum(increase(gomodel_lago_events_dropped_total[5m])) by (reason) > 0
