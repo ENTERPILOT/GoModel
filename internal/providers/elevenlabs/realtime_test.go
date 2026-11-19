@@ -16,6 +16,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/enterpilot/gomodel/internal/realtime"
 )
 
@@ -116,7 +117,8 @@ func TestSupportsRealtimeIntent(t *testing.T) {
 // the socket for the chunk named "reject".
 type scribeUpstream struct {
 	*httptest.Server
-	handshakes chan *http.Request
+	// handshakes records each websocket upgrade request.
+	handshakes *providertest.Capture
 	// received holds every frame the upstream read, valid or not, so a test can
 	// tell that nothing but audio chunks reached it.
 	received chan string
@@ -124,12 +126,8 @@ type scribeUpstream struct {
 
 func newScribeUpstream(t *testing.T) *scribeUpstream {
 	t.Helper()
-	upstream := &scribeUpstream{
-		handshakes: make(chan *http.Request, 1),
-		received:   make(chan string, 16),
-	}
-	upstream.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		upstream.handshakes <- r.Clone(context.Background())
+	upstream := &scribeUpstream{received: make(chan string, 16)}
+	upstream.Server, upstream.handshakes = providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
@@ -171,8 +169,7 @@ func newScribeUpstream(t *testing.T) *scribeUpstream {
 				heard++
 			}
 		}
-	}))
-	t.Cleanup(upstream.Close)
+	})
 	return upstream
 }
 
@@ -228,14 +225,16 @@ func TestRealtimeSessionTranslatesBothWays(t *testing.T) {
 	}
 
 	// The handshake carries the provider credential and the session settings.
-	handshake := <-upstream.handshakes
-	assert.Equal(t, "/v1/speech-to-text/realtime", handshake.URL.Path)
-	assert.Equal(t, "elevenlabs-secret-key", handshake.Header.Get("xi-api-key"))
-	assert.Equal(t, "scribe_v2_realtime", handshake.URL.Query().Get("model_id"))
-	assert.Equal(t, "pcm_24000", handshake.URL.Query().Get("audio_format"))
-	assert.Equal(t, "vad", handshake.URL.Query().Get("commit_strategy"))
-
 	created := read()
+	// The session started, so the handshake was recorded: it carries the
+	// provider credential and the session settings.
+	handshake := upstream.handshakes.Last(t)
+	assert.Equal(t, "/v1/speech-to-text/realtime", handshake.Path)
+	assert.Equal(t, "elevenlabs-secret-key", handshake.Header.Get("xi-api-key"))
+	assert.Equal(t, "scribe_v2_realtime", handshake.Query.Get("model_id"))
+	assert.Equal(t, "pcm_24000", handshake.Query.Get("audio_format"))
+	assert.Equal(t, "vad", handshake.Query.Get("commit_strategy"))
+
 	assert.Equal(t, "session.created", created["type"])
 	session, ok := created["session"].(map[string]any)
 	require.True(t, ok, "event = %v", created)

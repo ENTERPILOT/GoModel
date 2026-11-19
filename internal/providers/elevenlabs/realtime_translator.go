@@ -239,7 +239,8 @@ func (t *realtimeTranslator) ProviderEvent(frame []byte) [][]byte {
 // partial turns a partial transcript into a transcript delta. ElevenLabs sends
 // the whole segment so far each time, and may revise words it sent before;
 // OpenAI deltas only ever append. So the delta is what the new text adds to the
-// text the client already holds, and a revision sends nothing: the completed
+// text the client already holds. A partial that does not extend that text sends
+// nothing, so after a revision the segment sends no more deltas: the completed
 // event carries the corrected transcript.
 func (t *realtimeTranslator) partial(text string) [][]byte {
 	t.mu.Lock()

@@ -106,8 +106,8 @@ Defaults, and what differs from an OpenAI transcription session:
   effect; `language`, `prompt`, and `turn_detection` settings are not applied.
   The spoken language is detected automatically.
 - **Deltas only append.** ElevenLabs can revise earlier words while a segment
-  is open. When it does, GoModel sends no delta; the `completed` event carries
-  the final text.
+  is open. When it does, GoModel sends no more deltas for that segment; the
+  `completed` event carries the final text.
 - **Other client events** (`input_audio_buffer.clear`, `response.create`,
   conversation items) get an `error` event: ElevenLabs has no counterpart.
 - **Idle sessions close.** ElevenLabs closes a session that receives no audio

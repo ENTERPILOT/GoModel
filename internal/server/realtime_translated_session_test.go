@@ -19,15 +19,20 @@ import (
 )
 
 // nativeProtocolTranslator stands in for a provider with its own websocket
-// protocol: audio appends become a native chunk message, and every native
-// message comes back as a completed transcript without usage.
+// protocol: audio appends become a native chunk message, and the native chunk
+// comes back as a completed transcript without usage.
 type nativeProtocolTranslator struct{}
 
 func (nativeProtocolTranslator) ClientEvent([]byte) (upstream, replies [][]byte) {
 	return [][]byte{[]byte(`{"message_type":"chunk"}`)}, nil
 }
 
-func (nativeProtocolTranslator) ProviderEvent([]byte) [][]byte {
+func (nativeProtocolTranslator) ProviderEvent(frame []byte) [][]byte {
+	// Only the translated chunk earns a transcript, so a client frame that
+	// reached the upstream untranslated fails the test.
+	if string(frame) != `{"message_type":"chunk"}` {
+		return [][]byte{[]byte(`{"type":"error"}`)}
+	}
 	return [][]byte{[]byte(`{"type":"conversation.item.input_audio_transcription.completed","transcript":"Hello there."}`)}
 }
 

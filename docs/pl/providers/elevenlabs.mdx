@@ -109,8 +109,8 @@ Ustawienia domyślne i różnice względem sesji transkrypcji OpenAI:
   obowiązującą sesję; ustawienia `language`, `prompt` i `turn_detection` nie są
   stosowane. Język mowy jest wykrywany automatycznie.
 - **Delty tylko dopisują tekst.** ElevenLabs może poprawiać wcześniejsze słowa,
-  dopóki segment jest otwarty. GoModel nie wysyła wtedy delty; ostateczny tekst
-  zawiera zdarzenie `completed`.
+  dopóki segment jest otwarty. GoModel nie wysyła wtedy kolejnych delt dla tego
+  segmentu; ostateczny tekst zawiera zdarzenie `completed`.
 - **Pozostałe zdarzenia klienta** (`input_audio_buffer.clear`,
   `response.create`, elementy konwersacji) dostają zdarzenie `error`: ElevenLabs
   nie ma dla nich odpowiednika.

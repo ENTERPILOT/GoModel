@@ -86,7 +86,7 @@ wscat -H "Authorization: Bearer $GOMODEL_API_KEY" \
 - **由语音活动检测结束一个片段**，与 OpenAI 默认的 `server_vad` 相同。`input_audio_buffer.commit` 可以提前结束片段。
 - **会话设置在会话打开时即已确定。** ElevenLabs 通过 WebSocket URL 接收这些设置，此时 `session.update` 还无法到达。GoModel 会用
   `session.updated` 事件回应 `session.update`，其中描述实际生效的会话；`language`、`prompt` 和 `turn_detection` 设置不会被应用。语言会自动检测。
-- **增量只会追加。** 片段尚未结束时，ElevenLabs 可能会修正之前的词。此时 GoModel 不发送增量；最终文本由 `completed` 事件给出。
+- **增量只会追加。** 片段尚未结束时，ElevenLabs 可能会修正之前的词。此时 GoModel 不再为该片段发送增量；最终文本由 `completed` 事件给出。
 - **其他客户端事件**（`input_audio_buffer.clear`、`response.create`、对话项）会收到 `error` 事件：ElevenLabs 没有对应的消息。
 - **空闲会话会被关闭。** 会话在 15 秒内没有收到音频时，ElevenLabs 会将其关闭，因此在会话打开期间请持续发送音频。
 - **用量根据 GoModel 转发的音频计量**，按模型的每秒输入单价计费，因为 ElevenLabs 不上报用量。如果目录中没有该模型的价格，仍会记录时长；可通过[覆盖定价](/zh/features/cost-tracking)来计算成本。

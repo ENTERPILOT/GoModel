@@ -112,8 +112,8 @@ Standardwerte und Unterschiede zu einer OpenAI-Transkriptions-Session:
   `prompt` und `turn_detection` werden nicht angewendet. Die gesprochene Sprache
   wird automatisch erkannt.
 - **Deltas hängen nur an.** ElevenLabs kann frühere Wörter korrigieren, solange
-  ein Segment offen ist. In diesem Fall sendet GoModel kein Delta; das
-  `completed`-Event enthält den endgültigen Text.
+  ein Segment offen ist. In diesem Fall sendet GoModel für dieses Segment keine
+  weiteren Deltas; das `completed`-Event enthält den endgültigen Text.
 - **Andere Client-Events** (`input_audio_buffer.clear`, `response.create`,
   Conversation Items) erhalten ein `error`-Event: ElevenLabs hat dafür kein
   Gegenstück.

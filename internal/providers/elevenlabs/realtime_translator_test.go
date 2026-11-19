@@ -48,7 +48,7 @@ func TestRealtimeTranslatorForwardsAudio(t *testing.T) {
 			// The event type is decoded, not matched as bytes, so an escaped
 			// spelling is still an append.
 			name:  "escaped event type is still an append",
-			event: `{"type":"input_audio_buffer.append","audio":"AAAA"}`,
+			event: `{"type":"input_audio_buffer.app\u0065nd","audio":"AAAA"}`,
 			want:  `{"message_type":"input_audio_chunk","audio_base_64":"AAAA","commit":false,"sample_rate":24000}`,
 		},
 	}
