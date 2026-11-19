@@ -56,8 +56,9 @@ config: |
 
 Or point `existingConfigMap` at a ConfigMap that has a `config.yaml` key.
 
-To keep provider keys in a Secret, mount it next to the file and include it;
-`config.yaml` merges the files key by key:
+To keep provider keys in a Secret, mount it next to the file and include it.
+Each Secret key is a config file of its own, merged key by key, so
+`openai-eu.yaml` holds `providers: {openai-eu: {api_key: ...}}`:
 
 ```yaml
 config: |
@@ -70,7 +71,7 @@ config: |
 extraVolumes:
   - name: provider-keys
     secret:
-      secretName: gomodel-provider-keys   # keys: openai-eu.yaml, ...
+      secretName: gomodel-provider-keys   # key: openai-eu.yaml
 extraVolumeMounts:
   - name: provider-keys
     mountPath: /app/config/secrets

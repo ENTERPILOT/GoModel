@@ -211,13 +211,13 @@ GoModel 先读取 `config.yaml`，再按列出的顺序读取每个被包含的�
 - **路径**相对于 `config.yaml` 所在目录；也可以使用绝对路径。条目和每个被包含的文件中的 `${VAR}` 都会展开。
 - **通配模式**（`*`、`?`、`[...]`）指向所有匹配的文件，按文件名顺序读取。模式没有匹配到任何文件（包括目录不存在）不算错误。不含模式的条目指向一个文件，该文件必须存在。
 - **配置段按键逐层合并**：每个文件都可以添加提供商，同一个提供商也可以像上面那样分散在多个文件中。
-- **一个值或一个列表只能在一个文件中设置**。在第二个文件中再次设置会中止启动，而不是挑选其中一个。留空的键（下面没有内容的 `providers:`）不计入。
+- **一个值或一个列表只能在一个文件中设置**。在第二个文件中再次设置会中止启动，而不是挑选其中一个。留空的键（下面没有内容的 `providers:`）不计入。带有 YAML 锚点或合并键（`&name`、`<<`）的配置段同样只能放在一个文件中。
 - **只有 `config.yaml` 可以包含 `include`**。被包含的文件不能再包含其他文件。
 
-每个文件都会单独校验，因此错误信息会指出文件和行号：
+每个文件都会单独解析并检查未知键，因此这些错误会指出文件和行号。两个文件设置同一项时也是如此，例如在上面的密钥文件中再加一个 `base_url`：
 
 ```text
-failed to parse config/secrets/openai-eu.yaml: line 4: providers.openai-eu.base_url is already set in config/providers.yaml (line 5); a setting can be set in only one config file
+failed to parse config/secrets/openai-eu.yaml: line 5: providers.openai-eu.base_url is already set in config/providers.yaml (line 5); a setting can be set in only one config file
 ```
 
 环境变量仍然覆盖所有文件，`gomodel --reload` 会重新读取全部文件，`gomodel config export` 会将合并后的结果输出为一个不含 `include` 的文件。启动时，`config file loaded` 会在 `included` 中列出已读取的文件。
@@ -239,7 +239,7 @@ config: |
 extraVolumes:
   - name: provider-keys
     secret:
-      secretName: gomodel-provider-keys # 键: openai-eu.yaml, ...
+      secretName: gomodel-provider-keys # 每个键对应上面的一个文件
 extraVolumeMounts:
   - name: provider-keys
     mountPath: /app/config/secrets

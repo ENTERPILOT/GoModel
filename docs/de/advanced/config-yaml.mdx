@@ -290,14 +290,18 @@ Reihenfolge, und führt sie zu einer Konfiguration zusammen:
 - **Ein Wert oder eine Liste wird nur in einer Datei gesetzt.** Setzt eine
   zweite Datei denselben Schlüssel, bricht der Start ab, statt einen Gewinner
   zu wählen. Ein leer gelassener Schlüssel (`providers:` ohne Inhalt) zählt
-  nicht.
+  nicht. Auch ein Abschnitt mit YAML-Anker oder Merge-Key (`&name`, `<<`)
+  bleibt in einer Datei.
 - **Nur `config.yaml` darf `include` enthalten.** Eingebundene Dateien können
   keine weiteren einbinden.
 
-Jede Datei wird für sich validiert, daher nennen Fehler Datei und Zeile:
+Jede Datei wird für sich geparst und auf unbekannte Schlüssel geprüft, daher
+nennen diese Fehler Datei und Zeile. Das gilt auch für eine Einstellung, die
+zwei Dateien setzen, etwa eine `base_url`, die oben in der Secrets-Datei
+ergänzt wird:
 
 ```text
-failed to parse config/secrets/openai-eu.yaml: line 4: providers.openai-eu.base_url is already set in config/providers.yaml (line 5); a setting can be set in only one config file
+failed to parse config/secrets/openai-eu.yaml: line 5: providers.openai-eu.base_url is already set in config/providers.yaml (line 5); a setting can be set in only one config file
 ```
 
 Umgebungsvariablen überschreiben weiterhin jede Datei, `gomodel --reload` liest
@@ -324,7 +328,7 @@ config: |
 extraVolumes:
   - name: provider-keys
     secret:
-      secretName: gomodel-provider-keys # Schlüssel: openai-eu.yaml, ...
+      secretName: gomodel-provider-keys # jeder Schlüssel ist eine der Dateien oben
 extraVolumeMounts:
   - name: provider-keys
     mountPath: /app/config/secrets

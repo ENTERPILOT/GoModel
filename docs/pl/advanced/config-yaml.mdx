@@ -280,14 +280,17 @@ kolejności, i scala je w jedną konfigurację:
   wyżej.
 - **Wartość lub listę ustawia tylko jeden plik.** Ustawienie jej w drugim pliku
   zatrzymuje start, zamiast wybierać zwycięzcę. Klucz pozostawiony pusty
-  (`providers:` bez zawartości) się nie liczy.
+  (`providers:` bez zawartości) się nie liczy. Sekcja z kotwicą YAML lub
+  kluczem scalania (`&name`, `<<`) także zostaje w jednym pliku.
 - **Tylko `config.yaml` może zawierać `include`.** Dołączone pliki nie mogą
   dołączać kolejnych.
 
-Każdy plik jest walidowany osobno, więc błędy wskazują plik i wiersz:
+Każdy plik jest parsowany i sprawdzany pod kątem nieznanych kluczy osobno,
+więc te błędy wskazują plik i wiersz. Tak samo ustawienie obecne w dwóch
+plikach, na przykład `base_url` dopisany do pliku z sekretami powyżej:
 
 ```text
-failed to parse config/secrets/openai-eu.yaml: line 4: providers.openai-eu.base_url is already set in config/providers.yaml (line 5); a setting can be set in only one config file
+failed to parse config/secrets/openai-eu.yaml: line 5: providers.openai-eu.base_url is already set in config/providers.yaml (line 5); a setting can be set in only one config file
 ```
 
 Zmienne środowiskowe nadal nadpisują każdy plik, `gomodel --reload` odczytuje
@@ -314,7 +317,7 @@ config: |
 extraVolumes:
   - name: provider-keys
     secret:
-      secretName: gomodel-provider-keys # klucze: openai-eu.yaml, ...
+      secretName: gomodel-provider-keys # każdy klucz to jeden z plików powyżej
 extraVolumeMounts:
   - name: provider-keys
     mountPath: /app/config/secrets

@@ -262,14 +262,17 @@ merges them into one configuration:
   one provider can be spread over several files, as above.
 - **A value or a list is set in one file only.** Setting it in a second file
   stops startup instead of picking a winner. A key left empty (`providers:`
-  with nothing under it) does not count.
+  with nothing under it) does not count. A section with a YAML anchor or merge
+  key (`&name`, `<<`) also stays in one file.
 - **Only `config.yaml` may hold `include`.** Included files cannot include
   others.
 
-Every file is validated by itself, so errors name the file and line:
+Each file is parsed and checked for unknown keys by itself, so those errors
+name the file and line. So does a setting two files share, such as a `base_url`
+added to the secrets file above:
 
 ```text
-failed to parse config/secrets/openai-eu.yaml: line 4: providers.openai-eu.base_url is already set in config/providers.yaml (line 5); a setting can be set in only one config file
+failed to parse config/secrets/openai-eu.yaml: line 5: providers.openai-eu.base_url is already set in config/providers.yaml (line 5); a setting can be set in only one config file
 ```
 
 Environment variables still override every file, `gomodel --reload` re-reads
@@ -296,7 +299,7 @@ config: |
 extraVolumes:
   - name: provider-keys
     secret:
-      secretName: gomodel-provider-keys # keys: openai-eu.yaml, ...
+      secretName: gomodel-provider-keys # each key is one of the files above
 extraVolumeMounts:
   - name: provider-keys
     mountPath: /app/config/secrets

@@ -111,6 +111,16 @@ func TestLoad_IncludeEdgeCases(t *testing.T) {
 			wantProviders: 1,
 		},
 		{
+			name:          "file named by another path is read once",
+			files:         map[string]string{"config.yaml": "include: [a.yaml, \"${GOMODEL_TEST_INCLUDE_CWD}/a.yaml\", \"${GOMODEL_TEST_INCLUDE_CWD}/config.yaml\"]\n", "a.yaml": provider},
+			wantProviders: 1,
+		},
+		{
+			name:          "entry is a path as written",
+			files:         map[string]string{"config.yaml": "include: [\" a.yaml\"]\n", " a.yaml": provider},
+			wantProviders: 1,
+		},
+		{
 			name:          "pattern skips directories",
 			files:         map[string]string{"config.yaml": "include: [\"conf.d/*\"]\n", "conf.d/a.yaml": provider, "conf.d/..data/a.yaml": provider},
 			wantProviders: 1,
@@ -137,6 +147,7 @@ func TestLoad_IncludeEdgeCases(t *testing.T) {
 			clearAllConfigEnvVars(t)
 			withTempDir(t, func(dir string) {
 				t.Setenv("GOMODEL_TEST_INCLUDE_ABS", filepath.Join(dir, "elsewhere"))
+				t.Setenv("GOMODEL_TEST_INCLUDE_CWD", dir)
 				writeFiles(t, tt.files)
 
 				result, err := Load()
@@ -165,7 +176,7 @@ func TestLoad_RejectsBrokenIncludes(t *testing.T) {
 		},
 		{
 			name:    "empty entry",
-			files:   map[string]string{"config.yaml": "include: [\"\"]\n"},
+			files:   map[string]string{"config.yaml": "include: [a.yaml, \" \"]\n", "a.yaml": ""},
 			wantErr: "failed to parse config.yaml: include holds an empty entry",
 		},
 		{
@@ -211,6 +222,24 @@ func TestLoad_RejectsBrokenIncludes(t *testing.T) {
 			name:    "list set in two files",
 			files:   map[string]string{"config.yaml": "include: [a.yaml]\nvirtual_models:\n  - source: fast\n    target: a/x\n", "a.yaml": "virtual_models:\n  - source: smart\n    target: a/y\n"},
 			wantErr: "failed to parse a.yaml: line 2: virtual_models is already set in config.yaml (line 3)",
+		},
+		{
+			// The merge key supplies api_key, which a key added from a second
+			// file would silently replace.
+			name:    "section with a merge key set in two files",
+			files:   map[string]string{"config.yaml": "include: [a.yaml]\nproviders:\n  a:\n    <<: {api_key: first}\n    type: vllm\n", "a.yaml": "providers:\n  a:\n    api_key: second\n"},
+			wantErr: "failed to parse a.yaml: line 3: providers.a is also set in config.yaml (line 4); a section with a YAML anchor or merge key (<<) can be set in only one config file",
+		},
+		{
+			// A key added to an anchored section would reach every alias of it.
+			name:    "anchored section set in two files",
+			files:   map[string]string{"config.yaml": "include: [a.yaml]\nextensions:\n  base: &base\n    a: 1\n  copy: *base\n", "a.yaml": "extensions:\n  base:\n    b: 2\n"},
+			wantErr: "failed to parse a.yaml: line 3: extensions.base is also set in config.yaml (line 3)",
+		},
+		{
+			name:    "alias set in two files",
+			files:   map[string]string{"config.yaml": "include: [a.yaml]\nextensions:\n  base: &base\n    a: 1\n  copy: *base\n", "a.yaml": "extensions:\n  copy:\n    b: 2\n"},
+			wantErr: "failed to parse a.yaml: line 3: extensions.copy is already set in config.yaml (line 5)",
 		},
 		{
 			name:    "section in one file and value in another",
