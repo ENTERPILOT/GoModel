@@ -62,8 +62,9 @@ func geminiModelSupportedMethods(modelID string, methods []string) (supportsGene
 // isGeminiVideoModel recognizes Google's video generation models: Veo, which
 // lists only predictLongRunning (generation is an asynchronous operation), and
 // Gemini Omni (gemini-omni-1.2-flash, ...), Veo's replacement on the Gemini
-// API, which lists generateContent and is also a chat model. They are tagged
-// so the Models page shows them under Video and the catalog can price them.
+// API. Omni lists generateContent, so it keeps its chat mode, but Google serves
+// its video generation through the Interactions API. They are tagged so the
+// Models page shows them under Video and the catalog can price them.
 func isGeminiVideoModel(modelID string, methods []string) bool {
 	normalized := normalizeGeminiModelID(modelID)
 	switch {
