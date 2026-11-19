@@ -8,6 +8,10 @@ metadata:
     helm.sh/hook: test
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   restartPolicy: Never
   securityContext:
     runAsNonRoot: true
@@ -16,7 +20,7 @@ spec:
       type: RuntimeDefault
   containers:
     - name: curl
-      image: curlimages/curl:8.16.0
+      image: {{ include "gomodel.testImage" . | quote }}
       securityContext:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true

@@ -204,6 +204,7 @@ docker run --rm -p 8080:8080 \
 **GoModel 可以在完全离线隔离（air-gapped）的环境中运行。** 没有遥测、没有分析，也没有许可证检查。管理控制台内嵌在二进制文件中，
 其字体也已随附，因此界面不会加载任何 CDN 资源。搭配 [Ollama](/zh/providers/multiple-ollama)、[SGLang](/zh/providers/sglang)
 或 [vLLM](/zh/providers/vllm) 等本地模型服务器时，网关无需任何通往公共互联网的路由。
+分步操作手册（镜像同步、提供模型目录、验证）请参阅[离线隔离部署](/zh/guides/air-gapped)。
 
 默认情况下，网关只会发出两种不面向已配置提供商的出站调用，一个开关即可同时关闭两者：
 

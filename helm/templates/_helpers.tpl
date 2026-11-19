@@ -50,6 +50,16 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Image of the `helm test` pod. The defaults are repeated here because
+`helm upgrade --reuse-values` renders a release installed before
+testConnection existed without the chart's new defaults.
+*/}}
+{{- define "gomodel.testImage" -}}
+{{- $image := (.Values.testConnection | default dict).image | default dict }}
+{{- printf "%s:%s" ($image.repository | default "curlimages/curl") ($image.tag | default "8.16.0") }}
+{{- end }}
+
+{{/*
 Validate value combinations that would produce a broken deployment.
 */}}
 {{- define "gomodel.validate" -}}

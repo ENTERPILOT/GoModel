@@ -304,6 +304,8 @@ license check. The admin dashboard is embedded in the binary and its fonts are
 vendored, so the UI loads no CDN assets. Paired with local model servers such
 as [Ollama](/providers/multiple-ollama), [SGLang](/providers/sglang), or
 [vLLM](/providers/vllm), the gateway needs no route to the public internet.
+For the step-by-step runbook (mirroring the image, shipping the catalog,
+verifying), see [Air-gapped deployment](/guides/air-gapped).
 
 By default the gateway makes exactly two outbound calls that are not to a
 configured provider, and one switch turns both off:
