@@ -1346,6 +1346,61 @@ data: [DONE]
 	assert.Equal(t, mistralContentChunks(map[string]any{"type": "reference", "reference_ids": []any{float64(2)}}), last["extra_content"])
 }
 
+// A delta that arrives after the message item closed can carry replay state
+// next to its chunks. Both belong to the new message item: the closed one
+// must stay as its output_item.done stated it.
+func TestOpenAIResponsesStreamConverter_MistralContentChunksAfterMessageClosedKeepReplayState(t *testing.T) {
+	for name, offSpec := range map[string]string{
+		"typed path":    ``,
+		"tolerant path": `"reasoning_content":7,`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			mockStream := `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Checking."},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{` + offSpec + `"extra_content":{"google":{"thought_signature":"sig-late"}},"mistral_content_chunks":[{"type":"reference","reference_ids":[2]}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`
+			converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "m", "p")
+			raw, err := io.ReadAll(converter)
+			require.NoError(t, err)
+
+			events := parseTestSSEEvents(t, string(raw))
+			requireNormalizedResponsesStream(t, events)
+			doneItems := map[float64]any{}
+			var terminal []any
+			for _, event := range events {
+				switch event.Name {
+				case "response.output_item.done":
+					index, ok := event.Payload["output_index"].(float64)
+					require.True(t, ok)
+					doneItems[index] = event.Payload["item"]
+				case "response.completed":
+					response, ok := event.Payload["response"].(map[string]any)
+					require.True(t, ok)
+					terminal, ok = response["output"].([]any)
+					require.True(t, ok)
+				}
+			}
+			require.Len(t, terminal, 3)
+			for index, item := range terminal {
+				assert.Equal(t, doneItems[float64(index)], item, "terminal output item %d must restate its output_item.done", index)
+			}
+			first, ok := terminal[0].(map[string]any)
+			require.True(t, ok)
+			last, ok := terminal[2].(map[string]any)
+			require.True(t, ok)
+			assert.NotContains(t, first, "extra_content", "the closed message item must not gain late state")
+			want := mistralContentChunks(map[string]any{"type": "reference", "reference_ids": []any{float64(2)}})
+			want["google"] = map[string]any{"thought_signature": "sig-late"}
+			assert.Equal(t, "message", last["type"])
+			assert.Equal(t, want, last["extra_content"])
+		})
+	}
+}
+
 // eventNames lists the SSE event names in stream order, with "[DONE]" for the
 // trailing marker.
 func eventNames(events []testSSEEvent) []string {

@@ -59,7 +59,9 @@ więc siedzą na wiadomości.
   OpenAI, a historia przeniesiona między providerami nie kończy się błędem z powodu
   obcych pól.
 - **Tylko właściwy adapter odczytuje lub zapisuje jego zawartość.** Nic innego w
-  gatewayu nie interpretuje tej zawartości.
+  gatewayu nie interpretuje tej zawartości. Jeden wyjątek: tłumaczenie na Responses
+  zapisuje `extra_content.mistral`, kopiując fragmenty, które adapter Mistrala
+  zostawił na wiadomości czatu, bez ich interpretowania.
 - **Odsyłaj go dosłownie.** Nie przepisuj, nie zmieniaj kolejności ani nie skracaj
   tego pola.
 

@@ -56,7 +56,9 @@ zum gesamten Assistant-Turn, daher liegen sie auf der Nachricht.
   Gemini-Signatur erreicht nie Anthropic oder OpenAI, und ein Verlauf, der zwischen Providern
   gewechselt ist, scheitert nicht an fremden Feldern.
 - **Nur der zuständige Adapter liest oder schreibt darin.** Nichts anderes im Gateway interpretiert
-  den Inhalt.
+  den Inhalt. Eine Ausnahme: Die Responses-Übersetzung schreibt `extra_content.mistral` und kopiert
+  dabei die Chunks, die der Mistral-Adapter auf der Chat-Nachricht hinterlassen hat, ohne sie zu
+  interpretieren.
 - **Geben Sie es unverändert zurück.** Schreiben Sie das Feld nicht um, ordnen Sie es nicht neu und
   kürzen Sie es nicht.
 

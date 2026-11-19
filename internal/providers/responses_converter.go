@@ -291,10 +291,12 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	// Recorded before the text and tool calls of the same delta: a tool call
 	// closes the message item on the spot, and its output_item.done must
 	// already carry the state. Text after an image opens its new item first,
-	// so the state lands on the item it arrived with.
+	// so the state lands on the item it arrived with; so do chunks that
+	// follow a closed message, which is why they come before the replay
+	// state of the same delta.
 	sc.openMessageAfterImage(choice.Delta.Content != "", choice.Delta.ExtraContent)
-	sc.setMessageExtraContent(choice.Delta.ExtraContent)
 	sc.appendContentChunks(choice.Delta.ContentChunks)
+	sc.setMessageExtraContent(choice.Delta.ExtraContent)
 	// "reasoning_content" wins over the vendor "reasoning" member (Groq,
 	// OpenRouter), the same precedence the streaming codec applies.
 	if reasoning := cmp.Or(choice.Delta.ReasoningContent, choice.Delta.Reasoning); reasoning != "" {
@@ -327,7 +329,8 @@ func (sc *OpenAIResponsesStreamConverter) setMessageExtraContent(raw json.RawMes
 // appendContentChunks records the content chunks of a delta
 // (MistralContentChunksField) for the message item. Callers record them
 // before the rest of the delta, so a tool call in the same delta closes the
-// item with them. Chunks that arrive after the item closed go to a new
+// item with them, and before the delta's replay state, so that state follows
+// them to a new item. Chunks that arrive after the item closed go to a new
 // message item, opened at the end of the stream at the latest, instead of
 // changing one whose output_item.done is already out.
 func (sc *OpenAIResponsesStreamConverter) appendContentChunks(chunks []json.RawMessage) {
@@ -379,10 +382,10 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 			extra, _ = json.Marshal(value)
 		}
 		sc.openMessageAfterImage(content != "", extra)
-		sc.setMessageExtraContent(extra)
 		if _, ok := delta[MistralContentChunksField]; ok {
 			sc.appendContentChunks(rawDeltaContentChunks(data))
 		}
+		sc.setMessageExtraContent(extra)
 		reasoning, _ := delta["reasoning_content"].(string)
 		if reasoning == "" {
 			reasoning, _ = delta["reasoning"].(string)

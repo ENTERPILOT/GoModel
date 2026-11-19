@@ -57,7 +57,9 @@ belong to the whole assistant turn, so they live on the message.
   own. A Gemini signature never reaches Anthropic or OpenAI, and a history
   that moved between providers does not fail on foreign fields.
 - **Only the owning adapter reads or writes inside it.** Nothing else in the
-  gateway interprets the contents.
+  gateway interprets the contents. One exception: the Responses translation
+  writes `extra_content.mistral`, copying the chunks the Mistral adapter left
+  on the chat message without interpreting them.
 - **Echo it verbatim.** Do not rewrite, reorder, or trim the member.
 
 ## Thought signature preservation
