@@ -22,6 +22,8 @@ type cliOptions struct {
 	Ready         bool
 	ReadyTimeout  time.Duration
 	Reload        bool
+	// Open starts the gateway and opens the dashboard in the default browser.
+	Open bool
 	// PluginArgs is non-nil when the first argument is the "plugin"
 	// subcommand; it holds the arguments after it.
 	PluginArgs []string
@@ -66,6 +68,7 @@ func parseCLI(productName string, args []string, output io.Writer) (cliOptions, 
 	flags.BoolVar(&opts.Ready, "ready", false, "Check the local GoModel readiness endpoint and exit")
 	flags.DurationVar(&opts.ReadyTimeout, "ready-timeout", defaultReadyTimeout, "Timeout for --ready")
 	flags.BoolVar(&opts.Reload, "reload", false, "Tell the running GoModel to reload its configuration and exit")
+	flags.BoolVar(&opts.Open, "open", false, "Start GoModel and open the dashboard in the default browser")
 	if err := flags.Parse(args); err != nil {
 		return opts, err
 	}

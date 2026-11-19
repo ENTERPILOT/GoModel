@@ -14,6 +14,7 @@ i z dwoma (`--flag`); w poniższych przykładach używana jest forma długa.
 | Flaga              | Opis                                                     | Wartość domyślna |
 | ------------------ | ------------------------------------------------------- | ------- |
 | `--version`        | Wypisuje informacje o wersji i kończy działanie          | —       |
+| `--open`           | Uruchamia gateway i otwiera dashboard w domyślnej przeglądarce | —   |
 | `--health`         | Odpytuje lokalny endpoint `/health` (liveness) i kończy działanie | —       |
 | `--health-timeout` | Maksymalny czas oczekiwania na sondę `--health`          | `2s`    |
 | `--ready`          | Odpytuje lokalny endpoint `/health/ready` (readiness) i kończy działanie | — |
@@ -27,6 +28,21 @@ Wypisz wersję buildu i zakończ:
 ```bash
 gomodel --version
 ```
+
+## Otwieranie dashboardu
+
+`--open` uruchamia gateway jak zwykle i otwiera dashboard administracyjny
+w domyślnej przeglądarce. Przydaje się, gdy GoModel działa na własnym komputerze:
+
+```bash
+gomodel --open
+```
+
+Dashboard otwiera się raz, gdy gateway zaczyna nasłuchiwać; przeładowanie
+konfiguracji nie otwiera go ponownie. Jeśli przeglądarki nie da się otworzyć
+(serwer lub kontener bez sesji graficznej) albo dashboard jest wyłączony
+(`ADMIN_UI_ENABLED=false`), gateway działa dalej i zapisuje w logach
+ostrzeżenie z adresem dashboardu.
 
 ## Sonda health
 
