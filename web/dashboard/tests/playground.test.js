@@ -442,14 +442,17 @@ test("playgroundUserPathOptions reads the user_paths of a selected virtual model
   assert.equal(defaultUserPathForModel(inventory, "team-alias", virtualModels), "/team/alpha");
 });
 
-test("syncedUserPath follows the model default until the user types a path", () => {
+test("syncedUserPath follows the model default until the user enters a path", () => {
   // Nothing chosen yet: take the default.
-  assert.equal(syncedUserPath("", "", "/team/model"), "/team/model");
-  // Still the previous default (the inventory arrived first): follow the new one.
-  assert.equal(syncedUserPath("/team/model", "/team/model", "/team/redirect"), "/team/redirect");
-  assert.equal(syncedUserPath("/team/model", "/team/model", ""), "");
-  // A typed path stays.
-  assert.equal(syncedUserPath("/team/mine", "/team/model", "/team/redirect"), "/team/mine");
+  assert.equal(syncedUserPath("", false, "/team/model"), "/team/model");
+  // A prefilled path (the inventory arrived first) follows the new default.
+  assert.equal(syncedUserPath("/team/model", false, "/team/redirect"), "/team/redirect");
+  assert.equal(syncedUserPath("/team/model", false, ""), "");
+  // An entered path stays, also when it equals an earlier default.
+  assert.equal(syncedUserPath("/team/mine", true, "/team/redirect"), "/team/mine");
+  assert.equal(syncedUserPath("/team/model", true, "/team/redirect"), "/team/model");
+  // Clearing the field brings the default back.
+  assert.equal(syncedUserPath("", true, "/team/model"), "/team/model");
   assert.equal(syncedUserPath(undefined, undefined, undefined), "");
 });
 

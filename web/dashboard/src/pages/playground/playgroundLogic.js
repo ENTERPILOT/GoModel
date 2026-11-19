@@ -428,12 +428,11 @@ export function defaultUserPathForModel(inventory, selector, virtualModels = [])
   return playgroundUserPathOptions(inventory, selector, virtualModels)[0]?.value || "";
 }
 
-// The user path to show after the model lists changed: the selected model's
-// new default while the field is empty or still holds the previous default,
-// the user's own entry otherwise.
-export function syncedUserPath(current, previousDefault, nextDefault) {
+// The user path to show after the model lists changed: the path the user
+// entered, while there is one, otherwise the selected model's current default.
+export function syncedUserPath(current, userEntered, modelDefault) {
   const path = String(current || "");
-  return !path || path === String(previousDefault || "") ? String(nextDefault || "") : path;
+  return userEntered && path ? path : String(modelDefault || "");
 }
 
 // Effective user-path header name: the server-configured USER_PATH_HEADER

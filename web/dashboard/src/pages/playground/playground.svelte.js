@@ -85,8 +85,9 @@ class PlaygroundStore {
 
   #abort = null;
   #nextID = 1;
-  // The default last written to userPath, to tell it from a typed path.
-  #defaultUserPath = "";
+  // Whether userPath was entered by the user rather than prefilled from the
+  // selected model.
+  #userPathEntered = false;
 
   get endpointPath() {
     return endpointById(this.endpoint)?.path || "";
@@ -135,20 +136,19 @@ class PlaygroundStore {
   }
 
   #resetUserPath() {
-    this.#defaultUserPath = this.#modelUserPath();
-    this.userPath = this.#defaultUserPath;
+    this.#userPathEntered = false;
+    this.userPath = this.#modelUserPath();
   }
 
   // Follows the selected model's default user path when the inventory or the
-  // virtual models arrive or change, without replacing a path the user typed.
+  // virtual models arrive or change, without replacing a path the user entered.
   syncUserPath() {
-    const next = this.#modelUserPath();
-    this.userPath = syncedUserPath(this.userPath, this.#defaultUserPath, next);
-    this.#defaultUserPath = next;
+    this.userPath = syncedUserPath(this.userPath, this.#userPathEntered, this.#modelUserPath());
   }
 
   setUserPath(value) {
     this.userPath = String(value || "");
+    this.#userPathEntered = this.userPath !== "";
   }
 
   setStream(enabled) {
