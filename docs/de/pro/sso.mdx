@@ -1,7 +1,7 @@
 ---
 title: "OIDC Single Sign-On"
 sidebarTitle: "OIDC SSO"
-description: "Schützen Sie das GoModel Dashboard mit Ihrem OIDC-Identity-Provider über den Authorization Code Flow mit PKCE und ordnen Sie Gruppen des Identity-Providers User-Paths zu."
+description: "Schütze das GoModel Dashboard mit deinem OIDC-Identity-Provider über den Authorization Code Flow mit PKCE und ordne Gruppen des Identity-Providers User-Paths zu."
 icon: "key-round"
 tag: "Pro"
 keywords: ["GoModel Pro", "OIDC", "SSO", "Single Sign-On", "PKCE", "Dashboard-Authentifizierung", "dashboard authentication", "Gruppen-Mapping", "group mapping", "user_path", "Ablehnungsgründe", "rejected login reasons"]
@@ -25,7 +25,7 @@ Anmeldeereignisse.
 
 ## SSO konfigurieren
 
-Konfigurieren Sie SSO unter `extensions.sso` in der zentralen YAML-Konfiguration von GoModel:
+Konfiguriere SSO unter `extensions.sso` in der zentralen YAML-Konfiguration von GoModel:
 
 ```yaml
 extensions:
@@ -44,7 +44,7 @@ Redirect-URL muss auf `/sso/callback` enden (einschließlich eines ggf.
 konfigurierten `BASE_PATH`), und HTTPS ist erforderlich, außer bei
 Loopback-URLs für die Entwicklung. Standardmäßig ist mindestens eine
 Administratorgruppe oder ein [Gruppen-Mapping](#gruppen-mapping)
-erforderlich; setzen Sie `PRO_SSO_ALLOW_ALL_ADMINS=true` nur, wenn der
+erforderlich; setze `PRO_SSO_ALLOW_ALL_ADMINS=true` nur, wenn der
 Identity-Provider bereits festlegt, wer die Anwendung (den OIDC-Client oder
 die [SAML](/de/pro/saml)-Anwendung) nutzen darf.
 
@@ -52,7 +52,7 @@ Die OIDC-Discovery blockiert den Start nicht. Ist der Identity-Provider beim
 Start des Gateways nicht erreichbar, startet das Gateway trotzdem, bestehende
 Sessions funktionieren weiter, neue Anmeldungen antworten mit `503` und
 `identity_provider_unavailable`, und die Discovery wird im Hintergrund
-wiederholt (5 Sekunden, verdoppelt bis 5 Minuten). Setzen Sie
+wiederholt (5 Sekunden, verdoppelt bis 5 Minuten). Setze
 `require_discovery: true` (`PRO_SSO_REQUIRE_DISCOVERY=true`), um einen nicht
 erreichbaren Provider stattdessen zu einem Startfehler zu machen.
 
@@ -64,11 +64,11 @@ landet eine Person unter `/users/<E-Mail in Kleinbuchstaben>`.
 
 | Einstellung | Umgebungsvariable | Standardwert | Ändern, wenn |
 | --- | --- | --- | --- |
-| `user_path_claim` | `PRO_SSO_USER_PATH_CLAIM` | `email` | E-Mail-Adressen sich ändern oder bei Ihrem Provider nicht verifiziert sind. Nennen Sie einen anderen Wert, der die Person identifiziert, etwa eine unveränderliche Benutzer-ID: einen String-Claim der obersten Ebene des ID-Tokens (OIDC) oder ein SAML-Attribut, über seinen Namen oder einen [Alias](/de/pro/saml#attribute-und-principal). Bei `email` muss die Adresse verifiziert sein und wird in Kleinbuchstaben umgewandelt. |
-| `user_path_case_insensitive` | `PRO_SSO_USER_PATH_CASE_INSENSITIVE` | `false` | Ein eigener Claim oder ein eigenes Attribut bei Ihrem Provider nicht zwischen Groß- und Kleinschreibung unterscheidet. Andere Werte behalten ihre Schreibweise. |
+| `user_path_claim` | `PRO_SSO_USER_PATH_CLAIM` | `email` | E-Mail-Adressen sich ändern oder bei deinem Provider nicht verifiziert sind. Nenne einen anderen Wert, der die Person identifiziert, etwa eine unveränderliche Benutzer-ID: einen String-Claim der obersten Ebene des ID-Tokens (OIDC) oder ein SAML-Attribut, über seinen Namen oder einen [Alias](/de/pro/saml#attribute-und-principal). Bei `email` muss die Adresse verifiziert sein und wird in Kleinbuchstaben umgewandelt. |
+| `user_path_case_insensitive` | `PRO_SSO_USER_PATH_CASE_INSENSITIVE` | `false` | Ein eigener Claim oder ein eigenes Attribut bei deinem Provider nicht zwischen Groß- und Kleinschreibung unterscheidet. Andere Werte behalten ihre Schreibweise. |
 | `user_path_prefix` | `PRO_SSO_USER_PATH_PREFIX` | `/users` | Personen, auf die kein Gruppen-Mapping zutrifft, an anderer Stelle im Baum landen sollen. |
-| `groups_claim` | `PRO_SSO_GROUPS_CLAIM` | `groups` | Ihr Provider die Gruppen in einem anderen Claim (OIDC) oder Attribut (SAML) sendet. |
-| `admin_groups` | `PRO_SSO_ADMIN_GROUPS` | keine | Sie die Gruppen angeben, deren Mitglieder sich ohne Gruppen-Mapping anmelden dürfen. In der Umgebungsvariable durch Kommas getrennt. |
+| `groups_claim` | `PRO_SSO_GROUPS_CLAIM` | `groups` | dein Provider die Gruppen in einem anderen Claim (OIDC) oder Attribut (SAML) sendet. |
+| `admin_groups` | `PRO_SSO_ADMIN_GROUPS` | keine | du die Gruppen angibst, deren Mitglieder sich ohne Gruppen-Mapping anmelden dürfen. In der Umgebungsvariable durch Kommas getrennt. |
 | `allow_all_admins` | `PRO_SSO_ALLOW_ALL_ADMINS` | `false` | Der OIDC-Client oder die SAML-Anwendung beim Provider bereits auf die richtigen Personen beschränkt ist. |
 | `allowed_domains` | `PRO_SSO_ALLOWED_DOMAINS` | keine (jede Domain) | Sich nur verifizierte E-Mail-Adressen dieser Domains anmelden dürfen. |
 | `session_ttl` | `PRO_SSO_SESSION_TTL` | `1h` | Sessions kürzer oder länger dauern sollen. Zulässiger Bereich: `5m` bis `24h`. |
@@ -108,9 +108,9 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
   wird mit den Werten von `groups_claim` so verglichen, wie sie gesendet
   werden: Nichts wird abgeschnitten, ob der Claim eine Liste oder ein
   einzelner String ist, und ein leerer String bedeutet keine Gruppen. Entra ID
-  sendet die Objekt-IDs der Gruppen, nicht deren Namen; tragen Sie also die
+  sendet die Objekt-IDs der Gruppen, nicht deren Namen; trage also die
   Objekt-IDs ein.
-- **Der erste deklarierte Treffer gewinnt.** Ordnen Sie die Liste vom
+- **Der erste deklarierte Treffer gewinnt.** Ordne die Liste vom
   speziellsten zum allgemeinsten Eintrag; eine Person hat immer genau einen
   User-Path.
 - **Der Pfad lautet `<user_path>/<user>`.** `<user>` ist der Wert von
@@ -141,7 +141,7 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
   der Person, ein Pfad wie `/users/alice@example.com` ist also meist Alices
   eigene Richtlinie, und das ist beabsichtigt. Riskant ist ein nach einer
   E-Mail-Adresse benannter Pfad, unter dem andere Benutzer oder Keys liegen;
-  legen Sie sie dort nicht ab.
+  lege sie dort nicht ab.
 
 ### Wer sich anmelden darf
 
@@ -163,7 +163,7 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
    Anmeldung ohne Treffer mit dem Grund `group_unmapped` abgelehnt.
 
 Der Start erfordert daher mindestens eines von `admin_groups`,
-`group_mappings` oder `allow_all_admins: true`. Verwenden Sie ausschließlich
+`group_mappings` oder `allow_all_admins: true`. Verwende ausschließlich
 Mappings, um nur gemappte Gruppen zuzulassen.
 
 Eine Anmeldung ohne Gruppen-Claim ist eine Anmeldung ohne Gruppe, kein
@@ -176,7 +176,7 @@ auf `/teams` mit dem Präfix `/teams/guests`); solche Anmeldungen unterliegen
 dann den Budgets, Rate-Limits und dem Modellzugriff jedes Knotens, der
 `user_path_prefix` enthält, während ihr Zugriffsbereich ihr eigenes Blatt
 bleibt. Darf eine Person nie an den Mappings vorbeikommen, etwa weil ein
-falsch konfigurierter Provider den Claim weglassen könnte, aktivieren Sie
+falsch konfigurierter Provider den Claim weglassen könnte, aktiviere
 `allow_all_admins` nicht; `admin_groups` oder Mappings allein lehnen eine
 solche Anmeldung ab.
 
@@ -218,7 +218,7 @@ nicht nur bei der Anmeldung.
   [Wenn sich die Konfiguration ändert](#wenn-sich-die-konfiguration-ändert).
 - **API-Keys bleiben auf dem alten Pfad.** Keys, die eine Person auf ihrem
   früheren Blatt erstellt hat, funktionieren weiter, nachdem sie die Gruppe
-  gewechselt oder verlassen hat. Deaktivieren Sie sie im Dashboard.
+  gewechselt oder verlassen hat. Deaktiviere sie im Dashboard.
 - **Entra ID lässt die Gruppen von Personen in zu vielen Gruppen weg.** Bei
   mehr als 200 Gruppen in einem OIDC-Token (JWT) und mehr als 150 Gruppen in
   einer SAML-Assertion sendet Entra ID statt der Gruppen einen Verweis auf
@@ -227,7 +227,7 @@ nicht nur bei der Anmeldung.
   GoModel ruft die Gruppen nicht aus Graph ab und kann nicht erkennen, zu
   welchem Knoten die Person gehört. Solange `admin_groups` oder Mappings
   gesetzt sind, wird eine solche Anmeldung daher mit `groups_overage`
-  abgelehnt. Lassen Sie Entra ID im Gruppen-Claim nur die Gruppen senden, die
+  abgelehnt. Lass Entra ID im Gruppen-Claim nur die Gruppen senden, die
   der Anwendung zugewiesen sind. Die Grenzen zählen dann nur diese Gruppen;
   OIDC- und SAML-Benutzer gleichermaßen, auch SAML-Benutzer in insgesamt 151
   bis 200 Gruppen, können sich anmelden, solange höchstens 200 (OIDC) bzw. 150
@@ -236,10 +236,10 @@ nicht nur bei der Anmeldung.
 ## Abmeldung über Replicas hinweg
 
 Die Abmeldung beendet immer zuerst die GoModel-Session. Um auch die Session
-beim Identity-Provider zu beenden, setzen Sie `provider_logout_url`
+beim Identity-Provider zu beenden, setze `provider_logout_url`
 (`PRO_SSO_PROVIDER_LOGOUT_URL`) auf die absolute HTTPS-Logout-URL des
-Providers; das Gateway leitet nach der Abmeldung dorthin weiter. Konfigurieren
-Sie den Provider so, dass er zu `/sso/logged-out` unterhalb eines ggf.
+Providers; das Gateway leitet nach der Abmeldung dorthin weiter. Konfiguriere
+den Provider so, dass er zu `/sso/logged-out` unterhalb eines ggf.
 konfigurierten `BASE_PATH` zurückkehrt: Mit `BASE_PATH=/g` ist das
 `https://gomodel.example.com/g/sso/logged-out`. Ohne diese Einstellung zeigt
 GoModel seine eigene Abmeldeseite.
@@ -251,7 +251,7 @@ MongoDB-Storage funktioniert eine abgemeldete Session daher innerhalb weniger
 Sekunden auf keiner Replica mehr. Widerrufe überstehen Neustarts und werden
 gelöscht, sobald die Session ohnehin abgelaufen wäre.
 
-Betreiben Sie mit SQLite nur eine Replica: Jede SQLite-Instanz hat ihre eigene
+Betreibe mit SQLite nur eine Replica: Jede SQLite-Instanz hat ihre eigene
 Datenbank, andere Replicas sehen den Widerruf also nie, und ein erneut
 gesendetes Cookie bleibt dort bis zu seinem Ablauf gültig. Ist das
 Storage-Backend bei der Abmeldung nicht erreichbar, gilt der Widerruf trotzdem
@@ -356,8 +356,8 @@ Gruppen-Mapping und die SAML-Anmeldung einführt.
   sind.
 
   Eine Person, deren Wert eines dieser Zeichen enthält, kann sich nicht mehr
-  anmelden. Lassen Sie den Identity-Provider eine Schreibweise ohne diese
-  Zeichen senden, oder setzen Sie `user_path_claim` auf einen Wert, der keine
+  anmelden. Lass den Identity-Provider eine Schreibweise ohne diese
+  Zeichen senden, oder setze `user_path_claim` auf einen Wert, der keine
   E-Mail-Adresse ist, etwa eine unveränderliche Benutzer-ID. Dadurch erhält
   jeder Benutzer einen neuen Pfad.
 </Warning>

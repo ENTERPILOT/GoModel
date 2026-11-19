@@ -1,6 +1,6 @@
 ---
 title: "Usage API"
-description: "Prüfen Sie Ihre eigene Nutzung, Ihr Budget und den Status Ihrer Rate-Limits mit demselben API-Key, den Sie für Inferenz verwenden."
+description: "Prüfe deine eigene Nutzung, dein Budget und den Status deiner Rate-Limits mit demselben API-Key, den du für Inferenz verwendest."
 icon: "gauge"
 keywords: ["Usage API", "/v1/usage", "Nutzung per Self-Service", "Budget-Status", "Rate-Limit-Status"]
 ---
@@ -108,12 +108,12 @@ console.log(usage);
 }
 ```
 
-## Wessen Nutzung Sie sehen
+## Wessen Nutzung du siehst
 
 - **Verwalteter API-Key** – der an den Key gebundene `user_path` wird verwendet. Es sind keine
   Parameter nötig, und der Inhaber des Keys kann nichts außerhalb seines eigenen Teilbaums lesen.
-- **Master-Key (oder Unsafe-Modus)** – übergeben Sie `X-GoModel-User-Path`, um einen Pfad
-  auszuwählen, oder lassen Sie den Header weg, um `/` (alles) zu sehen:
+- **Master-Key (oder Unsafe-Modus)** – übergib `X-GoModel-User-Path`, um einen Pfad
+  auszuwählen, oder lass den Header weg, um `/` (alles) zu sehen:
 
 <CodeGroup>
 
@@ -171,7 +171,7 @@ von übergeordneten Pfaden wie `/` geerbt werden. `remaining` kann negativ werde
 Durchsetzung wider: Ist der Wert `true`, werden Requests bis `period_end` abgelehnt
 (`period_seconds` mit dem Wert `2592000` ist der Sentinel-Wert für den Kalendermonat, nicht
 buchstäblich 30 Tage). `resets_in_seconds` zählt relativ zu `server_time` bis `period_end`
-herunter, sodass Sie den Wert anzeigen können, ohne sich um Uhrzeitabweichungen auf dem Client
+herunter, sodass du den Wert anzeigen kannst, ohne dich um Uhrzeitabweichungen auf dem Client
 kümmern zu müssen.
 
 ### `rate_limits`
@@ -201,7 +201,7 @@ Infrastrukturkapazität, nicht den Aufrufer.
 
 ## Datumsfenster
 
-Der `usage`-Block umfasst standardmäßig die letzten 30 Tage (Tagesgrenzen in UTC). Schränken Sie
+Der `usage`-Block umfasst standardmäßig die letzten 30 Tage (Tagesgrenzen in UTC). Schränke
 ihn mit Query-Parametern ein – `days` oder explizit `start_date`/`end_date` (YYYY-MM-DD, maximal
 365 Tage):
 
@@ -264,14 +264,14 @@ Der `usage`-Block zählt nur Requests, die an einen Provider gehen, damit er mit
 | ---------- | -------------------------------------------------------- |
 | `uncached` | Nur Requests an Provider – der Standardwert              |
 | `cached`   | Nur lokale Cache-Treffer – was der Cache kostenlos ausgeliefert hat |
-| `all`      | Beides, Ihr gesamtes Request-Volumen                     |
+| `all`      | Beides, dein gesamtes Request-Volumen                     |
 
 ```bash
 curl "http://localhost:8080/v1/usage?cache_mode=cached" \
   -H "Authorization: Bearer sk_gom_..."
 ```
 
-Ein Vergleich von `cached` mit dem Standardwert zeigt am schnellsten, welchen Anteil Ihres
+Ein Vergleich von `cached` mit dem Standardwert zeigt am schnellsten, welchen Anteil deines
 Traffics der Cache abfängt. Nicht erkannte Werte fallen auf `uncached` zurück. `cache_mode` wirkt
 sich nur auf `usage` aus: Budgets und Rate-Limits zählen nie Cache-Treffer, weil ein Treffer
 nichts kostet und kein Kontingent verbraucht.

@@ -1,6 +1,6 @@
 ---
 title: "Failover"
-description: "Wechseln Sie per Failover zwischen den Zielen eines virtuellen Modells und machen Sie mit der Failover-Strategie aus einer Zielliste eine strikte Prioritätsreihenfolge."
+description: "Wechsle per Failover zwischen den Zielen eines virtuellen Modells und mache mit der Failover-Strategie aus einer Zielliste eine strikte Prioritätsreihenfolge."
 icon: "shuffle"
 keywords: ["Failover", "failover", "Fallback", "Provider-Ausfall", "provider outage", "automatischer Retry", "Hochverfügbarkeit", "high availability", "Prioritäts-Routing"]
 ---
@@ -23,12 +23,12 @@ welches Ziel zuerst versucht wird:
 | Niedrigste Kosten | das günstigste verfügbare Ziel | die übrigen Ziele in der angegebenen Reihenfolge |
 | **Failover** | immer das erste verfügbare Ziel | die nächsten Ziele in der angegebenen Reihenfolge |
 
-Wählen Sie **Failover**, wenn die Zielliste eine Prioritätsreihenfolge ist –
+Wähle **Failover**, wenn die Zielliste eine Prioritätsreihenfolge ist –
 immer das beste Modell verwenden, außer es ist ausgefallen, und erst dann auf
 die Backups ausweichen.
 
 Bei den anderen Strategien zeigt der Editor ein Kontrollkästchen **Failover**
-an, das standardmäßig aktiviert ist. Deaktivieren Sie es (oder setzen Sie im
+an, das standardmäßig aktiviert ist. Deaktiviere es (oder setze im
 Code `failover: false`), wenn eine Weiterleitung nur verteilen und ein
 fehlgeschlagener Request seinen Fehler zurückgeben soll, etwa wenn die Ziele
 nicht austauschbar sind und ein Client Retries selbst übernimmt. Die
@@ -37,15 +37,15 @@ dort nicht angeboten.
 
 ## Eine Failover-Kette konfigurieren
 
-Öffnen Sie im Dashboard **Models** und bearbeiten Sie das Modell, das Sie
-absichern möchten: Das Modell ist bereits als erstes Ziel festgelegt. Fügen Sie
-die Fallbacks darunter in Prioritätsreihenfolge hinzu und speichern Sie – die
+Öffne im Dashboard **Models** und bearbeite das Modell, das du
+absichern möchtest: Das Modell ist bereits als erstes Ziel festgelegt. Füge
+die Fallbacks darunter in Prioritätsreihenfolge hinzu und speichere – die
 Strategie ist standardmäßig **Failover**. Soll das Failover stattdessen unter
-einem neuen Namen laufen, erstellen Sie ein virtuelles Modell, listen Sie die
-Ziele in Prioritätsreihenfolge auf und wählen Sie im Dropdown
+einem neuen Namen laufen, erstelle ein virtuelles Modell, liste die
+Ziele in Prioritätsreihenfolge auf und wähle im Dropdown
 **Load-balancing strategy** die Option **Failover**. Gewichte und
 Session-Bindung gelten für diese Strategie nicht, daher blendet der Editor sie
-aus. Wenn Sie die festgelegte Zeile entfernen, wird der Eintrag zu einer
+aus. Wenn du die festgelegte Zeile entfernst, wird der Eintrag zu einer
 einfachen Redirect: Requests für das Modell gehen dann an die übrigen
 Ziele.
 
@@ -85,12 +85,12 @@ aufführt, durchläuft dagegen auch dessen Fallbacks.
 
 Bei Requests ohne Streaming laufen Provider-Retries vor dem Failover. Um
 Cloudflare-Responses mit `522`/`524` zu wiederholen und anschließend beim selben
-Provider das Modell zu wechseln, verwenden Sie
+Provider das Modell zu wechseln, verwende
 [Ausfallsicherheits-Einstellungen mit Circuit Breakern pro Modell](/de/advanced/resilience#cloudflare-timeouts-wiederholen-dann-modell-wechseln).
 
 Failover reagiert auf fehlgeschlagene Versuche, nicht auf langsame. Um Traffic
 von einem Provider abzuziehen, der zwar noch antwortet, aber zu lange braucht,
-setzen Sie einen
+setze einen
 [Schwellenwert für langsame Aufrufe](/de/advanced/resilience#failover-weg-von-einem-langsamen-provider)
 für seinen Circuit Breaker.
 
@@ -142,7 +142,7 @@ dieses virtuelle Modell dem Modell Failover hinzufügt, statt es zu ersetzen.
   weiterhin ausgeliefert, bis ihre TTL abläuft.
 </Note>
 
-Setzen Sie `FAILOVER_ENABLED=false` (oder `failover.enabled: false`), um den
+Setze `FAILOVER_ENABLED=false` (oder `failover.enabled: false`), um den
 Durchlauf global abzuschalten; auch ein [Workflow](/de/advanced/workflows) kann
 ihn für seinen Geltungsbereich abschalten. Das gewählte Ziel wird weiterhin
 bedient, jedoch ohne Retries.
@@ -159,10 +159,10 @@ passen sie an:
 | `retry_on_statuses` | `FAILOVER_RETRY_ON_STATUSES` | `[429, 5xx]` | Upstream-HTTP-Statuscodes, die Failover auslösen: exakte Codes (`408`) oder eine ganze Klasse (`5xx`). |
 | `retry_on_errors` | `FAILOVER_RETRY_ON_ERRORS` | siehe unten | Fehlerphrasen, die unabhängig vom Status Failover auslösen. |
 
-Eine nicht leere Liste **ersetzt** ihren Standardwert. Wiederholen Sie daher
-die Standardwerte, die Sie behalten möchten; eine leere oder weggelassene
-Liste behält den Standardwert bei (verwenden Sie `enabled: false`, um Failover
-abzuschalten). In Umgebungsvariablen trennen Sie Einträge durch Kommas.
+Eine nicht leere Liste **ersetzt** ihren Standardwert. Wiederhole daher
+die Standardwerte, die du behalten möchtest; eine leere oder weggelassene
+Liste behält den Standardwert bei (verwende `enabled: false`, um Failover
+abzuschalten). In Umgebungsvariablen trennst du Einträge durch Kommas.
 
 Eine Phrase in `retry_on_errors` trifft zu, wenn jedes ihrer Wörter im
 Fehlercode oder in der Fehlermeldung vorkommt (Groß-/Kleinschreibung wird
@@ -247,19 +247,19 @@ Shuffle-Symbol auf der Seite **Models** und die Konfiguration
   beibehalten. Ein primäres Modell, das bereits eine Weiterleitung oder eine
   pfadbezogene Einstellung hat oder deaktiviert ist, wird protokolliert und
   übersprungen, und der Speicher bleibt erhalten, bis dies aufgelöst ist –
-  fügen Sie seine Fallbacks als Ziele dieses virtuellen Modells mit der
-  Failover-Strategie hinzu und löschen Sie dann die Zeile. Eine Zuordnung,
+  füge seine Fallbacks als Ziele dieses virtuellen Modells mit der
+  Failover-Strategie hinzu und lösche dann die Zeile. Eine Zuordnung,
   deren Fallback ein virtuelles Modell nennt, das zurück zu ihrem primären
   Modell routet, bleibt ebenso erhalten, da ihre Umwandlung einen Kettenzyklus
-  erzeugen würde – passen Sie dieses virtuelle Modell an oder entfernen Sie
-  es, und starten Sie dann neu. Ein primäres Modell, das in
+  erzeugen würde – passe dieses virtuelle Modell an oder entferne
+  es, und starte dann neu. Ein primäres Modell, das in
   `disabled_models` aufgeführt ist, wird als deaktiviertes virtuelles Modell
-  umgewandelt: Seine Fallbacks bleiben erhalten, aber inaktiv, bis Sie es auf
-  der Seite **Models** aktivieren.
+  umgewandelt: Seine Fallbacks bleiben erhalten, aber inaktiv, bis du es auf
+  der Seite **Models** aktivierst.
 - `failover.rules`, `manual_rules_path`, `FAILOVER_RULES_JSON` und
   `disabled_models` werden weiterhin geladen und bei jedem Start mit einer
   Deprecation-Warnung in konfigurationsverwaltete virtuelle Modelle übersetzt.
   Eine Regel, deren primäres Modell im Dashboard ein virtuelles Modell hat,
   wird mit einer Warnung übersprungen, sodass sie das Routing dieses
-  virtuellen Modells nie ersetzt. Verschieben Sie die Regeln bei Gelegenheit
+  virtuellen Modells nie ersetzt. Verschiebe die Regeln bei Gelegenheit
   unter `virtual_models`.

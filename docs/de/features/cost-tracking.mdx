@@ -1,6 +1,6 @@
 ---
 title: "Kostenerfassung"
-description: "Wie GoModel die Kosten von Requests schätzt, woher die Preise stammen, wie Sie sie überschreiben und wie Sie gespeicherte Kosten neu berechnen."
+description: "Wie GoModel die Kosten von Requests schätzt, woher die Preise stammen, wie du sie überschreibst und wie du gespeicherte Kosten neu berechnest."
 icon: "calculator"
 keywords: ["Kostenerfassung", "cost tracking", "LLM-Kosten", "LLM cost", "Token-Preise", "token pricing", "Ausgaben", "spend", "Preis-Override", "Kostenschätzung", "Aufschlag", "markup", "Weiterberechnung", "chargeback", "abgerechnete Kosten", "billed cost"]
 ---
@@ -11,10 +11,10 @@ GoModel schätzt die Kosten jedes erfassten Requests anhand der Modellpreise und
   Diese Kosten sind **Schätzungen**, keine Abrechnungsdaten. Sofern ein Provider
   keine exakten Kosten meldet, multipliziert GoModel die vom Provider gemeldeten
   Token mit den konfigurierten Preisen des Modells. Rabatte, Aktionen und
-  providerseitige Rundungen werden daher nicht berücksichtigt. Betrachten Sie das
-  Dashboard des Providers als maßgebliche Quelle und gleichen Sie die Zahlen von
-  GoModel damit ab, bevor Sie sie für Rechnungsstellung oder Abstimmung
-  verwenden.
+  providerseitige Rundungen werden daher nicht berücksichtigt. Betrachte das
+  Dashboard des Providers als maßgebliche Quelle und gleiche die Zahlen von
+  GoModel damit ab, bevor du sie für Rechnungsstellung oder Abstimmung
+  verwendest.
 </Warning>
 
 ## Wie Kosten geschätzt werden
@@ -23,7 +23,7 @@ Für jeden Request bepreist GoModel:
 
 - **Input**- und **Output**-Token zu den Preisen des Modells pro Million Token (MTok).
 - **Gecachte Input**-, **Reasoning**- und **Audio**-Token zu ihren eigenen Preisen, sofern der Provider sie meldet, sodass Traffic mit vielen Cache-Treffern oder viel Reasoning korrekt bepreist wird.
-- **Nicht-Token-Einheiten**, wenn der Provider so abrechnet: generierte Bilder (`per_image` / `output_image_per_mtok`), Audiodauer (`per_second_input`, `per_second_output`) und Sprachzeichen (`per_character_input`). Unter [Bilder](/de/advanced/images-api#kostenerfassung) und [Audio](/de/advanced/audio-api#kostenerfassung) erfahren Sie, welche Einheit für welches Modell gilt – wenn ein Preis und ein Token-Preis zwei Ausdrucksformen derselben Gebühr sind (die generierten Token eines Bildes, die Dauer eines Audioclips), wird nur einer davon angewendet.
+- **Nicht-Token-Einheiten**, wenn der Provider so abrechnet: generierte Bilder (`per_image` / `output_image_per_mtok`), Audiodauer (`per_second_input`, `per_second_output`) und Sprachzeichen (`per_character_input`). Unter [Bilder](/de/advanced/images-api#kostenerfassung) und [Audio](/de/advanced/audio-api#kostenerfassung) erfährst du, welche Einheit für welches Modell gilt – wenn ein Preis und ein Token-Preis zwei Ausdrucksformen derselben Gebühr sind (die generierten Token eines Bildes, die Dauer eines Audioclips), wird nur einer davon angewendet.
 
 Wenn ein Provider exakte Kosten zurückgibt (OpenRouter-Credits, xAI `cost_in_usd_ticks`), verwendet GoModel diesen Wert statt der Katalogpreise. Jede Zeile hält im Feld `cost_source` fest, welche Methode verwendet wurde: `model_pricing`, `openrouter_credits` oder `xai_cost_in_usd_ticks`.
 
@@ -63,7 +63,7 @@ Manche Provider berechnen je nach Ausführungszeitpunkt eines Requests unterschi
 
 GoModel bepreist jeden Request mit den Preisen, die zum Zeitpunkt seines Abschlusses galten, ausgewertet in **UTC**, unabhängig von der Zeitzone des Servers oder des Dashboards. Zeitbereiche sind halboffen (`start` einschließlich, `end` ausschließlich); ein `end` gleich oder vor `start` reicht über Mitternacht hinaus, und `days` beschränkt einen Bereich auf bestimmte Wochentage (alle Tage, wenn weggelassen). Preise, die in einem Zeitfenster fehlen, behalten ihren Basispreis, und außerhalb aller Zeitfenster gelten die Basispreise. Die Neuberechnung gespeicherter Kosten verwendet den gespeicherten Zeitstempel jeder Zeile, sodass historische Zeilen für das Zeitfenster neu bepreist werden, in das sie tatsächlich fielen. Die Kostenschätzung für gecachten Input im Dashboard wendet Zeitfenster pro Minute der Woche an, passend zur Genauigkeit der Fenstergrenzen.
 
-Auf der Seite **Models** markiert ein `*` neben einem Preis ein Modell mit Zeitfenstern; fahren Sie mit der Maus darüber, um Zeitplan und Preise zu sehen. Das Überschreiben eines Basispreises (Input, Output, gecachter Input oder Cache-Schreibvorgang) ersetzt auch den Katalograbatt für diesen Preis: Der Override wird zum Preis für jede Stunde. Modell-Metadaten in `config.yaml` können außerdem eigene `time_windows` deklarieren, die die des Katalogs ersetzen.
+Auf der Seite **Models** markiert ein `*` neben einem Preis ein Modell mit Zeitfenstern; fahre mit der Maus darüber, um Zeitplan und Preise zu sehen. Das Überschreiben eines Basispreises (Input, Output, gecachter Input oder Cache-Schreibvorgang) ersetzt auch den Katalograbatt für diesen Preis: Der Override wird zum Preis für jede Stunde. Modell-Metadaten in `config.yaml` können außerdem eigene `time_windows` deklarieren, die die des Katalogs ersetzen.
 
 <Note>
   Zeitfenster sind ausschließlich wiederkehrende UTC-Zeitpläne. Regeln, die der
@@ -79,13 +79,13 @@ Die Preise eines Modells werden in folgender Prioritätsreihenfolge aufgelöst:
 2. Metadaten unter `providers.<name>.models` in **`config.yaml`**.
 3. Der **Modellkatalog**, bezogen aus der Registry [`ai-model-list`](https://github.com/ENTERPILOT/ai-model-list).
 
-Der Katalog liefert die Standardpreise für die meisten Modelle. Wenn der Preis eines Modells falsch aussieht oder ein Preis fehlt (zum Beispiel ein Preis für gecachten Input), prüfen Sie ihn anhand von [`ai-model-list`](https://github.com/ENTERPILOT/ai-model-list) und reichen Sie dort eine Korrektur ein, oder setzen Sie für eine sofortige Behebung einen Override.
+Der Katalog liefert die Standardpreise für die meisten Modelle. Wenn der Preis eines Modells falsch aussieht oder ein Preis fehlt (zum Beispiel ein Preis für gecachten Input), prüfe ihn anhand von [`ai-model-list`](https://github.com/ENTERPILOT/ai-model-list) und reiche dort eine Korrektur ein, oder setze für eine sofortige Behebung einen Override.
 
-Die Preise sind ein Teil einer umfassenderen Metadaten-Pipeline, die auch Kontextfenster, Fähigkeiten und Modellkategorien auflöst – die vollständige Quellenkette finden Sie unter [Modell-Metadaten](/de/advanced/model-metadata).
+Die Preise sind ein Teil einer umfassenderen Metadaten-Pipeline, die auch Kontextfenster, Fähigkeiten und Modellkategorien auflöst – die vollständige Quellenkette findest du unter [Modell-Metadaten](/de/advanced/model-metadata).
 
 ## Preise überschreiben
 
-Überschreiben Sie Preise, wenn der Katalogpreis falsch ist, fehlt oder von Ihrem ausgehandelten Preis abweicht. Öffnen Sie die Seite **Models**, suchen Sie das Modell und öffnen Sie dessen Editor **Pricing override**. Legen Sie einen oder mehrere Preistypen (Input, Output, gecachter Input usw.) in USD fest. Gespeicherte Felder überschreiben die Preise aus dem Katalog und aus `config.yaml` für diesen Selektor; nicht gesetzte Felder werden weiterhin geerbt.
+Überschreibe Preise, wenn der Katalogpreis falsch ist, fehlt oder von deinem ausgehandelten Preis abweicht. Öffne die Seite **Models**, suche das Modell und öffne dessen Editor **Pricing override**. Lege einen oder mehrere Preistypen (Input, Output, gecachter Input usw.) in USD fest. Gespeicherte Felder überschreiben die Preise aus dem Katalog und aus `config.yaml` für diesen Selektor; nicht gesetzte Felder werden weiterhin geerbt.
 
 <Frame caption="Die Seite Models listet die Preise jedes Modells auf; die $-Aktion öffnet dessen Preis-Override">
   <img
@@ -94,20 +94,20 @@ Die Preise sind ein Teil einer umfassenderen Metadaten-Pipeline, die auch Kontex
   />
 </Frame>
 
-<Frame caption="Legen Sie einen Preistyp und einen USD-Wert fest; gespeicherte Felder überschreiben die Preise aus dem Katalog und aus config.yaml für den Selektor">
+<Frame caption="Lege einen Preistyp und einen USD-Wert fest; gespeicherte Felder überschreiben die Preise aus dem Katalog und aus config.yaml für den Selektor">
   <img
     src="/features/pricing-override-editor.png"
     alt="GoModel-Editor Pricing override mit dem Selektor, einem Preistyp Input in Dollar pro MTok und dessen USD-Wert"
   />
 </Frame>
 
-Overrides gelten für neue Requests. Um bereits ausgeführte Requests neu zu bepreisen, berechnen Sie sie neu.
+Overrides gelten für neue Requests. Um bereits ausgeführte Requests neu zu bepreisen, berechne sie neu.
 
 ## Aufschläge und abgerechnete Kosten
 
-Legen Sie einen Aufschlag fest, wenn Sie Modellzugriff weiterverkaufen, zum Beispiel um Kunden die von ihnen verbrauchten Tokens weiterzuberechnen. GoModel erfasst für jeden Request die **abgerechneten Kosten** (`billed_cost` in der Nutzungszeile): die Provider-Kosten plus Aufschlag. Die Provider-Kosten selbst ändern sich nie, sodass Budgets, Dashboard-Summen und Einsparungen weiterhin messen, was Sie upstream bezahlen. Mit GoModel Pro kann ein Budget stattdessen die abgerechneten Kosten begrenzen; siehe [Budgets](/de/features/budgets).
+Lege einen Aufschlag fest, wenn du Modellzugriff weiterverkaufst, zum Beispiel um Kunden die von ihnen verbrauchten Tokens weiterzuberechnen. GoModel erfasst für jeden Request die **abgerechneten Kosten** (`billed_cost` in der Nutzungszeile): die Provider-Kosten plus Aufschlag. Die Provider-Kosten selbst ändern sich nie, sodass Budgets, Dashboard-Summen und Einsparungen weiterhin messen, was du upstream bezahlst. Mit GoModel Pro kann ein Budget stattdessen die abgerechneten Kosten begrenzen; siehe [Budgets](/de/features/budgets).
 
-Aufschläge sind standardmäßig deaktiviert. Aktivieren Sie sie mit `markups_enabled: true` (env `PRICING_MARKUPS_ENABLED=true`) und legen Sie dann Prozentwerte in `config.yaml` fest. Sind Aufschläge aktiviert, aber passt keine Regel auf einen Request, entsprechen seine abgerechneten Kosten den Provider-Kosten. Sind sie deaktiviert, erfasst GoModel keine abgerechneten Kosten und ignoriert `markups` und `bill_cache_hits`; ist `markups` gesetzt, wird beim Start eine Warnung protokolliert.
+Aufschläge sind standardmäßig deaktiviert. Aktiviere sie mit `markups_enabled: true` (env `PRICING_MARKUPS_ENABLED=true`) und lege dann Prozentwerte in `config.yaml` fest. Sind Aufschläge aktiviert, aber passt keine Regel auf einen Request, entsprechen seine abgerechneten Kosten den Provider-Kosten. Sind sie deaktiviert, erfasst GoModel keine abgerechneten Kosten und ignoriert `markups` und `bill_cache_hits`; ist `markups` gesetzt, wird beim Start eine Warnung protokolliert.
 
 ```yaml
 pricing:
@@ -126,9 +126,9 @@ Der spezifischste Selektor gewinnt, in dieser Reihenfolge: Provider/Modell, Mode
 
 Jede Nutzungszeile speichert außerdem den Aufschlag, zu dem sie abgerechnet wurde (`markup_percent`, `markup_selector`), sodass geänderte Aufschläge vergangene Abrechnungen nie umschreiben.
 
-Ein Provider mit `billable: false` (`providers.<name>.billable` in `config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` oder das Kontrollkästchen **Billable** auf der Seite **Providers**) bedient Requests, deren Kosten der Aufrufer Ihnen nicht schuldet, typischerweise der eigene API-Key eines Kunden, der als eigene Provider-Instanz registriert ist. Seine Nutzung wird weiterhin erfasst und bepreist, sodass die Schätzung sichtbar bleibt, sofern das Modell einen Preis hat, und jede Zeile vermerkt `billable: false`. Bei aktivierten Aufschlägen wird eine solche Zeile mit `0` abgerechnet, ohne dass eine Aufschlagsregel angewendet wird; die Spalte **Billed**, abgerechnete Budgets und der Rechnungsexport berechnen einem Kunden also nie seinen eigenen Key: Eine Rechnungsposition für einen solchen Provider zeigt die Provider-Kosten mit abgerechneten Kosten von `0`. Ein Treffer im Response-Cache für das Modell dieses Providers wird ebenfalls mit `0` abgerechnet, und die Neuberechnung gespeicherter Kosten belässt diese Zeilen bei `0`. Bei deaktivierten Aufschlägen erfasst keine Zeile abgerechnete Kosten, nicht abrechenbare eingeschlossen. Das Flag wird wie der Aufschlag beim Schreiben der Zeile gesetzt, sodass eine spätere Änderung vergangene Abrechnungen nicht umschreibt. User-Path- und Label-Budgets überspringen nicht abrechenbare Nutzung unabhängig davon, ob Aufschläge aktiviert sind; siehe [Budgets](/de/features/budgets#nicht-abrechenbare-provider).
+Ein Provider mit `billable: false` (`providers.<name>.billable` in `config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` oder das Kontrollkästchen **Billable** auf der Seite **Providers**) bedient Requests, deren Kosten der Aufrufer dir nicht schuldet, typischerweise der eigene API-Key eines Kunden, der als eigene Provider-Instanz registriert ist. Seine Nutzung wird weiterhin erfasst und bepreist, sodass die Schätzung sichtbar bleibt, sofern das Modell einen Preis hat, und jede Zeile vermerkt `billable: false`. Bei aktivierten Aufschlägen wird eine solche Zeile mit `0` abgerechnet, ohne dass eine Aufschlagsregel angewendet wird; die Spalte **Billed**, abgerechnete Budgets und der Rechnungsexport berechnen einem Kunden also nie seinen eigenen Key: Eine Rechnungsposition für einen solchen Provider zeigt die Provider-Kosten mit abgerechneten Kosten von `0`. Ein Treffer im Response-Cache für das Modell dieses Providers wird ebenfalls mit `0` abgerechnet, und die Neuberechnung gespeicherter Kosten belässt diese Zeilen bei `0`. Bei deaktivierten Aufschlägen erfasst keine Zeile abgerechnete Kosten, nicht abrechenbare eingeschlossen. Das Flag wird wie der Aufschlag beim Schreiben der Zeile gesetzt, sodass eine spätere Änderung vergangene Abrechnungen nicht umschreibt. User-Path- und Label-Budgets überspringen nicht abrechenbare Nutzung unabhängig davon, ob Aufschläge aktiviert sind; siehe [Budgets](/de/features/budgets#nicht-abrechenbare-provider).
 
-Sobald Aufschläge aktiviert sind, zeigt das Dashboard die abgerechneten Kosten neben den Provider-Kosten: eine Karte **Billed** auf der Übersichts- und der Nutzungsseite, eine Spalte in jeder Nutzungsaufschlüsselung (Modell, User Path, Label, Request-Typ oder Endpoint und Session) sowie eine Spalte im Request-Log, deren Tooltip den Aufschlag jeder Zeile nennt. Die Admin-API liefert sie als `total_billed_cost` in `/admin/usage/summary`, als `billed_cost` in `/admin/usage/daily`, `/admin/usage/models`, `/admin/usage/user-paths`, `/admin/usage/labels`, `/admin/usage/endpoints` und `/admin/usage/sessions` sowie als `billed_cost`, `markup_percent` und `markup_selector` in den Einträgen von `/admin/usage/log`. Ein Tag, an dem nur Cache-Treffer abgerechnet wurden, erscheint trotzdem in `/admin/usage/daily`, mit null Requests. Abgerechnete Summen enthalten abgerechnete Cache-Treffer, obwohl die übrigen Kostenwerte sie ausnehmen; die abgerechneten Kosten pro User Path sind daher der Betrag, den Sie jedem Kunden berechnen.
+Sobald Aufschläge aktiviert sind, zeigt das Dashboard die abgerechneten Kosten neben den Provider-Kosten: eine Karte **Billed** auf der Übersichts- und der Nutzungsseite, eine Spalte in jeder Nutzungsaufschlüsselung (Modell, User Path, Label, Request-Typ oder Endpoint und Session) sowie eine Spalte im Request-Log, deren Tooltip den Aufschlag jeder Zeile nennt. Die Admin-API liefert sie als `total_billed_cost` in `/admin/usage/summary`, als `billed_cost` in `/admin/usage/daily`, `/admin/usage/models`, `/admin/usage/user-paths`, `/admin/usage/labels`, `/admin/usage/endpoints` und `/admin/usage/sessions` sowie als `billed_cost`, `markup_percent` und `markup_selector` in den Einträgen von `/admin/usage/log`. Ein Tag, an dem nur Cache-Treffer abgerechnet wurden, erscheint trotzdem in `/admin/usage/daily`, mit null Requests. Abgerechnete Summen enthalten abgerechnete Cache-Treffer, obwohl die übrigen Kostenwerte sie ausnehmen; die abgerechneten Kosten pro User Path sind daher der Betrag, den du jedem Kunden berechnest.
 
 ### Aufschläge pro Kunde (GoModel Pro)
 
@@ -139,7 +139,7 @@ Sobald Aufschläge aktiviert sind, zeigt das Dashboard die abgerechneten Kosten 
   stillschweigend den globalen Satz.
 </Info>
 
-Geben Sie jedem Kunden, identifiziert durch seinen [User-Path](/de/features/user-path)-Teilbaum, mit `user_path_markups` eigene Aufschläge. Jeder Pfad nimmt dieselben Selektoren wie `markups`:
+Gib jedem Kunden, identifiziert durch seinen [User-Path](/de/features/user-path)-Teilbaum, mit `user_path_markups` eigene Aufschläge. Jeder Pfad nimmt dieselben Selektoren wie `markups`:
 
 ```yaml
 pricing:
@@ -168,17 +168,17 @@ Ein Wert `---` bedeutet, dass die Kosten unbekannt sind, weil keine Preise verf�
 
 ## Ausgaben filtern und aufschlüsseln
 
-Die Nutzungsseite filtert jede Karte, jedes Diagramm und das Request-Log nach Modell, Anbieter, Label, API-Schlüssel, Endpunkt, Nutzerpfad und Session. Jedes Dropdown nimmt mehrere Werte an: Ein Request erfüllt einen Filter, wenn er einen der gewählten Werte hat, und er muss jeden Filter erfüllen. Die Nutzerpfad-Auswahl zeigt bekannte Pfade als Baum, gruppiert nach Präfix; ein gewählter Knoten schließt alles darunter ein, und Sie können einen nicht aufgeführten Pfad eintippen.
+Die Nutzungsseite filtert jede Karte, jedes Diagramm und das Request-Log nach Modell, Anbieter, Label, API-Schlüssel, Endpunkt, Nutzerpfad und Session. Jedes Dropdown nimmt mehrere Werte an: Ein Request erfüllt einen Filter, wenn er einen der gewählten Werte hat, und er muss jeden Filter erfüllen. Die Nutzerpfad-Auswahl zeigt bekannte Pfade als Baum, gruppiert nach Präfix; ein gewählter Knoten schließt alles darunter ein, und du kannst einen nicht aufgeführten Pfad eintippen.
 
-Standardmäßig blendet der API-Schlüssel-Filter deaktivierte und abgelaufene Schlüssel aus, und der Nutzerpfad-Filter blendet Pfade aus, die weder eine Richtlinie noch einen aktiven API-Schlüssel haben. Aktivieren Sie **Inaktive Schlüssel anzeigen** oder **Inaktive Pfade anzeigen** neben dem Filter, um sie aufzulisten, etwa für den Verlauf eines ehemaligen Kunden. Ein gewählter Wert bleibt immer aufgeführt. Ist die Nutzerliste nicht verfügbar, zeigt der Nutzerpfad-Filter alle Pfade.
+Standardmäßig blendet der API-Schlüssel-Filter deaktivierte und abgelaufene Schlüssel aus, und der Nutzerpfad-Filter blendet Pfade aus, die weder eine Richtlinie noch einen aktiven API-Schlüssel haben. Aktiviere **Inaktive Schlüssel anzeigen** oder **Inaktive Pfade anzeigen** neben dem Filter, um sie aufzulisten, etwa für den Verlauf eines ehemaligen Kunden. Ein gewählter Wert bleibt immer aufgeführt. Ist die Nutzerliste nicht verfügbar, zeigt der Nutzerpfad-Filter alle Pfade.
 
-Der Bereich **Aufschlüsselung** schlüsselt die gefilterte Nutzung nach zwei Dimensionen auf. Zum Beispiel zeigen Zeilen **Nutzerpfad**, Spalten **Zeitraum** und Zeitraum **Monatlich** die Kosten pro Monat und Nutzerpfad. Wählen Sie die Kennzahl (Kosten, Tokens oder Requests); die Top 10 Zeilen und Spalten bleiben erhalten, der Rest wird unter **Sonstige** zusammengefasst. **Nutzerpfade gruppieren** fasst Pfade nach ihren ersten Segmenten zusammen, sodass `/team/alice/laptop` unter `/team/alice` zählt. Wechseln Sie zwischen gestapeltem Diagramm und Tabelle, und exportieren Sie die Tabelle samt Summen mit **CSV herunterladen**.
+Der Bereich **Aufschlüsselung** schlüsselt die gefilterte Nutzung nach zwei Dimensionen auf. Zum Beispiel zeigen Zeilen **Nutzerpfad**, Spalten **Zeitraum** und Zeitraum **Monatlich** die Kosten pro Monat und Nutzerpfad. Wähle die Kennzahl (Kosten, Tokens oder Requests); die Top 10 Zeilen und Spalten bleiben erhalten, der Rest wird unter **Sonstige** zusammengefasst. **Nutzerpfade gruppieren** fasst Pfade nach ihren ersten Segmenten zusammen, sodass `/team/alice/laptop` unter `/team/alice` zählt. Wechsle zwischen gestapeltem Diagramm und Tabelle, und exportiere die Tabelle samt Summen mit **CSV herunterladen**.
 
 Filter, Zeitraum und Aufschlüsselung stehen in der URL der Seite, ein kopierter Link öffnet also dieselbe Ansicht. Dieselben Daten liefert [`GET /admin/usage/breakdown`](/de/advanced/admin-endpoints#get-adminusagebreakdown), die Filter gelten für jeden Nutzungs-Endpunkt außer `/admin/usage/throughput` (siehe [Mehrwertige Filter](/de/advanced/admin-endpoints#mehrwertige-filter)).
 
 ## Gespeicherte Kosten neu berechnen
 
-Die Neuberechnung ermittelt die gespeicherten Kosten der passenden Nutzungszeilen anhand der aktuellen Preise neu. Verwenden Sie sie nach der Änderung eines Overrides oder wenn zum Zeitpunkt eines Requests keine Preise verfügbar waren. Die Aktion ist standardmäßig aktiviert (`USAGE_PRICING_RECALCULATION_ENABLED`); wählen Sie in der Nutzungsansicht **Recalculate** und geben Sie dann zur Bestätigung `recalculate` ein. Sie ist auf den ausgewählten Datumsbereich, Provider oder das Modell sowie den User Path beschränkt.
+Die Neuberechnung ermittelt die gespeicherten Kosten der passenden Nutzungszeilen anhand der aktuellen Preise neu. Verwende sie nach der Änderung eines Overrides oder wenn zum Zeitpunkt eines Requests keine Preise verfügbar waren. Die Aktion ist standardmäßig aktiviert (`USAGE_PRICING_RECALCULATION_ENABLED`); wähle in der Nutzungsansicht **Recalculate** und gib dann zur Bestätigung `recalculate` ein. Sie ist auf den ausgewählten Datumsbereich, Provider oder das Modell sowie den User Path beschränkt.
 
 Die Neuberechnung bepreist die abgerechneten Kosten mit dem Aufschlag neu, zu dem jede Zeile abgerechnet wurde, und rechnet Cache-Treffer gemäß dem aktuellen `bill_cache_hits` ab. Zeilen, die vor der Einführung von Aufschlägen erfasst wurden, werden zu ihren Provider-Kosten abgerechnet. Solange Aufschläge deaktiviert sind, lässt die Neuberechnung die abgerechneten Kosten unverändert.
 
@@ -193,21 +193,21 @@ Die Neuberechnung bepreist die abgerechneten Kosten mit dem Aufschlag neu, zu de
 
 Der Benchmark beantwortet die Frage „Was kostet ein aktiver Entwickler pro Monat, und wie verteilt sich das?“. `GET /admin/usage/benchmark` behandelt jedes direkte Kind von `parent` als einen Nutzer und summiert dessen gesamten Teilbaum, so wie der [Rechnungsexport](#rechnungsexport-gomodel-pro) und [Budgets pro Kind](/de/features/budgets#dynamische-budgets-pro-kind) Pfade gruppieren: Mit `parent=/eng` zählen `/eng/alice/laptop` und `/eng/alice/ci` beide als `/eng/alice`. Eine Pro-Lizenz ist nicht nötig.
 
-Auf der Nutzungsseite zeigt der Bereich **Kosten pro aktivem Nutzer** unterhalb von **Aufschlüsselung** dieselben Daten: Wählen Sie die Gruppe und die Anzahl der Monate und wechseln Sie zwischen einem Diagramm mit Median- und p90-Kosten pro aktivem Nutzer samt Anzahl aktiver Nutzer und einer Tabelle der Monatsstatistiken. Der Bereich folgt den Filtern der Seite, nicht aber ihrem Zeitraum, und bietet bis zu 12 Monate. Bei aktivierten Aufschlägen wechselt ein Schalter zwischen Provider-Kosten und abgerechneten Kosten. Der aktuelle Monat ist als laufend markiert, statt mit dem Vormonat verglichen zu werden, Nutzer mit fehlenden Preisen zählt die Spalte **Preislücken**, und Kosten, die auf der Gruppe selbst erfasst wurden, erscheinen mit einem Hinweis.
+Auf der Nutzungsseite zeigt der Bereich **Kosten pro aktivem Nutzer** unterhalb von **Aufschlüsselung** dieselben Daten: Wähle die Gruppe und die Anzahl der Monate und wechsle zwischen einem Diagramm mit Median- und p90-Kosten pro aktivem Nutzer samt Anzahl aktiver Nutzer und einer Tabelle der Monatsstatistiken. Der Bereich folgt den Filtern der Seite, nicht aber ihrem Zeitraum, und bietet bis zu 12 Monate. Bei aktivierten Aufschlägen wechselt ein Schalter zwischen Provider-Kosten und abgerechneten Kosten. Der aktuelle Monat ist als laufend markiert, statt mit dem Vormonat verglichen zu werden, Nutzer mit fehlenden Preisen zählt die Spalte **Preislücken**, und Kosten, die auf der Gruppe selbst erfasst wurden, erscheinen mit einem Hinweis.
 
 | Parameter | Standard | Ändern, wenn |
 | --- | --- | --- |
-| `parent` | Die Wurzel des [Bereichs](/de/advanced/admin-endpoints#bereichsbeschränkter-admin-zugriff) der Zugangsdaten, oder `/` für globale Zugangsdaten (Nutzer sind dann die Pfade der obersten Ebene) | Sie die Personen einer Gruppe sehen wollen, zum Beispiel `parent=/eng` |
-| `months` | `7`: sechs vollständige Monate plus der aktuelle | Sie einen längeren oder kürzeren Verlauf wollen, `1` bis `12` Monate bis `end_month`. Jeder andere Wert, auch `0`, liefert `400` |
-| `start_month`, `end_month` | `end_month` ist der aktuelle Monat; `start_month` ergibt sich aus `months` | Sie einen festen Bereich von höchstens 12 Monaten wollen (`YYYY-MM`). Mit `start_month` wird `months` ignoriert und nicht geprüft; `end_month` darf nicht nach dem aktuellen Monat liegen |
-| `cost_basis` | `provider` | Sie Zugang weiterverkaufen: `billed` misst Provider-Kosten plus Aufschlag, einschließlich abgerechneter Treffer des Response-Caches. Erfordert `PRICING_MARKUPS_ENABLED=true`, sonst `409` `markups_disabled` |
-| `top_users` | `0` | Sie sehen wollen, wer die Kosten verursacht: Jeder Monat listet seine N teuersten Nutzer, höchstens `50` |
+| `parent` | Die Wurzel des [Bereichs](/de/advanced/admin-endpoints#bereichsbeschränkter-admin-zugriff) der Zugangsdaten, oder `/` für globale Zugangsdaten (Nutzer sind dann die Pfade der obersten Ebene) | du die Personen einer Gruppe sehen willst, zum Beispiel `parent=/eng` |
+| `months` | `7`: sechs vollständige Monate plus der aktuelle | du einen längeren oder kürzeren Verlauf willst, `1` bis `12` Monate bis `end_month`. Jeder andere Wert, auch `0`, liefert `400` |
+| `start_month`, `end_month` | `end_month` ist der aktuelle Monat; `start_month` ergibt sich aus `months` | du einen festen Bereich von höchstens 12 Monaten willst (`YYYY-MM`). Mit `start_month` wird `months` ignoriert und nicht geprüft; `end_month` darf nicht nach dem aktuellen Monat liegen |
+| `cost_basis` | `provider` | du Zugang weiterverkaufst: `billed` misst Provider-Kosten plus Aufschlag, einschließlich abgerechneter Treffer des Response-Caches. Erfordert `PRICING_MARKUPS_ENABLED=true`, sonst `409` `markups_disabled` |
+| `top_users` | `0` | du sehen willst, wer die Kosten verursacht: Jeder Monat listet seine N teuersten Nutzer, höchstens `50` |
 
 <Note>
   Standardmäßig nennt die Antwort keine User Paths: Sie enthält nur Anzahlen,
   Summen und Statistiken pro Monat. Zeilen pro Nutzer
-  (`top_users: [{user, requests, cost}]`) erscheinen nur, wenn Sie
-  `top_users` setzen. Die Statistiken sind nicht anonymisiert: In einem Monat
+  (`top_users: [{user, requests, cost}]`) erscheinen nur, wenn du
+  `top_users` setzt. Die Statistiken sind nicht anonymisiert: In einem Monat
   mit einem aktiven Nutzer sind `mean`, `p50`, `p90` und `max` genau dessen
   Kosten, und bei wenigen Nutzern liegen sie nahe daran.
 </Note>
@@ -261,7 +261,7 @@ Perzentile werden linear zwischen den nächstgelegenen Rängen interpoliert, wie
 
 Monate laufen von Mitternacht bis Mitternacht in der Zeitzone des Headers `X-GoModel-Timezone`, wie beim [Rechnungsexport](#rechnungsexport-gomodel-pro): Das Dashboard sendet seine eingestellte Zeitzone, ein API-Aufruf ohne den Header verwendet UTC. `time_zone` meldet die verwendete Zeitzone.
 
-Jeder Nutzer wird gezählt: Anders als bei der Aufschlüsselung wird nichts unter **Sonstige** zusammengefasst. Ein Bereich umfasst höchstens 12 Monate einschließlich des aktuellen, passend zur 365-Tage-Grenze der übrigen Nutzungs-Endpunkte, und wird geprüft, bevor etwas gelesen wird. Ein Benchmark enthält höchstens 100.000 Nutzermonate (Nutzer × Monate); das Lesen bricht mit `400` ab, sobald es diese Grenze überschreitet, statt Nutzer auszulassen. Wählen Sie einen tieferen `parent`, weniger Monate oder engere Filter. `parent` nennt eine Gruppe; wird es wiederholt, folgt `400`. [Bereichsbeschränkte Zugangsdaten](/de/advanced/admin-endpoints#bereichsbeschränkter-admin-zugriff) können nur Gruppen innerhalb ihres Teilbaums auswerten; jeder andere `parent` liefert `403` `user_path_out_of_scope`.
+Jeder Nutzer wird gezählt: Anders als bei der Aufschlüsselung wird nichts unter **Sonstige** zusammengefasst. Ein Bereich umfasst höchstens 12 Monate einschließlich des aktuellen, passend zur 365-Tage-Grenze der übrigen Nutzungs-Endpunkte, und wird geprüft, bevor etwas gelesen wird. Ein Benchmark enthält höchstens 100.000 Nutzermonate (Nutzer × Monate); das Lesen bricht mit `400` ab, sobald es diese Grenze überschreitet, statt Nutzer auszulassen. Wähle einen tieferen `parent`, weniger Monate oder engere Filter. `parent` nennt eine Gruppe; wird es wiederholt, folgt `400`. [Bereichsbeschränkte Zugangsdaten](/de/advanced/admin-endpoints#bereichsbeschränkter-admin-zugriff) können nur Gruppen innerhalb ihres Teilbaums auswerten; jeder andere `parent` liefert `403` `user_path_out_of_scope`.
 
 ## Rechnungsexport (GoModel Pro)
 
@@ -277,7 +277,7 @@ Jeder Nutzer wird gezählt: Anders als bei der Aufschlüsselung wird nichts unte
 
 Der Endpunkt akzeptiert denselben Datumsbereich und dieselben Filter wie die anderen Nutzungsendpunkte, dazu `format=csv` (Standard, heruntergeladen als `gomodel-invoice-<start>-to-<end>.csv`) oder `format=json`. Auf der Nutzungsseite lädt **Rechnung exportieren** die CSV für den gewählten Datumsbereich und die Filter herunter.
 
-Die Tage des Zeitraums laufen von Mitternacht bis Mitternacht in der Zeitzone des Headers `X-GoModel-Timezone`, den das Dashboard auf die in seinen Einstellungen gewählte Zeitzone setzt, standardmäßig auf die des Browsers; ein API-Aufruf ohne ihn verwendet UTC. Jeder Export meldet seine Zeitzone in `time_zone`, und eine Datei, die in einer anderen Zeitzone als UTC exportiert wurde, trägt sie im Namen (`gomodel-invoice-2026-10-01-to-2026-10-31-America-Los_Angeles.csv`). Rechnen Sie aus einer Zeitzone ab: Dieselben Daten decken in zwei Zeitzonen unterschiedliche Stunden ab, sodass Nutzung nahe einer Monatsgrenze auf zwei Rechnungen oder auf keiner landet, wenn aufeinanderfolgende Rechnungen Zeitzonen mischen.
+Die Tage des Zeitraums laufen von Mitternacht bis Mitternacht in der Zeitzone des Headers `X-GoModel-Timezone`, den das Dashboard auf die in seinen Einstellungen gewählte Zeitzone setzt, standardmäßig auf die des Browsers; ein API-Aufruf ohne ihn verwendet UTC. Jeder Export meldet seine Zeitzone in `time_zone`, und eine Datei, die in einer anderen Zeitzone als UTC exportiert wurde, trägt sie im Namen (`gomodel-invoice-2026-10-01-to-2026-10-31-America-Los_Angeles.csv`). Rechne aus einer Zeitzone ab: Dieselben Daten decken in zwei Zeitzonen unterschiedliche Stunden ab, sodass Nutzung nahe einer Monatsgrenze auf zwei Rechnungen oder auf keiner landet, wenn aufeinanderfolgende Rechnungen Zeitzonen mischen.
 
 ```bash
 curl -OJ "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31" \
@@ -291,4 +291,4 @@ subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3
 total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20,UTC
 ```
 
-Jede Position ist ein Modell auf einer Provider-Instanz. `row_type` unterscheidet Positionen (`item`) von der Zwischensumme jedes Kunden (`subtotal`) und der Gesamtsumme (`total`); filtern Sie also in einer Tabellenkalkulation vor dem Summieren auf `item`. Beträge sind einfache Dezimalzahlen in USD; leere Kosten sind unbekannt (keine Preise). Requests, Tokens und Provider-Kosten umfassen an Provider gesendete Requests; die abgerechneten Kosten enthalten zusätzlich abgerechnete Treffer des Response-Caches, wie in den anderen Abrechnungsansichten; eine Position, die nur aus Cache-Treffern besteht, zeigt daher Provider-Kosten von `0`. `effective_markup_percent` ist das Verhältnis von abgerechneten Kosten zu Provider-Kosten minus eins, abgerechnete Cache-Treffer erhöhen den Wert also bei einer Position mit Provider-Kosten; eine Position nur aus Cache-Treffern hat keinen.
+Jede Position ist ein Modell auf einer Provider-Instanz. `row_type` unterscheidet Positionen (`item`) von der Zwischensumme jedes Kunden (`subtotal`) und der Gesamtsumme (`total`); filtere also in einer Tabellenkalkulation vor dem Summieren auf `item`. Beträge sind einfache Dezimalzahlen in USD; leere Kosten sind unbekannt (keine Preise). Requests, Tokens und Provider-Kosten umfassen an Provider gesendete Requests; die abgerechneten Kosten enthalten zusätzlich abgerechnete Treffer des Response-Caches, wie in den anderen Abrechnungsansichten; eine Position, die nur aus Cache-Treffern besteht, zeigt daher Provider-Kosten von `0`. `effective_markup_percent` ist das Verhältnis von abgerechneten Kosten zu Provider-Kosten minus eins, abgerechnete Cache-Treffer erhöhen den Wert also bei einer Position mit Provider-Kosten; eine Position nur aus Cache-Treffern hat keinen.

@@ -57,8 +57,8 @@ zum gesamten Assistant-Turn, daher liegen sie auf der Nachricht.
   gewechselt ist, scheitert nicht an fremden Feldern.
 - **Nur der zuständige Adapter liest oder schreibt darin.** Nichts anderes im Gateway interpretiert
   den Inhalt.
-- **Geben Sie es unverändert zurück.** Schreiben Sie das Feld nicht um, ordnen Sie es nicht neu und
-  kürzen Sie es nicht.
+- **Gib es unverändert zurück.** Schreibe das Feld nicht um, ordne es nicht neu und
+  kürze es nicht.
 
 ## Erhalt von Thought Signatures
 
@@ -170,7 +170,7 @@ sieht so aus. Gezeigt werden nur die relevanten Felder.
 Dasselbe Feld erscheint auf gestreamten `tool_calls`-Deltas, auf `function_call`-Items der
 Responses API, auf `tool_use`-Blöcken der Anthropic Messages API und, bei reinen Text-Turns, auf
 der Assistant-Nachricht selbst. In der Responses API reist die Signatur eines reinen Text-Turns auf
-einem `reasoning`-Output-Item vor der Nachricht, ohne eigenen Reasoning-Text; geben Sie das Item
+einem `reasoning`-Output-Item vor der Nachricht, ohne eigenen Reasoning-Text; gib das Item
 zurück, und die Signatur landet auf dem Assistant-Turn. Nur der erste Call eines parallelen
 Batches trägt eine Signatur. Eine flache `thought_signature` oder `thoughtSignature` auf dem Tool
 Call wird ebenfalls akzeptiert, sodass Clients, die für andere Gateways entwickelt wurden,
@@ -178,9 +178,9 @@ weiterhin funktionieren.
 
 Enthält ein Gemini-3-Verlauf einen Function Call ganz ohne Signatur, weil die Konversation bei
 einem anderen Provider begonnen hat oder ein Client das Feld verworfen hat, sendet GoModel den
-von Google dokumentierten Platzhalter, statt den Fehler 400 durchzureichen. Geben Sie den echten
-Wert zurück, wann immer Sie ihn haben; der Platzhalter kostet für diesen Turn die
-Reasoning-Kontinuität. Provider-Details finden Sie unter [Gemini-Thought-Signatures](/de/providers/gemini#thought-signatures).
+von Google dokumentierten Platzhalter, statt den Fehler 400 durchzureichen. Gib den echten
+Wert zurück, wann immer du ihn hast; der Platzhalter kostet für diesen Turn die
+Reasoning-Kontinuität. Provider-Details findest du unter [Gemini-Thought-Signatures](/de/providers/gemini#thought-signatures).
 
 ## Thinking-Blöcke
 
@@ -275,7 +275,7 @@ Die Anthropic Messages API gibt ihn trotzdem als `thinking`-Block aus, mit `sign
 Schema kennzeichnet das Feld als erforderlich, sodass ein streng typisierter Client einen Block
 ohne dieses Feld ablehnen würde. Beim Streaming wird der Block mit einer leeren Signatur geöffnet
 und kein `signature_delta` gesendet; das ist die Form, die Anthropic selbst streamt, bevor die
-echte Signatur eintrifft. Geben Sie den Turn unverändert zurück: Der Block wird an diesen Provider
+echte Signatur eintrifft. Gib den Turn unverändert zurück: Der Block wird an diesen Provider
 wie jeder andere erneut gesendet.
 
 Anthropic akzeptiert nur Signaturen, die es selbst ausgestellt hat (eine fehlende scheitert mit
@@ -304,7 +304,7 @@ Wert enthält den gesamten Turn.
 muss. Ein `redacted_thinking`-Block hat überhaupt keinen lesbaren Text, daher ist `extra_content`
 das Einzige, was ihn transportiert.
 
-Hängen Sie den Assistant-Turn so an den Verlauf an, wie Sie ihn empfangen haben, dann erfolgt das
+Hänge den Assistant-Turn so an den Verlauf an, wie du ihn empfangen hast, dann erfolgt das
 Replay automatisch. Wird dieser Verlauf zu einem anderen Provider geroutet, wird das Feld
 verworfen, wie jedes fremde Vendor-Objekt, und die Konversation läuft ohne es weiter.
 

@@ -1,6 +1,6 @@
 ---
 title: "Rate-Limits"
-description: "Begrenzen Sie Requests pro Minute, Tokens pro Minute und gleichzeitige Requests pro User Path, Provider oder Modell."
+description: "Begrenze Requests pro Minute, Tokens pro Minute und gleichzeitige Requests pro User Path, Provider oder Modell."
 icon: "gauge"
 keywords: ["Rate-Limits", "rate limits", "rpm", "tpm", "429", "Concurrency", "Drosselung", "throttling", "User Path", "Provider", "Modell"]
 ---
@@ -17,7 +17,7 @@ was sie schützt:
   Pfads hinweg.
 - **Provider** (Schutz des Upstreams) – z. B. erhält der Provider `openai`
   höchstens `500` Requests pro Minute über alle Verbraucher und Modelle hinweg,
-  sodass das Gateway Ihr Provider-Kontingent nie überschreitet.
+  sodass das Gateway dein Provider-Kontingent nie überschreitet.
 - **Modell** – z. B. darf `openai/gpt-4o` `90,000` Tokens pro Minute
   verbrauchen; eine reine ID wie `gpt-4o` begrenzt das Modell über alle
   Provider hinweg.
@@ -35,7 +35,7 @@ Limits gelten für alle Modell-Endpunkte: Chat Completions, Responses, Messages,
 Embeddings, Audio, Passthrough, Realtime-Sessions und das Einreichen von
 Batches.
 
-Verwenden Sie Rate-Limits zur Traffic-Steuerung und Budgets zur
+Verwende Rate-Limits zur Traffic-Steuerung und Budgets zur
 Ausgabenkontrolle: Budgets begrenzen Dollarbeträge über Stunden bis Monate
 anhand dauerhaft gespeicherter Nutzungsdaten, Rate-Limits begrenzen die
 Request- und Token-Geschwindigkeit über Sekunden bis zu einem Tag mit schnellen
@@ -77,7 +77,7 @@ Rate Limits -> Create Rate Limit
   className="rounded-lg"
 />
 
-Wählen Sie den Scope (User Path, Provider oder Modell), das Subjekt, einen
+Wähle den Scope (User Path, Provider oder Modell), das Subjekt, einen
 Zeitraum und die Obergrenzen. Im Dashboard erstellte Regeln werden als `manual`
 gekennzeichnet. Aus YAML oder Umgebungsvariablen geladene Regeln werden als
 `config` gekennzeichnet und sind im Dashboard schreibgeschützt. Jede Zeile
@@ -91,9 +91,9 @@ die eigenen Regeln des Modells, die Provider-Regeln, die es mitnutzt, und die
 globalen Regeln (Root-User-Path) – jeweils mit Live-Nutzung – sowie Aktionen zum
 Hinzufügen und Bearbeiten.
 
-Wenn Sie Scope, Subjekt oder Zeitraum einer Regel bearbeiten, wird sie
+Wenn du Scope, Subjekt oder Zeitraum einer Regel bearbeitest, wird sie
 **verschoben**: Die Regel wird unter dem neuen Key neu angelegt, und ihre
-Live-Zähler beginnen von vorn. Wenn Sie nur die Obergrenzen bearbeiten, bleiben
+Live-Zähler beginnen von vorn. Wenn du nur die Obergrenzen bearbeitest, bleiben
 die Zähler erhalten.
 
 Regeln aus YAML vorbelegen:
@@ -131,7 +131,7 @@ rate_limits:
           max_tokens: 90000
 ```
 
-Oder verwenden Sie Umgebungsvariablen. Regeln für User Paths verwenden
+Oder verwende Umgebungsvariablen. Regeln für User Paths verwenden
 `SET_RATE_LIMIT_<PATH>` (das Suffix wird genau wie bei `SET_BUDGET_*` auf einen
 User Path abgebildet; `__` trennt Pfadsegmente); Provider-Regeln verwenden
 `SET_PROVIDER_RATE_LIMIT_<NAME>` (Unterstriche werden zu Bindestrichen, wie bei
@@ -155,7 +155,7 @@ SET_RATE_LIMIT_TEAM__ALPHA='[{"period_seconds":300,"max_requests":50}]'
 ```
 
 Für Modellregeln gibt es keine Form als Umgebungsvariable (Modell-IDs sind in
-Variablennamen nicht zulässig); deklarieren Sie sie in YAML oder über die Admin
+Variablennamen nicht zulässig); deklariere sie in YAML oder über die Admin
 API und das Dashboard.
 
 Unterstützte benannte Zeiträume:
@@ -180,7 +180,7 @@ abgeglichen. Modellregeln werden mit dem ausgeführten Modell abgeglichen: Ein
 Subjekt mit Provider-Angabe (`openai/gpt-4o`) deckt das Modell eines Providers
 ab, ein reines Subjekt (`gpt-4o`) deckt dieses Modell bei jedem Provider ab.
 Der Abgleich ignoriert Groß-/Kleinschreibung, und die Regel behält die
-Schreibweise bei, mit der Sie sie angelegt haben – eine Regel auf den Provider
+Schreibweise bei, mit der du sie angelegt hast – eine Regel auf den Provider
 `openai-EU` wird als `openai-EU` aufgeführt und gemeldet, trifft aber auf die
 Route unabhängig von deren Schreibweise zu.
 
@@ -188,8 +188,8 @@ Route unabhängig von deren Schreibweise zu.
 Regel mit `100 rpm` auf `/team` erlaubt insgesamt 100 Requests pro Minute für
 alles unterhalb von `/team`; eine Regel mit `500 rpm` auf den Provider `openai`
 teilen sich alle Verbraucher und Modelle, die dorthin geroutet werden. Für
-Limits pro Key binden Sie jeden verwalteten API-Key an einen eigenen User Path
-und definieren dort Regeln.
+Limits pro Key bindest du jeden verwalteten API-Key an einen eigenen User Path
+und definierst dort Regeln.
 
 <Info>
   Dynamische Rate-Limits pro untergeordnetem Pfad sind in GoModel Pro
@@ -201,7 +201,7 @@ und definieren dort Regeln.
   Durchsetzung ändern würde.
 </Info>
 
-Setzen Sie `per_child: true` in einem User-Path-Eintrag, um ihn zu einem
+Setze `per_child: true` in einem User-Path-Eintrag, um ihn zu einem
 dynamischen Template zu machen. Jeder direkt untergeordnete Pfad besitzt dann
 eigene Zähler: Mit einem Template auf `/customers` teilt sich
 `/customers/alice/app` den Zähler von `/customers/alice`, während
@@ -266,7 +266,7 @@ Wissenswerte Details:
   gesichert, sodass sie einen Neustart und `gomodel --reload` überstehen. Ein
   Neustart zählt die gespeicherten Werte des vorherigen Laufs einmal, nicht
   doppelt; ein Absturz verliert höchstens die Zählungen seit dem letzten Flush.
-  Passen Sie das Intervall mit `RATE_LIMITS_FLUSH_INTERVAL` an (Sekunden;
+  Passe das Intervall mit `RATE_LIMITS_FLUSH_INTERVAL` an (Sekunden;
   Standardwert `1`). `0` überspringt das periodische Schreiben: Zählerstände
   werden weiterhin beim Start geladen und beim geordneten Herunterfahren
   gespeichert, aber Replikate sehen den Traffic der anderen nach dem Start
@@ -280,8 +280,8 @@ Wissenswerte Details:
   Gespeicherte Zählerstände von vor einem Reset oder einer solchen Änderung
   kommen nie zurück, auch nicht nach einem Neustart oder nach dem
   Zurückschalten. Das Bearbeiten eines Limits behält die Zählerstände.
-  Schließen Sie ein Rolling Upgrade von einem Release vor den Snapshots pro
-  Replikat ab, bevor Sie Regeln zurücksetzen oder löschen: Ein Reset oder
+  Schließe ein Rolling Upgrade von einem Release vor den Snapshots pro
+  Replikat ab, bevor du Regeln zurücksetzt oder löschst: Ein Reset oder
   Löschen, das ein älteres Replikat verarbeitet hat, kann nach einem Neustart
   zurückkehren.
 
@@ -312,12 +312,12 @@ Das Limit ist näherungsweise, nicht exakt:
   seine Slots, bis seine Zahl veraltet ist, nach drei Flush-Intervallen und
   mindestens 5 Sekunden; dann werden sie auf allen anderen Replikaten frei. Die
   Aktualität vergleicht den Zeitpunkt, zu dem ein Replikat seine Zahl
-  gespeichert hat, mit der Uhr des Lesers, halten Sie die Uhren der Replikate
+  gespeichert hat, mit der Uhr des Lesers, halte die Uhren der Replikate
   also synchron (NTP).
 - Eine Obergrenze, die nie überschritten werden darf, etwa `concurrent=1` über
   Replikate hinweg, braucht eine Prüfung gegen gemeinsamen Zustand bei jedem
-  Request, die GoModel noch nicht bietet. Verwenden Sie dafür ein einzelnes
-  Replikat, oder leiten Sie alle Requests, die die Regel zählt, an dasselbe
+  Request, die GoModel noch nicht bietet. Verwende dafür ein einzelnes
+  Replikat, oder leite alle Requests, die die Regel zählt, an dasselbe
   Replikat.
 
 Jeder Flush schreibt nur die Request- und Token-Zähler, die sich seit dem
@@ -335,7 +335,7 @@ Schreiber beim Start wiederhergestellt hat. Bis diese Fenster auslaufen (bis zu
 zwei Perioden), kann Traffic, den mehrere v0.2.1-Replikate gezählt haben, zu
 niedrig gezählt werden, und ein v0.2.1-Replikat, das während des Rollouts neu
 startet, kann manchen Traffic doppelt zählen. Beides endet, sobald diese
-Fenster ausgelaufen sind. Für einen sauberen Neustart setzen Sie die
+Fenster ausgelaufen sind. Für einen sauberen Neustart setzt du die
 Zähler nach dem Rollout zurück (`POST /admin/rate-limits/reset`): Jede Regel
 zählt dann ab null.
 </Note>
@@ -599,7 +599,7 @@ console.log(deleted);
 
 </CodeGroup>
 
-Setzen Sie die Request- und Token-Zähler für eine einzelne Regel
+Setze die Request- und Token-Zähler für eine einzelne Regel
 (`POST /admin/rate-limits/reset-one` mit
 `{"scope": ..., "subject": ..., "period": ...}`) oder für alle Regeln
 (`POST /admin/rate-limits/reset` mit `{"confirmation": "reset"}`) zurück, auf
@@ -609,5 +609,5 @@ Zähler nie zurück; das Löschen, das Verschieben auf einen neuen Scope, ein ne
 Subject oder eine neue Periode und das Umschalten zwischen geteilt und
 `per_child` schon.
 
-Die Liste der Endpunkte finden Sie unter
+Die Liste der Endpunkte findest du unter
 [Admin-Endpunkte](/de/advanced/admin-endpoints).

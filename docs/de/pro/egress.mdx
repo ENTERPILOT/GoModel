@@ -1,7 +1,7 @@
 ---
 title: "Egress-Proxy-Pools"
 sidebarTitle: "Egress-Proxy-Pools"
-description: "Leiten Sie Provider-Traffic über benannte Pools von HTTP- oder SOCKS5-Proxys, mit Health Checks, Failover und Regeln, die Provider den Pools zuordnen."
+description: "Leite Provider-Traffic über benannte Pools von HTTP- oder SOCKS5-Proxys, mit Health Checks, Failover und Regeln, die Provider den Pools zuordnen."
 icon: "route"
 tag: "Pro"
 keywords: ["GoModel Pro", "Egress", "Proxy-Pool", "SOCKS5", "HTTP-Proxy", "Failover", "statische IP", "Health Check"]
@@ -37,7 +37,7 @@ keine Regel zutrifft, behalten das gatewayweite Verhalten von `HTTP_PROXY`, `HTT
 
 ## Pools konfigurieren
 
-Konfigurieren Sie die Pools unter `extensions.egress` in der zentralen YAML-Konfiguration von
+Konfiguriere die Pools unter `extensions.egress` in der zentralen YAML-Konfiguration von
 GoModel:
 
 ```yaml
@@ -80,11 +80,11 @@ PRO_EGRESS_RULES=openai*=eu,type:anthropic=eu,*=us
 
 | Einstellung | Standardwert | Ändern, wenn |
 | --- | --- | --- |
-| `strategy` | `failover` | Verwenden Sie `round_robin`, um die Last auf alle Mitglieder zu verteilen, statt das erste zu bevorzugen. |
-| `check_url` | nicht gesetzt (TCP-Verbindung) | Setzen Sie eine URL, um zu prüfen, dass der Proxy tatsächlich das Internet erreicht und nicht nur Verbindungen annimmt. |
-| `health_check_interval` | `30s` | Verringern Sie den Wert, wenn ein ausgefallener Proxy schneller als nach einer halben Minute erkannt werden muss. |
-| `health_check_timeout` | `5s` | Erhöhen Sie den Wert für langsame Proxys, die weit vom Gateway entfernt sind. |
-| `failure_threshold` | `2` | Anzahl aufeinanderfolgender fehlgeschlagener Prüfungen, bevor ein Mitglied übersprungen wird. Erhöhen Sie den Wert bei instabilen Verbindungen. |
+| `strategy` | `failover` | Verwende `round_robin`, um die Last auf alle Mitglieder zu verteilen, statt das erste zu bevorzugen. |
+| `check_url` | nicht gesetzt (TCP-Verbindung) | Setze eine URL, um zu prüfen, dass der Proxy tatsächlich das Internet erreicht und nicht nur Verbindungen annimmt. |
+| `health_check_interval` | `30s` | Verringere den Wert, wenn ein ausgefallener Proxy schneller als nach einer halben Minute erkannt werden muss. |
+| `health_check_timeout` | `5s` | Erhöhe den Wert für langsame Proxys, die weit vom Gateway entfernt sind. |
+| `failure_threshold` | `2` | Anzahl aufeinanderfolgender fehlgeschlagener Prüfungen, bevor ein Mitglied übersprungen wird. Erhöhe den Wert bei instabilen Verbindungen. |
 
 ## Health Checks und Failover
 
@@ -111,5 +111,5 @@ maskiertem Passwort) geloggt. Prometheus stellt bereit:
 - `gomodel_pro_egress_selections_total{pool,member,proxy}`: Requests, für die das jeweilige
   Mitglied ausgewählt wurde.
 
-Richten Sie einen Alert auf `gomodel_pro_egress_proxy_healthy == 0` ein, um von einem
+Richte einen Alert auf `gomodel_pro_egress_proxy_healthy == 0` ein, um von einem
 ausgefallenen Proxy zu erfahren, bevor dem Pool die Mitglieder ausgehen.

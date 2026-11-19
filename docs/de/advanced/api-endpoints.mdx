@@ -9,7 +9,7 @@ GoModel stellt OpenAI-kompatible und Anthropic-kompatible APIs, einen Provider-n
 und eine Reihe von Betriebsendpunkten bereit. Admin- und Dashboard-Routen sind separat unter
 [Admin-Endpunkte](/de/advanced/admin-endpoints) dokumentiert.
 
-Details zu Requests und Responses finden Sie in den jeweiligen Leitfäden:
+Details zu Requests und Responses findest du in den jeweiligen Leitfäden:
 [Responses API](/de/advanced/responses-api), [Conversations API](/de/advanced/conversations-api),
 [Anthropic Messages API](/de/advanced/anthropic-messages-api),
 [Audio API](/de/advanced/audio-api), [Images API](/de/advanced/images-api),
@@ -63,9 +63,9 @@ und [Usage API](/de/advanced/usage-api).
 ### Realtime-Übersetzungs-Sessions
 
 Sprachübersetzungsmodelle (OpenAI `gpt-realtime-translate`) laufen auf einer eigenen
-Session-Schnittstelle, die das Gateway entsprechend abbildet. Verbinden Sie sich mit
+Session-Schnittstelle, die das Gateway entsprechend abbildet. Verbinde dich mit
 `/v1/realtime/translations` – oder mit `/v1/realtime?intent=translation`, was dieselbe Session ist –
-und legen Sie die Zielsprache fest, nachdem der Socket geöffnet wurde:
+und lege die Zielsprache fest, nachdem der Socket geöffnet wurde:
 
 ```bash
 wscat -H "Authorization: Bearer $GOMODEL_API_KEY" \
@@ -155,7 +155,7 @@ curl "http://localhost:8080/v1/audio/voices?model=kokoro" \
 { "voices": [{ "id": "af_bella", "name": "af_bella" }, { "id": "am_adam", "name": "am_adam" }] }
 ```
 
-Übergeben Sie `id` als `voice` an `/v1/audio/speech`; `name` ist eine
+Übergib `id` als `voice` an `/v1/audio/speech`; `name` ist eine
 Anzeigebezeichnung und fällt auf `id` zurück. `model` wird genau wie bei
 `/v1/audio/speech` aufgelöst und autorisiert, Aliase und virtuelle Modelle
 eingeschlossen. Der Aufruf wird nicht abgerechnet und nicht auf Budgets
@@ -177,14 +177,14 @@ fehlendes `model` ergibt ebenfalls `400`, ein unbekanntes Modell `404`.
 <Note>
   Die OpenAI-TTS-Engine von Open WebUI ruft `{base_url}/audio/voices` ohne
   `model` und ohne API-Key auf und fällt gegen GoModel deshalb auf ihre
-  eingebaute OpenAI-Stimmenliste zurück. Tragen Sie die Voice-ID stattdessen in
+  eingebaute OpenAI-Stimmenliste zurück. Trage die Voice-ID stattdessen in
   den Einstellungen ein.
 </Note>
 
 ### Key-Verifizierung
 
 Mit `GET /v1/auth/verify` kann ein Dienst, der vor dem Gateway steht, einen API-Key prüfen, ohne
-eine Kopie der Key-Liste vorzuhalten. Der Endpunkt ist **standardmäßig deaktiviert**; aktivieren Sie
+eine Kopie der Key-Liste vorzuhalten. Der Endpunkt ist **standardmäßig deaktiviert**; aktiviere
 ihn mit `AUTH_VERIFY_ENABLED=true` (`server.auth_verify_enabled`). Es handelt sich nicht um eine
 `/admin`-Route, daher funktioniert er auch dann, wenn die Admin API deaktiviert ist.
 

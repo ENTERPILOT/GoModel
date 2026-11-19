@@ -1,6 +1,6 @@
 ---
 title: "llm-d"
-description: "Leiten Sie GoModel-Requests über das llm-d Inference Gateway und ergänzen Sie vertrauenswürdige Scheduling-Metadaten."
+description: "Leite GoModel-Requests über das llm-d Inference Gateway und ergänze vertrauenswürdige Scheduling-Metadaten."
 icon: "route"
 keywords: ["llm-d", "Inference Gateway", "EPP", "Kubernetes", "Inferenz-Scheduling", "inference scheduling"]
 ---
@@ -8,7 +8,7 @@ keywords: ["llm-d", "Inference Gateway", "EPP", "Kubernetes", "Inferenz-Scheduli
 Der Provider `llmd` von GoModel sendet OpenAI-kompatible Requests an einen
 [llm-d Router](https://llm-d.ai/docs/dev/architecture/core/router) und ergänzt
 vertrauenswürdige Scheduling-Metadaten für den Endpoint Picker (EPP).
-Verwenden Sie diesen Provider, wenn GoModel das authentifizierte API-Gateway
+Verwende diesen Provider, wenn GoModel das authentifizierte API-Gateway
 vor llm-d ist.
 
 ## Voraussetzungen
@@ -19,7 +19,7 @@ vor llm-d ist.
 
 Der [llm-d-Schnellstart](https://llm-d.ai/docs/dev/getting-started/quickstart)
 legt einen EPP-Service an, dessen Name sich aus dem Release der Anleitung
-ableitet. Verwenden Sie den Service-Namen aus Ihrem eigenen Deployment.
+ableitet. Verwende den Service-Namen aus deinem eigenen Deployment.
 
 ## Mit Umgebungsvariablen konfigurieren
 
@@ -35,15 +35,15 @@ LLMD_FAIRNESS_FROM_USER_PATH=true
 ```
 
 `LLMD_BASE_URL` ist erforderlich und sollte `/v1` enthalten. `LLMD_API_KEY` ist
-optional; setzen Sie ihn, wenn das Gateway vor llm-d eine
+optional; setze ihn, wenn das Gateway vor llm-d eine
 Bearer-Authentifizierung verlangt.
 
 Wird `LLMD_INFERENCE_OBJECTIVE` weggelassen, sendet GoModel keinen Header für
-das Inference Objective. Setzen Sie die Variable, wenn das llm-d-Deployment
+das Inference Objective. Setze die Variable, wenn das llm-d-Deployment
 mehrere Inference Objectives definiert und dieser GoModel-Provider eines davon
 auswählen soll.
 
-Deklarieren Sie `LLMD_MODELS`, wenn Ihre Route `GET /v1/models` nicht
+Deklariere `LLMD_MODELS`, wenn deine Route `GET /v1/models` nicht
 bereitstellt. GoModel verwendet diese Liste als Modellangebot des Providers.
 
 ## Mit YAML konfigurieren
@@ -61,19 +61,19 @@ providers:
 
 `fairness_from_user_path` ist standardmäßig `true`. GoModel leitet die
 Fairness-ID aus dem effektiven [`user_path`](/de/features/user-path) ab,
-nachdem Authentifizierung und Key-Richtlinie angewendet wurden. Setzen Sie die
+nachdem Authentifizierung und Key-Richtlinie angewendet wurden. Setze die
 Option auf `false`, wenn eine andere vertrauenswürdige Schicht die
 Fairness-Metadaten setzt.
 
 <Note>
   Ein vom Client mitgegebener `X-GoModel-User-Path` allein reicht nicht aus, um
-  die Fairness-ID festzulegen. Binden Sie den Pfad an einen verwalteten
+  die Fairness-ID festzulegen. Binde den Pfad an einen verwalteten
   Auth-Key oder eine Extension-Identität, damit GoModel ihn als effektiven,
   authentifizierten Pfad behandeln kann.
 </Note>
 
 <Warning>
-  Leiten Sie keine vom Client mitgegebenen llm-d-Scheduling-Header von einem
+  Leite keine vom Client mitgegebenen llm-d-Scheduling-Header von einem
   nicht vertrauenswürdigen Edge weiter. Ein Client könnte sonst ein anderes
   Objective oder eine andere Fairness-Gruppe auswählen. Der dedizierte Provider
   entfernt bei Passthrough-Requests die Steuer-Header von llm-d und der Gateway
@@ -92,8 +92,8 @@ unterscheiden können.
 
 ## Prüfen
 
-Legen Sie zunächst im Dashboard einen verwalteten GoModel-API-Key an, binden
-Sie seinen `user_path` an `/team/alpha` und weisen Sie den zurückgegebenen Wert
+Lege zunächst im Dashboard einen verwalteten GoModel-API-Key an, binde
+seinen `user_path` an `/team/alpha` und weise den zurückgegebenen Wert
 `TEAM_ALPHA_GOMODEL_KEY` zu. Die Key-Bindung, nicht ein vom Client behaupteter
 Header, legt die Fairness-ID fest, die dieser Request verwendet.
 
@@ -215,7 +215,7 @@ angeboten.
 
 ## Mehrere llm-d-Routen
 
-Verwenden Sie Variablen mit Suffix, um unabhängige Router-Services zu
+Verwende Variablen mit Suffix, um unabhängige Router-Services zu
 registrieren:
 
 ```bash
@@ -228,5 +228,5 @@ LLMD_DEV_MODELS=Qwen/Qwen2.5-0.5B-Instruct
 LLMD_DEV_INFERENCE_OBJECTIVE=development
 ```
 
-Diese Variablen registrieren `llmd-prod` und `llmd-dev`. Wählen Sie sie über
+Diese Variablen registrieren `llmd-prod` und `llmd-dev`. Wähle sie über
 Modellnamen wie `llmd-dev/Qwen/Qwen2.5-0.5B-Instruct` aus.

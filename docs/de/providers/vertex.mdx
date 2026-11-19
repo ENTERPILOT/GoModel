@@ -1,6 +1,6 @@
 ---
 title: "Google Vertex AI"
-description: "Konfigurieren Sie Gemini und Claude auf Google Vertex AI in GoModel, einschließlich ADC- und Service-Account-Authentifizierung, Regionen sowie nativem, OpenAI-kompatiblem oder Anthropic-Routing."
+description: "Konfiguriere Gemini und Claude auf Google Vertex AI in GoModel, einschließlich ADC- und Service-Account-Authentifizierung, Regionen sowie nativem, OpenAI-kompatiblem oder Anthropic-Routing."
 icon: "/brand/vertex.svg"
 keywords: ["Google Vertex AI", "Gemini", "ADC", "Service-Account", "service account", "Provider-Einrichtung"]
 ---
@@ -10,8 +10,8 @@ Google AI Studio siehe den [Google-Gemini-Leitfaden](/de/providers/gemini).
 
 Vertex benötigt ein GCP-Projekt, eine Region, in der das Modell verfügbar ist, und entweder
 Application Default Credentials oder einen JSON-Key eines Service-Accounts. GoModel routet
-standardmäßig zum nativen Gemini-Publisher-Endpunkt von Vertex; wechseln Sie zum
-OpenAI-kompatiblen Endpunkt, wenn Sie dessen Kompatibilitätsverhalten benötigen.
+standardmäßig zum nativen Gemini-Publisher-Endpunkt von Vertex; wechsle zum
+OpenAI-kompatiblen Endpunkt, wenn du dessen Kompatibilitätsverhalten benötigst.
 
 <Note>
   Die Vertex-Authentifizierung ist auf Unternehmen ausgerichtet und kann in einem zukünftigen
@@ -49,7 +49,7 @@ VERTEX_SERVICE_ACCOUNT_FILE=/secrets/service-account.json
 
 ### Mehrere Regionen oder Konten
 
-Verwenden Sie Umgebungsvariablen mit Suffix, um zusätzliche Vertex-Provider zu registrieren:
+Verwende Umgebungsvariablen mit Suffix, um zusätzliche Vertex-Provider zu registrieren:
 
 ```bash
 VERTEX_US_PROJECT=prod-ai
@@ -74,7 +74,7 @@ Die Standard-Basen werden aus Projekt und Standort abgeleitet:
 Ein im Dashboard gespeicherter Provider nutzt die Application Default Credentials
 des Hosts oder eine Service-Account-Datei auf dem Host nur für Googles
 Vertex-AI-Endpunkte: `aiplatform.googleapis.com`, `{location}-aiplatform.googleapis.com`
-und `aiplatform.{location}.rep.googleapis.com`, jeweils über HTTPS. Speichern Sie
+und `aiplatform.{location}.rep.googleapis.com`, jeweils über HTTPS. Speichere
 für jede andere Base URL, etwa einen Proxy oder einen Private-Service-Connect-Endpunkt,
 den Auth-Typ `gcp_service_account` und Service-Account-JSON mit dem Provider. Für Provider, die in `config.yaml` oder über
 Umgebungsvariablen deklariert sind, gilt diese Einschränkung nicht.
@@ -94,14 +94,14 @@ aus den Locations `global`, `us` und `eu` bedient.
 
 ## Claude-Modelle
 
-Setzen Sie `api_mode: anthropic`, um Claude (Partnermodelle von Anthropic) über Vertex zu bedienen.
+Setze `api_mode: anthropic`, um Claude (Partnermodelle von Anthropic) über Vertex zu bedienen.
 Chat- und Responses-Requests werden als Anthropic Messages an
 `.../publishers/anthropic/models/{model}:rawPredict` gesendet (`:streamRawPredict` beim Streaming),
 authentifiziert mit denselben ADC- oder Service-Account-Credentials.
 
-Die Base-URL kann die `/endpoints/openapi`- oder `/publishers/google`-URL sein, die Sie bereits
-verwenden; GoModel leitet daraus die `/publishers/anthropic`-URL ab. Vertex listet Claude-Modelle
-nicht pro Projekt auf, führen Sie sie daher unter `models` auf. Verwenden Sie die Modell-ID von der
+Die Base-URL kann die `/endpoints/openapi`- oder `/publishers/google`-URL sein, die du bereits
+verwendest; GoModel leitet daraus die `/publishers/anthropic`-URL ab. Vertex listet Claude-Modelle
+nicht pro Projekt auf, führe sie daher unter `models` auf. Verwende die Modell-ID von der
 Model-Garden-Karte.
 
 ```yaml
@@ -117,7 +117,7 @@ providers:
 ```
 
 Eine Instanz in diesem Modus bedient Claude-Chat und -Responses und weiterhin Embeddings über
-die native Vertex-API für jedes unter `models` aufgeführte Embedding-Modell; behalten Sie eine
+die native Vertex-API für jedes unter `models` aufgeführte Embedding-Modell; behalte eine
 zweite `vertex`-Instanz für Gemini-Chat. Token-Zählung
 und Anthropic-Batches werden nicht unterstützt.
 

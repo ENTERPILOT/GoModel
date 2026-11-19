@@ -1,6 +1,6 @@
 ---
 title: "Guardrails"
-description: "Führen Sie Plugin-Instanzen aus, die Prompts, Responses und Streams prüfen, verändern, blockieren oder beantworten – konfiguriert in config.yaml oder über das Admin-Dashboard."
+description: "Führe Plugin-Instanzen aus, die Prompts, Responses und Streams prüfen, verändern, blockieren oder beantworten – konfiguriert in config.yaml oder über das Admin-Dashboard."
 icon: "shield-check"
 keywords: ["Guardrails", "guardrails", "Request-Abfangen", "request interception", "Inhaltsfilterung", "content filtering", "Richtliniendurchsetzung", "policy enforcement", "Plugins", "plugins"]
 ---
@@ -52,7 +52,7 @@ Guardrails funktionieren mit allen textbasierten Endpunkten:
 
 ## Schnellstart
 
-Fügen Sie Ihrer `config/config.yaml` einen Abschnitt `guardrails` hinzu:
+Füge deiner `config/config.yaml` einen Abschnitt `guardrails` hinzu:
 
 ```yaml
 guardrails:
@@ -83,10 +83,10 @@ Repos nicht direkt verwalten.
   className="rounded-lg"
 />
 
-Öffnen Sie **Plugins & Guardrails** in der Seitenleiste und klicken Sie auf
-**Create Guardrail**: Vergeben Sie einen Namen, wählen Sie einen Typ (jedes
+Öffne **Plugins & Guardrails** in der Seitenleiste und klicke auf
+**Create Guardrail**: Vergib einen Namen, wähle einen Typ (jedes
 geladene Plugin mit einem Prompt-, Response- oder Stream-Hook wird aufgeführt),
-grenzen Sie ihn optional auf einen `user_path` ein und füllen Sie das Formular
+grenze ihn optional auf einen `user_path` ein und fülle das Formular
 aus, das das Plugin deklariert. Der Abschnitt **Advanced** enthält den
 Fehlermodus und den Timeout. Einträge aus `config.yaml` werden beim Start in
 denselben Speicher übernommen und bleiben mit ihm synchron, sodass im Dashboard
@@ -102,7 +102,7 @@ Guardrail.
 
 <Note>
   Die Ausführung von Guardrails zur Laufzeit hängt weiterhin von
-  `GUARDRAILS_ENABLED` ab. Ist die Option deaktiviert, können Sie Definitionen
+  `GUARDRAILS_ENABLED` ab. Ist die Option deaktiviert, kannst du Definitionen
   auf der Seite trotzdem verwalten – sie laufen nur noch nicht auf dem
   Live-Traffic.
 </Note>
@@ -184,14 +184,14 @@ guardrails:
 `system_prompt` und `llm_based_altering` akzeptieren ihre Einstellungen auch in
 einem typisierten Block, der nach dem Typ benannt ist (`system_prompt:` /
 `llm_based_altering:`), wie im Schnellstart. Der typisierte Block und `config:`
-sind gleichwertig; verwenden Sie `config:` für alle anderen Typen.
+sind gleichwertig; verwende `config:` für alle anderen Typen.
 Zeilenorientierte Schlüssel wie `string_replace.rules` und die
 `header_edit`-Listen akzeptieren entweder einen Block-Skalar (`|`) oder eine
 YAML-Liste von Strings, die mit Zeilenumbrüchen verbunden werden.
 
 ### Umgebungsvariable
 
-Sie können Guardrails ein- und ausschalten, ohne die Konfigurationsdatei zu
+Du kannst Guardrails ein- und ausschalten, ohne die Konfigurationsdatei zu
 bearbeiten:
 
 ```bash
@@ -363,9 +363,9 @@ nicht erkannt.
 | `case_insensitive` | Nein | `false` | Ohne Berücksichtigung der Groß-/Kleinschreibung suchen. |
 | `roles` | Nein | `["user"]` | Prompt-Nachrichten, für die die Regeln gelten: `system` (einschließlich Developer), `user`, `assistant`, `tool`. In der Response-Phase ist immer der Assistant-Text das Ziel. |
 | `on_match` | Nein | `replace` | `replace` ersetzt; `block` lehnt mit einem Fehler ab; `respond` antwortet mit `message` als Assistant-Antwort; `warn` fährt fort und erfasst den Treffer. Nur `replace` bearbeitet den Text. |
-| `message` | Nein | `Request blocked by policy` für `block` und `respond`, keiner für `warn` | Fehlermeldung für `block`, Assistant-Antwort für `respond`, Notiz im Request-Log für `warn`. Ein `warn` erfasst nur dann eine Notiz, wenn Sie eine festlegen, damit das Ergebnis im Dashboard nicht als Block gekennzeichnet wird. |
+| `message` | Nein | `Request blocked by policy` für `block` und `respond`, keiner für `warn` | Fehlermeldung für `block`, Assistant-Antwort für `respond`, Notiz im Request-Log für `warn`. Ein `warn` erfasst nur dann eine Notiz, wenn du eine festlegst, damit das Ergebnis im Dashboard nicht als Block gekennzeichnet wird. |
 | `block_status` | Nein | Standard der Phase | Ein HTTP-Statuscode zwischen 400 und 599 für `block`, zum Beispiel `403`. Leer bedeutet 400, wenn der Prompt blockiert wird, und 502, wenn die Response blockiert wird. |
-| `stream_lookbehind` | Nein | `64` | Anzahl der Zeichen gestreamten Texts, die zurückgehalten werden, damit ein Treffer, der sich über zwei Chunks erstreckt, trotzdem umgeschrieben wird; setzen Sie den Wert mindestens auf die Länge des längsten Suchtexts. Ein Treffer am Ende des bisher gestreamten Texts wird zurückgehalten, bis er nicht mehr wächst, sodass ein offenes Muster wie `sk-[A-Za-z0-9_-]{20,}` den gesamten Wert maskiert, sofern er höchstens so lang ist – bei einem längeren Wert bleibt der Teil jenseits des Lookbehinds stehen, setzen Sie den Wert daher über das längste erwartete Secret. Wird von `replace` und `warn` verwendet. |
+| `stream_lookbehind` | Nein | `64` | Anzahl der Zeichen gestreamten Texts, die zurückgehalten werden, damit ein Treffer, der sich über zwei Chunks erstreckt, trotzdem umgeschrieben wird; setze den Wert mindestens auf die Länge des längsten Suchtexts. Ein Treffer am Ende des bisher gestreamten Texts wird zurückgehalten, bis er nicht mehr wächst, sodass ein offenes Muster wie `sk-[A-Za-z0-9_-]{20,}` den gesamten Wert maskiert, sofern er höchstens so lang ist – bei einem längeren Wert bleibt der Teil jenseits des Lookbehinds stehen, setze den Wert daher über das längste erwartete Secret. Wird von `replace` und `warn` verwendet. |
 
 In der Stream-Phase transformieren `replace` und `warn` Events im laufenden
 Betrieb mit dem konfigurierten Lookbehind. `block` und `respond` puffern den
@@ -389,10 +389,10 @@ Kosten einer Verzögerung des ersten Tokens, bis die Response vollständig ist.
 ### `tag_replace`
 
 Ersetzt Platzhalter `{{gomodel.<tag>}}` im Prompt-Text unmittelbar vor dem
-Provider-Aufruf durch Werte des aktuellen Requests. Damit können Sie dem Modell
+Provider-Aufruf durch Werte des aktuellen Requests. Damit kannst du dem Modell
 mitteilen, als welches Modell es läuft oder welches Datum heute ist, ohne dass
 der Client diese Angaben sendet. Es lässt sich gut mit `system_prompt`
-kombinieren: Schreiben Sie die Tags in den System-Prompt und führen Sie
+kombinieren: Schreibe die Tags in den System-Prompt und führe
 `tag_replace` mit einem späteren `order`-Wert aus.
 
 **Phasen:** prompt. **Bearbeitet Inhalte:** ja.
@@ -433,7 +433,7 @@ System-Nachricht, und verwenden ihn nur wieder, wenn er identisch ist.
 `{{gomodel.request_id}}` bei jedem Request, sodass jeder Aufruf den vollen
 Eingabepreis zahlt und länger wartet. `{{gomodel.date}}` und
 `{{gomodel.weekday}}` ändern sich einmal pro Tag und kosten einen Cache-Miss pro
-Tag. Bevorzugen Sie `date` gegenüber `time` oder `datetime`, und platzieren Sie
+Tag. Bevorzuge `date` gegenüber `time` oder `datetime`, und platziere
 veränderliche Tags am Ende des Prompts statt am Anfang einer langen
 System-Nachricht.
 </Warning>
@@ -442,7 +442,7 @@ System-Nachricht.
 
 | Schlüssel | Erforderlich | Standard | Beschreibung |
 | --- | -------- | ------- | ----------- |
-| `roles` | Nein | `["system"]` | Prompt-Nachrichten, in denen Tags expandiert werden: `system` (einschließlich Developer), `user`, `assistant`, `tool`. Wenn Sie `user` hinzufügen, können Aufrufer Request-Werte wie den User Path auslesen, und Template-Text in ihren Prompts wird umgeschrieben. |
+| `roles` | Nein | `["system"]` | Prompt-Nachrichten, in denen Tags expandiert werden: `system` (einschließlich Developer), `user`, `assistant`, `tool`. Wenn du `user` hinzufügst, können Aufrufer Request-Werte wie den User Path auslesen, und Template-Text in ihren Prompts wird umgeschrieben. |
 | `timezone` | Nein | `UTC` | IANA-Zeitzone für die Datums- und Uhrzeit-Tags, zum Beispiel `Europe/Warsaw`. Die Host-Zone `Local` wird abgelehnt. |
 
 #### Beispiel
@@ -558,7 +558,7 @@ ist entweder ein Chat-Modell oder ein Decision-Modell:
 | `block_status` | Nein | Standard der Phase | Ein HTTP-Statuscode zwischen 400 und 599 für `block`, zum Beispiel `403`. Leer bedeutet 400, wenn der Prompt blockiert wird, und 502, wenn die Response blockiert wird. |
 | `respond_text` | Nein | `I can't help with that request.` | Assistant-Antwort für `respond`. |
 | `on_unclear` | Nein | `warn` | Wenn die Antwort des Judges nicht geparst werden kann, durch `max_tokens` abgeschnitten wurde oder vollständig für Reasoning verbraucht wurde: `allow`, `warn` oder `block` (wendet `action` an). Als Urteil zählt nur ein JSON-Objekt oder ein alleinstehendes `allow` oder `block`, nie ein Wort innerhalb eines Satzes. |
-| `max_tokens` | Nein | `2048` | Chat-Engine: Completion-Obergrenze für den Judge-Aufruf. Nicht verbrauchte Tokens kosten nichts; bemessen Sie den Wert für das Reasoning des Judge-Modells, nicht für das Urteil. |
+| `max_tokens` | Nein | `2048` | Chat-Engine: Completion-Obergrenze für den Judge-Aufruf. Nicht verbrauchte Tokens kosten nichts; bemiss den Wert für das Reasoning des Judge-Modells, nicht für das Urteil. |
 | `temperature` | Nein | `0` | Chat-Engine: Sampling-Temperatur für den Judge-Aufruf (0 bis 2). |
 
 Identischer Text wird pro Request nur einmal beurteilt, sodass eine Instanz, die
@@ -579,16 +579,16 @@ Response-Cache, Nutzung und Request-Logging, unter dem User Path der Instanz.
 
 Jedes Urteil erfasst die Wahrscheinlichkeit im Decision-Detail (`probability`),
 und die Instanz meldet sie als Histogramm
-`plugin_llm_judge_decision_probability`. Nutzen Sie beides, um `block_threshold`
-pro Richtlinie abzustimmen: Erhöhen Sie den Wert, um nur eindeutige Verstöße zu
-blockieren, oder senken Sie ihn, um mehr Grenzfälle zu erfassen.
+`plugin_llm_judge_decision_probability`. Nutze beides, um `block_threshold`
+pro Richtlinie abzustimmen: Erhöhe den Wert, um nur eindeutige Verstöße zu
+blockieren, oder senke ihn, um mehr Grenzfälle zu erfassen.
 
 `engine: auto` erkennt reine Decision-Modelle anhand des Modellkatalogs. Ein
 OpenAI-Modell mit Decisions-Unterstützung kann auch chatten, daher befragt `auto`
-es per Chat. Setzen Sie `engine: decision`, um stattdessen seine Decisions API zu
+es per Chat. Setze `engine: decision`, um stattdessen seine Decisions API zu
 verwenden.
 
-Lassen Sie `judge_images` bei einem Judge, der nur Text liest, etwa einem
+Lass `judge_images` bei einem Judge, der nur Text liest, etwa einem
 Kev-Server, ausgeschaltet: Mit Bildern schlägt jeder Aufruf fehl, und `fail_mode`
 entscheidet. Gehostetes Jev liest Bilder, die als Base64-Data-URLs gesendet
 werden. Ist `judge_images` eingeschaltet, wird auch ein Prompt beurteilt, der nur
@@ -611,8 +611,8 @@ Ein Reasoning-Judge-Modell verbraucht seine Completion für das Nachdenken, bevo
 es irgendetwas schreibt: Ist die Obergrenze vorher erreicht, liefert der Judge
 kein Urteil, und die Instanz setzt nichts durch – sie folgt stattdessen
 `on_unclear`, das standardmäßig nur warnt. Die Standardobergrenze von `2048`
-lässt dafür Spielraum; nicht verbrauchte Tokens werden nie berechnet. Erhöhen
-Sie den Wert daher eher weiter, statt ihn zu kürzen, wenn das Judge-Modell viel
+lässt dafür Spielraum; nicht verbrauchte Tokens werden nie berechnet. Erhöhe
+den Wert daher eher weiter, statt ihn zu kürzen, wenn das Judge-Modell viel
 Reasoning betreibt.
 
 Ein Judge, der zu keinem Urteil kommt, wird getrennt von einer Antwort erfasst,
@@ -624,8 +624,8 @@ die zwar gegeben wurde, aber nicht geparst werden konnte:
 | `llm_judge_no_verdict` | Die Antwort wurde abgeschnitten (`finish_reason: length`) oder bestand nur aus Reasoning, oder ein Decision-Modell hat keine Antwort geliefert. Bei einer abgeschnittenen Antwort wird eine Warnung mit dem Judge-Modell und der Obergrenze protokolliert. `on_unclear` greift. |
 | `llm_judge_unclear` | Der Judge hat geantwortet, aber die Antwort ist kein Urteil, oder ein Decision-Modell hat die Frage abgelehnt. `on_unclear` greift. |
 
-Prüfen Sie nach dem Konfigurieren einer Instanz das Gateway-Log auf
-`judge returned no verdict`, und setzen Sie `on_unclear: block` für eine
+Prüfe nach dem Konfigurieren einer Instanz das Gateway-Log auf
+`judge returned no verdict`, und setze `on_unclear: block` für eine
 Richtlinie, die auch dann gelten muss, wenn der Judge nichts Verwertbares
 liefert. Ein Judge-Aufruf, der vollständig fehlschlägt – Provider-Fehler,
 Timeout –, ist kein unklares Urteil: Darüber entscheidet `fail_mode`, wie bei
@@ -667,8 +667,8 @@ docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
 | `language` | Nein | `en` | Sprachcode, mit dem der Analyzer arbeitet. Das Standard-Image enthält nur `en`; die Instanz wird als beeinträchtigt angezeigt, wenn der Analyzer kein Modell für die Sprache hat. |
 | `entities` | Nein | alle | Zu suchende Entitätstypen (`PERSON`, `EMAIL_ADDRESS`, `PHONE_NUMBER`, `CREDIT_CARD`, `US_SSN`, ...; siehe `GET /supportedentities` am Analyzer). |
 | `block_entities` | Nein | | Entitätstypen, die den Request unabhängig von der Aktion ablehnen (oder mit `message` beantworten, wenn die Aktion `respond` ist). |
-| `score_threshold` | Nein | Standard des Analyzers | Mindestkonfidenz, 0 bis 1. Erhöhen Sie den Wert, wenn gewöhnliche Wörter für Namen oder Datumsangaben gehalten werden. |
-| `allow_list` | Nein | | Exakte Wörter, die nie als personenbezogene Daten behandelt werden: Produktnamen, Ihr Unternehmen. |
+| `score_threshold` | Nein | Standard des Analyzers | Mindestkonfidenz, 0 bis 1. Erhöhe den Wert, wenn gewöhnliche Wörter für Namen oder Datumsangaben gehalten werden. |
+| `allow_list` | Nein | | Exakte Wörter, die nie als personenbezogene Daten behandelt werden: Produktnamen, dein Unternehmen. |
 | `ad_hoc_recognizers` | Nein | | JSON-Array mit Presidio-Pattern-Recognizern (`supported_entity` plus `patterns` oder `deny_list`) für eigene Bezeichner. |
 | `roles` | Nein | `["user", "assistant", "tool"]` | Analysierte Prompt-Nachrichten, einschließlich Tool-Ergebnistext, Tool-Call-Argumenten und dem Reasoning wiedergegebener Assistant-Turns. In der Response-Phase werden der Assistant-Text und die Tool-Call-Argumente immer analysiert. |
 | `action` | Nein | `anonymize` | `anonymize` schreibt die Werte um; `block` lehnt mit einem Fehler ab; `respond` antwortet mit `message` als Assistant-Antwort; `warn` fährt fort und erfasst die Entitätstypen. |
@@ -688,16 +688,16 @@ gleichzeitig), sodass der Analyzer nie die gesamte Unterhaltung als einen Text
 sieht und seine eigenen Limits pro Part gelten. Das Detail im Request-Log erfasst
 Entitätstypen und Anzahlen, nie die Werte, und Fehlermeldungen des Analyzers
 enthalten nie den übergebenen Text. Der Analyzer erhält den Text im Klartext.
-Betreiben Sie ihn daher als Sidecar auf demselben Host oder erreichen Sie ihn
+Betreibe ihn daher als Sidecar auf demselben Host oder erreiche ihn
 über `https://` oder ein privates Netzwerk.
 
 <Warning>
-  Die Anonymisierung verbirgt die Werte vor dem Provider, nicht vor Ihrem
+  Die Anonymisierung verbirgt die Werte vor dem Provider, nicht vor deinem
   Request-Log. `LOGGING_LOG_BODIES` ist standardmäßig `true`, und die
   gespeicherten `request_body` und `response_body` sind die, die der Client
   gesendet und empfangen hat, mit den personenbezogenen Daten im Klartext –
   anonymisiert ist nur der umgeschriebene Body unter `request_revisions`.
-  Setzen Sie
+  Setze
   [`LOGGING_LOG_BODIES=false`](/de/advanced/configuration#request-logging), wenn
   der Request-Log-Speicher keine personenbezogenen Daten enthalten darf.
   `LOGGING_LOG_REVISION_BODIES=false` verwirft nur die anonymisierten Kopien;
@@ -705,7 +705,7 @@ Betreiben Sie ihn daher als Sidecar auf demselben Host oder erreichen Sie ihn
 </Warning>
 
 <Tip>
-  Beginnen Sie mit einer expliziten `entities`-Liste. Sind alle Typen aktiviert,
+  Beginne mit einer expliziten `entities`-Liste. Sind alle Typen aktiviert,
   meldet das Sprachmodell des Analyzers auch `DATE_TIME`, `LOCATION`, `NRP` und
   `URL`, wodurch Wendungen wie „a nice day“ oder „Paris“ sowohl im Prompt als
   auch in der Antwort zu Platzhaltern werden. `PERSON`, `EMAIL_ADDRESS`,
@@ -719,8 +719,8 @@ Betreiben Sie ihn daher als Sidecar auf demselben Host oder erreichen Sie ihn
   (`TOOLESC Katarzyna` wird als ein `PERSON` gemeldet), sodass ein
   `presidio`-Schritt vor einem `string_replace`-Schritt genau den Text ersetzen
   kann, nach dem die spätere Regel sucht; muss eine Regel die Originalwörter
-  sehen, geben Sie dem `string_replace`-Schritt die niedrigere `order`, damit er
-  zuerst läuft, oder nehmen Sie diese Wörter in `allow_list` auf.
+  sehen, gib dem `string_replace`-Schritt die niedrigere `order`, damit er
+  zuerst läuft, oder nimm diese Wörter in `allow_list` auf.
 </Tip>
 
 In der Stream-Phase transformieren `anonymize` und `warn` Events im laufenden
@@ -736,7 +736,7 @@ Mit `restore: true` ersetzt die Prompt-Phase Werte durch nummerierte
 Platzhalter und merkt sie sich für den Request; die Response- oder Stream-Phase
 setzt die Werte dort wieder ein, wo das Modell einen Platzhalter wiederholt – in
 Text, Reasoning (`reasoning_content` oder `reasoning`) und Tool-Call-Argumenten.
-So sieht der Client seine eigenen Daten, der Provider dagegen nie. Setzen Sie
+So sieht der Client seine eigenen Daten, der Provider dagegen nie. Setze
 `restore` bei den Instanzen in beiden Phasen: Die Instanz in der Prompt-Phase
 erfasst die Werte, die Instanz in der Response-Phase stellt sie wieder her.
 Reasoning wird nur wiederhergestellt, nicht analysiert. Wiederhergestelltes
@@ -751,7 +751,7 @@ Platzhalter: Clients geben sie unverändert in `input` wieder, sodass
 wiederhergestellte Werte im nächsten Turn den Provider erreichen würden.
 
 <Warning>
-  Kombinieren Sie die Instanz in der Prompt-Phase mit einer in der
+  Kombiniere die Instanz in der Prompt-Phase mit einer in der
   **Response**-Phase. Die Response-Phase deckt beide Arten von Requests ab –
   einen gestreamten puffert sie –, während eine Instanz in der Stream-Phase nur
   bei gestreamten Antworten läuft. Mit einer Instanz nur in der Stream-Phase
@@ -772,7 +772,7 @@ Standardliste sie enthält.
 Nur Werte aus den `restore_roles` (standardmäßig User-Nachrichten, frühere
 Assistant-Turns und Tool-Ergebnisse) werden wieder eingesetzt; ein Wert aus
 einer System- oder Developer-Nachricht bleibt ein Platzhalter, sodass ein
-Benutzer das Modell nicht dazu bringen kann, ihn preiszugeben. Fügen Sie
+Benutzer das Modell nicht dazu bringen kann, ihn preiszugeben. Füge
 `system` hinzu, wenn die System-Nachricht die eigenen Daten des Benutzers
 enthält (den Benutzernamen oder gespeicherte Erinnerungen eines Chat-Frontends)
 und jeder, der das Deployment nutzen kann, sie sehen darf. Ein Wert, den das
@@ -791,16 +791,16 @@ der Provider maskiert hat (Gemini liefert `\u003cPERSON_1\u003e`).
 
 Tool-Call-Argumente werden standardmäßig für jedes Tool wiederhergestellt. Ein
 clientseitig ausgeführtes Tool, das seine Argumente an Dritte sendet, etwa eine
-Websuche, sollte die Platzhalter behalten: Führen Sie es in
-`restore_tools_exclude` auf, oder listen Sie in `restore_tools` nur die Tools
+Websuche, sollte die Platzhalter behalten: Führe es in
+`restore_tools_exclude` auf, oder liste in `restore_tools` nur die Tools
 auf, die die Werte benötigen (Wissenssuche, Rückfragen an den Benutzer,
 Dokumenterstellung).
 
 Ein Markdown-Renderer, der HTML bereinigt, kann einen in der Antwort
 verbliebenen Platzhalter ausblenden (einen, den das Modell erfunden hat, oder
-einen aus dem System-Prompt). Setzen Sie `placeholder_format: "[{entity}_{n}]"`,
+einen aus dem System-Prompt). Setze `placeholder_format: "[{entity}_{n}]"`,
 damit sie sichtbar bleiben. Die Instanzen, die an einem Request arbeiten, teilen
-sich die Platzhalter im Format der zuerst laufenden Instanz. Geben Sie ihnen
+sich die Platzhalter im Format der zuerst laufenden Instanz. Gib ihnen
 daher dasselbe Format.
 
 #### Beispiel
@@ -904,8 +904,8 @@ guardrails:
 
 ### Response-Phase: Secrets auf dem Weg nach außen schwärzen
 
-Läuft auf der vollständigen Response, bevor sie den Client erreicht. Setzen Sie
-`fail_mode: open`, wenn Ihnen eine ungeschwärzte Antwort lieber ist als ein 500,
+Läuft auf der vollständigen Response, bevor sie den Client erreicht. Setze
+`fail_mode: open`, wenn dir eine ungeschwärzte Antwort lieber ist als ein 500,
 falls der Guardrail selbst fehlschlägt.
 
 ```yaml
@@ -927,7 +927,7 @@ guardrails:
 
 Dieselbe Instanz kann in mehreren Phasen referenziert werden. `mask-keys`
 transformiert gestreamte Chunks im laufenden Betrieb; `stream_lookbehind` legt
-fest, wie viel Text zurückgehalten wird. Setzen Sie den Wert daher über das
+fest, wie viel Text zurückgehalten wird. Setze den Wert daher über das
 längste erwartete Secret (Provider-Keys wie `sk-proj-…` und `sk-ant-…` sind
 deutlich länger als der Standard von 64 Zeichen, und alles jenseits des
 Lookbehinds erreicht den Client unmaskiert). `answer-judge` benötigt die
@@ -959,7 +959,7 @@ guardrails:
 
 <Tip>
   Eine Regel in `config.yaml` platziert eine Instanz in einer Phase. Um dieselbe
-  Instanz in zwei Phasen auszuführen, fügen Sie sie dem Workflow im Dashboard
+  Instanz in zwei Phasen auszuführen, füge sie dem Workflow im Dashboard
   oder über `POST /admin/workflows` zweimal mit unterschiedlichen
   `phase`-Werten hinzu; siehe
   [Workflows](/de/advanced/workflows#guardrail-steps).
@@ -980,7 +980,7 @@ automatisch:
 | `/v1/systemone` | — | `state` |
 
 <Tip>
-  Sie müssen sich keine Gedanken darüber machen, welchen Endpunkt Ihre Benutzer
+  Du musst dir keine Gedanken darüber machen, welchen Endpunkt deine Benutzer
   aufrufen. Eine einzige Guardrail-Regel funktioniert für alle unterstützten
   Text-Endpunkte identisch.
 </Tip>
@@ -1035,7 +1035,7 @@ Cache-Typ.
 
 Ein blockierter Request erreicht nie den Provider; eine blockierte Response
 erreicht nie den Client. Unter [Plugins](/de/advanced/plugins#entscheidungen)
-erfahren Sie, wie Entscheidungen zusammengeführt werden, wenn mehrere Guardrails
+erfährst du, wie Entscheidungen zusammengeführt werden, wenn mehrere Guardrails
 mit demselben `order`-Wert laufen.
 
 Jedes Ergebnis, auch ein stilles Zulassen, wird im Request-Log-Eintrag des Requests
@@ -1045,5 +1045,5 @@ fehlgeschlagen ist. Das Dashboard färbt die Guardrail-Steps im Workflow-Diagram
 eines Request-Log-Eintrags danach ein: grün, wenn der Step bestanden oder bearbeitet
 hat; gelb bei einer Warnung oder einem Fail-open-Fehler; rot bei einem
 Blockieren, einer Antwort oder einem Fail-closed-Fehler; abgedunkelt, wenn der
-Step nie gelaufen ist. Die Felder finden Sie unter
+Step nie gelaufen ist. Die Felder findest du unter
 [Plugins](/de/advanced/plugins#request-log).

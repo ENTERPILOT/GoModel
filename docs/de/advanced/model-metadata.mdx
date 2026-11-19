@@ -53,7 +53,7 @@ flowchart LR
    Fähigkeiten: Ein Eintrag, der `image` akzeptiert, weist `vision` aus (ebenso `audio_input`,
    `video_input`, `pdf_input`), sofern seine Fähigkeiten diesen Key nicht explizit setzen. Falsche
    oder fehlende Daten werden am besten durch einen Beitrag zur Registry korrigiert; für eine
-   sofortige Korrektur verwenden Sie einen Override.
+   sofortige Korrektur verwendest du einen Override.
 5. **ID-Heuristik** – eine Namensprüfung als letztes Mittel für Modelle, die am Ende gar keine Modi
    haben (typisch für llama.cpp und LM Studio): IDs, die `embed` enthalten oder bekannten
    Embedding-Familien entsprechen (`bge`, `e5`, `gte`, `minilm`), werden zu Embedding-Modellen; IDs,
@@ -62,8 +62,8 @@ flowchart LR
 
 ## Herkunft eines Werts prüfen
 
-Klappen Sie auf der Seite **Models** im Dashboard eine Zeile auf, um die effektiven Metadaten des
-Modells zusammen mit der Ebene zu sehen, die jedes Feld geliefert hat, und schalten Sie das Panel
+Klappe auf der Seite **Models** im Dashboard eine Zeile auf, um die effektiven Metadaten des
+Modells zusammen mit der Ebene zu sehen, die jedes Feld geliefert hat, und schalte das Panel
 auf **Provider**, **Catalog** oder **Config** um, um eine einzelne Ebene für sich zu sehen. Dieselben
 Daten liefert
 [`GET /admin/models/metadata`](/de/advanced/admin-endpoints#get-/admin/models/metadata).
@@ -94,9 +94,9 @@ MODEL_LIST_URL=file:///etc/gomodel/models.json   # Datei-URL
 ```
 
 Eine Datei wird beim Start und bei jeder Cache-Aktualisierung gelesen und nur dann neu geparst,
-wenn sich ihr Inhalt ändert, sodass Sie Preise durch Ersetzen der Datei aktualisieren können. Da
+wenn sich ihr Inhalt ändert, sodass du Preise durch Ersetzen der Datei aktualisieren kannst. Da
 für eine Datei kein Netzwerk-Request nötig ist, funktioniert sie auch mit `GOMODEL_OFFLINE=true`,
-wodurch HTTP-Katalog-URLs verworfen werden. Setzen Sie `MODEL_LIST_URL=off`, um den Katalog
+wodurch HTTP-Katalog-URLs verworfen werden. Setze `MODEL_LIST_URL=off`, um den Katalog
 vollständig zu deaktivieren und Metadaten in `config.yaml` zu deklarieren; die vollständige
-Air-Gap-Checkliste finden Sie im
+Air-Gap-Checkliste findest du im
 [Leitfaden für den Produktivbetrieb](/de/guides/production#air-gapped-und-offline-deployments).

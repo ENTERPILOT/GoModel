@@ -5,35 +5,35 @@ icon: "terminal"
 keywords: ["Claude Code", "Anthropic passthrough", "Anthropic-Passthrough", "Coding-Agent", "coding agent", "Einrichtung", "setup guide"]
 ---
 
-GoModel kann Claude Code vorgeschaltet werden, sodass jeder Request zuerst Ihr
+GoModel kann Claude Code vorgeschaltet werden, sodass jeder Request zuerst dein
 eigenes Gateway durchläuft.
 
 Ablauf:
 
 `Claude Code -> GoModel -> Anthropic`
 
-## Bevor Sie beginnen
+## Bevor du beginnst
 
-- Installieren Sie Claude Code auf Ihrem Rechner.
-- Wählen Sie einen GoModel-Master-Key, zum Beispiel `change-me`.
-- Stellen Sie sicher, dass GoModel Zugangsdaten für den Anthropic-Upstream hat.
+- Installiere Claude Code auf deinem Rechner.
+- Wähle einen GoModel-Master-Key, zum Beispiel `change-me`.
+- Stelle sicher, dass GoModel Zugangsdaten für den Anthropic-Upstream hat.
 
 <Note>
-  Claude Code lässt sich über GoModel routen, unabhängig davon, ob Sie persönlich
-  ein Claude-Code-Abonnement nutzen. Im Gateway-Modus kommuniziert Claude Code über
+  Claude Code lässt sich über GoModel routen, unabhängig davon, ob du persönlich
+  ein Claude-Code-Abonnement nutzt. Im Gateway-Modus kommuniziert Claude Code über
   `ANTHROPIC_BASE_URL` und `ANTHROPIC_AUTH_TOKEN` mit GoModel. GoModel benötigt
   trotzdem einen eigenen `ANTHROPIC_API_KEY`, um Anthropic upstream zu erreichen —
   entweder einen Console-API-Key oder ein OAuth-Token eines Claude-Abonnements.
 </Note>
 
-## So erhalten Sie `ANTHROPIC_API_KEY`
+## So erhältst du `ANTHROPIC_API_KEY`
 
 **Option A — Console-API-Key (nutzungsbasiert):**
 
-1. Öffnen Sie die Claude Console und melden Sie sich bei Ihrem API-Konto an.
-2. Gehen Sie in der Console zu den Kontoeinstellungen und erstellen Sie einen
+1. Öffne die Claude Console und melde dich bei deinem API-Konto an.
+2. Gehe in der Console zu den Kontoeinstellungen und erstelle einen
    API-Key.
-3. Kopieren Sie den Key (er wird nur einmal angezeigt) und setzen Sie ihn für
+3. Kopiere den Key (er wird nur einmal angezeigt) und setze ihn für
    GoModel als `ANTHROPIC_API_KEY`.
 
 Laut der API-Dokumentation von Anthropic werden API-Keys in den Kontoeinstellungen
@@ -47,13 +47,13 @@ der Console erstellt.
 
 **Option B — Token eines Claude-Abonnements (Pro, Max, Team oder Enterprise):**
 
-1. Führen Sie `claude setup-token` auf einem Rechner aus, auf dem Claude Code mit
-   Ihrem Abonnement angemeldet ist.
-2. Kopieren Sie das erzeugte Token `sk-ant-oat01-...` und setzen Sie es für GoModel
+1. Führe `claude setup-token` auf einem Rechner aus, auf dem Claude Code mit
+   deinem Abonnement angemeldet ist.
+2. Kopiere das erzeugte Token `sk-ant-oat01-...` und setze es für GoModel
    als `ANTHROPIC_API_KEY`.
 
 GoModel erkennt das Präfix `sk-ant-oat` und authentifiziert sich upstream
-automatisch mit dem OAuth-Bearer-Schema. Die Nutzung wird über die Limits Ihres
+automatisch mit dem OAuth-Bearer-Schema. Die Nutzung wird über die Limits deines
 Abonnements abgedeckt statt über die API-Abrechnung.
 
 <Warning>
@@ -66,7 +66,7 @@ Abonnements abgedeckt statt über die API-Abrechnung.
 
 ## 1. GoModel starten
 
-Starten Sie GoModel mit einem Master-Key und einem Anthropic-Provider-Key:
+Starte GoModel mit einem Master-Key und einem Anthropic-Provider-Key:
 
 ```bash
 docker run --rm -p 8080:8080 \
@@ -77,7 +77,7 @@ docker run --rm -p 8080:8080 \
 
 ## 2. Anthropic-Passthrough prüfen
 
-Prüfen Sie, ob der Models-Endpunkt des Anthropic-Passthrough antwortet:
+Prüfe, ob der Models-Endpunkt des Anthropic-Passthrough antwortet:
 
 <CodeGroup>
 
@@ -113,7 +113,7 @@ for await (const model of client.models.list()) {
 
 </CodeGroup>
 
-Senden Sie anschließend eine kleine Testnachricht:
+Sende anschließend eine kleine Testnachricht:
 
 <CodeGroup>
 
@@ -174,7 +174,7 @@ Ist das Gateway korrekt eingerichtet, enthält die Response `ok`.
 
 ## 3. Claude Code für GoModel konfigurieren
 
-Richten Sie Claude Code auf GoModel aus:
+Richte Claude Code auf GoModel aus:
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:8080
@@ -192,13 +192,13 @@ können Claude Code zu anderen Providern routen. Alternativ verwendet
 `ANTHROPIC_BASE_URL=http://localhost:8080/p/anthropic` den reinen Passthrough, der
 fest an den Anthropic-Upstream gebunden ist.
 
-Kurzfassung der Claude-Code-Dokumentation: Setzen Sie im Gateway-Modus
-`ANTHROPIC_BASE_URL` auf Ihre Gateway-URL und `ANTHROPIC_AUTH_TOKEN` auf Ihr
-Gateway-Token und führen Sie Claude Code dann wie gewohnt aus. Siehe die offizielle
+Kurzfassung der Claude-Code-Dokumentation: Setze im Gateway-Modus
+`ANTHROPIC_BASE_URL` auf deine Gateway-URL und `ANTHROPIC_AUTH_TOKEN` auf dein
+Gateway-Token und führe Claude Code dann wie gewohnt aus. Siehe die offizielle
 Anleitung:
 [Claude Code LLM gateway docs](https://code.claude.com/docs/en/llm-gateway).
 
-Läuft GoModel nicht auf Ihrem lokalen Rechner, ersetzen Sie `localhost:8080` durch
+Läuft GoModel nicht auf deinem lokalen Rechner, ersetze `localhost:8080` durch
 den korrekten Host und Port.
 
 ## 4. Einen Test-Prompt mit Claude Code ausführen
@@ -216,13 +216,13 @@ ok
 
 ## 5. Den Traffic in GoModel prüfen
 
-Öffnen Sie die Seite „Anfragen“ im GoModel-Dashboard:
+Öffne die Seite „Anfragen“ im GoModel-Dashboard:
 
 [http://localhost:8080/admin/dashboard/requests](http://localhost:8080/admin/dashboard/requests)
 
-Hier können Sie am einfachsten bestätigen, dass Claude Code GoModel erreicht, und
+Hier kannst du am einfachsten bestätigen, dass Claude Code GoModel erreicht, und
 den vollständigen Verlauf von Requests und Responses einsehen. Im selben Dashboard
-können Sie Ihren GoModel-Traffic und die Nutzung weiter verfolgen.
+kannst du deinen GoModel-Traffic und die Nutzung weiter verfolgen.
 
 ## Referenzen
 

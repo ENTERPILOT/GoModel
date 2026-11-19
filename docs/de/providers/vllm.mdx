@@ -1,6 +1,6 @@
 ---
 title: "vLLM"
-description: "Leiten Sie OpenAI-kompatible GoModel-Requests an einen oder mehrere vLLM-Server weiter, einschließlich Hugging-Face-Modell-IDs mit Schrägstrichen."
+description: "Leite OpenAI-kompatible GoModel-Requests an einen oder mehrere vLLM-Server weiter, einschließlich Hugging-Face-Modell-IDs mit Schrägstrichen."
 icon: "server"
 keywords: ["vLLM", "Self-Hosting", "self-hosted", "Hugging-Face-Modelle", "Hugging Face models", "OpenAI-kompatibler Server", "OpenAI-compatible server"]
 ---
@@ -10,7 +10,7 @@ Hugging-Face-Modell-IDs mit Schrägstrichen (z. B.
 `meta-llama/Llama-3.1-8B-Instruct`) funktionieren – GoModel trennt Selektoren
 mit Provider-Angabe nur am ersten Schrägstrich.
 
-Starten Sie zuerst vLLM:
+Starte zuerst vLLM:
 
 ```bash
 vllm serve meta-llama/Llama-3.1-8B-Instruct
@@ -28,8 +28,8 @@ GOMODEL_MASTER_KEY=change-me
 <Note>
   Diese Beispiele gehen davon aus, dass GoModel in Docker läuft und vLLM auf
   dem Host unter `localhost:8000` – daher `host.docker.internal`. Laufen beide
-  im selben Docker-Netzwerk, verwenden Sie den Service-Namen von vLLM. Läuft
-  GoModel direkt auf dem Host, verwenden Sie `http://localhost:8000/v1`.
+  im selben Docker-Netzwerk, verwende den Service-Namen von vLLM. Läuft
+  GoModel direkt auf dem Host, verwende `http://localhost:8000/v1`.
 </Note>
 
 ## GoModel starten
@@ -104,7 +104,7 @@ Präfix zurück, z. B. `vllm/meta-llama/Llama-3.1-8B-Instruct`.
 
 ## Mehrere vLLM-Instanzen
 
-Verwenden Sie Umgebungsvariablen mit Suffix, um ohne YAML mehr als eine Instanz
+Verwende Umgebungsvariablen mit Suffix, um ohne YAML mehr als eine Instanz
 zu registrieren:
 
 ```bash
@@ -118,7 +118,7 @@ Bindestrichen).
 
 ## vLLM-Passthrough
 
-Passthrough ist standardmäßig aktiviert. Verwenden Sie ihn für vLLM-spezifische
+Passthrough ist standardmäßig aktiviert. Verwende ihn für vLLM-spezifische
 Endpunkte wie `/tokenize`, `/detokenize`, `/pooling`, `/rerank`:
 
 <CodeGroup>
@@ -175,7 +175,7 @@ konfiguriert.
 <Note>
   Passthrough-Routen sind unter `/p/vllm/...` auf den Provider-Typ bezogen. Um
   in einem Setup mit mehreren vLLM-Instanzen eine bestimmte benannte Instanz
-  anzusprechen, verwenden Sie übersetzte `/v1/...`-Requests mit Modell-IDs mit
+  anzusprechen, verwende übersetzte `/v1/...`-Requests mit Modell-IDs mit
   Provider-Angabe (z. B. `vllm-test/meta-llama/Llama-3.1-8B-Instruct`).
 </Note>
 

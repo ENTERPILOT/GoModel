@@ -1,6 +1,6 @@
 ---
 title: "GoModel & Caddy"
-description: "Verwenden Sie forward_auth von Caddy mit dem Key-Verifizierungs-Endpunkt von GoModel, um nicht authentifizierten Traffic am Edge abzuweisen und andere Dienste über GoModel-API-Keys abzusichern."
+description: "Verwende forward_auth von Caddy mit dem Key-Verifizierungs-Endpunkt von GoModel, um nicht authentifizierten Traffic am Edge abzuweisen und andere Dienste über GoModel-API-Keys abzusichern."
 icon: "shield-check"
 keywords: ["Caddy", "forward_auth", "Reverse Proxy", "reverse proxy", "API-Key-Verifizierung", "API key verification", "/v1/auth/verify", "Edge-Authentifizierung", "nicht authentifizierten Traffic blockieren"]
 ---
@@ -8,7 +8,7 @@ keywords: ["Caddy", "forward_auth", "Reverse Proxy", "reverse proxy", "API-Key-V
 ## Übersicht
 
 [`forward_auth`](https://caddyserver.com/docs/caddyfile/directives/forward_auth) von Caddy
-fragt einen anderen Dienst, ob ein Request fortgesetzt werden darf. Richten Sie es auf
+fragt einen anderen Dienst, ob ein Request fortgesetzt werden darf. Richte es auf
 [`GET /v1/auth/verify`](/de/advanced/api-endpoints#key-verifizierung) von GoModel, und Caddy
 lässt Traffic nur mit GoModel-API-Keys passieren – ohne dass irgendwo im
 Proxy eine Kopie dieser Keys liegt.
@@ -23,7 +23,7 @@ Dafür eignet sich das vor allem:
   oder ein Metrik-Endpunkt auf demselben Host kann einen gültigen GoModel-Key verlangen,
   ohne eine eigene Authentifizierung zu implementieren.
 
-`/v1/auth/verify` ist **standardmäßig deaktiviert**. Aktivieren Sie den Endpunkt mit
+`/v1/auth/verify` ist **standardmäßig deaktiviert**. Aktiviere den Endpunkt mit
 `AUTH_VERIFY_ENABLED=true` (`server.auth_verify_enabled`). Er ist keine
 `/admin`-Route und funktioniert daher auch mit `ADMIN_ENDPOINTS_ENABLED=false`.
 
@@ -43,7 +43,7 @@ er ist für Skripte und Dienste gedacht, die wissen möchten, *welcher* Key gean
 
 ## Einen anderen Dienst über GoModel-Keys absichern
 
-Der Upstream ist hier eine beliebige App, die Sie hinter die Keys von GoModel stellen möchten.
+Der Upstream ist hier eine beliebige App, die du hinter die Keys von GoModel stellen möchtest.
 
 ```caddyfile
 {
@@ -69,7 +69,7 @@ Aufrufer ist: Bei einem verwalteten Key, der an einen [User-Path](/de/features/u
 Upstream diesen Pfad und kann einschränken, was er anzeigt. Der Header ist leer
 für Aufrufer mit Master-Key und für Keys ohne gebundenen Pfad.
 
-Prüfen Sie es:
+Prüfe es:
 
 ```bash
 # Keine Zugangsdaten – am Edge abgewiesen, der Upstream sieht den Request nie
@@ -81,8 +81,8 @@ curl -i http://localhost:8090/ -H "Authorization: Bearer sk_gom_..."
 
 ## Traffic vor dem Gateway filtern
 
-Um dieselbe Prüfung vor GoModel selbst zu schalten, verifizieren Sie gegen das Gateway
-und leiten per Proxy an es weiter:
+Um dieselbe Prüfung vor GoModel selbst zu schalten, verifiziere gegen das Gateway
+und leite per Proxy an es weiter:
 
 ```caddyfile
 api.example.com {
@@ -100,7 +100,7 @@ Preis dafür, nicht authentifizierten Traffic zu verwerfen, bevor er die Anwendu
 lohnenswert an einem aus dem Internet erreichbaren Edge, nicht lohnenswert in einem privaten Netzwerk, in dem
 die eigene Authentifizierung von GoModel ohnehin die einzige Schranke ist.
 
-Zwei Routen müssen ohne Key erreichbar bleiben, wenn Sie sie verwenden:
+Zwei Routen müssen ohne Key erreichbar bleiben, wenn du sie verwendest:
 
 ```caddyfile
 api.example.com {
@@ -127,9 +127,9 @@ ohne Authentifizierung bedient.
   GoModel-Instanz ohne Master-Key und ohne verwaltete Keys – dem unsicheren
   Standard für die Entwicklung – wird jeder Request akzeptiert, `/v1/auth/verify` antwortet
   mit `200` und `{"valid": false, "method": "none"}`, weil es keinen Key zu
-  bestätigen gibt, und `forward_auth` lässt alles durch. Setzen Sie
-  `GOMODEL_MASTER_KEY` oder stellen Sie [verwaltete Keys](/de/features/users) aus, bevor Sie sich
-  darauf verlassen, dass hiermit etwas blockiert wird.
+  bestätigen gibt, und `forward_auth` lässt alles durch. Setze
+  `GOMODEL_MASTER_KEY` oder stelle [verwaltete Keys](/de/features/users) aus, bevor du dich
+  darauf verlässt, dass hiermit etwas blockiert wird.
 </Warning>
 
 ## Hinweise
@@ -139,8 +139,8 @@ ohne Authentifizierung bedient.
   `/v1/auth/verify` führt keine Provider-Arbeit aus und antwortet aus dem Key-Speicher.
 - Der Endpunkt antwortet mit `Cache-Control: no-store` – die Antwort beschreibt die Zugangsdaten
   eines einzelnen Aufrufers und darf niemand anderem ausgeliefert werden.
-- Wenn Sie den Endpunkt aktivieren, stellen Sie ein Key-Orakel bereit: Jeder, der ihn erreicht, kann prüfen,
-  ob ein Key gültig ist. Stellen Sie ihn nur dort bereit, wo Sie ihn brauchen, und schalten Sie die
+- Wenn du den Endpunkt aktivierst, stellst du ein Key-Orakel bereit: Jeder, der ihn erreicht, kann prüfen,
+  ob ein Key gültig ist. Stelle ihn nur dort bereit, wo du ihn brauchst, und schalte die
   [Rate-Limits](/de/features/rate-limits) von GoModel vor nicht vertrauenswürdige Aufrufer.
 - Caddy fügt dem Verifizierungs-Subrequest `X-Forwarded-Method` und `X-Forwarded-Uri` hinzu.
   GoModel ignoriert beide; die Prüfung betrifft die Zugangsdaten, nicht die

@@ -1,6 +1,6 @@
 ---
 title: "Kimi Code"
-description: "Konfigurieren Sie Kimi Code in GoModel und verstehen Sie den Modell-Alias, den Vorbehalt bei Embeddings und das Kontingentverhalten."
+description: "Konfiguriere Kimi Code in GoModel und verstehe den Modell-Alias, den Vorbehalt bei Embeddings und das Kontingentverhalten."
 icon: "code"
 keywords: ["Kimi Code", "Moonshot", "Kontingent", "quota", "Provider-Einrichtung", "provider setup"]
 ---
@@ -39,10 +39,10 @@ providers:
 <Note>
   Der Provider-`type` ist `kimicode` (ohne Bindestrich). Der Konfigurationsschlüssel
   (`kimicode` im obigen Beispiel) ist frei wählbar und identifiziert nur diesen
-  Eintrag in Ihrer Konfiguration; er kann geändert werden.
+  Eintrag in deiner Konfiguration; er kann geändert werden.
 </Note>
 
-Sie können die Base-URL und die Modellliste auch so überschreiben:
+Du kannst die Base-URL und die Modellliste auch so überschreiben:
 
 ```bash
 KIMICODE_BASE_URL=https://api.kimi.ai/coding/v1
@@ -58,7 +58,7 @@ KIMICODE_BASE_URL=https://api.kimi.com/coding/v1
 
 ## Modelle
 
-Der Standard-Alias für das Chat-Modell ist `kimi-for-coding`. Sie können ihn in einem
+Der Standard-Alias für das Chat-Modell ist `kimi-for-coding`. Du kannst ihn in einem
 virtuellen Modell referenzieren oder direkt über den OpenAI-kompatiblen Endpunkt
 `/v1/chat/completions` aufrufen.
 
@@ -71,8 +71,8 @@ virtual_models:
 ## Embeddings
 
 Kimi Code stellt `bge_m3_embed` für Embeddings bereit, dieses Modell ist Upstream jedoch
-nicht dokumentiert. Behandeln Sie es als experimentell: Testen Sie Verfügbarkeit und
-Dimensionalität in Ihrem Konto, bevor Sie sich in produktiven Workflows darauf verlassen.
+nicht dokumentiert. Behandle es als experimentell: Teste Verfügbarkeit und
+Dimensionalität in deinem Konto, bevor du dich in produktiven Workflows darauf verlässt.
 
 ## Preise und Kontingent
 
@@ -83,7 +83,7 @@ einordnen, kann aber dennoch auf Kimi Code zurückgreifen, wenn kein Provider mi
 verfügbar ist.
 
 Das Upstream-Kontingent basiert auf einer wöchentlichen Erneuerung plus einem rollierenden
-Fünf-Stunden-Fenster. Planen Sie Burst-Limits ein und bevorzugen Sie zurückhaltende
+Fünf-Stunden-Fenster. Plane Burst-Limits ein und bevorzuge zurückhaltende
 Retry-Einstellungen pro Provider:
 
 ```yaml

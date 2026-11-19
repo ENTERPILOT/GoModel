@@ -36,7 +36,7 @@ Beispiele:
 - Provider-Typ: `openai`
 - Provider-Name: `openai_primary`
 
-Wenn Sie mehrere konfigurierte Provider desselben Typs haben, können Workflows sie über den Provider-Namen unabhängig voneinander ansprechen.
+Wenn du mehrere konfigurierte Provider desselben Typs hast, können Workflows sie über den Provider-Namen unabhängig voneinander ansprechen.
 
 ## Rangfolge beim Matching
 
@@ -111,7 +111,7 @@ Workflows mit unterschiedlichen Ketten teilen sich nie gecachte Antworten.
 
 ### Pfadvererbung
 
-Angenommen, Sie haben:
+Angenommen, du hast:
 
 - Workflow A: `scope_user_path=/team`
 - Workflow B: `scope_user_path=/team/team1`
@@ -122,12 +122,12 @@ Existiert Workflow B nicht, gewinnt Workflow A.
 
 ### Eingrenzung nach Provider-Namen
 
-Wenn Sie zwei OpenAI-Provider haben:
+Wenn du zwei OpenAI-Provider hast:
 
 - `openai_primary`
 - `openai_backup`
 
-können Sie separate Workflows erstellen für:
+kannst du separate Workflows erstellen für:
 
 - `scope_provider_name=openai_primary`
 - `scope_provider_name=openai_backup`
@@ -136,7 +136,7 @@ Obwohl beide den Provider-Typ `openai` haben, sind es unterschiedliche Workflow-
 
 ## API-Beispiel
 
-Erstellen Sie einen Workflow, der auf einen konfigurierten Provider-Namen, ein Modell und einen User-Path-Teilbaum eingegrenzt ist:
+Erstelle einen Workflow, der auf einen konfigurierten Provider-Namen, ein Modell und einen User-Path-Teilbaum eingegrenzt ist:
 
 <CodeGroup>
 

@@ -1,15 +1,15 @@
 ---
 title: "MCP-Gateway"
-description: "Bündeln Sie Ihre MCP-Server hinter einem authentifizierten GoModel-Endpunkt – mit Tool-Sichtbarkeit pro Key, Nutzungserfassung und Rate-Limits."
+description: "Bündle deine MCP-Server hinter einem authentifizierten GoModel-Endpunkt – mit Tool-Sichtbarkeit pro Key, Nutzungserfassung und Rate-Limits."
 icon: "plug"
 keywords: ["MCP gateway", "MCP-Gateway", "Model Context Protocol", "MCP servers", "MCP-Server", "Tool-Aggregation", "tool aggregation", "MCP proxy"]
 ---
 
 ## Was das MCP-Gateway leistet
 
-GoModel kann zwischen Ihren Agent-Clients (Claude Code, Claude Desktop, Cursor,
+GoModel kann zwischen deinen Agent-Clients (Claude Code, Claude Desktop, Cursor,
 VS Code, …) und den MCP-Servern (Model Context Protocol) stehen, die diese nutzen —
-genauso, wie es bereits zwischen Ihren Anwendungen und den Modell-Providern steht:
+genauso, wie es bereits zwischen deinen Anwendungen und den Modell-Providern steht:
 
 - **Ein Endpunkt, ein Key.** Clients verbinden sich mit `https://your-gateway/mcp`
   über einen GoModel-API-Key. Sie halten nie Zugangsdaten für die Upstream-MCP-Server;
@@ -35,8 +35,8 @@ genauso, wie es bereits zwischen Ihren Anwendungen und den Modell-Providern steh
 
 ## Einen Client verbinden
 
-Richten Sie einen beliebigen MCP-Client mit Streamable HTTP auf das Gateway aus und
-übergeben Sie Ihren GoModel-Key als Bearer-Token:
+Richte einen beliebigen MCP-Client mit Streamable HTTP auf das Gateway aus und
+übergib deinen GoModel-Key als Bearer-Token:
 
 ```json
 {
@@ -56,7 +56,7 @@ Die Seite **MCP Servers** im Dashboard enthält ein Panel **Connect a client** m
 der Endpunkt-URL und einer Client-Konfiguration zum direkten Kopieren.
 
 Client-spezifische Befehle, Authentifizierung über Umgebungsvariablen und Schritte
-zur Überprüfung finden Sie unter
+zur Überprüfung findest du unter
 [Claude Code und Codex verbinden](/de/mcp-proxy/claude-code-and-codex).
 
 Vier Möglichkeiten, einzuschränken, was ein Client sieht:
@@ -69,15 +69,15 @@ Vier Möglichkeiten, einzuschränken, was ein Client sieht:
 
 ## Server zu virtuellen Servern gruppieren
 
-Ein virtueller Server stellt eine feste Teilmenge Ihrer MCP-Server unter einer
-eigenen URL bereit. Verwenden Sie einen für Clients, die nur eine URL und keine
+Ein virtueller Server stellt eine feste Teilmenge deiner MCP-Server unter einer
+eigenen URL bereit. Verwende einen für Clients, die nur eine URL und keine
 benutzerdefinierten Header akzeptieren, oder um jedem Team oder Agent eine
 kuratierte Auswahl bereitzustellen.
 
-Erstellen Sie einen auf der Seite **MCP Servers** über **Add Virtual Server**:
-Wählen Sie einen Namen, die zugehörigen Server und optional den Modus der
+Erstelle einen auf der Seite **MCP Servers** über **Add Virtual Server**:
+Wähle einen Namen, die zugehörigen Server und optional den Modus der
 Tool-Liste. Änderungen werden sofort wirksam. Um virtuelle Server als Code zu
-verwalten, deklarieren Sie sie stattdessen in der Konfiguration:
+verwalten, deklariere sie stattdessen in der Konfiguration:
 
 ```yaml
 mcp:
@@ -129,7 +129,7 @@ die Liste durch zwei Tools:
   gibt die passenden Tools mit ihren Beschreibungen und Input-Schemas zurück.
 - `call_tool` führt ein gefundenes Tool über `name` mit seinen `arguments` aus.
 
-Die Funktion ist standardmäßig deaktiviert. Aktivieren Sie sie für alle Clients:
+Die Funktion ist standardmäßig deaktiviert. Aktiviere sie für alle Clients:
 
 ```yaml
 mcp:
@@ -156,8 +156,8 @@ diesem Standardwert abweicht:
 }
 ```
 
-Verwenden Sie sie für Clients, die jedes Tool an das Modell senden, etwa eigene
-Agents und SDK-Schleifen. Lassen Sie sie für Clients mit eigener Tool-Suche, wie
+Verwende sie für Clients, die jedes Tool an das Modell senden, etwa eigene
+Agents und SDK-Schleifen. Lass sie für Clients mit eigener Tool-Suche, wie
 Claude Code, deaktiviert: Diese laden Tools bereits verzögert und erhalten
 Berechtigungsabfragen pro Tool sowie Hinweise auf schreibgeschützte bzw. destruktive
 Tools nur dann, wenn Tools direkt aufgelistet werden. Über `call_tool` sieht für den
@@ -186,19 +186,19 @@ Dashboard-Zeilen mit demselben Slug und sind dort schreibgeschützt:
 
 ### Einen Server über das Dashboard hinzufügen
 
-Öffnen Sie **MCP Servers** und klicken Sie auf **Add MCP Server**. Füllen Sie aus:
+Öffne **MCP Servers** und klicke auf **Add MCP Server**. Fülle aus:
 
-- **Name** — für Menschen gedacht; Sie können ihn später umbenennen.
+- **Name** — für Menschen gedacht; du kannst ihn später umbenennen.
 - **Transport** — `http` (Streamable HTTP, Standard) oder `sse` (Legacy).
 - **URL** — der Upstream-MCP-Endpunkt.
 - **Headers** — Upstream-Zugangsdaten (zum Beispiel `Authorization: Bearer …`);
   gespeicherte Werte werden danach geschwärzt angezeigt.
-- **Tools** — aktivieren Sie die Tools, die Clients verwenden dürfen; siehe
+- **Tools** — aktiviere die Tools, die Clients verwenden dürfen; siehe
   [Festlegen, welche Tools ein Server bereitstellt](/de/features/mcp-gateway#festlegen-welche-tools-ein-server-bereitstellt).
 - Optional **user paths** und **excluded user paths** unter **Advanced**; siehe
   [Einschränken, wer einen Server sieht](/de/features/mcp-gateway#einschränken-wer-einen-server-sieht).
 
-Speichern Sie, um sofort zu verbinden. Verwenden Sie das Aktualisierungssymbol der
+Speichere, um sofort zu verbinden. Verwende das Aktualisierungssymbol der
 Zeile, um einen **Reconnect** zu erzwingen, das Listensymbol, um den
 Katalog-Inspektor zu öffnen, und das Stiftsymbol zum Bearbeiten. Auf diese Weise
 hinzugefügte Zeilen lassen sich bearbeiten und löschen; Zeilen aus der `config.yaml`
@@ -263,12 +263,12 @@ stillschweigend zu verwerfen.
 
 Das offizielle Image enthält nur die GoModel-Binärdatei — keine Shell, kein Node und
 kein Python —, daher können `npx`- und `uvx`-Befehle darin nicht starten.
-stdio-Server, die als statische Binärdatei ausgeliefert werden, funktionieren: Hängen
-Sie die Binärdatei ein und richten Sie `command` darauf aus.
+stdio-Server, die als statische Binärdatei ausgeliefert werden, funktionieren: Hänge
+die Binärdatei ein und richte `command` darauf aus.
 
-Für alles andere betreiben Sie den stdio-Server in einem eigenen Container hinter
+Für alles andere betreibst du den stdio-Server in einem eigenen Container hinter
 einer stdio-zu-HTTP-Bridge wie
-[supergateway](https://github.com/supercorp-ai/supergateway) und deklarieren ihn als
+[supergateway](https://github.com/supercorp-ai/supergateway) und deklarierst ihn als
 regulären `http`-Server:
 
 ```yaml
@@ -295,11 +295,11 @@ services:
 ```
 
 So bleiben Laufzeitumgebung und Abhängigkeiten des MCP-Servers aus dem
-Gateway-Container heraus. Die Bridge hat keine Authentifizierung; veröffentlichen
-Sie ihren Port daher nicht — lassen Sie sie nur im internen Compose-Netzwerk
+Gateway-Container heraus. Die Bridge hat keine Authentifizierung; veröffentliche
+ihren Port daher nicht — lass sie nur im internen Compose-Netzwerk
 erreichbar.
 
-Um den Subprozess direkt aus dem Gateway zu starten, bauen Sie stattdessen ein
+Um den Subprozess direkt aus dem Gateway zu starten, baue stattdessen ein
 eigenes Image. Die Binärdatei ist statisch und läuft daher auf jeder Basis:
 
 ```dockerfile
@@ -313,14 +313,14 @@ EXPOSE 8080
 ENTRYPOINT ["/gomodel"]
 ```
 
-Für Updates und Sicherheitspatches dieses Images sind Sie dann selbst zuständig.
+Für Updates und Sicherheitspatches dieses Images bist du dann selbst zuständig.
 
 ## MCP-Server von Providern bereitstellen
 
 Manche Provider betreiben eigene MCP-Server, die mit demselben API-Key wie ihre
-Modelle erreichbar sind. Tragen Sie einen konfigurierten Provider in
+Modelle erreichbar sind. Trage einen konfigurierten Provider in
 `mcp.provider_servers` ein, und das Gateway stellt dessen Server mit dem Key
-dieses Providers bereit. Sie müssen den Key nicht in `mcp.servers` kopieren:
+dieses Providers bereit. Du musst den Key nicht in `mcp.servers` kopieren:
 
 ```yaml
 mcp:
@@ -344,7 +344,7 @@ Clients rufen sie wie jeden anderen Server auf, zum Beispiel
   Proxy erreicht so den passenden MCP-Endpunkt, und der Key geht an keinen
   neuen Host.
 - **Im Dashboard schreibgeschützt**, wie deklarierte Server. Um einen davon mit
-  `user_paths` einzuschränken oder Tools zu kürzen, deklarieren Sie in
+  `user_paths` einzuschränken oder Tools zu kürzen, deklariere in
   `mcp.servers` einen Server mit demselben Slug; er ersetzt den des Providers.
 - Nur Provider aus `config.yaml` oder Umgebungsvariablen zählen, und der erste
   API-Key wird verwendet. Ein Name ohne konfigurierten Provider wird mit einer
@@ -375,7 +375,7 @@ bereit, daher muss `url` den Pfad enthalten — zum Beispiel
 für selbst gehostetes Firecrawl. Ein letzter Fehler mit HTTP 405 bedeutet, dass der
 Pfad existiert, die Handshake-Methode aber ablehnt; so antwortet ein
 Streamable-HTTP-Endpunkt, wenn `transport` auf `sse` steht (und ein SSE-Endpunkt,
-wenn er auf `http` steht): Korrigieren Sie zuerst `transport`, dann den Pfad.
+wenn er auf `http` steht): Korrigiere zuerst `transport`, dann den Pfad.
 Zustandslose Server (ohne `Mcp-Session-Id`) benötigen keine zusätzliche
 Konfiguration.
 
@@ -391,28 +391,28 @@ interaktive OAuth-Anmeldung statt eines statischen Tokens. GoModel meldet sich
 einmal pro Server an, und alle Clients des Gateways teilen sich diese Anmeldung.
 Direkt im Dashboard:
 
-1. Klicken Sie auf **MCP-Server hinzufügen** und wählen Sie unter **Server**
+1. Klicke auf **MCP-Server hinzufügen** und wähle unter **Server**
    den Dienst: Linear, Notion, GitHub, Sentry, Stripe, Supabase, Vercel oder
    Hugging Face. Die URL wird ausgefüllt.
-2. Wählen Sie, wie verbunden wird:
-   - **Mit ... anmelden**: Klicken Sie auf **Speichern und anmelden** und
-     erteilen Sie dann auf der Anmeldeseite des Dienstes den Zugriff. Sie
-     kehren zu **MCP Servers** zurück, und der Server verbindet sich mit dem
+2. Wähle, wie verbunden wird:
+   - **Mit ... anmelden**: Klicke auf **Speichern und anmelden** und
+     erteile dann auf der Anmeldeseite des Dienstes den Zugriff. Du
+     kehrst zu **MCP Servers** zurück, und der Server verbindet sich mit dem
      neuen Token.
-   - **API-Schlüssel oder Token**, wo der Dienst das anbietet: Fügen Sie den
-     Schlüssel ein und speichern Sie. Der Server verbindet sich damit, ohne
+   - **API-Schlüssel oder Token**, wo der Dienst das anbietet: Füge den
+     Schlüssel ein und speichere. Der Server verbindet sich damit, ohne
      Anmeldeseite. Hugging Face bietet dies oder **Keine Authentifizierung**.
 
-Für jeden anderen Server wählen Sie **Eigener Server**, geben seine URL ohne
-`Authorization`-Header ein und speichern. Sobald er mit `401 Unauthorized`
-antwortet, zeigt er **Anmeldung erforderlich**; klicken Sie in der Zeile auf das
+Für jeden anderen Server wählst du **Eigener Server**, gibst seine URL ohne
+`Authorization`-Header ein und speicherst. Sobald er mit `401 Unauthorized`
+antwortet, zeigt er **Anmeldung erforderlich**; klicke in der Zeile auf das
 Anmeldesymbol und dann auf **Weiter zur Anmeldung**. Die Verbindungs- und
 Zugriffseinstellungen eines vordefinierten Servers liegen unter **Erweiterte
-Einstellungen**; Tools wählen Sie später beim Bearbeiten des Servers.
+Einstellungen**; Tools wählst du später beim Bearbeiten des Servers.
 
-GitHub bietet keine dynamische Client-Registrierung: Registrieren Sie einmal
+GitHub bietet keine dynamische Client-Registrierung: Registriere einmal
 eine [GitHub OAuth App](https://github.com/settings/applications/new) mit der
-im Anmeldedialog angezeigten Redirect-URI und tragen Sie dort deren Client-ID
+im Anmeldedialog angezeigten Redirect-URI und trage dort deren Client-ID
 und Secret ein.
 
 GoModel folgt der
@@ -421,9 +421,9 @@ Es ermittelt den Autorisierungsserver aus den Protected-Resource-Metadaten des
 Servers, verlangt S256-PKCE, sendet den `resource`-Indikator bei jeder
 Token-Anfrage und prüft `state` und `iss` beim Rücksprung. Es registriert sich
 per dynamischer Client-Registrierung als OAuth-Client. Unterstützt der
-Autorisierungsserver das nicht, registrieren Sie selbst einen Client mit der im
+Autorisierungsserver das nicht, registriere selbst einen Client mit der im
 Dialog angezeigten Redirect-URI (`https://<gateway>/admin/mcp-oauth/callback`)
-und tragen Sie dessen Client-ID (und bei einem vertraulichen Client das Secret)
+und trage dessen Client-ID (und bei einem vertraulichen Client das Secret)
 unter **Eigenen OAuth-Client verwenden** ein.
 
 Tokens werden in der Gateway-Datenbank gespeichert, mit
@@ -434,10 +434,10 @@ Refresh-Token. Antwortet der Server auf ein noch nicht abgelaufenes Token (zum
 Beispiel ein vorzeitig widerrufenes) mit `401 Unauthorized`, erneuert GoModel es
 einmal und wiederholt den Request, sofern der Autorisierungsserver ein
 Refresh-Token ausgestellt hat; andernfalls zeigt die Zeile **Anmeldung prüfen**,
-und Sie melden sich erneut an. Die Zeile zeigt **Angemeldet**, **Anmeldung abgelaufen** (kein
-Refresh-Token mehr; melden Sie sich erneut an) oder **Anmeldung prüfen** mit dem
+und du meldest dich erneut an. Die Zeile zeigt **Angemeldet**, **Anmeldung abgelaufen** (kein
+Refresh-Token mehr; melde dich erneut an) oder **Anmeldung prüfen** mit dem
 Fehler. Eine fehlgeschlagene Erneuerung wird bei der nächsten Anfrage
-wiederholt; melden Sie sich nur erneut an, wenn der Fehler bleibt. Das Abmeldesymbol löscht die gespeicherten
+wiederholt; melde dich nur erneut an, wenn der Fehler bleibt. Das Abmeldesymbol löscht die gespeicherten
 Tokens.
 
 Hinweise:
@@ -513,11 +513,11 @@ gewohnt weiter.
 
 ## Festlegen, welche Tools ein Server bereitstellt
 
-Standardmäßig wird jedes Tool bereitgestellt, das ein Server meldet. Reduzieren Sie
+Standardmäßig wird jedes Tool bereitgestellt, das ein Server meldet. Reduziere
 die Tools eines Servers, um den Agent-Kontext klein zu halten und riskante Tools,
 etwa zum Löschen oder Mergen, von Clients fernzuhalten.
 
-Bearbeiten Sie dazu im Dashboard einen Server und nutzen Sie dessen Abschnitt
+Bearbeite dazu im Dashboard einen Server und nutze dessen Abschnitt
 **Tools**. Er listet jedes vom Server gemeldete Tool mit einer Checkbox auf, dazu ein
 Filterfeld sowie **Expose all** / **Exclude all** für die gefilterten Zeilen. Tools,
 die der Server als `read-only` oder `destructive` annotiert, tragen ein Badge. Diese
@@ -528,12 +528,12 @@ Hinweise stammen vom Upstream; GoModel überprüft sie nicht.
 | Auswahl | Gespeichert als | Neue Upstream-Tools |
 | --- | --- | --- |
 | **Expose automatically** (Standard) | `disallowed_tools`: die nicht aktivierten Tools | Bereitgestellt |
-| **Keep hidden** | `allowed_tools`: die aktivierten Tools | Verborgen, bis Sie sie aktivieren |
+| **Keep hidden** | `allowed_tools`: die aktivierten Tools | Verborgen, bis du sie aktivierst |
 
-Wählen Sie **Keep hidden** für Server, die Sie nicht kontrollieren, damit ein neues
+Wähle **Keep hidden** für Server, die du nicht kontrollierst, damit ein neues
 Tool Clients nie ohne Prüfung erreicht.
 
-Sie können ein Tool auch über seinen Namen hinzufügen, zum Beispiel bevor sich der
+Du kannst ein Tool auch über seinen Namen hinzufügen, zum Beispiel bevor sich der
 Server zum ersten Mal verbindet. Namen, die der Server nicht meldet, bleiben in der
 Liste und sind mit **Not reported by the server** markiert, sodass Tippfehler und
 entfernte Tools sichtbar bleiben.
@@ -569,8 +569,8 @@ Aufrufer aus. Beide gleichen Teilbäume ab, sodass `/contractors` auch
 
 Der User-Path des Aufrufers stammt aus seinem API-Key, sofern der Key einen hat.
 Andernfalls – auch mit dem Master-Key – stammt er aus dem Header
-`X-GoModel-User-Path` (oder dem über `USER_PATH_HEADER` benannten Header); so können
-Sie schnell prüfen, was ein bestimmter Teilbaum sieht.
+`X-GoModel-User-Path` (oder dem über `USER_PATH_HEADER` benannten Header); so kannst
+du schnell prüfen, was ein bestimmter Teilbaum sieht.
 
 Verborgene Server fehlen in `tools/list`, und `/mcp/{slug}` gibt für sie 404 zurück.
 Wie bei Tool-Filtern werden Änderungen an der Sichtbarkeit ohne neuen
@@ -581,19 +581,19 @@ daher auch bereits offene MCP-Sessions.
 
 Der Katalog-Inspektor im Dashboard (oder `GET /admin/mcp-servers/{slug}/catalog`)
 listet auf, was ein Server aktuell über das Gateway bereitstellt: Tools, Prompts,
-Ressourcen und Ressourcen-Templates mit ihren Beschreibungen, nach Anwendung Ihrer
+Ressourcen und Ressourcen-Templates mit ihren Beschreibungen, nach Anwendung deiner
 `allowed_tools`- / `disallowed_tools`-Filter. Tools, die der Server meldet, die aber
 durch die Filter verborgen werden, sind separat unter `excluded_tools` aufgeführt.
 Die Namen sind die ursprünglichen Upstream-Namen; der aggregierte Endpunkt `/mcp`
 stellt sie als `{slug}_{name}` bereit.
 
-Um alle Tools auf einmal zu sehen, klicken Sie auf der Seite MCP-Server auf
+Um alle Tools auf einmal zu sehen, klicke auf der Seite MCP-Server auf
 **Alle Tools**. Die Ansicht listet die Tools aller Server in einer durchsuchbaren
 Liste auf, mit Beschreibungen, Read-only- und Destructive-Hinweisen sowie dem
 zugehörigen Server. Bereitgestellte Tools erscheinen unter dem Namen, mit dem
 Clients sie aufrufen (`{slug}_{name}`); ausgeblendete behalten ihren Upstream-Namen.
-Wählen Sie einen virtuellen Server, um nur die Tools seiner Mitglieder zu sehen,
-und aktivieren Sie **Durch Filter ausgeblendete Tools anzeigen**, um
+Wähle einen virtuellen Server, um nur die Tools seiner Mitglieder zu sehen,
+und aktiviere **Durch Filter ausgeblendete Tools anzeigen**, um
 ausgeschlossene Tools einzubeziehen. Server, die nicht verbunden sind oder deren
 Katalog nicht geladen werden konnte, werden über den Tools aufgeführt, da ihre
 Tools fehlen können. Die Liste zeigt die gatewayweite Sicht: Sie berücksichtigt
@@ -602,9 +602,9 @@ Clients nicht alle aufgeführten Server.
 
 ### Tool-Inventar exportieren
 
-Für ein Security-Review können Sie alle Tools aller Server als eine Datei
-herunterladen. Klicken Sie in **Alle Tools** auf **CSV herunterladen** oder
-**JSON herunterladen**, oder rufen Sie die Admin-API mit einem globalen
+Für ein Security-Review kannst du alle Tools aller Server als eine Datei
+herunterladen. Klicke in **Alle Tools** auf **CSV herunterladen** oder
+**JSON herunterladen**, oder rufe die Admin-API mit einem globalen
 Admin-Schlüssel auf:
 
 ```bash
@@ -626,7 +626,7 @@ verbundener Server wird mit seinem Status und ohne Tools aufgeführt; ein Server
 im Status `degraded`, der zuvor verbunden war, behält seinen letzten Katalog,
 seine Tools bleiben also im Export.
 
-Um den Export einzuschränken, ergänzen Sie `server=<slug>`,
+Um den Export einzuschränken, ergänze `server=<slug>`,
 `virtual_server=<name>` oder `user_path=/team/x`; Letzteres behält nur die
 Server, die ein Aufrufer mit diesem User Path sieht. Der Download im Dashboard
 umfasst den in **Alle Tools** gewählten Endpunkt. Das vollständige Schema steht
@@ -642,7 +642,7 @@ unter [GET /admin/mcp-servers/catalog](/de/advanced/admin-endpoints#get-adminmcp
 - **Browser-Origins werden standardmäßig abgelehnt.** MCP-Clients sind keine
   Webseiten; daher lehnt `/mcp` jeden Request mit Browser-Fetch-Metadaten (`Origin`
   oder `Sec-Fetch-Site`) ab, sofern er nicht von einem Origin stammt, der in
-  `mcp.allowed_origins` (`MCP_ALLOWED_ORIGINS`) aufgeführt ist. Schreiben Sie
+  `mcp.allowed_origins` (`MCP_ALLOWED_ORIGINS`) aufgeführt ist. Schreibe
   Einträge so, wie ein Browser sie serialisiert — `https://console.example.com`, ohne
   abschließenden Schrägstrich, Standardports optional. Ein Origin auf der Allowlist
   erhält eine vollständige Session, einschließlich des `GET`-Benachrichtigungsstreams,
@@ -650,9 +650,9 @@ unter [GET /admin/mcp-servers/catalog](/de/advanced/admin-endpoints#get-adminmcp
   Rebinding: Rebinding ändert nur, zu welcher Adresse ein Hostname aufgelöst wird;
   `Origin` und `Host` einer umgebundenen Seite stimmen also weiterhin überein, und der
   Browser meldet weiterhin `Sec-Fetch-Site: same-origin` — ein Vergleich beweist
-  nichts, und nur eine explizite Allowlist unterscheidet Ihren Origin von dem eines
-  Angreifers. Setzen Sie `allowed_origins` nur, wenn Sie einen MCP-Web-Client von
-  einem bekannten Origin ausliefern; `"*"` vertraut jedem Origin, deaktiviert die
+  nichts, und nur eine explizite Allowlist unterscheidet deinen Origin von dem eines
+  Angreifers. Setze `allowed_origins` nur, wenn du einen MCP-Web-Client von
+  einem bekannten Origin auslieferst; `"*"` vertraut jedem Origin, deaktiviert die
   Schutzmaßnahme und erzeugt beim Start eine Warnung.
 - **stdio ist nur deklarativ möglich.** stdio-Server starten Subprozesse auf dem
   Gateway-Host und können daher nur in der `config.yaml` / `MCP_SERVERS` deklariert
@@ -660,18 +660,18 @@ unter [GET /admin/mcp-servers/catalog](/de/advanced/admin-endpoints#get-adminmcp
   gleichbedeutend mit Codeausführung auf dem Gateway sein.
 - **stdio-Subprozesse erhalten eine minimale Umgebung.** Nur `PATH`, `HOME`,
   `TMPDIR`, `USER` und `LANG` werden vererbt — niemals die Provider-API-Keys oder der
-  Master-Key des Gateways. Übergeben Sie alles Weitere explizit über die `env:`-Map
+  Master-Key des Gateways. Übergib alles Weitere explizit über die `env:`-Map
   des Servers (Werte unterstützen `${VAR}`).
 - **Im Dashboard verwaltete Zugangsdaten liegen in der Gateway-Datenbank.** Header
   von Servern, die über die Admin-Oberfläche erstellt wurden, werden im
   konfigurierten Storage-Backend gespeichert (sie werden nur auf API-/UI-Ebene
-  geschwärzt). Wenn Ihr Bedrohungsmodell Secrets in der Datenbank ausschließt,
-  deklarieren Sie diese Server stattdessen in der `config.yaml` / `MCP_SERVERS` —
+  geschwärzt). Wenn dein Bedrohungsmodell Secrets in der Datenbank ausschließt,
+  deklariere diese Server stattdessen in der `config.yaml` / `MCP_SERVERS` —
   `${ENV}`-Referenzen halten das Secret in der Umgebung, und deklarative Server
   berühren den Speicher nie.
 - **Remote-URLs sind serverseitiger ausgehender Traffic.** Im Dashboard verwaltete
-  HTTP/SSE-Server unterstützen bewusst private und Loopback-Endpunkte. Schützen Sie
-  den Admin-Schreibzugriff und setzen Sie die Egress-Richtlinie Ihres Deployments
+  HTTP/SSE-Server unterstützen bewusst private und Loopback-Endpunkte. Schütze
+  den Admin-Schreibzugriff und setze die Egress-Richtlinie deines Deployments
   durch, damit nicht vertrauenswürdige Betreiber das Gateway nicht nutzen können, um
   interne Dienste auszuspähen.
 - **Sessions sind keine Authentifizierung.** Jeder Request wird per Bearer-Token

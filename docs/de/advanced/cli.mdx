@@ -1,6 +1,6 @@
 ---
 title: "CLI-Befehle"
-description: "Kommandozeilen-Flags, mit denen Sie das GoModel-Binary prüfen, den Zustand eines laufenden Gateways abfragen und seine Konfiguration neu laden."
+description: "Kommandozeilen-Flags, mit denen du das GoModel-Binary prüfst, den Zustand eines laufenden Gateways abfragen und seine Konfiguration neu laden."
 icon: "terminal"
 keywords: ["CLI", "Kommandozeilen-Flags", "command-line flags", "Health Check", "Versionsabfrage", "Konfiguration neu laden", "config reload", "SIGHUP"]
 ---
@@ -46,7 +46,7 @@ gomodel --health
 Die Abfrage zielt immer auf das Loopback-Interface (`127.0.0.1`), da sie im
 selben Container wie der Server läuft. `PORT` und `BASE_PATH` leitet sie jedoch
 aus der Konfiguration ab, statt `8080` und `/health` fest zu verdrahten.
-Begrenzen Sie die Dauer des Requests mit `--health-timeout`:
+Begrenze die Dauer des Requests mit `--health-timeout`:
 
 ```bash
 gomodel --health --health-timeout 5s
@@ -163,9 +163,9 @@ bestehende Deployments), andernfalls das betriebssystemübliche
 benutzerspezifische Datenverzeichnis – dieselbe Auflösung, die auch die
 SQLite-Datenbank verwendet.
 
-Geben Sie jeder Instanz einen eigenen Pfad, wenn sich mehrere Gateways einen
+Gib jeder Instanz einen eigenen Pfad, wenn sich mehrere Gateways einen
 Host teilen, denn `--reload` sendet das Signal an den Prozess, den die Datei
-nennt. Soll gar keine PID-Datei geschrieben werden, setzen Sie
+nennt. Soll gar keine PID-Datei geschrieben werden, setze
 `server.pid_file: ""` in `config.yaml` – damit ist `--reload` deaktiviert,
 `kill -HUP` funktioniert aber weiterhin. Eine leere Umgebungsvariable
 `PID_FILE` gilt als nicht gesetzt und behält den Standardwert bei, wie bei
@@ -174,7 +174,7 @@ Gateway eine Warnung und arbeitet normal weiter, nur ohne Unterstützung für
 `--reload`.
 
 Sowohl das Gateway als auch `gomodel --reload` ermitteln den Pfad aus
-derselben Konfiguration. Führen Sie den Befehl daher im selben
+derselben Konfiguration. Führe den Befehl daher im selben
 Arbeitsverzeichnis (oder mit derselben `PID_FILE`) wie das Gateway aus:
 
 ```bash
@@ -203,9 +203,9 @@ leichtgewichtigere Option.
 
 Liveness (`--health`) ist das richtige Signal für einen Docker-`HEALTHCHECK`
 (Neustart bei Absturz). Readiness (`/health/ready`) ist das richtige Signal für
-eine Kubernetes-`readinessProbe` (Traffic steuern) – richten Sie sie direkt auf
-den HTTP-Endpunkt oder führen Sie `gomodel --ready` als Exec-Probe aus. Wählen
-Sie `--ready-timeout` größer als den internen Probe-Timeout des Servers pro
+eine Kubernetes-`readinessProbe` (Traffic steuern) – richte sie direkt auf
+den HTTP-Endpunkt oder führe `gomodel --ready` als Exec-Probe aus. Wähle
+`--ready-timeout` größer als den internen Probe-Timeout des Servers pro
 Abhängigkeit (`2s`), damit ein langsames Backend ein sauberes `not_ready`
 liefert, statt dass zuerst beim Client der Timeout greift.
 
@@ -250,7 +250,7 @@ LiteLLM-Datenbank, sofern er eine URL hat (`--database-url`, die
 `database_url` der Konfiguration oder `DATABASE_URL`), und importiert sie mit
 `--gomodel-url` in ein laufendes GoModel. Ein erneuter Aufruf bringt GoModel auf
 den aktuellen Stand. Eine `--gomodel-url` auf einem anderen Rechner muss
-`https` verwenden, sofern Sie nicht `--allow-http` angeben. `--skip-database`
+`https` verwenden, sofern du nicht `--allow-http` angibst. `--skip-database`
 wandelt nur die Konfiguration um.
 
 ```sh
@@ -258,5 +258,5 @@ gomodel migrate litellm [--out DIR] [--force] [--database-url URL | --skip-datab
   [--gomodel-url URL [--allow-http]] <litellm-config.yaml>
 ```
 
-Die vollständige Schritt-für-Schritt-Anleitung finden Sie unter
+Die vollständige Schritt-für-Schritt-Anleitung findest du unter
 [Migration von LiteLLM](/de/guides/migrate-from-litellm).

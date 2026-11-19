@@ -1,6 +1,6 @@
 ---
 title: "Anthropic"
-description: "Konfigurieren Sie Anthropic (Claude) in GoModel und erfahren Sie, wie der Reasoning-Aufwand auf Adaptive Thinking und die Effort-Steuerung von Claude abgebildet wird."
+description: "Konfiguriere Anthropic (Claude) in GoModel und erfahre, wie der Reasoning-Aufwand auf Adaptive Thinking und die Effort-Steuerung von Claude abgebildet wird."
 icon: "sparkles"
 keywords: ["Anthropic", "Claude", "Reasoning-Aufwand", "reasoning effort", "Extended Thinking", "extended thinking", "Provider einrichten", "provider setup"]
 ---
@@ -35,9 +35,9 @@ providers:
 ## Claude-Abonnement (OAuth-Token)
 
 GoModel akzeptiert auch ein OAuth-Token eines Claude-Abonnements als
-Anthropic-Zugangsdaten. Erzeugen Sie eines mit `claude setup-token` (erfordert ein Claude-Abonnement
+Anthropic-Zugangsdaten. Erzeuge eines mit `claude setup-token` (erfordert ein Claude-Abonnement
 – Pro, Max, Team oder Enterprise – und die Claude Code CLI) und
-setzen Sie es als Provider-Key:
+setze es als Provider-Key:
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-oat01-...
@@ -49,11 +49,11 @@ sie als `Authorization: Bearer` mit der Beta `oauth-2025-04-20` statt als
 
 <Warning>
   Anthropic autorisiert OAuth-Tokens von Abonnements **nur für Claude-Code-Traffic**.
-  Verwenden Sie dies, um Ihr eigenes Claude Code über GoModel zu routen (siehe den
+  Verwende dies, um dein eigenes Claude Code über GoModel zu routen (siehe den
   [Claude-Code-Leitfaden](/de/guides/claude-code)); Requests anderer Clients werden
   upstream mit „This credential is only authorized for use with
   Claude Code“ abgelehnt. Endpunkte außerhalb des Funktionsumfangs von Claude Code (etwa das
-  Auflisten von Modellen) können ebenfalls abgelehnt werden – schlägt die Modellerkennung des Providers fehl, konfigurieren Sie
+  Auflisten von Modellen) können ebenfalls abgelehnt werden – schlägt die Modellerkennung des Providers fehl, konfiguriere
   die `models`-Liste für den Provider explizit.
 </Warning>
 
@@ -93,11 +93,11 @@ daher werden sie bei Legacy-Modellen auf das `high`-Budget begrenzt, statt
 | `high` / `xhigh` / `max` | 20000 |
 
 <Note>
-  Lassen Sie `reasoning` weg, um Thinking beim Standardverhalten des Modells zu belassen. GoModel setzt
-  `thinking: {type: "adaptive"}` nur, wenn Sie `reasoning.effort` (oder
-  `reasoning_effort`) übergeben. Ohne diese Angabe
+  Lass `reasoning` weg, um Thinking beim Standardverhalten des Modells zu belassen. GoModel setzt
+  `thinking: {type: "adaptive"}` nur, wenn du `reasoning.effort` (oder
+  `reasoning_effort`) übergibst. Ohne diese Angabe
   nutzen Opus 4.6 bis 4.8, Sonnet 4.6 und Sonnet 5.5 kein Extended Thinking, während
-  Opus 5, Sonnet 5 und Haiku 5.5 von sich aus denken. Senden Sie
+  Opus 5, Sonnet 5 und Haiku 5.5 von sich aus denken. Sende
   `reasoning.effort: "none"`, um das abzuschalten: GoModel sendet diesen drei Modellen
   `thinking: {type: "disabled"}`. Fable 5.x, Mythos 5.x und Opus 5.5 denken immer
   (siehe den Hinweis zum dauerhaft aktiven Thinking unten). Effort ist eine separate
@@ -110,7 +110,7 @@ daher werden sie bei Legacy-Modellen auf das `high`-Budget begrenzt, statt
 <Note>
   Die Effort-Stufen sind upstream an Modelle gebunden: `xhigh` ist verfügbar bei Fable 5/5.1,
   Opus 5, Sonnet 5 und Opus 4.8/4.7; `max` bei diesen sowie Opus 4.6 und
-  Sonnet 4.6. GoModel leitet die von Ihnen gesendete Stufe weiter; Anthropic lehnt sie mit
+  Sonnet 4.6. GoModel leitet die von dir gesendete Stufe weiter; Anthropic lehnt sie mit
   400 ab, wenn das Zielmodell sie nicht unterstützt. Manuelles Thinking mit `budget_tokens`
   wird ab Opus 4.7 abgelehnt, weshalb GoModel für diese Modelle Adaptive Thinking
   verwendet.
@@ -118,11 +118,11 @@ daher werden sie bei Legacy-Modellen auf das `high`-Budget begrenzt, statt
 
 <Note>
   Bei Fable 5.x, Mythos 5.x und Opus 5.5 ist Thinking immer aktiv, unabhängig davon, ob
-  Sie `reasoning` senden; `reasoning.effort` stellt nur seine Tiefe ein. `none` kann es nicht
+  du `reasoning` sendest; `reasoning.effort` stellt nur seine Tiefe ein. `none` kann es nicht
   abschalten, daher sendet GoModel `low`, die niedrigste Stufe, die diese Modelle akzeptieren,
   statt sie bei ihrem Standard-Effort zu belassen. Die dafür verbrauchten Tokens werden in
   Chat-Completions-Responses als `usage.completion_reasoning_tokens` gemeldet. Der Reasoning-Text
-  wird nur zurückgegeben, wenn Sie `reasoning.summary` (`auto`, `concise` oder `detailed`) setzen:
+  wird nur zurückgegeben, wenn du `reasoning.summary` (`auto`, `concise` oder `detailed`) setzt:
   GoModel sendet dann `thinking.display: "summarized"`, und die Zusammenfassung kommt als
   `reasoning_content` in Chat Completions und im `content` des Reasoning-Items auf `/v1/responses` zurück.
 </Note>
@@ -140,8 +140,8 @@ Anthropic behandelt `temperature` und `top_p` bei jedem Modell als gegenseitig a
 Ein Request mit beiden wird mit ``400 "`temperature` and
 `top_p` cannot both be specified for this model"`` abgelehnt. Da OpenAI-kompatible
 Clients routinemäßig beide Standardwerte ausfüllen, leitet GoModel `temperature` weiter und
-entfernt `top_p` (wobei der verworfene Wert protokolliert wird), wenn beide vorhanden sind. Senden Sie nur
-`top_p`, wenn Sie genau diesen Parameter steuern möchten.
+entfernt `top_p` (wobei der verworfene Wert protokolliert wird), wenn beide vorhanden sind. Sende nur
+`top_p`, wenn du genau diesen Parameter steuern möchtest.
 
 Unabhängig vom Modell verlangt Anthropic bei aktivem Extended Thinking
 `temperature = 1`. GoModel entfernt jeden anderen Temperaturwert (und protokolliert
@@ -156,7 +156,7 @@ auf `/v1/responses`, das GoModel zuerst in `response_format` übersetzt.
 | `response_format` | Was GoModel sendet |
 | --- | --- |
 | `{"type": "text"}` (oder weggelassen) | Nichts – das Standardverhalten von Claude |
-| `{"type": "json_schema", ...}` | `output_config.format` mit Ihrem Schema, sodass Anthropic die Ausgabe einschränkt |
+| `{"type": "json_schema", ...}` | `output_config.format` mit deinem Schema, sodass Anthropic die Ausgabe einschränkt |
 | `{"type": "json_object"}` | Eine Anweisung im System-Prompt – das native Format von Anthropic akzeptiert nur `json_schema` |
 
 ```bash
@@ -206,14 +206,14 @@ Schema vor dem Senden an:
   ausdrücken – Anthropic lehnt das `allOf` ab, das das zweite aufnehmen würde –, daher
   wird `oneOf` entfernt und der Verlust protokolliert
 - `required` bleibt genau wie gesendet: Anthropic akzeptiert optionale Properties, sodass
-  eine Property, die Sie nicht in `required` aufgenommen haben, optional bleibt
+  eine Property, die du nicht in `required` aufgenommen hast, optional bleibt
 
 Verschachtelte Objekte, Arrays, `enum`, `const`, `anyOf`, `allOf` und `$ref`/`$defs`
 werden unverändert durchgereicht. `$ref` hat Grenzen, die GoModel nicht überbrücken kann, und
 Anthropic gibt für jede davon ein 400 mit entsprechender Angabe zurück: Verweise müssen lokal sein (`#/$defs/…`
 – eine externe URL wird abgelehnt), nicht rekursiv (eine Definition, die auf sich selbst
-verweist, direkt oder in einem Zyklus, wird abgelehnt) und außerhalb von `allOf` liegen (lösen Sie den
-Verweis selbst auf, bevor Sie mit `allOf` kombinieren).
+verweist, direkt oder in einem Zyklus, wird abgelehnt) und außerhalb von `allOf` liegen (löse den
+Verweis selbst auf, bevor du mit `allOf` kombinierst).
 
 <Note>
   `strict` wird nicht weitergeleitet – Anthropic setzt das übergebene Schema immer durch.
@@ -224,11 +224,11 @@ Verweis selbst auf, bevor Sie mit `allOf` kombinieren).
 
 ### Wenn der Inhalt kein schemakonformes JSON ist
 
-Das Schema schränkt ein, was das Modell generiert, nicht wie der Turn endet. Prüfen Sie
-die Completion, bevor Sie `message.content` parsen:
+Das Schema schränkt ein, was das Modell generiert, nicht wie der Turn endet. Prüfe
+die Completion, bevor du `message.content` parst:
 
 - `finish_reason: "length"` – die Antwort hat `max_tokens` erreicht, und das JSON ist
-  mitten in einem Wert abgeschnitten. Erhöhen Sie `max_tokens` und versuchen Sie es erneut.
+  mitten in einem Wert abgeschnitten. Erhöhe `max_tokens` und versuche es erneut.
 - `finish_reason: "tool_calls"` – das Modell hat ein Tool aufgerufen, statt zu antworten,
   daher ist `message.content` leer.
 - `finish_reason: "content_filter"` – Claude hat den Request abgelehnt (Anthropics
@@ -236,7 +236,7 @@ die Completion, bevor Sie `message.content` parsen:
   `status: "incomplete"` mit `incomplete_details.reason: "content_filter"`.
 
 Nur `finish_reason: "stop"` mit nicht leerem Inhalt sollte an einen JSON-Parser
-übergeben werden; behandeln Sie alles andere als Fehler, statt es zu parsen.
+übergeben werden; behandle alles andere als Fehler, statt es zu parsen.
 
 ## Developer-Nachrichten und strikte Tools
 
@@ -264,7 +264,7 @@ die keine deklarierte Funktion nennt, wird mit 400 abgelehnt.
 
 `verbosity` von OpenAI (und `text.verbosity` auf `/v1/responses`) hat bei Anthropic keine
 Entsprechung. GoModel protokolliert den angeforderten Wert und entfernt ihn, statt den
-Request scheitern zu lassen. Bitten Sie stattdessen im Prompt um kürzere oder längere Antworten.
+Request scheitern zu lassen. Bitte stattdessen im Prompt um kürzere oder längere Antworten.
 
 ## Erzwungene Tool-Auswahl
 
@@ -279,12 +279,12 @@ Opus 5, Haiku 5.5 und alle anderen Claude-Modelle behalten die erzwungene Tool-N
 
 <Warning>
   Die Anweisung ist eine starke Vorgabe, keine feste Garantie: Das Modell kann weiterhin
-  mit Text antworten. Wenn Sie sich auf die erzwungene Tool-Auswahl verlassen haben, um JSON zu erhalten, verwenden Sie
+  mit Text antworten. Wenn du dich auf die erzwungene Tool-Auswahl verlassen hast, um JSON zu erhalten, verwende
   stattdessen [Structured Output](/de/providers/anthropic#structured-output).
 </Warning>
 
 ## Nativer Passthrough
 
 Um Claude-native Request-Felder ohne OpenAI-kompatible Entsprechung zu senden
-(zum Beispiel eingebettete `system`-Einträge mitten in einer Aufgabe im `messages`-Array), verwenden Sie die
+(zum Beispiel eingebettete `system`-Einträge mitten in einer Aufgabe im `messages`-Array), verwende die
 Passthrough-Route `/p/anthropic/messages`, die den Body unverändert weiterleitet.

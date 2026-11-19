@@ -1,6 +1,6 @@
 ---
 title: "OpenTelemetry"
-description: "Exportieren Sie GoModel-Traces und -Metriken mit OTEL_ENABLED über OTLP, konfigurieren Sie den Collector mit den Standardvariablen OTEL_* und erfahren Sie, welche Spans und GenAI-Metriken exportiert werden."
+description: "Exportiere GoModel-Traces und -Metriken mit OTEL_ENABLED über OTLP, konfiguriere den Collector mit den Standardvariablen OTEL_* und erfahre, welche Spans und GenAI-Metriken exportiert werden."
 icon: "network"
 keywords: ["OpenTelemetry", "OTLP", "Tracing", "tracing", "Traces", "Metriken", "metrics", "Observability", "observability", "GenAI semantic conventions", "Jaeger", "Grafana Tempo"]
 ---
@@ -14,15 +14,15 @@ OTLP-kompatible Backend zeigt, welches Modell über welchen Provider aufgerufen
 wurde, wie lange der Aufruf gedauert hat und ob er fehlgeschlagen ist.
 
 Zugangsdaten und Fehlermeldungen werden nie exportiert. Prompts und
-Completions werden nur exportiert, wenn Sie die
-[Inhaltserfassung](/de/guides/opentelemetry#erfassung-von-prompts-und-completions) einschalten. Für das
+Completions werden nur exportiert, wenn du die
+[Inhaltserfassung](/de/guides/opentelemetry#erfassung-von-prompts-und-completions) einschaltest. Für das
 Scraping durch Prometheus siehe [Prometheus-Metriken](/de/guides/prometheus-metrics);
 beides kann gleichzeitig laufen.
 
 ## Schnellstart
 
-Der Export ist **standardmäßig deaktiviert**. Setzen Sie `OTEL_ENABLED=true`
-und richten Sie den Exporter auf Ihren Collector aus:
+Der Export ist **standardmäßig deaktiviert**. Setze `OTEL_ENABLED=true`
+und richte den Exporter auf deinen Collector aus:
 
 <CodeGroup>
 
@@ -117,7 +117,7 @@ Sampling betrifft nur Traces. Metriken sind immer vollständig.
 
 <Warning>
   Export-Header wie `authorization` werden mit jedem Export-Request übertragen.
-  Verwenden Sie einen `https://`-Endpunkt (oder einen gRPC-Endpunkt mit TLS),
+  Verwende einen `https://`-Endpunkt (oder einen gRPC-Endpunkt mit TLS),
   sobald Header Zugangsdaten enthalten; Klartext ist nur für einen Collector
   auf demselben Host akzeptabel. GoModel protokolliert beim Start eine Warnung,
   wenn Header konfiguriert sind und der effektive Endpunkt Klartext verwendet
@@ -152,7 +152,7 @@ Jeder logische Aufruf an einen Modell-Provider wird instrumentiert mit:
 | `gen_ai.operation.name` | `chat` | Je nach Endpunkt auch `embeddings`, `generate_content` und weitere. |
 | `gen_ai.request.model` | `gpt-5` | Das Modell, das an Upstream gesendet wird, nach Auflösung von Aliassen und virtuellen Modellen. |
 | `gen_ai.provider.name` | `openai` | Semantischer Provider-Name: `openai`, `anthropic`, `aws.bedrock`, `gcp.vertex_ai`, `gcp.gemini`, `azure.ai.openai`, `x_ai`, … oder `unknown`. |
-| `gomodel.provider.name` | `openai-eu` | Der exakte Provider-Name aus Ihrer GoModel-Konfiguration. |
+| `gomodel.provider.name` | `openai-eu` | Der exakte Provider-Name aus deiner GoModel-Konfiguration. |
 | `gen_ai.request.stream` | `true` | Nur bei Streaming-Aufrufen vorhanden. |
 | `error.type` | `429`, `timeout`, `network_error`, `empty_stream` | Nur bei Fehlern vorhanden; `empty_stream` kennzeichnet einen Stream, der vor seinem ersten Chunk endete. |
 | `http.response.status_code` | `200` | Upstream-Status. |
@@ -180,8 +180,8 @@ Metriken sind Histogramme in Sekunden mit denselben Attributen:
 
 `gomodel.client.empty_responses` zählt gepufferte Chat- und Responses-API-Aufrufe,
 die `200` ohne Choices, ohne Ausgabe oder ohne Token-Nutzung zurückgegeben
-haben. Diese Aufrufe sehen in den obigen Histogrammen erfolgreich aus, richten
-Sie Alerts daher stattdessen auf diesen Zähler ein. Sein `error.type` ist
+haben. Diese Aufrufe sehen in den obigen Histogrammen erfolgreich aus, richte
+Alerts daher stattdessen auf diesen Zähler ein. Sein `error.type` ist
 `no_choices`, `no_output` (ein abgeschlossener Responses-API-Aufruf ohne
 Ausgabeelemente) oder `no_usage` (Inhalt ohne Token-Nutzung).
 
@@ -271,8 +271,8 @@ haben. Request-Zahlen pro Aufrufer liefert in Prometheus
 
 ### Erfassung von Prompts und Completions
 
-Die Inhaltserfassung ist **standardmäßig deaktiviert**. Schalten Sie sie ein,
-um die ausgetauschten Nachrichten in Ihrem Tracing-Backend zu sehen, zum
+Die Inhaltserfassung ist **standardmäßig deaktiviert**. Schalte sie ein,
+um die ausgetauschten Nachrichten in deinem Tracing-Backend zu sehen, zum
 Beispiel als Ein- und Ausgabe einer Generation in [Langfuse](/de/guides/langfuse):
 
 <CodeGroup>
@@ -309,11 +309,11 @@ Modusnamen neuerer OpenTelemetry-Instrumentierungen.
 
 <Warning>
   Bei aktivierter Erfassung verlässt jeder gesampelte Prompt und jede
-  gesampelte Completion das Gateway zusammen mit ihrem Trace. Aktivieren Sie
-  sie nur für ein Backend, das diese Daten speichern darf, und erwägen Sie
+  gesampelte Completion das Gateway zusammen mit ihrem Trace. Aktiviere
+  sie nur für ein Backend, das diese Daten speichern darf, und erwäge
   Sampling (`OTEL_TRACES_SAMPLER`), um das Volumen zu begrenzen. Das
   [Request-Log](/de/advanced/configuration#request-logging) behält Inhalte
-  stattdessen in Ihrem eigenen Speicher.
+  stattdessen in deinem eigenen Speicher.
 </Warning>
 
 ## Datenschutz
@@ -333,9 +333,9 @@ Drittanbieters gehen kann, ohne preiszugeben, was durch das Gateway fließt:
   Client die Kardinalität der Metriken nicht über den `Host`-Header aufblähen
   kann.
 - User Paths, API-Key-Namen und Request-Labels werden nur auf den Token- und
-  Kostenmetriken exportiert, und nur, wenn Sie das passende
+  Kostenmetriken exportiert, und nur, wenn du das passende
   [Aufrufer-Attribut](/de/guides/opentelemetry#aufrufer-attribute)
-  einschalten. Secrets und IDs von API-Keys werden nie exportiert.
+  einschaltest. Secrets und IDs von API-Keys werden nie exportiert.
 
 ## Neu laden
 
@@ -363,4 +363,4 @@ services:
     ports: ["16686:16686"]
 ```
 
-Senden Sie einen Request über das Gateway und öffnen Sie `http://localhost:16686`.
+Sende einen Request über das Gateway und öffne `http://localhost:16686`.

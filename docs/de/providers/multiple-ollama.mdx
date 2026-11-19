@@ -1,12 +1,12 @@
 ---
 title: "Ollama"
-description: "Verwenden Sie eine GoModel-Instanz mit mehreren Ollama-Providern über Umgebungsvariablen mit Suffix und provider-qualifizierte Modell-IDs."
+description: "Verwende eine GoModel-Instanz mit mehreren Ollama-Providern über Umgebungsvariablen mit Suffix und provider-qualifizierte Modell-IDs."
 icon: "network"
 keywords: ["Ollama", "lokale Modelle", "local models", "self-hosted", "mehrere Provider", "multiple providers"]
 ---
 
 GoModel registriert Ollama über `OLLAMA_BASE_URL`. Um mehrere Ollama-Instanzen hinter
-einem Gateway zu betreiben, verwenden Sie Umgebungsvariablen mit Suffix.
+einem Gateway zu betreiben, verwende Umgebungsvariablen mit Suffix.
 
 ## Konfiguration
 
@@ -17,11 +17,11 @@ GOMODEL_MASTER_KEY=change-me
 ```
 
 `OLLAMA_A_BASE_URL` registriert den Provider `ollama-a`; `OLLAMA_B_BASE_URL`
-registriert `ollama-b`. Verwenden Sie pro Instanz unterschiedliche Ports oder
+registriert `ollama-b`. Verwende pro Instanz unterschiedliche Ports oder
 Hostnamen.
 
 <Tip>
-  Fügen Sie unter Linux dem Befehl `docker run` die Option
+  Füge unter Linux dem Befehl `docker run` die Option
   `--add-host=host.docker.internal:host-gateway` hinzu, damit der Container Ollama
   auf dem Host erreichen kann.
 </Tip>
@@ -96,14 +96,14 @@ console.log(completion.choices[0].message.content);
 
 `GET /v1/models` liefert provider-qualifizierte IDs wie `ollama-a/llama3.2` und
 `ollama-b/llama3.2`. Ein reiner Modellname wird zu dem Provider geroutet, der ihn in
-der Registrierungsreihenfolge als Erster bereitstellt — verwenden Sie die
+der Registrierungsreihenfolge als Erster bereitstellt — verwende die
 qualifizierte Form, um explizit auszuwählen.
 
 ## Wann YAML dennoch hilft
 
-Greifen Sie nur dann zur `config.yaml`, wenn generierte Namen wie `ollama-a` nicht
-ausreichen oder wenn Sie Einstellungen zur Ausfallsicherheit pro Provider
-überschreiben möchten:
+Greife nur dann zur `config.yaml`, wenn generierte Namen wie `ollama-a` nicht
+ausreichen oder wenn du Einstellungen zur Ausfallsicherheit pro Provider
+überschreiben möchtest:
 
 ```yaml
 providers:

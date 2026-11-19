@@ -1,6 +1,6 @@
 ---
 title: "audio.cpp"
-description: "Routen Sie Sprach- und Transkriptions-Requests von GoModel zu einem lokalen audio.cpp-Server, einschließlich seiner nativen Routen für Details, Alignment und Live-Streaming."
+description: "Route Sprach- und Transkriptions-Requests von GoModel zu einem lokalen audio.cpp-Server, einschließlich seiner nativen Routen für Details, Alignment und Live-Streaming."
 icon: "audio-lines"
 keywords: ["audio.cpp", "audiocpp_server", "text-to-speech", "Text-to-Speech", "TTS", "speech-to-text", "Speech-to-Text", "ASR", "lokale Modelle", "local models", "self-hosted", "GGUF"]
 ---
@@ -15,7 +15,7 @@ Es handelt sich um einen reinen Audio-Provider. `/v1/audio/speech` und
 `/v1/embeddings` liefern `invalid_request_error`, weil `audiocpp_server` keine
 solchen Endpunkte hat.
 
-Starten Sie zuerst den Server mit einer Konfiguration, die die bereitgestellten
+Starte zuerst den Server mit einer Konfiguration, die die bereitgestellten
 Modelle benennt:
 
 ```json
@@ -47,15 +47,15 @@ GOMODEL_MASTER_KEY=change-me
 ```
 
 `AUDIOCPP_API_KEY` ist optional und in der Regel nicht gesetzt: audio.cpp hat keine
-eigene Authentifizierung. Setzen Sie ihn nur, wenn ein Reverse Proxy vor dem Server
+eigene Authentifizierung. Setze ihn nur, wenn ein Reverse Proxy vor dem Server
 ein Bearer-Token erwartet.
 
 <Note>
   Diese Beispiele gehen davon aus, dass GoModel in Docker läuft und audio.cpp auf
   dem Host — daher `host.docker.internal`. Läuft GoModel direkt auf dem Host,
-  verwenden Sie `http://localhost:8099`. Ein abschließendes `/v1` wird akzeptiert
-  und entfernt, sodass beide Schreibweisen denselben Server ansprechen. Sie
-  betreiben mehrere Instanzen? Registrieren Sie jede unter einem Namen mit Suffix:
+  verwende `http://localhost:8099`. Ein abschließendes `/v1` wird akzeptiert
+  und entfernt, sodass beide Schreibweisen denselben Server ansprechen. Du
+  betreibst mehrere Instanzen? Registriere jede unter einem Namen mit Suffix:
   `AUDIOCPP_GPU_BASE_URL=...` erzeugt den Provider `audiocpp-gpu`.
 </Note>
 
@@ -79,7 +79,7 @@ curl -s http://localhost:8080/v1/audio/transcriptions \
 `voice` benennt ein Stimm-Preset von audio.cpp, eine gecachte Voice-ID oder eine
 WAV-Datei in der konfigurierten Stimmbibliothek — audio.cpp hat keinen festen
 Stimmensatz, daher bedeuten OpenAIs `alloy`/`nova`/… für audio.cpp nichts. Welche
-Stimmen ein Modell anbietet, listen Sie mit
+Stimmen ein Modell anbietet, liste mit
 [`GET /v1/audio/voices`](/de/advanced/api-endpoints#stimmen-abfragen) auf:
 
 ```bash
@@ -87,7 +87,7 @@ curl -s "http://localhost:8080/v1/audio/voices?model=audiocpp/pocket-tts" \
   -H "Authorization: Bearer change-me"
 ```
 
-Lassen Sie `voice` weg, damit audio.cpp das konfigurierte
+Lass `voice` weg, damit audio.cpp das konfigurierte
 `default_voice_preset` des Modells anwendet.
 
 Parameter für das Klonen von Stimmen (`voice_ref`, `reference_text`, `seed`,
@@ -165,7 +165,7 @@ Anders als bei den meisten Provider-Typen ist dies standardmäßig nicht aktivie
 Diese Oberfläche ist undurchsichtig, ein Request, der sie erreicht, wird also nicht
 gegen die Modell-Allowlist des Aufrufers geprüft, und audio.cpp stellt dort
 Modellverwaltung (`/models/load`, `/tasks/unload_models`) und serverlokale
-Dateipfade bereit. Aktivieren Sie sie nur für vertrauenswürdige Aufrufer.
+Dateipfade bereit. Aktiviere sie nur für vertrauenswürdige Aufrufer.
 
 Das Präfix `/v1` ist optional (`/p/audiocpp/audio/voices` und
 `/p/audiocpp/v1/audio/voices` sind dieselbe Route); `/health` wird vom Server-Root
@@ -210,6 +210,6 @@ Eigenschaft des Modells, nicht der Route.
 - **Capabilities** — `streaming` für ein Modell, das mit `"mode": "streaming"`
   konfiguriert ist.
 
-Das sind Standardwerte, keine Festlegungen: Alles, was Sie in den Modell-Metadaten
-des Providers deklarieren, hat Vorrang — siehe
+Das sind Standardwerte, keine Festlegungen: Alles, was du in den Modell-Metadaten
+des Providers deklarierst, hat Vorrang — siehe
 [Modell-Metadaten](/de/advanced/model-metadata).

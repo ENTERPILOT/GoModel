@@ -1,13 +1,13 @@
 ---
 title: "GoModel & OpenClaw"
-description: "Verwenden Sie GoModel als OpenAI-kompatibles AI-Gateway für OpenClaw, mit empfohlenen OpenAI-Modellen und einer produktionsreifen Einrichtung."
+description: "Verwende GoModel als OpenAI-kompatibles AI-Gateway für OpenClaw, mit empfohlenen OpenAI-Modellen und einer produktionsreifen Einrichtung."
 icon: "paw-print"
 keywords: ["OpenClaw", "OpenAI-kompatibles Gateway", "OpenAI-compatible gateway", "KI-Gateway", "Einrichtungsanleitung"]
 ---
 
 ## Übersicht
 
-GoModel ist ein OpenAI-kompatibles **AI-Gateway** für OpenClaw. Es bietet Ihnen einen einzigen,
+GoModel ist ein OpenAI-kompatibles **AI-Gateway** für OpenClaw. Es bietet dir einen einzigen,
 stabilen API-Endpunkt und routet Requests an OpenAI und andere Provider. Dadurch bleibt die
 OpenClaw-Konfiguration einfach, und der Wechsel zwischen Modellen wird leichter.
 
@@ -27,8 +27,8 @@ Diese OpenAI-Modell-IDs sind derzeit gute Standardwerte für OpenClaw:
 | `gpt-5.2-codex` | Fortgeschrittene Coding-Workflows in Codex-ähnlichen Umgebungen (auf die Responses API ausgerichtet) |
 
 <Note>
-  Prüfen Sie zuerst die Verfügbarkeit in Ihrer GoModel-Instanz: `GET /v1/models`. Die
-  Verfügbarkeit von Modellen hängt von der Stufe Ihres OpenAI-Kontos und der verwendeten API ab.
+  Prüfe zuerst die Verfügbarkeit in deiner GoModel-Instanz: `GET /v1/models`. Die
+  Verfügbarkeit von Modellen hängt von der Stufe deines OpenAI-Kontos und der verwendeten API ab.
 </Note>
 
 Referenz:
@@ -37,7 +37,7 @@ Referenz:
 
 ## 1. GoModel starten
 
-Starten Sie GoModel mit mindestens einem Provider und einem Master-Key:
+Starte GoModel mit mindestens einem Provider und einem Master-Key:
 
 ```bash
 docker run --rm -p 8080:8080 \
@@ -46,7 +46,7 @@ docker run --rm -p 8080:8080 \
   enterpilot/gomodel
 ```
 
-Prüfen Sie Ihre Modellliste:
+Prüfe deine Modellliste:
 
 <CodeGroup>
 
@@ -81,7 +81,7 @@ for await (const model of client.models.list()) {
 
 ## 2. GoModel-Provider in OpenClaw hinzufügen
 
-Fügen Sie in Ihrer OpenClaw-Konfiguration einen eigenen Provider hinzu, der OpenAI-kompatible
+Füge in deiner OpenClaw-Konfiguration einen eigenen Provider hinzu, der OpenAI-kompatible
 Requests verwendet:
 
 ```json
@@ -139,25 +139,25 @@ Requests verwendet:
 }
 ```
 
-Ersetzen Sie die Modell-IDs durch die Werte, die GoModel unter `/v1/models` zurückgibt.
+Ersetze die Modell-IDs durch die Werte, die GoModel unter `/v1/models` zurückgibt.
 
 <Tip>
   `gpt-5.2-codex` ist für Coding-Agents sehr relevant, wird von OpenAI derzeit aber als auf die
-  Responses API ausgerichtet positioniert. Wenn Ihre OpenClaw-Einrichtung `openai-completions`
-  verwendet, bevorzugen Sie `gpt-5-mini` oder `gpt-5.2`.
+  Responses API ausgerichtet positioniert. Wenn deine OpenClaw-Einrichtung `openai-completions`
+  verwendet, bevorzuge `gpt-5-mini` oder `gpt-5.2`.
 </Tip>
 
 ## 3. Aus OpenClaw heraus validieren
 
-Senden Sie nach dem Neuladen von OpenClaw einen Test-Prompt mit Ihrem konfigurierten
+Sende nach dem Neuladen von OpenClaw einen Test-Prompt mit deinem konfigurierten
 Standardmodell.
 
-Wenn Sie `401 Unauthorized` erhalten, prüfen Sie, ob OpenClaw denselben Wert wie
+Wenn du `401 Unauthorized` erhältst, prüfe, ob OpenClaw denselben Wert wie
 `GOMODEL_MASTER_KEY` sendet.
 
 ## Hinweise
 
 - Läuft GoModel in Docker und OpenClaw nicht, ist `http://localhost:8080` in der Regel korrekt.
-- Laufen beide in verschiedenen Containern, verwenden Sie statt `localhost` ein gemeinsames Docker-Netzwerk und den Hostnamen des Containers.
-- Sie können mehrere über GoModel bereitgestellte Modelle verfügbar machen, indem Sie weitere Einträge unter `models.providers.gomodel.models` hinzufügen.
-- Als AI-Gateway bietet Ihnen GoModel außerdem zentrale Authentifizierung, Request-Logs, Nutzungsanalysen und eine Provider-Abstraktion über einen einzigen OpenAI-kompatiblen Endpunkt.
+- Laufen beide in verschiedenen Containern, verwende statt `localhost` ein gemeinsames Docker-Netzwerk und den Hostnamen des Containers.
+- Du kannst mehrere über GoModel bereitgestellte Modelle verfügbar machen, indem du weitere Einträge unter `models.providers.gomodel.models` hinzufügst.
+- Als AI-Gateway bietet dir GoModel außerdem zentrale Authentifizierung, Request-Logs, Nutzungsanalysen und eine Provider-Abstraktion über einen einzigen OpenAI-kompatiblen Endpunkt.

@@ -1,7 +1,7 @@
 ---
 title: "Anthropic Messages API und Token-Zählung"
 sidebarTitle: "Anthropic Messages API"
-description: "Nehmen Sie Requests im Anthropic-Stil an /v1/messages in GoModel entgegen und routen Sie sie zu jedem konfigurierten Provider – mit Budgets, Failover und Nutzungserfassung."
+description: "Nimm Requests im Anthropic-Stil an /v1/messages in GoModel entgegen und route sie zu jedem konfigurierten Provider – mit Budgets, Failover und Nutzungserfassung."
 icon: "message-square-code"
 keywords: ["Anthropic Messages API", "/v1/messages", "count_tokens", "Token zählen", "count message tokens", "Claude API", "Anthropic SDK", "API-Übersetzung", "API translation"]
 ---
@@ -59,7 +59,7 @@ unverändert.
 | --- | --- |
 | `POST /v1/messages` | Erstellt eine Nachricht über das übersetzte Modell-Routing. Unterstützt Streaming (`stream: true`) mit SSE-Events im Anthropic-Format. |
 | `POST /v1/messages/count_tokens` | Zählt Input-Tokens. Exakt für Modelle, deren Provider einen Zähl-Endpunkt hat (Anthropic, OpenAI, Gemini im nativen AI-Studio-Modus); andernfalls eine kalibrierte Schätzung. |
-| `GET /v1/models` | Gibt den Katalog in der Anthropic-Listenform zurück (`type: "model"`, `display_name`, `created_at`), wenn der Request den Header `anthropic-version` trägt, den die Anthropic-SDKs immer senden; andernfalls in der OpenAI-Form. Der gesamte Katalog wird auf einer Seite zurückgegeben, sofern der Client nicht mit `limit`, `after_id` oder `before_id` paginiert (Anthropic-Paginierung, `has_more` wird entsprechend gesetzt); ein Cursor, der kein gelistetes Modell benennt, ergibt einen `400` – beginnen Sie dann wieder bei der ersten Seite. |
+| `GET /v1/models` | Gibt den Katalog in der Anthropic-Listenform zurück (`type: "model"`, `display_name`, `created_at`), wenn der Request den Header `anthropic-version` trägt, den die Anthropic-SDKs immer senden; andernfalls in der OpenAI-Form. Der gesamte Katalog wird auf einer Seite zurückgegeben, sofern der Client nicht mit `limit`, `after_id` oder `before_id` paginiert (Anthropic-Paginierung, `has_more` wird entsprechend gesetzt); ein Cursor, der kein gelistetes Modell benennt, ergibt einen `400` – beginne dann wieder bei der ersten Seite. |
 | `GET /v1/models/{model}` | Ruft ein einzelnes Modell ab, in der Anthropic-Modellform, wenn der Request `anthropic-version` trägt; andernfalls in der OpenAI-Form. Eine reine ID, die für Inferenz funktioniert (`gpt-6-luna`), liefert das gelistete Modell, zu dem sie aufgelöst wird. Fehler (zum Beispiel ein unbekanntes Modell) verwenden unter derselben Bedingung den Anthropic-Fehler-Envelope (`{"type": "error", "error": {...}}`). |
 | `POST /v1/messages/batches` | Erstellt einen Message Batch. Inline-`requests[].params` werden pro Eintrag übersetzt, sodass ein Batch jeden Provider mit nativer Batch-Unterstützung ansprechen kann (Anthropic, OpenAI, …), nicht nur Anthropic. |
 | `GET /v1/messages/batches` | Listet Batches auf (`limit`, `after_id`). |
@@ -227,7 +227,7 @@ durchgängig erhalten:
 - **Reasoning von einem Provider, der es nicht signiert** (DeepSeek, Fireworks, …),
   wird als `thinking`-Block mit `signature: ""` zurückgegeben — das Feld ist im
   Anthropic-Schema erforderlich, und der leere Wert zeigt an, dass das Reasoning
-  unsigniert ist. Senden Sie den Turn unverändert zurück: Der Block wird an diesen
+  unsigniert ist. Sende den Turn unverändert zurück: Der Block wird an diesen
   Provider wie jeder andere wiedergegeben. Anthropic akzeptiert nur Signaturen, die
   es selbst erzeugt hat; daher wird ein unsignierter Block aus einem Turn entfernt,
   bevor dieser Claude erreicht (der Rest des Turns wird unverändert gesendet).
@@ -235,7 +235,7 @@ durchgängig erhalten:
   Provider haben kein entsprechendes Flag und erhalten nur den Inhalt des Ergebnisses.
 - **`tool_use.extra_content`** transportiert den Replay-Zustand eines anderen
   Providers, etwa eine Gemini-3-Thought-Signature, zurück zu diesem Provider. GoModel
-  setzt es an den `tool_use`-Blöcken, die es zurückgibt; senden Sie es unverändert
+  setzt es an den `tool_use`-Blöcken, die es zurückgibt; sende es unverändert
   zurück. Siehe
   [Extra Content, Thinking-Blöcke und Thought Signatures](/de/advanced/extra-content).
 - **Server-/integrierte Tools** (Websuche, Codeausführung, …) und ihre
@@ -347,7 +347,7 @@ durchgängig erhalten:
   kommen im abschließenden Event `message_delta`, das SDK-Akkumulatoren bevorzugen.
 
 Für byte-genaue Anthropic-Treue über die unterstützten Cache-Steuerungen hinaus
-verwenden Sie stattdessen die Passthrough-Route `/p/anthropic/v1/messages`.
+verwendest du stattdessen die Passthrough-Route `/p/anthropic/v1/messages`.
 
-Die Designbegründung und die Abwägungen finden Sie in
+Die Designbegründung und die Abwägungen findest du in
 [ADR-0007](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0007-anthropic-messages-ingress.md).

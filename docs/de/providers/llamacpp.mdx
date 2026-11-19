@@ -1,7 +1,7 @@
 ---
 title: "llama.cpp-Server: Anbindung an ein LLM-Gateway"
 sidebarTitle: "llama.cpp"
-description: "Leiten Sie OpenAI-kompatible GoModel-Requests an eine llama.cpp-Instanz von llama-server weiter (derselbe Provider-Typ funktioniert auch für LM Studio)."
+description: "Leite OpenAI-kompatible GoModel-Requests an eine llama.cpp-Instanz von llama-server weiter (derselbe Provider-Typ funktioniert auch für LM Studio)."
 icon: "server"
 keywords: ["llama.cpp", "llama-server", "llama.cpp router mode", "llama.cpp Router-Modus", "LM Studio", "lokale Modelle", "self-hosted", "OpenAI-kompatibler Server"]
 ---
@@ -9,14 +9,14 @@ keywords: ["llama.cpp", "llama-server", "llama.cpp router mode", "llama.cpp Rout
 `llama-server` von llama.cpp spricht direkt die OpenAI-API, und GoModel hat dafür einen eigenen
 Provider-Typ `llamacpp`: Der API-Key ist optional (llama-server läuft meist ohne Key), und
 Provider-eigene Endpunkte wie `/health` und `/rerank` sind über Passthrough erreichbar.
-Registrieren Sie llama.cpp **nicht** als `ollama`-Provider: Dieser Typ spricht die native API von
+Registriere llama.cpp **nicht** als `ollama`-Provider: Dieser Typ spricht die native API von
 Ollama, die llama.cpp nicht implementiert.
 
 Derselbe Provider-Typ eignet sich für LM Studio und jeden anderen einfachen OpenAI-kompatiblen
 lokalen Server.
 
-Starten Sie zuerst llama-server. Ohne `--alias` ist die Modell-ID in `/v1/models` der Pfad der
-Modelldatei – setzen Sie einen Alias, damit Requests einen sauberen Namen verwenden können:
+Starte zuerst llama-server. Ohne `--alias` ist die Modell-ID in `/v1/models` der Pfad der
+Modelldatei – setze einen Alias, damit Requests einen sauberen Namen verwenden können:
 
 ```bash
 llama-server -hf ggml-org/gemma-3-4b-it-GGUF --alias gemma-3-4b-it --port 8081
@@ -36,8 +36,8 @@ GOMODEL_MASTER_KEY=change-me
 
 <Note>
   Diese Beispiele gehen davon aus, dass GoModel in Docker läuft und llama-server auf dem Host unter
-  `localhost:8081` – daher `host.docker.internal`. Läuft GoModel direkt auf dem Host, verwenden Sie
-  `http://localhost:8081/v1`. Sie betreiben mehrere llama-server-Instanzen? Registrieren Sie jede
+  `localhost:8081` – daher `host.docker.internal`. Läuft GoModel direkt auf dem Host, verwende
+  `http://localhost:8081/v1`. Du betreibst mehrere llama-server-Instanzen? Registriere jede
   unter einem Namen mit Suffix: `LLAMACPP_STUDIO_BASE_URL=...` erzeugt den Provider
   `llamacpp-studio`.
 </Note>
@@ -60,7 +60,7 @@ curl -s http://localhost:8080/v1/chat/completions \
 
 `/v1/embeddings` funktioniert über GoModel, solange llama-server den Endpunkt bedienen kann: Das
 geladene Modell muss einen anderen Pooling-Typ als `none` verwenden. Spezielle Embedding-GGUFs
-deklarieren das Pooling in der Regel in ihren Metadaten; andernfalls übergeben Sie
+deklarieren das Pooling in der Regel in ihren Metadaten; andernfalls übergibst du
 `--pooling mean` (oder `cls`/`last`). Das Flag `--embeddings` ist optional – es beschränkt den
 Server ausschließlich auf Embeddings:
 
@@ -96,8 +96,8 @@ Auflistung mit genau einem Eintrag abgefragt. Im
 mehrere Modelle bereitstellt, trägt jedes Modell seinen eigenen `meta.n_ctx` und benötigt
 überhaupt kein `/props`.
 
-Beides sind Standardwerte, keine endgültigen Entscheidungen: Alles, was Sie in den
-Modell-Metadaten des Providers deklarieren, hat Vorrang – siehe
+Beides sind Standardwerte, keine endgültigen Entscheidungen: Alles, was du in den
+Modell-Metadaten des Providers deklarierst, hat Vorrang – siehe
 [Modell-Metadaten](/de/advanced/model-metadata).
 
 ## Modellklassifizierung
@@ -106,7 +106,7 @@ llama-server meldet nichts, was ein Chat-Modell von einem Embedding-Modell unter
 klassifiziert GoModel seine Modelle anhand der ID: Namen, die `embed` enthalten oder bekannten
 Embedding-Familien entsprechen (`bge`, `e5`, `gte`, `minilm`), werden als Embedding-Modelle
 eingeordnet, und Namen, die `rerank` enthalten, als Reranking-Modelle – bei IDs mit Namespace wird
-das letzte Pfadsegment geprüft. Für alles, was unklassifiziert bleibt, deklarieren Sie `modes` in
+das letzte Pfadsegment geprüft. Für alles, was unklassifiziert bleibt, deklariere `modes` in
 den Modell-Metadaten des Providers. Kategorien wirken sich nur auf die Gruppierung im Dashboard
 aus; `/v1/embeddings` routet unabhängig von der Kategorie zu jedem Modell, das der Provider
 bereitstellt.
@@ -121,7 +121,7 @@ bereitstellt.
   [Passthrough](/de/features/passthrough-api) unter `/p/llamacpp/...` erreichbar: Pfade im
   OpenAI-Format (`chat/completions`, `embeddings`, ...) werden von der `/v1`-Basis bedient, alles
   andere (`/health`, `/props`, `/tokenize`, `/infill`, ...) vom Server-Root. Bei einer Einrichtung
-  mit Suffix verwenden Sie den Instanznamen, z. B. `/p/llamacpp-studio/health`.
-- **Reranking** – llama-server bietet Reranking (starten Sie ihn mit einem Reranker-Modell und
-  `--rerank --embedding --pooling rank`), GoModel hat jedoch keinen Rerank-Endpunkt; erreichen Sie
+  mit Suffix verwendest du den Instanznamen, z. B. `/p/llamacpp-studio/health`.
+- **Reranking** – llama-server bietet Reranking (starte ihn mit einem Reranker-Modell und
+  `--rerank --embedding --pooling rank`), GoModel hat jedoch keinen Rerank-Endpunkt; erreiche
   es über Passthrough: `POST /p/llamacpp/rerank` (oder `/p/llamacpp/v1/rerank`).

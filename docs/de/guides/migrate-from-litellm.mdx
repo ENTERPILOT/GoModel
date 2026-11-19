@@ -1,6 +1,6 @@
 ---
 title: "Migration von LiteLLM"
-description: "Konvertieren Sie eine config.yaml des LiteLLM-Proxys mit einem Befehl in GoModel, betreiben Sie beide Gateways parallel und stellen Sie Clients um, ohne Modellnamen zu ändern."
+description: "Konvertiere eine config.yaml des LiteLLM-Proxys mit einem Befehl in GoModel, betreibe beide Gateways parallel und stelle Clients um, ohne Modellnamen zu ändern."
 icon: "arrow-right-left"
 keywords: ["LiteLLM", "Migration", "migration", "migrieren", "LiteLLM-Alternative", "LiteLLM alternative", "config.yaml", "model_list", "router_settings", "Virtual Keys", "Teams", "Budgets", "Fallbacks"]
 ---
@@ -21,48 +21,48 @@ eigentliche Arbeit steckt in der Gateway-Konfiguration, und
 
 ## 1. Die Konfiguration konvertieren
 
-Führen Sie zuerst einen Probelauf (Dry Run) durch. Er gibt den Migrationsbericht
+Führe zuerst einen Probelauf (Dry Run) durch. Er gibt den Migrationsbericht
 und die erzeugte Konfiguration aus und schreibt nichts:
 
 ```bash
 gomodel migrate litellm litellm_config.yaml
 ```
 
-Schreiben Sie dann die Dateien:
+Schreibe dann die Dateien:
 
 ```bash
 gomodel migrate litellm --out ./gomodel litellm_config.yaml
 ```
 
-Mit Docker (das Image läuft als Benutzer ohne Root-Rechte, übergeben Sie daher
-Ihren eigenen Benutzer, um in das gemountete Verzeichnis schreiben zu können):
+Mit Docker (das Image läuft als Benutzer ohne Root-Rechte, übergib daher
+deinen eigenen Benutzer, um in das gemountete Verzeichnis schreiben zu können):
 
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work \
   enterpilot/gomodel migrate litellm --out /work/gomodel /work/litellm_config.yaml
 ```
 
-`--out` schreibt drei Dateien und verweigert das Überschreiben, sofern Sie nicht
-`--force` übergeben:
+`--out` schreibt drei Dateien und verweigert das Überschreiben, sofern du nicht
+`--force` übergibst:
 
 | Datei | Inhalt |
 | --- | --- |
 | `config.yaml` | Provider, virtuelle Modelle, Retries, Timeouts und Observability-Einstellungen |
-| `.env` | Secrets, die direkt in der LiteLLM-Konfiguration standen (API-Keys, Master-Key). Wird mit Modus `0600` erstellt; halten Sie die Datei aus der Versionskontrolle heraus |
+| `.env` | Secrets, die direkt in der LiteLLM-Konfiguration standen (API-Keys, Master-Key). Wird mit Modus `0600` erstellt; halte die Datei aus der Versionskontrolle heraus |
 | `MIGRATION_REPORT.md` | Erstellte Provider und virtuelle Modelle, zu setzende Umgebungsvariablen sowie jede geänderte oder nicht übernommene Einstellung |
 
 `os.environ/NAME`-Referenzen werden zu `${NAME}`, sodass die Umgebung, mit der
-Sie LiteLLM bereits betreiben, weiterhin funktioniert. `include:`-Dateien werden
+du LiteLLM bereits betreibst, weiterhin funktioniert. `include:`-Dateien werden
 mitverarbeitet.
 
 ## 2. Den Bericht prüfen
 
-Lesen Sie `MIGRATION_REPORT.md`, bevor Sie Traffic senden. Der Bericht enthält
+Lies `MIGRATION_REPORT.md`, bevor du Traffic sendest. Der Bericht enthält
 drei Listen:
 
-- **Review before switching traffic**: Dinge, die Sie abschließen müssen, etwa
+- **Review before switching traffic**: Dinge, die du abschließen musst, etwa
   Guardrails, Model Access Groups oder einen Langfuse-Callback. Guardrails in
-  GoModel sind deaktiviert, bis Sie sie konfigurieren.
+  GoModel sind deaktiviert, bis du sie konfigurierst.
 - **Not migrated**: Einstellungen ohne Entsprechung in GoModel, einzeln
   aufgeführt. Nichts wird stillschweigend verworfen.
 - **Behavior changes**: Einstellungen, die konvertiert wurden, sich aber etwas
@@ -70,12 +70,12 @@ drei Listen:
 
 ## 3. GoModel neben LiteLLM betreiben
 
-Starten Sie GoModel mit den erzeugten Dateien auf einem anderen Port. Fügen Sie
+Starte GoModel mit den erzeugten Dateien auf einem anderen Port. Füge
 die im Bericht unter **Environment** aufgeführten Variablen (diejenigen, die
-LiteLLM bereits mit `os.environ/` gelesen hat) zu `.env` hinzu und legen Sie die
+LiteLLM bereits mit `os.environ/` gelesen hat) zu `.env` hinzu und lege die
 Datei an, falls der Konverter keine geschrieben hat. GoModel verweigert den
 Start, solange die Variable, die `server.master_key` liest, nicht gesetzt ist.
-Senden Sie dann einige Test-Requests mit den Modellen, die Ihre Clients
+Sende dann einige Test-Requests mit den Modellen, die deine Clients
 verwenden:
 
 ```yaml compose.yaml
@@ -93,11 +93,11 @@ cd gomodel
 docker compose up
 ```
 
-Laden Sie `.env` über `env_file` in Compose (oder über den eigenen `.env`-Loader
-von GoModel, wenn Sie das Binary aus diesem Verzeichnis starten).
+Lade `.env` über `env_file` in Compose (oder über den eigenen `.env`-Loader
+von GoModel, wenn du das Binary aus diesem Verzeichnis startest).
 `docker run --env-file` liest Werte wörtlich und würde daher die
 Anführungszeichen beibehalten, die `.env` um Werte wie Inline-JSON-Zugangsdaten
-setzt. Wenn Sie das Binary direkt ausführen, hat eine bereits in Ihrer Shell
+setzt. Wenn du das Binary direkt ausführst, hat eine bereits in deiner Shell
 exportierte Variable wie `OPENAI_API_KEY` Vorrang vor demselben Namen in `.env`.
 
 ```bash
@@ -107,7 +107,7 @@ curl -s http://localhost:8080/v1/chat/completions \
   -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "ok?"}]}'
 ```
 
-`GET /v1/models` listet dieselben Modellnamen auf wie LiteLLM. Stellen Sie dann
+`GET /v1/models` listet dieselben Modellnamen auf wie LiteLLM. Stelle dann
 die Clients Team für Team um.
 
 ## 4. Keys, Teams und Budgets importieren
@@ -119,7 +119,7 @@ aus der Konfiguration, andernfalls `DATABASE_URL`. Er liest nur, und zwar
 innerhalb einer schreibgeschützten Transaktion. Ohne Datenbank-URL konvertiert
 er nur die Konfiguration.
 
-Sobald GoModel mit der konvertierten Konfiguration läuft, importieren Sie in die
+Sobald GoModel mit der konvertierten Konfiguration läuft, importiere in die
 laufende Instanz:
 
 ```bash
@@ -132,7 +132,7 @@ Master-Key von LiteLLM, und benötigt `https` für ein GoModel auf einem anderen
 Rechner (`--allow-http` in einem vertrauenswürdigen Netzwerk, etwa einem
 Compose-Netzwerk). Ohne `--gomodel-url` führt er den Import nur im Bericht auf.
 
-Führen Sie ihn erneut aus, während beide Gateways parallel laufen: Er bringt
+Führe ihn erneut aus, während beide Gateways parallel laufen: Er bringt
 GoModel auf den aktuellen Stand von LiteLLM. Keys erhalten ihren aktuellen Pfad,
 ihre Labels, erlaubten Modelle und ihr Ablaufdatum, und Keys, die LiteLLM
 inzwischen gesperrt hat oder die abgelaufen sind, werden deaktiviert. In GoModel
@@ -172,8 +172,8 @@ Der Modellzugriff folgt den Regeln von LiteLLM. Die Modellliste eines Benutzers
 gilt für dessen persönliche Keys, nicht für die Team-Keys, die er besitzt, da nur
 persönliche Keys unter `/users/<user>` liegen. Modellnamen werden in die
 dahinterliegenden Provider-Modelle aufgelöst, da GoModel das Modell prüft, in das
-ein virtuelles Modell aufgelöst wird; wenn Sie ein virtuelles Modell später auf
-andere Modelle richten, aktualisieren Sie die erlaubten Modelle, die es genannt
+ein virtuelles Modell aufgelöst wird; wenn du ein virtuelles Modell später auf
+andere Modelle richtest, aktualisiere die erlaubten Modelle, die es genannt
 haben.
 
 Ein `max_budget` oder Rate-Limit von `0` lehnt in LiteLLM jeden Request ab.
@@ -214,7 +214,7 @@ und im Bericht aufgeführt werden:
 | `routing_strategy: cost-based-routing` | Virtuelles Modell mit `strategy: cost` |
 | Andere Routing-Strategien | `round_robin` mit Failover (im Bericht vermerkt) |
 | `fallbacks`, `default_fallbacks` | Ein virtuelles Modell mit `failover`, das die Gruppe und dann ihre Fallbacks versucht |
-| `context_window_fallbacks`, `content_policy_fallbacks` | Nicht konvertiert; fügen Sie Fehlerformulierungen zu [`failover.retry_on_errors`](/de/features/failover) hinzu |
+| `context_window_fallbacks`, `content_policy_fallbacks` | Nicht konvertiert; füge Fehlerformulierungen zu [`failover.retry_on_errors`](/de/features/failover) hinzu |
 | `model_group_alias` | Ein virtuelles Modell, das auf die Gruppe zeigt |
 | `openai/*`-Wildcards | Der Provider stellt seinen gesamten Katalog bereit; partielle Wildcards werden zu einem [`model_filter`](/de/advanced/config-yaml#modelle-eines-providers-filtern) |
 | `input_cost_per_token`, `output_cost_per_token`, `max_input_tokens` | `metadata.pricing` des Modells (pro Million Token) und `context_window` |

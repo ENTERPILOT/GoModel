@@ -1,6 +1,6 @@
 ---
 title: "Benutzer"
-description: "Legen Sie fest, welche Modelle eine Gruppe, ein Benutzer oder ein API-Key aufrufen darf – mit Allowlists, die im Baum der User Paths nach unten vererbt werden."
+description: "Lege fest, welche Modelle eine Gruppe, ein Benutzer oder ein API-Key aufrufen darf – mit Allowlists, die im Baum der User Paths nach unten vererbt werden."
 icon: "users"
 keywords: ["Benutzer", "users", "Gruppen", "groups", "Modellzugriff", "model access", "erlaubte Modelle", "allowed models", "user_path", "API-Key", "API key", "Zugriffsrichtlinie", "access policy"]
 ---
@@ -8,7 +8,7 @@ keywords: ["Benutzer", "users", "Gruppen", "groups", "Modellzugriff", "model acc
 ## Übersicht
 
 Die Seite **Users** macht aus der [`user_path`](/de/features/user-path)-Hierarchie
-hinter Ihren API-Keys einen Baum aus Gruppen und Benutzern und erlaubt es,
+hinter deinen API-Keys einen Baum aus Gruppen und Benutzern und erlaubt es,
 für jeden Knoten einzuschränken, welche Modelle Requests darunter aufrufen
 dürfen:
 
@@ -16,8 +16,8 @@ dürfen:
 - `/acme/eng/alice` ist ein **Benutzer** – API-Keys sind direkt daran gebunden.
 
 Nichts muss vorab angelegt werden. Der Baum wird aus den User Paths
-bestehender API-Keys abgeleitet; fügen Sie einem Knoten nur dann eine
-Richtlinie hinzu, wenn Sie ihn einschränken möchten.
+bestehender API-Keys abgeleitet; füge einem Knoten nur dann eine
+Richtlinie hinzu, wenn du ihn einschränken möchtest.
 
 ## Regeln
 
@@ -111,12 +111,12 @@ Jeder Eintrag in einer Allowlist ist ein Selektor:
 | `anthropic/*`      | jedes Modell des Providers `anthropic`             |
 | `openai/gpt-4o`    | ein Modell bei einem Provider                           |
 | `gpt-4o`           | diese Modell-ID bei jedem Provider                       |
-| `*`                | jedes Modell; überflüssig, sofern Sie keine explizite Zeile wünschen, und erweitert niemals die Liste eines übergeordneten Knotens (Regel 3) |
+| `*`                | jedes Modell; überflüssig, sofern du keine explizite Zeile wünschst, und erweitert niemals die Liste eines übergeordneten Knotens (Regel 3) |
 
 Provider-Namen müssen einem konfigurierten Provider entsprechen; unbekannte
 Namen werden beim Speichern der Richtlinie abgelehnt. Virtuelle Modelle sind
 keine Selektoren: Ein Alias oder ein Load Balancer wird vor der Prüfung in das
-konkrete Provider-Modell aufgelöst. Erlauben Sie daher die Zielmodelle, nicht
+konkrete Provider-Modell aufgelöst. Erlaube daher die Zielmodelle, nicht
 das virtuelle Modell. Ein Name eines virtuellen Modells in einer Liste wird als
 reine Modell-ID akzeptiert, passt aber nie auf etwas. Ein Load Balancer, dessen
 Ziele sich über mehrere Provider erstrecken, ist nur nutzbar, wenn jedes Ziel,
@@ -159,23 +159,23 @@ Listen keine gemeinsame Schnittmenge haben) – und der Anzahl der daran
 gebundenen API-Keys. Die eigenen `allowed_models` eines verwalteten API-Keys
 können einen Request weiter einschränken, als der Pfad anzeigt. Der Editor
 warnt bereits während der Eingabe, wenn die Liste kein Modell mehr übrig
-lassen würde. Fügen Sie einen Knoten hinzu oder bearbeiten Sie ihn, um seine
-Modelle festzulegen; entfernen Sie die Richtlinie, um auf die Limits der
+lassen würde. Füge einen Knoten hinzu oder bearbeite ihn, um seine
+Modelle festzulegen; entferne die Richtlinie, um auf die Limits der
 übergeordneten Knoten zurückzufallen.
 
 Die Anzahl der Keys verlinkt auf die Seite **API Keys**, gefiltert auf den
 Teilbaum dieses Pfads, und jede Zeile hat eine Aktion *Add API key*, die das
 Formular zum Anlegen eines Keys mit vorausgefülltem Pfad öffnet.
 
-Allowlists pro Key befinden sich auf der Seite **API Keys**: Setzen Sie
-`Allowed models` beim Anlegen eines Keys oder bearbeiten Sie sie später in der
+Allowlists pro Key befinden sich auf der Seite **API Keys**: Setze
+`Allowed models` beim Anlegen eines Keys oder bearbeite sie später in der
 Zeile des Keys. Die Spalte **Effective models** dort ist die endgültige
 Antwort für diese Zugangsdaten – Pfadrichtlinien, die eigene Liste des Keys und
 modellseitige Richtlinien kombiniert.
 
 ### Konfiguration
 
-Deklarieren Sie Richtlinien in `config.yaml` unter `users:` (siehe Beispiel
+Deklariere Richtlinien in `config.yaml` unter `users:` (siehe Beispiel
 oben) oder in der Umgebungsvariable `USERS` als JSON-Array mit denselben
 Feldern:
 
@@ -197,4 +197,4 @@ deklarierten Richtlinie lässt den Start fehlschlagen.
 | `PUT`    | `/admin/auth-keys/{id}/allowed-models`  | Ersetzt die Allowlist eines API-Keys           |
 
 `POST /admin/auth-keys` akzeptiert `allowed_models` beim Anlegen. Request- und
-Response-Formate finden Sie unter [Admin-Endpunkte](/de/advanced/admin-endpoints).
+Response-Formate findest du unter [Admin-Endpunkte](/de/advanced/admin-endpoints).

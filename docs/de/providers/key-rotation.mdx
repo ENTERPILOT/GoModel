@@ -1,12 +1,12 @@
 ---
 title: "Rotation von API-Keys"
-description: "Geben Sie einem Provider mehrere API-Keys, verteilen Sie Sessions darauf und erhalten Sie die Prompt-Cache-Affinität."
+description: "Gib einem Provider mehrere API-Keys, verteile Sessions darauf und erhalte die Prompt-Cache-Affinität."
 icon: "key-round"
 keywords: ["Key Rotation", "API key rotation", "mehrere API-Keys", "multiple API keys", "Round Robin", "Rate-Limits"]
 ---
 
 Ein Provider hat normalerweise einen API-Key, und jeder Request an ihn
-verwendet diesen Key. Konfigurieren Sie mehr als einen, verteilt GoModel
+verwendet diesen Key. Konfiguriere mehr als einen, verteilt GoModel
 identifizierte Sessions auf diese Keys. Jede Konversation bleibt standardmäßig
 bei einem Key, sodass sie weiterhin den Prompt-Cache des Providers treffen
 kann, während jeder Key nur einen Teil des gesamten Traffics trägt.
@@ -22,7 +22,7 @@ Key verhält sich alles genau wie bisher.
 
 ## Konfigurieren
 
-Fügen Sie Keys mit nummerierten Umgebungsvariablen hinzu. `<PROVIDER>_API_KEY`
+Füge Keys mit nummerierten Umgebungsvariablen hinzu. `<PROVIDER>_API_KEY`
 ist der erste Key; `<PROVIDER>_API_KEY_2`, `_3` usw. fügen die weiteren hinzu.
 
 ```bash
@@ -49,7 +49,7 @@ providers:
 `api_key` und `api_keys` lassen sich kombinieren; `api_key` wird zuerst
 verwendet.
 
-Um wieder striktes Round Robin pro Request zu erhalten, deaktivieren Sie die
+Um wieder striktes Round Robin pro Request zu erhalten, deaktiviere die
 Session-Bindung für diesen Provider:
 
 ```yaml
@@ -156,6 +156,6 @@ mehr nötig, nur um Prompt-Caching über mehrere Keys hinweg zu erhalten.
 
 ## Überprüfen
 
-Die Rotation wird nicht über die API gemeldet. Um sie zu bestätigen, beobachten
-Sie das Nutzungs-Dashboard des Providers selbst: Der Traffic sollte sich
+Die Rotation wird nicht über die API gemeldet. Um sie zu bestätigen, beobachte
+das Nutzungs-Dashboard des Providers selbst: Der Traffic sollte sich
 ungefähr gleichmäßig auf die Keys verteilen.

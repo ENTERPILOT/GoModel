@@ -1,6 +1,6 @@
 ---
 title: "Konfiguration"
-description: "Konfigurieren Sie GoModel über Umgebungsvariablen, .env-Dateien oder config.yaml und erfahren Sie, welche Ebene Vorrang hat. Jede Einstellung hat einen Standardwert, GoModel funktioniert also ganz ohne Konfiguration."
+description: "Konfiguriere GoModel über Umgebungsvariablen, .env-Dateien oder config.yaml und erfahre, welche Ebene Vorrang hat. Jede Einstellung hat einen Standardwert, GoModel funktioniert also ganz ohne Konfiguration."
 icon: "sliders-horizontal"
 keywords: ["Konfiguration", "configuration", "Umgebungsvariablen", "environment variables", ".env", "Einstellungen", "settings"]
 ---
@@ -11,7 +11,7 @@ GoModel folgt dem Prinzip guter Standardwerte. Die Standardeinstellungen sollen 
 
 ## Wie überschreibe ich die Standardeinstellungen?
 
-Wir verwenden eine dreistufige Konfigurations-Pipeline. Jede Einstellung hat einen sinnvollen Standardwert, sodass Sie den Server ganz ohne Konfiguration starten können.
+Wir verwenden eine dreistufige Konfigurations-Pipeline. Jede Einstellung hat einen sinnvollen Standardwert, sodass du den Server ganz ohne Konfiguration starten kannst.
 
 {/* Umgebungsvariablen (haben immer Vorrang) → config.yaml (optional) → Standardwerte im Code */}
 
@@ -22,10 +22,10 @@ flowchart LR
 ```
 
 <Tip>
-  Da GoModel ohne Konfigurationsdateien sofort einsatzbereit ist, können Sie es
+  Da GoModel ohne Konfigurationsdateien sofort einsatzbereit ist, kannst du es
   in einer Minute ausprobieren.
 
-Starten Sie hier: [Schnellstart](/de/getting-started/quickstart)
+Starte hier: [Schnellstart](/de/getting-started/quickstart)
 
 </Tip>
 
@@ -35,7 +35,7 @@ GoModel erkennt Provider automatisch anhand bekannter Umgebungsvariablen.
 
 ### 1. Umgebungsvariablen
 
-Der gängigste Weg, GoModel zu konfigurieren. Setzen Sie eine der folgenden Variablen, um Standardwerte zu überschreiben.
+Der gängigste Weg, GoModel zu konfigurieren. Setze eine der folgenden Variablen, um Standardwerte zu überschreiben.
 
 #### Server
 
@@ -50,7 +50,7 @@ Der gängigste Weg, GoModel zu konfigurieren. Setzen Sie eine der folgenden Vari
 | `BODY_SIZE_LIMIT`    | Maximale Größe des Request-Bodys (z. B. `10M`, `1024K`, `500KB`), komprimiert und dekomprimiert | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | Sekunden, die ein einzelner Response-Schreibvorgang auf einer Modellroute darauf warten darf, dass der Client ihn liest; `0` deaktiviert | `60`                   |
 | `USER_PATH_HEADER`   | Header, über den `user_path`-Werte von Requests gelesen und geschrieben werden  | `X-GoModel-User-Path`  |
-| `SERVER_TRUSTED_PROXIES` | Netzwerke, in denen Ihre eigenen Proxys stehen; aktiviert Client-Adressen aus Headern | _(leer)_ |
+| `SERVER_TRUSTED_PROXIES` | Netzwerke, in denen deine eigenen Proxys stehen; aktiviert Client-Adressen aus Headern | _(leer)_ |
 | `SERVER_CLIENT_IP_HEADER` | Header, in dem ein vertrauenswürdiger Proxy die Client-Adresse übergibt | `X-Forwarded-For` |
 | `SERVER_TRUSTED_HOPS` | Anzahl der Proxys zwischen Client und Gateway; `0` durchsucht stattdessen die Kette | `0` |
 | `SERVER_TLS_CERT_FILE` | PEM-Zertifikat, mit dem der Listener HTTPS ausliefert; zusammen mit dem Schlüssel setzen | _(leer, einfaches HTTP)_ |
@@ -79,18 +79,18 @@ greift daher nur, wenn der Socket des Clients so lange voll bleibt, niemals
 während ein langsames Modell nichts zu senden hat. Greift er, wird die
 Verbindung geschlossen, der Upstream-Request an den Provider abgebrochen und
 der Request-Log-Eintrag vermerkt `client_stalled`, auch wenn der Stream aus dem
-Response-Cache bedient wurde. Erhöhen Sie den Wert für Clients, die das Lesen
-eines Streams berechtigterweise länger als eine Minute pausieren; setzen Sie
+Response-Cache bedient wurde. Erhöhe den Wert für Clients, die das Lesen
+eines Streams berechtigterweise länger als eine Minute pausieren; setze
 `0`, um ihn zu deaktivieren.
 
 #### Client-Adressen hinter einem Proxy
 
 Jede Client-Adresse, die GoModel meldet – in Request-Log-Einträgen, Rate-Limit-Keys,
 Logs –, ist die Adresse der Verbindung, die das Gateway erreicht hat. Hinter
-einem Reverse Proxy zeigen daher alle den Proxy. Setzen Sie
-`SERVER_TRUSTED_PROXIES` auf die Netzwerke, in denen Ihre eigenen Proxys
+einem Reverse Proxy zeigen daher alle den Proxy. Setze
+`SERVER_TRUSTED_PROXIES` auf die Netzwerke, in denen deine eigenen Proxys
 stehen, dann liest GoModel stattdessen den weitergeleiteten Client. Nichts gilt
-als vertrauenswürdig, bevor Sie es auflisten, nicht einmal Loopback, und
+als vertrauenswürdig, bevor du es auflistest, nicht einmal Loopback, und
 Änderungen an diesen Einstellungen erfordern einen Neustart.
 
 ```bash
@@ -104,15 +104,15 @@ Einträge sind CIDR-Netzwerke, einzelne Adressen (ein einzelner Host) oder ein P
 | `loopback` | `127.0.0.0/8`, `::1/128`                             |
 | `private`  | `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7` |
 
-Verwenden Sie bevorzugt genau das Subnetz, in dem Ihr Proxy steht. `private`
+Verwende bevorzugt genau das Subnetz, in dem dein Proxy steht. `private`
 erlaubt jedem privaten Client, seine eigene weitergeleitete Adresse zu setzen.
-Das ist die falsche Wahl, wenn auch Ihre Clients private Adressen haben – ein
+Das ist die falsche Wahl, wenn auch deine Clients private Adressen haben – ein
 Homelab, dessen Clients in `192.168.1.0/24` liegen und dessen Cluster in
 `10.42.0.0/16` läuft, sollte nur `10.42.0.0/16` auflisten.
 
 Standardmäßig liest GoModel `X-Forwarded-For`, an das jeder Hop die von ihm
 gesehene Adresse anhängt, und erfasst den nächstgelegenen Hop, der nicht zu
-Ihren vertrauenswürdigen Netzwerken gehört: die letzte Adresse, die Ihre eigene
+deinen vertrauenswürdigen Netzwerken gehört: die letzte Adresse, die deine eigene
 Infrastruktur geschrieben hat, und zugleich die am weitesten entfernte, die ein
 Client nicht überschreiben kann. Ein Request von außerhalb der aufgelisteten
 Netzwerke, eine nicht parsebare Kette und eine Kette, die ausschließlich aus
@@ -130,8 +130,8 @@ Zwei Einstellungen ändern, wie der Header gelesen wird:
   `Forwarded`-Header nach RFC 7239 wird nicht unterstützt.
 - `SERVER_TRUSTED_HOPS` nimmt den `X-Forwarded-For`-Eintrag in einer festen
   Tiefe, statt die Kette zu durchsuchen – `1` ist der Eintrag ganz rechts, `2`
-  der davor. Verwenden Sie diese Einstellung, wenn Ihr Edge in einer bekannten
-  Tiefe sitzt, aber wechselnde Adressen nutzt, die Sie nicht aufzählen können.
+  der davor. Verwende diese Einstellung, wenn dein Edge in einer bekannten
+  Tiefe sitzt, aber wechselnde Adressen nutzt, die du nicht aufzählen kannst.
   Die Verbindung muss weiterhin aus einem vertrauenswürdigen Netzwerk kommen,
   und eine Kette, die kürzer als die konfigurierte Tiefe ist, fällt auf die
   Verbindungsadresse zurück.
@@ -139,11 +139,11 @@ Zwei Einstellungen ändern, wie der Header gelesen wird:
 Beide setzen `SERVER_TRUSTED_PROXIES` voraus; allein gesetzt führen sie zu
 einem Fehler beim Start, statt stillschweigend wirkungslos zu bleiben.
 
-Setzen Sie `GOMODEL_DEMO_MODE=true` für eine öffentliche oder gemeinsam
+Setze `GOMODEL_DEMO_MODE=true` für eine öffentliche oder gemeinsam
 genutzte Demo-Instanz. GoModel protokolliert dann beim Start und alle fünf
 Minuten eine Warnung, zeigt oben im Dashboard eine dauerhafte Warnung an und
 gibt `DEMO_MODE=on` über die freigegebene `/admin/runtime/config`-Response aus.
-Der Demo-Modus setzt den Speicher nicht zurück; planen Sie das separat im
+Der Demo-Modus setzt den Speicher nicht zurück; plane das separat im
 Deployment ein.
 
 Der Demo-Modus umgeht auch nicht die Authentifizierung. Ein Log-Modus
@@ -151,15 +151,15 @@ Der Demo-Modus umgeht auch nicht die Authentifizierung. Ein Log-Modus
 mindestens einen verwalteten Gateway-API-Key enthält, sodass Requests ein
 Bearer-Token erfordern, selbst wenn `GOMODEL_MASTER_KEY` leer ist. Deaktivierte
 oder abgelaufene verwaltete Keys lassen die Authentifizierung als
-Fail-Closed-Sicherheitsmaßnahme aktiv. Löschen Sie alle verwalteten Keys, um in
-den nicht authentifizierten Modus zurückzukehren, oder konfigurieren Sie einen
+Fail-Closed-Sicherheitsmaßnahme aktiv. Lösche alle verwalteten Keys, um in
+den nicht authentifizierten Modus zurückzukehren, oder konfiguriere einen
 Master-Key für die Wiederherstellung.
 
 #### Master-Key deaktivieren
 
 Der Master-Key ist eine einzige globale Berechtigung: Wer ihn besitzt, ist
 gleichzeitig jeder Benutzer des Gateways. Sobald verwaltete Gateway-API-Keys
-ausgegeben sind, setzen Sie `MASTER_KEY_DISABLED=true`
+ausgegeben sind, setze `MASTER_KEY_DISABLED=true`
 (`server.master_key_disabled` in YAML), um ihn stillzulegen. Dann bleiben diese
 Keys – zusammen mit einer eventuell betriebenen Authentifizierungserweiterung
 wie SSO – der einzige Zugang. User Paths, Budgets, Rate-Limits und
@@ -174,28 +174,28 @@ GoModel verwirft einen konfigurierten Master-Key beim Start, sodass nichts ihn
 akzeptiert oder daraus ableitet: Er schlägt am Gateway fehl, an
 [`GET /v1/auth/verify`](/de/advanced/api-endpoints#key-verifizierung) und an
 `/admin`. Ein in der Umgebung oder in `config.yaml` verbliebener Key ist
-wirkungslos statt ein Fehler. Deshalb können Sie den Schalter gefahrlos
-umlegen, bevor Sie den Key entfernen.
+wirkungslos statt ein Fehler. Deshalb kannst du den Schalter gefahrlos
+umlegen, bevor du den Key entfernst.
 
 Deaktivieren ist nicht dasselbe, wie `GOMODEL_MASTER_KEY` leer zu lassen. Ein
 leerer Wert betreibt das Gateway ohne Authentifizierung und öffnet `/admin/*`,
 damit das Dashboard seinen ersten verwalteten Key anlegen kann. Sofern keine
 Authentifizierungserweiterung konfiguriert ist, bleibt `/admin/*` auch dann
 offen, wenn bereits verwaltete Keys existieren, und GoModel protokolliert
-währenddessen beim Start eine Sicherheitswarnung. Setzen Sie daher einen
-Master-Key oder deaktivieren Sie ihn, sobald der erste Key mit
+währenddessen beim Start eine Sicherheitswarnung. Setze daher einen
+Master-Key oder deaktiviere ihn, sobald der erste Key mit
 Dashboard-Zugriff ausgegeben ist. Ein deaktivierter Master-Key schlägt
 dagegen geschlossen fehl (Fail-Closed): Jeder Request benötigt Zugangsdaten,
-und die Admin API bleibt hinter Zugangsdaten mit Dashboard-Zugriff. Geben Sie
-diese Zugangsdaten aus, bevor Sie den Schalter umlegen – ohne Master-Key, ohne
+und die Admin API bleibt hinter Zugangsdaten mit Dashboard-Zugriff. Gib
+diese Zugangsdaten aus, bevor du den Schalter umlegst – ohne Master-Key, ohne
 verwalteten Key und ohne Authentifizierungserweiterung lehnt das Gateway jeden
 Request ab und protokolliert beim Start eine entsprechende Warnung.
 
 #### Präfix verwalteter Keys
 
-Standardmäßig beginnen verwaltete Keys mit `sk_gom_`. Setzen Sie `AUTH_KEY_PREFIX`
-(`server.auth_key_prefix` in YAML), um sie mit Ihrer eigenen Marke zu versehen
-oder an das Key-Format Ihrer Organisation bzw. an die Muster Ihres
+Standardmäßig beginnen verwaltete Keys mit `sk_gom_`. Setze `AUTH_KEY_PREFIX`
+(`server.auth_key_prefix` in YAML), um sie mit deiner eigenen Marke zu versehen
+oder an das Key-Format deiner Organisation bzw. an die Muster deines
 Secret-Scanners anzupassen:
 
 ```bash
@@ -210,8 +210,8 @@ gekürzten Anzeigewert.
 
 #### HTTPS ausliefern
 
-Lassen Sie die `SERVER_TLS_*`-Einstellungen leer, um hinter einem Proxy, der TLS
-terminiert, einfaches HTTP auszuliefern. Setzen Sie Zertifikat und Schlüssel
+Lass die `SERVER_TLS_*`-Einstellungen leer, um hinter einem Proxy, der TLS
+terminiert, einfaches HTTP auszuliefern. Setze Zertifikat und Schlüssel
 (`server.tls_cert_file` und `server.tls_key_file` in YAML), wenn Clients sich
 direkt mit dem Gateway verbinden:
 
@@ -230,15 +230,15 @@ Verbindungen behalten den Zugriff, den sie erhalten haben. Nur eine Hälfte des
 Paars zu setzen oder eine beim Start fehlende
 oder ungültige Datei ist ein Fehler. Die Einstellungen erwarten Dateipfade,
 keine PEM-Inhalte; ein Wert mit PEM wird abgelehnt. Sie akzeptieren
-`${env:...}`-Referenzen; `${file:...}` liefert den Inhalt einer Datei, nutzen Sie
+`${env:...}`-Referenzen; `${file:...}` liefert den Inhalt einer Datei, nutze
 es also nur für eine Datei, die einen Pfad enthält. Diese Einstellungen betreffen
 nur eingehende Verbindungen; das [Vertrauen für ausgehendes
 TLS](#vertrauen-für-ausgehendes-tls) wird separat konfiguriert. Ein Beispiel mit
-cert-manager finden Sie im [Produktionsleitfaden](/de/guides/production#natives-tls).
+cert-manager findest du im [Produktionsleitfaden](/de/guides/production#natives-tls).
 
 #### MCP Gateway
 
-Den vollständigen Leitfaden finden Sie unter [MCP Gateway](/de/features/mcp-gateway).
+Den vollständigen Leitfaden findest du unter [MCP Gateway](/de/features/mcp-gateway).
 
 | Variable      | Beschreibung                                                                                                                      | Standardwert            |
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
@@ -257,7 +257,7 @@ unten.
 
 | Variable     | Beschreibung                                                                                                                                                                       | Standardwert              |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `LOG_FORMAT` | `text` für farbige, menschenlesbare Ausgabe, `json` für strukturierte Logs. Ohne Wert wird automatisch erkannt: Text auf einem TTY, sonst JSON. Erzwingen Sie `json` in Produktiv-, CloudWatch-, Datadog- und GCP-Umgebungen. | _(automatische Erkennung)_      |
+| `LOG_FORMAT` | `text` für farbige, menschenlesbare Ausgabe, `json` für strukturierte Logs. Ohne Wert wird automatisch erkannt: Text auf einem TTY, sonst JSON. Erzwinge `json` in Produktiv-, CloudWatch-, Datadog- und GCP-Umgebungen. | _(automatische Erkennung)_      |
 | `LOG_LEVEL`  | Minimales Log-Level: `debug`, `info`, `warn`, `error`. Die Aliasse `dbg`, `inf`, `warning`, `err` werden ebenfalls akzeptiert.                                                                    | `info`               |
 
 #### Cache
@@ -278,7 +278,7 @@ unten.
 | `RESPONSE_CACHE_PARTITION_BY_USER_PATH` | Gibt jedem effektiven `user_path` eigene Einträge im exakten und semantischen Cache | `false` |
 
 <Tip>
-  Unter [Cache](/de/features/cache) finden Sie das Verhalten des exakten Caches,
+  Unter [Cache](/de/features/cache) findest du das Verhalten des exakten Caches,
   Response-Header, Analytics-Endpunkte sowie die Partitionierung nach `user_path`
   und die Grenzen ihrer Isolation.
 </Tip>
@@ -313,9 +313,9 @@ Der Speicher wird gemeinsam von Request-Logging, Nutzungserfassung und künftige
   einheitlich Unix-Sekunden, und der erste Start konvertiert die Spalte direkt
   in der Datenbank. Eine manuelle Migration ist nicht nötig, aber die Änderung
   ist nicht umkehrbar: Ein älteres Binary, das gegen eine konvertierte
-  Datenbank gestartet wird, startet nicht. Erstellen Sie vor dem Upgrade ein
-  Backup, falls Sie eventuell zurückrollen müssen, und rollen Sie zurück, indem
-  Sie dieses Backup wiederherstellen, nicht indem Sie das Binary austauschen.
+  Datenbank gestartet wird, startet nicht. Erstelle vor dem Upgrade ein
+  Backup, falls du eventuell zurückrollen musst, und rolle zurück, indem
+  du dieses Backup wiederherstellst, nicht indem du das Binary austauschst.
   Workflow-Werte für `created_at` werden auf ganze Sekunden abgerundet und in
   UTC dargestellt. SQLite- und MongoDB-Deployments sind nicht betroffen.
 </Warning>
@@ -336,8 +336,8 @@ Größe nie begrenzt, und die Datenbank bleibt klein. Siehe
 
 Der Standardpfad folgt der SQLite-Regel: `./data/media`, wenn neben dem Prozess
 ein `./data`-Verzeichnis existiert, andernfalls das benutzerspezifische
-Datenverzeichnis des Betriebssystems. Binden Sie in Containern dort ein Volume
-ein; bei mehreren Replikas verwenden Sie einen gemeinsamen Mount (EFS, einen
+Datenverzeichnis des Betriebssystems. Binde in Containern dort ein Volume
+ein; bei mehreren Replikas verwendest du einen gemeinsamen Mount (EFS, einen
 S3-FUSE-Mount), damit jede Instanz jede Datei ausliefern kann. Dateien werden so
 lange aufbewahrt wie die Request-Log-Einträge, die auf sie verweisen
 (`LOGGING_RETENTION_DAYS`), und durch einen stündlichen Bereinigungslauf
@@ -362,8 +362,8 @@ entfernt.
 | `LOGGING_RETENTION_DAYS`          | Automatisches Löschen nach N Tagen (0 = nie)     | `30`    |
 
 Request-Log-Einträge enthalten die Client-Adresse, die das Gateway ermittelt hat.
-Hinter einem Reverse Proxy ist das der Proxy, bis Sie dessen Netzwerk in
-`SERVER_TRUSTED_PROXIES` eintragen – siehe [Client-Adressen hinter einem
+Hinter einem Reverse Proxy ist das der Proxy, bis du dessen Netzwerk in
+`SERVER_TRUSTED_PROXIES` einträgst – siehe [Client-Adressen hinter einem
 Proxy](/de/advanced/configuration#client-adressen-hinter-einem-proxy).
 
 Echtzeit-Vorschauen im Dashboard und persistierte Request-Logs sind getrennte
@@ -380,12 +380,12 @@ gespeicherte Logs sichtbar sind.
   Erweiterung und baut den Index beim Start auf, sofern seine Datenbankrolle das
   darf. Andernfalls funktioniert die Suche weiterhin, durchsucht aber jeden
   Eintrag im gewählten Datumsbereich. Um sie für eine eingeschränkte Rolle zu
-  aktivieren, führen Sie einmalig `CREATE EXTENSION pg_trgm;` als Superuser aus
-  und starten Sie GoModel neu.
+  aktivieren, führe einmalig `CREATE EXTENSION pg_trgm;` als Superuser aus
+  und starte GoModel neu.
 </Note>
 
 <Tip>
-  Wählen Sie bei großen Request-Log-Tabellen neben dem Suchfeld der Seite „Anfragen“ im
+  Wähle bei großen Request-Log-Tabellen neben dem Suchfeld der Seite „Anfragen“ im
   Dashboard ein Feld statt **Alle Felder**. **Nutzerpfad** und **Modell** finden
   Werte, die mit der Eingabe beginnen (Groß-/Kleinschreibung zählt, `voxina`
   findet also `/voxinate/events/…`; **Modell** prüft das angefragte und das
@@ -413,9 +413,9 @@ gespeicherte Logs sichtbar sind.
   Client-Body im Request-Log-Eintrag. So lässt sich eine Kette von Änderungen Schritt
   für Schritt nachvollziehen. `LOGGING_LOG_GUARDRAIL_STEPS` steuert diese
   Erfassung pro Schritt (die Request-Bodys werden außerhalb des Request-Pfads
-  kodiert): Schalten Sie es ab, um die Änderungen einer Kette als eine einzige
+  kodiert): Schalte es ab, um die Änderungen einer Kette als eine einzige
   Revision mit dem weitergeleiteten Request zu erfassen, ohne Snapshots pro
-  Schritt. Wenn Sie `LOGGING_LOG_REVISION_BODIES` deaktivieren, bleiben die
+  Schritt. Wenn du `LOGGING_LOG_REVISION_BODIES` deaktivierst, bleiben die
   Revisions-Metadaten (Name des Rewriters, Bytegrößen, eingesparte Tokens,
   Details der Änderung) erhalten, die zusätzlichen Body-Kopien entfallen aber.
   Das halbiert den Request-Log-Speicher pro umgeschriebenem Request ungefähr.
@@ -494,7 +494,7 @@ Budgetverwaltung und protokolliert eine Warnung.
 
 `SET_BUDGET_<PATH>` unterstützt die Standardzeiträume `hourly`, `daily`,
 `weekly` und `monthly`. Das Suffix `<PATH>` wird in Kleinbuchstaben
-umgewandelt; verwenden Sie doppelte Unterstriche (`__`) zwischen
+umgewandelt; verwende doppelte Unterstriche (`__`) zwischen
 Pfadsegmenten, während einfache Unterstriche innerhalb eines Segments bleiben.
 Zum Beispiel konfiguriert `SET_BUDGET_TEAM__ALPHA__SERVICE="daily=10"` den Pfad
 `/team/alpha/service` und `SET_BUDGET_TEAM_ALPHA="daily=10"` den Pfad
@@ -507,22 +507,22 @@ Provider-Konvention, sodass `SET_PROVIDER_BUDGET_OPENAI_PROD` den Provider
 `SET_BUDGET_="monthly=500"` bezeichnet eine Umgebungsvariable mit dem
 wörtlichen Namen `SET_BUDGET_`, die den Root-Pfad `/` konfiguriert. POSIX
 erlaubt diesen Namen, manche Shells und Orchestratoren, darunter einige
-Kubernetes-Validatoren, lehnen ihn jedoch möglicherweise ab. Verwenden Sie
-YAML oder das Dashboard, wenn Ihre Umgebung ihn nicht setzen kann.
+Kubernetes-Validatoren, lehnen ihn jedoch möglicherweise ab. Verwende
+YAML oder das Dashboard, wenn deine Umgebung ihn nicht setzen kann.
 
 Hinweis zur Migration: Die Budgetverwaltung hängt von der Nutzungserfassung
 ab. Bei `USAGE_ENABLED=false` startet GoModel mit deaktivierten Budgets und
 protokolliert eine Warnung, selbst wenn `BUDGETS_ENABLED=true` gesetzt ist.
-Setzen Sie sowohl `USAGE_ENABLED=true` als auch `BUDGETS_ENABLED=true`, um
+Setze sowohl `USAGE_ENABLED=true` als auch `BUDGETS_ENABLED=true`, um
 Budgets durchzusetzen.
 
-Unter [Budgets](/de/features/budgets) finden Sie YAML-Beispiele, Zeiträume,
+Unter [Budgets](/de/features/budgets) findest du YAML-Beispiele, Zeiträume,
 Zuordnungsregeln und die Durchsetzung in Workflows.
 
 #### Metriken
 
 <Note>
-  Die Prometheus-Unterstützung ist **experimentell**. Details finden Sie im
+  Die Prometheus-Unterstützung ist **experimentell**. Details findest du im
   [Leitfaden zu Prometheus-Metriken](/de/guides/prometheus-metrics).
 </Note>
 
@@ -568,7 +568,7 @@ Diese Einstellungen steuern die Timeouts für Upstream-API-Requests an LLM-Provi
 Ein Stream, der länger als `HTTP_STREAM_IDLE_TIMEOUT` still bleibt, wird mit
 einem `504`-Provider-Fehler geschlossen, statt bis `HTTP_TIMEOUT` zu hängen.
 Die Wartezeit auf das erste Token zählt nicht mit, langsame Reasoning-Modelle
-sind also nicht betroffen. Erhöhen Sie den Wert nur für einen Provider, der
+sind also nicht betroffen. Erhöhe den Wert nur für einen Provider, der
 mitten im Stream berechtigterweise minutenlang pausiert.
 
 Die Standardvariablen `HTTP_PROXY`, `HTTPS_PROXY` und `NO_PROXY` gelten für
@@ -599,13 +599,13 @@ und Redis über `rediss://` vertraut dem Systemspeicher.
 Eine fehlende oder nicht lesbare Datei ist ein Startfehler, sodass ein Tippfehler
 im Pfad nicht stillschweigend dazu führt, dass nichts zusätzlich vertraut wird.
 Bei einem [Reload der Konfiguration](/de/advanced/cli#konfiguration-neu-laden)
-werden die Dateien neu gelesen, aber nicht überwacht. Führen Sie nach dem
+werden die Dateien neu gelesen, aber nicht überwacht. Führe nach dem
 Rotieren also einen Reload oder Neustart aus. Ein vollständiges Beispiel
-finden Sie im [Produktionsleitfaden](/de/guides/production#private-cas-und-proxys).
+findest du im [Produktionsleitfaden](/de/guides/production#private-cas-und-proxys).
 
 #### API-Keys der Provider
 
-Setzen Sie diese Variablen, um Provider automatisch zu registrieren. Keine YAML-Konfiguration erforderlich.
+Setze diese Variablen, um Provider automatisch zu registrieren. Keine YAML-Konfiguration erforderlich.
 
 | Variable             | Provider                                           |
 | -------------------- | -------------------------------------------------- |
@@ -631,7 +631,7 @@ Setzen Sie diese Variablen, um Provider automatisch zu registrieren. Keine YAML-
 | `LLAMACPP_BASE_URL`  | llama.cpp llama-server / LM Studio (kein API-Key nötig, sofern nicht mit `--api-key` gestartet) |
 | `LLMD_BASE_URL`      | llm-d Router/EPP (kein API-Key nötig, sofern dessen Gateway keinen verlangt) |
 
-Die meisten Provider können über `<PROVIDER>_BASE_URL` (zum Beispiel `OPENAI_BASE_URL`) eine eigene Base-URL verwenden. Chutes AI verwendet standardmäßig `https://llm.chutes.ai/v1`; dies lässt sich mit `CHUTES_BASE_URL` überschreiben. DeepSeek verwendet standardmäßig `https://api.deepseek.com`; setzen Sie `DEEPSEEK_BASE_URL` nur für einen kompatiblen Proxy oder einen alternativen DeepSeek-Endpunkt. OpenRouter verwendet standardmäßig `https://openrouter.ai/api/v1`; dies lässt sich mit `OPENROUTER_BASE_URL` überschreiben. Kilo AI verwendet standardmäßig `https://api.kilo.ai/api/gateway`; dies lässt sich mit `KILO_BASE_URL` überschreiben. Eden AI verwendet standardmäßig `https://api.edenai.run/v3`; dies lässt sich mit `EDENAI_BASE_URL` überschreiben. Z.ai verwendet standardmäßig `https://api.z.ai/api/paas/v4`; setzen Sie `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` für den Endpunkt des GLM Coding Plan. SGLang verwendet standardmäßig `http://localhost:30000/v1`, wenn `SGLANG_API_KEY` gesetzt ist; Deployments ohne Key sollten `SGLANG_BASE_URL` jedoch explizit setzen, um den Provider zu registrieren. vLLM folgt demselben Muster mit `http://localhost:8000/v1`. Für llama.cpp ist `LLAMACPP_BASE_URL` immer erforderlich (der Standardport von llama-server kollidiert mit GoModels eigenem Port 8080, daher gibt es keinen Standardwert); `LLAMACPP_API_KEY` ist optional. llm-d hat keinen universellen Endpunkt, daher ist `LLMD_BASE_URL` immer erforderlich; `LLMD_API_KEY` ist optional. Azure verwendet `AZURE_BASE_URL` für die Base-URL seines Deployments und akzeptiert optional `AZURE_API_VERSION` zum Überschreiben; andernfalls gilt für Deployment-URLs standardmäßig `2024-10-21`, für `/openai/v1`-URLs (Azure AI Foundry) wird keine Version gesendet. Oracle erfordert `ORACLE_BASE_URL`, weil sein OpenAI-kompatibler Endpunkt regionsspezifisch ist.
+Die meisten Provider können über `<PROVIDER>_BASE_URL` (zum Beispiel `OPENAI_BASE_URL`) eine eigene Base-URL verwenden. Chutes AI verwendet standardmäßig `https://llm.chutes.ai/v1`; dies lässt sich mit `CHUTES_BASE_URL` überschreiben. DeepSeek verwendet standardmäßig `https://api.deepseek.com`; setze `DEEPSEEK_BASE_URL` nur für einen kompatiblen Proxy oder einen alternativen DeepSeek-Endpunkt. OpenRouter verwendet standardmäßig `https://openrouter.ai/api/v1`; dies lässt sich mit `OPENROUTER_BASE_URL` überschreiben. Kilo AI verwendet standardmäßig `https://api.kilo.ai/api/gateway`; dies lässt sich mit `KILO_BASE_URL` überschreiben. Eden AI verwendet standardmäßig `https://api.edenai.run/v3`; dies lässt sich mit `EDENAI_BASE_URL` überschreiben. Z.ai verwendet standardmäßig `https://api.z.ai/api/paas/v4`; setze `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` für den Endpunkt des GLM Coding Plan. SGLang verwendet standardmäßig `http://localhost:30000/v1`, wenn `SGLANG_API_KEY` gesetzt ist; Deployments ohne Key sollten `SGLANG_BASE_URL` jedoch explizit setzen, um den Provider zu registrieren. vLLM folgt demselben Muster mit `http://localhost:8000/v1`. Für llama.cpp ist `LLAMACPP_BASE_URL` immer erforderlich (der Standardport von llama-server kollidiert mit GoModels eigenem Port 8080, daher gibt es keinen Standardwert); `LLAMACPP_API_KEY` ist optional. llm-d hat keinen universellen Endpunkt, daher ist `LLMD_BASE_URL` immer erforderlich; `LLMD_API_KEY` ist optional. Azure verwendet `AZURE_BASE_URL` für die Base-URL seines Deployments und akzeptiert optional `AZURE_API_VERSION` zum Überschreiben; andernfalls gilt für Deployment-URLs standardmäßig `2024-10-21`, für `/openai/v1`-URLs (Azure AI Foundry) wird keine Version gesendet. Oracle erfordert `ORACLE_BASE_URL`, weil sein OpenAI-kompatibler Endpunkt regionsspezifisch ist.
 
 Jeder Provider-Typ akzeptiert außerdem über `<PROVIDER>_MODELS` eine
 kommagetrennte Liste konfigurierter Modelle, zum Beispiel
@@ -649,40 +649,40 @@ etwa für Speech-to-Text. In YAML liefert
 <Warning>
 **Breaking Change:** Früher war `fallback` der Standard. Provider mit einer
 konfigurierten Liste bieten jetzt nur diese Modelle an, andere Modelle liefern
-404. Unter [Modellmodi](/de/advanced/config-yaml#modellmodi) steht, wie Sie das bisherige Verhalten
-wiederherstellen.
+404. Unter [Modellmodi](/de/advanced/config-yaml#modellmodi) steht, wie du das bisherige Verhalten
+wiederherstellst.
 </Warning>
 
 `GET /v1/models` listet standardmäßig Provider-qualifizierte IDs
-(`openai/gpt-5`). Setzen Sie `UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true`
+(`openai/gpt-5`). Setze `UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true`
 (YAML: `models.unqualified_model_ids_at_models_endpoint`), um stattdessen
 reine Modell-IDs (`gpt-5`) aufzulisten – für Clients, die das angeforderte
 Modell gegen die Liste prüfen und nur einfache Namen kennen. Einschränkung:
 Wenn zwei Provider dieselbe Modell-ID anbieten, wird nur der Provider
 aufgelistet, an den ein nicht qualifizierter Request geroutet wird (der zuerst
-registrierte). Binden Sie einen Namen mit einem
+registrierte). Binde einen Namen mit einem
 [virtuellen Modell](/de/features/virtual-models#reine-modell-ids-auflisten) an einen
 bestimmten Provider, zum Beispiel `source: gpt-5` mit `target: azure/gpt-5`.
 
-Jedes Provider-Modell ist standardmäßig verfügbar. Setzen Sie
+Jedes Provider-Modell ist standardmäßig verfügbar. Setze
 `MODELS_ENABLED_BY_DEFAULT=false` (YAML: `models.enabled_by_default`), um
 stattdessen einen expliziten Freigabeeintrag in
 [virtuellen Modellen](/de/features/virtual-models#standardmäßige-verfügbarkeit-von-modellen)
 zu verlangen: Requests für andere Modelle schlagen dann mit
 `400 model_access_denied` fehl, und die Modelle erscheinen nicht in
 `GET /v1/models`. Um Provider-Modelle in `GET /v1/models` auszublenden, sie aber
-routbar zu lassen, setzen Sie `KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT=true`
+routbar zu lassen, setze `KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT=true`
 (YAML: `models.keep_only_aliases_at_models_endpoint`); der Endpunkt listet dann
 nur aktivierte Redirects virtueller Modelle.
 
 Um das Modellangebot eines Providers einzugrenzen, statt es Modell für Modell
-aufzulisten, verwenden Sie `<PROVIDER>_MODEL_FILTER_INCLUDE`,
+aufzulisten, verwende `<PROVIDER>_MODEL_FILTER_INCLUDE`,
 `<PROVIDER>_MODEL_FILTER_EXCLUDE` und
 `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` (YAML:
 `providers.<name>.model_filter`). Siehe
 [Modelle eines Providers filtern](/de/advanced/config-yaml#modelle-eines-providers-filtern).
 
-Setzen Sie `MODELS_VLLM_DISCOVERY_COMPAT=true` (YAML:
+Setze `MODELS_VLLM_DISCOVERY_COMPAT=true` (YAML:
 `models.vllm_discovery_compat`), wenn ein Client Modelle nur von einer
 vLLM-Runtime erkennt. Der `vllm`-Provider von OpenCode ist ein Beispiel: Er
 fragt `/health` und `/v1/models` ab und verwirft jeden Eintrag, dessen
@@ -709,7 +709,7 @@ Eintrag unvollständig ist: Das Feld wird nie weggelassen, weil diese Clients di
 ganze Liste gegen ein Schema prüfen, in dem es Pflicht ist. Fehlt es bei einem
 Eintrag, schlägt die Antwort fehl und alle anderen Modelle verschwinden mit. Ein
 Client, der den Wert nur liest, wenn er positiv ist, behält seinen eigenen
-Standard. Um das echte Fenster anzugeben, deklarieren Sie es am Modell:
+Standard. Um das echte Fenster anzugeben, deklariere es am Modell:
 
 ```yaml
 providers:
@@ -723,10 +723,10 @@ providers:
           context_window: 32768
 ```
 
-Weitere Felder eines Eintrags finden Sie unter
+Weitere Felder eines Eintrags findest du unter
 [Modellmetadaten](/de/advanced/model-metadata).
 
-Für OpenRouter sendet GoModel außerdem standardmäßige Attribution-Header, sofern der Request sie nicht bereits setzt. Überschreiben Sie diese Standardwerte mit `OPENROUTER_SITE_URL` und `OPENROUTER_APP_NAME`.
+Für OpenRouter sendet GoModel außerdem standardmäßige Attribution-Header, sofern der Request sie nicht bereits setzt. Überschreibe diese Standardwerte mit `OPENROUTER_SITE_URL` und `OPENROUTER_APP_NAME`.
 
 ### 2. `.env`-Datei
 
@@ -740,7 +740,7 @@ OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Kopieren Sie `.env.template` nach `.env` und kommentieren Sie die benötigten Werte ein:
+Kopiere `.env.template` nach `.env` und kommentiere die benötigten Werte ein:
 
 ```bash
 cp .env.template .env
@@ -754,21 +754,21 @@ cp .env.template .env
 
 ### 3. Konfigurationsdatei (YAML)
 
-Für komplexere Setups können Sie eine optionale YAML-Konfigurationsdatei verwenden. GoModel sucht sie an zwei Orten (in dieser Reihenfolge):
+Für komplexere Setups kannst du eine optionale YAML-Konfigurationsdatei verwenden. GoModel sucht sie an zwei Orten (in dieser Reihenfolge):
 
 1. `config/config.yaml`
 2. `config.yaml`
 
-Wenn Sie überlegen, ob Sie YAML überhaupt brauchen, lesen Sie
+Wenn du überlegst, ob du YAML überhaupt brauchst, lies
 [config.yaml](/de/advanced/config-yaml).
 
-Kopieren Sie für den Einstieg das Beispiel:
+Kopiere für den Einstieg das Beispiel:
 
 ```bash
 cp config/config.example.yaml config/config.yaml
 ```
 
-Kommentieren Sie dann die gewünschten Einstellungen ein und passen Sie sie an:
+Kommentiere dann die gewünschten Einstellungen ein und passe sie an:
 
 ```yaml
 server:
@@ -821,16 +821,16 @@ providers:
 ```
 
 Um einen Wert aus einer eingebundenen Datei zu lesen oder den Start bei einer
-nicht gesetzten Variable fehlschlagen zu lassen, verwenden Sie eine
+nicht gesetzten Variable fehlschlagen zu lassen, verwende eine
 [Secret-Referenz](/de/advanced/secret-references):
 `${file:/run/secrets/openai}` oder `${env:OPENAI_API_KEY}`.
 
 <Tip>
-  Die YAML-Datei ist vollständig optional. Jede Einstellung, die Sie in YAML
-  setzen können, lässt sich auch über Umgebungsvariablen setzen. Verwenden Sie
-  YAML, wenn Sie Ausfallsicherheits-Einstellungen pro Provider brauchen, die
-  generierten Provider-Namen nicht ausreichen oder Sie eine strukturierte
-  Konfigurationsdatei bevorzugen.
+  Die YAML-Datei ist vollständig optional. Jede Einstellung, die du in YAML
+  setzen kannst, lässt sich auch über Umgebungsvariablen setzen. Verwende
+  YAML, wenn du Ausfallsicherheits-Einstellungen pro Provider brauchst, die
+  generierten Provider-Namen nicht ausreichen oder du eine strukturierte
+  Konfigurationsdatei bevorzugst.
 </Tip>
 
 ## Provider-Konfiguration
@@ -882,7 +882,7 @@ ignorierten Variablen werden beim Start als Warnung protokolliert. Teilen sich
 mehrere umbenannte Provider einen Typ, werden die Variablen ohne Suffix mit
 derselben Warnung ignoriert.
 
-Verwenden Sie Variablen mit Suffix, um ohne YAML mehr als eine Instanz
+Verwende Variablen mit Suffix, um ohne YAML mehr als eine Instanz
 desselben Provider-Typs zu registrieren. GoModel wandelt das Suffix in
 Kleinbuchstaben um und ersetzt im konfigurierten Provider-Namen Unterstriche
 durch Bindestriche:
@@ -916,7 +916,7 @@ export VERTEX_US_LOCATION="us-central1" # Registriert "vertex-us", Typ "vertex"
 ### Provider-Blöcke in YAML
 
 Für mehr Kontrolle (eigene Namen, Ausfallsicherheit pro Provider oder größere
-strukturierte Einstellungen) verwenden Sie die YAML-Datei:
+strukturierte Einstellungen) verwendest du die YAML-Datei:
 
 ```yaml
 models:
@@ -997,14 +997,14 @@ providers:
 
 <Note>
   `models:` funktioniert in jedem Provider-Block; wie es mit Upstream `/models`
-  kombiniert wird, hängt vom [Modellmodus](/de/advanced/config-yaml#modellmodi) ab. Für Oracle GenAI finden Sie im
+  kombiniert wird, hängt vom [Modellmodus](/de/advanced/config-yaml#modellmodi) ab. Für Oracle GenAI findest du im
   [Oracle-GenAI-Leitfaden](/de/providers/oracle) die erforderliche OCI-Policy und
   eine getestete Konfiguration.
 </Note>
 
 ### Ollama (lokale Modelle)
 
-Ollama benötigt keinen API-Key. Setzen Sie die Base-URL, um es zu aktivieren:
+Ollama benötigt keinen API-Key. Setze die Base-URL, um es zu aktivieren:
 
 ```bash
 export OLLAMA_BASE_URL="http://localhost:11434/v1"
@@ -1021,7 +1021,7 @@ providers:
 
 ### vLLM
 
-vLLM verwendet seine OpenAI-kompatible `/v1`-API. Setzen Sie in Docker
+vLLM verwendet seine OpenAI-kompatible `/v1`-API. Setze in Docker
 `VLLM_BASE_URL`, um einen vLLM-Server ohne Key zu registrieren:
 
 ```bash
@@ -1032,7 +1032,7 @@ docker run --rm -p 8080:8080 \
 ```
 
 Wurde der Upstream-Server mit `vllm serve ... --api-key token-abc123`
-gestartet, setzen Sie zusätzlich:
+gestartet, setze zusätzlich:
 
 ```bash
 docker run --rm -p 8080:8080 \
@@ -1042,7 +1042,7 @@ docker run --rm -p 8080:8080 \
   enterpilot/gomodel
 ```
 
-Sie können auch ohne YAML mehr als eine vLLM-Instanz registrieren:
+Du kannst auch ohne YAML mehr als eine vLLM-Instanz registrieren:
 
 ```bash
 docker run --rm -p 8080:8080 \
@@ -1052,9 +1052,9 @@ docker run --rm -p 8080:8080 \
   enterpilot/gomodel
 ```
 
-Dadurch werden die Provider `vllm` und `vllm-test` registriert. Verwenden Sie
-YAML nur, wenn die generierten Provider-Namen nicht ausreichen oder Sie einen
-größeren strukturierten Block benötigen.
+Dadurch werden die Provider `vllm` und `vllm-test` registriert. Verwende
+YAML nur, wenn die generierten Provider-Namen nicht ausreichen oder du einen
+größeren strukturierten Block benötigst.
 
 ## Hinweise zum Provider-Verhalten
 
@@ -1069,7 +1069,7 @@ GoModel setzt für sie keinen Standardwert ein.
 | ------------------------------ | ------------------------------------------------- | ------- |
 | `ANTHROPIC_DEFAULT_MAX_TOKENS` | Wert, der eingesetzt wird, wenn der Aufrufer `max_tokens` weglässt | `4096`  |
 
-Erhöhen Sie diesen Wert für neuere Modelle, die regelmäßig längere Ausgaben
+Erhöhe diesen Wert für neuere Modelle, die regelmäßig längere Ausgaben
 erzeugen (Sonnet 4.6, Opus 4.7). Ein explizit im Request gesetztes
 `max_tokens` hat immer Vorrang vor dem über die Umgebung gesetzten
 Standardwert. Ungültige oder nicht positive Werte fallen auf `4096` zurück.

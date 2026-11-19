@@ -186,14 +186,14 @@ einen `text/plain`-Body zurück.
   auch `timestamp_granularities` ohne Klammern.
 </Tip>
 
-Fügen Sie `stream=true` hinzu, um das Transkript bereits während der Erzeugung zu
+Füge `stream=true` hinzu, um das Transkript bereits während der Erzeugung zu
 erhalten – siehe [Streaming](/de/advanced/audio-api#streaming).
 
 ### Self-hosted Speech-to-Text-Server
 
 Viele self-hosted STT-Server stellen `/v1/audio/transcriptions` bereit, aber kein
-`/v1/models`. Registrieren Sie einen solchen Server als `openai`-Provider und
-geben Sie das Modell an, das er bereitstellt:
+`/v1/models`. Registriere einen solchen Server als `openai`-Provider und
+gib das Modell an, das er bereitstellt:
 
 ```yaml
 providers:
@@ -337,8 +337,8 @@ Im Vergleich zu `/v1/chat/completions` gilt:
 - **Realtime Voice-to-Voice** (die WebSocket-basierte Realtime-API) wird nicht
   unterstützt.
 
-Für einen Provider, dessen native Audio-API von der OpenAI-API abweicht, nutzen
-Sie die [Passthrough-API](/de/features/passthrough-api)
+Für einen Provider, dessen native Audio-API von der OpenAI-API abweicht, nutze
+die [Passthrough-API](/de/features/passthrough-api)
 (`/p/{provider}/v1/audio/...`), um Bytes unverändert an diesen Upstream
 weiterzuleiten.
 

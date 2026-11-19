@@ -1,6 +1,6 @@
 ---
 title: "Google Gemini"
-description: "Konfigurieren Sie Google Gemini über AI Studio in GoModel, wählen Sie natives oder OpenAI-kompatibles Routing und verstehen Sie das Verhalten von image_url."
+description: "Konfiguriere Google Gemini über AI Studio in GoModel, wähle natives oder OpenAI-kompatibles Routing und verstehe das Verhalten von image_url."
 icon: "sparkles"
 keywords: ["Google Gemini", "AI Studio", "native Gemini API", "Provider-Einrichtung", "provider setup"]
 ---
@@ -11,8 +11,8 @@ auf Vertex AI von Google Cloud siehe den
 
 Standardmäßig routet GoModel Gemini-Requests für Chat, Responses, Embeddings
 und [Bilder](/de/advanced/images-api) über die nativen APIs von Gemini
-(`generateContent`, `batchEmbedContents`, Imagen `predict`). Wechseln Sie zum
-OpenAI-kompatiblen Endpunkt, wenn Sie Kompatibilitätsverhalten benötigen, das
+(`generateContent`, `batchEmbedContents`, Imagen `predict`). Wechsle zum
+OpenAI-kompatiblen Endpunkt, wenn du Kompatibilitätsverhalten benötigst, das
 der native Adapter noch nicht implementiert (insbesondere entfernte
 `image_url`-Werte).
 
@@ -36,7 +36,7 @@ providers:
 <Note>
   `USE_GOOGLE_GEMINI_NATIVE_API` wird weiterhin als veralteter globaler
   Schalter berücksichtigt, wenn `GEMINI_API_MODE` pro Provider nicht gesetzt
-  ist. Verwenden Sie bevorzugt `GEMINI_API_MODE`.
+  ist. Verwende bevorzugt `GEMINI_API_MODE`.
 </Note>
 
 Der native AI-Studio-Modus kann außerdem GoModels Prompt-Cache-Pläne nach dem
@@ -95,7 +95,7 @@ Google hat Imagen im August 2026 aus der AI-Studio-API entfernt; Imagen wird
 weiterhin auf [Vertex AI](/de/providers/vertex) bereitgestellt.
 Bildbearbeitungen erfordern den nativen Modus und ein Gemini-Bildmodell; Masken
 werden nicht unterstützt. Details zur Parameterabbildung und zu den Preisen
-finden Sie in den
+findest du in den
 [Provider-Hinweisen der Images API](/de/advanced/images-api#google-gemini).
 
 ### Bilder in Chat-Responses
@@ -124,7 +124,7 @@ einfach:
 In der Responses API ist jedes Bild ein eigenes Output-Item
 `image_generation_call`. Das Base64-Bild steht in `result` und das Format in
 `output_format`, wie im Output von OpenAI. Um das Bild in einem späteren Turn zu
-bearbeiten, senden Sie die Assistant-Nachricht (mit `images`) oder das Item
+bearbeiten, sende die Assistant-Nachricht (mit `images`) oder das Item
 `image_generation_call` unverändert zurück, damit Gemini die Thought Signature
 jedes Bildes erhält. Clients von `/v1/messages` (Anthropic Messages API)
 erhalten nur den Text. Beim Streaming kommt jedes Bild vollständig an: in Chat
@@ -132,7 +132,7 @@ Completions im `delta.images` eines Chunks, in der Responses API als fertiges
 Item `image_generation_call`. Ein Upstream-Stream-Event, das ein ganzes Bild als
 Base64 enthält, darf bis zu 32 MiB groß sein; Stream-Plugins halten
 standardmäßig höchstens 4 MiB, daher beendet ein größeres Bild einen Stream, der
-durch sie läuft. Fordern Sie 2K- und 4K-Bilder ohne Streaming an, wenn solche
+durch sie läuft. Fordere 2K- und 4K-Bilder ohne Streaming an, wenn solche
 Plugins aktiv sind.
 
 Jedes Bild umfasst mehrere Megabyte Base64. Request-Logs erfassen höchstens 1 MB
@@ -233,7 +233,7 @@ funktioniert:
 Dasselbe `extra_content`-Element erscheint bei gestreamten
 `tool_calls`-Deltas, bei `function_call`-Ausgabeelementen der Responses API,
 bei `tool_use`-Blöcken der Anthropic Messages API und (bei reinen
-Text-Turns) an der Assistant-Nachricht selbst. Senden Sie es unverändert
+Text-Turns) an der Assistant-Nachricht selbst. Sende es unverändert
 zurück; nur der erste Aufruf eines parallelen Batches trägt eine Signatur.
 Andere Provider sehen es nie; die gemeinsame Konvention ist unter
 [Extra Content, Thinking-Blöcke und Thought Signatures](/de/advanced/extra-content)
@@ -246,7 +246,7 @@ Signatur (die Konversation begann mit einem anderen Modell, oder der Client hat
 das Feld verworfen), sendet GoModel Googles dokumentierten Platzhalter
 `skip_thought_signature_validator`, statt den 400 weiterzugeben – im nativen
 Modus wie im Modus `openai_compatible`. Die Reasoning-Kontinuität ist für
-diesen Turn eingeschränkt, senden Sie daher bevorzugt die echte Signatur zurück.
+diesen Turn eingeschränkt, sende daher bevorzugt die echte Signatur zurück.
 
 ## Bildeingabe
 
@@ -263,7 +263,7 @@ zuerst die URL ab und senden die Bytes an `generateContent`.
 | Modus | `video_url` im OpenAI-Stil |
 | ---- | ----- |
 | `native` (Standard) | eingebettete `data:`-URLs, YouTube-Links, URIs der Gemini Files API und `gs://`-Objekte |
-| `openai_compatible` | unverändert weitergeleitet, aber Googles OpenAI-kompatibler Endpunkt unterstützt keine Videoeingabe – verwenden Sie `native` |
+| `openai_compatible` | unverändert weitergeleitet, aber Googles OpenAI-kompatibler Endpunkt unterstützt keine Videoeingabe – verwende `native` |
 
 ```json
 {"type":"video_url","video_url":{"url":"https://www.youtube.com/watch?v=abc123"}}
@@ -273,7 +273,7 @@ Im nativen Modus wird eine `data:`-URL zu einem eingebetteten Videoteil
 (standardmäßig `video/mp4`, wenn die Data-URL keinen Medientyp angibt), während
 URIs von YouTube, Files API und Cloud Storage als Dateireferenz gesendet
 werden, die Gemini selbst auflöst. Jede andere entfernte `https://...`-URL wird
-abgelehnt statt verworfen – laden Sie sie zuerst über die Gemini Files API
+abgelehnt statt verworfen – lade sie zuerst über die Gemini Files API
 hoch.
 
 ## Nachrichten und Tools
@@ -302,7 +302,7 @@ Gemini bietet keine Möglichkeit, einen Turn auf einen einzigen
 Funktionsaufruf zu beschränken, und das Benennen eines einzelnen Tools hilft
 nicht: Gemini kann dieselbe Funktion in einem Turn mehrfach aufrufen. Wenn
 `parallel_tool_calls: false` (oder Anthropics `disable_parallel_tool_use`)
-wichtig ist, behandeln oder verwerfen Sie die zusätzlichen Aufrufe in Ihrem
+wichtig ist, behandle oder verwirf die zusätzlichen Aufrufe in deinem
 Client.
 
 Eine `allowed_tools`-Auswahl mit leerer `tools`-Liste wird mit 400 abgelehnt,

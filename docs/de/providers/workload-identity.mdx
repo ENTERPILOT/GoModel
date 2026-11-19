@@ -1,6 +1,6 @@
 ---
 title: "Workload Identity Federation"
-description: "OpenAI und Anthropic authentifizieren, indem das Identitätstoken Ihrer Plattform gegen kurzlebige Zugriffstokens des Anbieters getauscht wird, statt einen statischen API-Schlüssel zu verwenden."
+description: "OpenAI und Anthropic authentifizieren, indem das Identitätstoken deiner Plattform gegen kurzlebige Zugriffstokens des Anbieters getauscht wird, statt einen statischen API-Schlüssel zu verwenden."
 icon: "fingerprint"
 tag: "Beta"
 keywords: ["Workload Identity", "Federation", "WIF", "OIDC", "Kubernetes", "Servicekonto", "Token-Austausch", "ohne Schlüssel"]
@@ -14,12 +14,12 @@ keywords: ["Workload Identity", "Federation", "WIF", "OIDC", "Kubernetes", "Serv
 
 Mit Workload Identity Federation authentifiziert sich GoModel ohne langlebigen
 API-Schlüssel bei einem Anbieter. Das Gateway liest ein Identitätstoken, das
-Ihre Plattform bereits ausstellt (ein projiziertes Kubernetes-Servicekonto-Token,
+deine Plattform bereits ausstellt (ein projiziertes Kubernetes-Servicekonto-Token,
 AWS-, GCP- oder Azure-Workload-Identity, GitHub-Actions-OIDC, ein SPIFFE
 JWT-SVID), und tauscht es gegen ein kurzlebiges Zugriffstoken des Anbieters.
 
 Unterstützte Anbieter: `openai` (RFC-8693-Token-Austausch) und `anthropic`
-(RFC 7523 jwt-bearer). Richten Sie zuerst Identitätsanbieter und Servicekonto
+(RFC 7523 jwt-bearer). Richte zuerst Identitätsanbieter und Servicekonto
 beim Anbieter ein:
 [OpenAI](https://developers.openai.com/api/docs/guides/workload-identity-federation),
 [Anthropic](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation).
@@ -102,7 +102,7 @@ Beispiel `OPENAI_EU_IDENTITY_TOKEN_FILE` für einen Anbieter namens `openai-eu`.
 
 - Ein API-Schlüssel hat wie in den offiziellen SDKs Vorrang vor Workload
   Identity. GoModel protokolliert eine Warnung, wenn beides gesetzt ist.
-  Entfernen Sie `<PROVIDER>_API_KEY` bei der Umstellung.
+  Entferne `<PROVIDER>_API_KEY` bei der Umstellung.
 - Ein Anbieter aus der Konfiguration mit `workload_identity` übernimmt kein
   bloßes `<PROVIDER>_API_KEY` aus der Umgebung, außer er ist nach seinem Typ
   benannt.

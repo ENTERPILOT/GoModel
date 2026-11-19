@@ -1,6 +1,6 @@
 ---
 title: "Intelligentes Routing"
-description: "Leiten Sie jeden Request anhand seines Inhalts an eine einfache oder anspruchsvolle Modellstufe weiter und wählen Sie innerhalb dieser Stufe den gesündesten und günstigsten Provider."
+description: "Leite jeden Request anhand seines Inhalts an eine einfache oder anspruchsvolle Modellstufe weiter und wähle innerhalb dieser Stufe den gesündesten und günstigsten Provider."
 icon: "route"
 tag: "Pro · Beta"
 keywords: ["GoModel Pro", "intelligentes Routing", "intelligent routing", "Smart Routing", "Modellstufen", "model tiers", "adaptives Routing", "adaptive routing", "Load Balancing", "Kostenoptimierung"]
@@ -9,7 +9,7 @@ keywords: ["GoModel Pro", "intelligentes Routing", "intelligent routing", "Smart
 <Warning>
   Intelligentes Routing befindet sich in der Beta. Bewertungssignale, Standardwerte und
   Konfigurationsoptionen können sich zwischen Releases ändern; mit den Response-Headern
-  und Metriken können Sie jede getroffene Entscheidung überprüfen.
+  und Metriken kannst du jede getroffene Entscheidung überprüfen.
 </Warning>
 
 ## Übersicht
@@ -31,7 +31,7 @@ Beide lassen sich kombinieren: Ein Request für `model: "normal"` wird zu `norma
 
 ## Smart Tier Routing
 
-Konfigurieren Sie einen gestuften Alias mit gewöhnlichen GoModel-Modellnamen. Die Ziele der Stufen können
+Konfiguriere einen gestuften Alias mit gewöhnlichen GoModel-Modellnamen. Die Ziele der Stufen können
 konkrete Modelle oder virtuelle Modelle sein:
 
 ```bash
@@ -61,8 +61,8 @@ Andernfalls sammelt der Request Punkte, und ein Wert ab
 | Thread-Tiefe von 7 oder mehr Nachrichten | +1 |
 
 Mit den Standardwerten bleibt ein kurzes Code-Snippet allein (3) auf der Stufe `easy`, während
-Code plus 2k Zeichen Kontext (4) eskaliert. Senken Sie den Schwellenwert, um
-mehr Traffic an die Stufe `hard` zu senden, oder erhöhen Sie ihn, um die günstige Stufe zu schützen.
+Code plus 2k Zeichen Kontext (4) eskaliert. Senke den Schwellenwert, um
+mehr Traffic an die Stufe `hard` zu senden, oder erhöhe ihn, um die günstige Stufe zu schützen.
 
 ### Session-Pinning
 
@@ -84,7 +84,7 @@ Pin läuft nach `PRO_SMART_ROUTING_SESSION_TTL` Inaktivität ab.
 
 ### Eine Entscheidung überschreiben und prüfen
 
-Senden Sie `X-GoModel-Smart-Routing: off`, um die Klassifizierung für einen Request zu umgehen,
+Sende `X-GoModel-Smart-Routing: off`, um die Klassifizierung für einen Request zu umgehen,
 oder `X-GoModel-Tier: easy` bzw. `X-GoModel-Tier: hard`, um seine Stufe zu erzwingen, ohne
 den Session-Pin zu ändern.
 
@@ -98,7 +98,7 @@ X-GoModel-Pro-Tier-Score: 5
 
 Dasselbe Urteil samt Begründung wird im Revisions-Detail des Request-Logs erfasst.
 Prometheus stellt Metriken zu Requests, Eskalationen und Bewertungen unter dem Präfix
-`gomodel_pro_smartroute_` bereit; mit dem Histogramm der Bewertungen stimmen Sie
+`gomodel_pro_smartroute_` bereit; mit dem Histogramm der Bewertungen stimmst du
 den Schwellenwert auf echten Traffic ab.
 
 ## Adaptives Routing

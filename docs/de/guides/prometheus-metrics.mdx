@@ -1,25 +1,25 @@
 ---
 title: "Prometheus-Metriken"
-description: "Aktivieren Sie die experimentellen Prometheus-Metriken von GoModel mit METRICS_ENABLED, scrapen Sie den /metrics-Endpunkt und sehen Sie, welche Gateway-Metriken exportiert werden."
+description: "Aktiviere die experimentellen Prometheus-Metriken von GoModel mit METRICS_ENABLED, scrape den /metrics-Endpunkt und sieh, welche Gateway-Metriken exportiert werden."
 icon: "chart-line"
 keywords: ["Prometheus", "Metriken", "metrics", "Monitoring", "Observability", "Grafana"]
 ---
 
 <Warning>
   Die Prometheus-Unterstützung ist **experimentell**. Metriknamen, Labels und
-  Konfigurationsoptionen können sich ohne Vorankündigung ändern. Pinnen Sie eine bestimmte
-  GoModel-Version, wenn Sie auf ein stabiles Schema angewiesen sind.
+  Konfigurationsoptionen können sich ohne Vorankündigung ändern. Pinne eine bestimmte
+  GoModel-Version, wenn du auf ein stabiles Schema angewiesen bist.
 </Warning>
 
-Dieser Leitfaden erklärt, wie Sie den experimentellen Prometheus-Metrik-Endpunkt in GoModel
-konfigurieren.
+Dieser Leitfaden erklärt, wie du den experimentellen Prometheus-Metrik-Endpunkt in GoModel
+konfigurierst.
 
 ## Schnellstart
 
 ### Standardmäßig deaktiviert
 
-Metriken sind **standardmäßig deaktiviert**. Um die Erfassung von Metriken zu aktivieren, setzen
-Sie `METRICS_ENABLED=true` und starten Sie GoModel:
+Metriken sind **standardmäßig deaktiviert**. Um die Erfassung von Metriken zu aktivieren, setze
+`METRICS_ENABLED=true` und starte GoModel:
 
 <CodeGroup>
 
@@ -48,9 +48,9 @@ export METRICS_ENABLED=true
 </CodeGroup>
 
 <Note>
-  Im restlichen Leitfaden wird nur das Setzen der Variablen gezeigt. Wenden Sie sie über die oben
+  Im restlichen Leitfaden wird nur das Setzen der Variablen gezeigt. Wende sie über die oben
   gewählte Startmethode an – `.env` plus `--env-file`, ein Inline-Flag `-e` oder `export` vor
-  `./bin/gomodel` – und starten Sie GoModel neu.
+  `./bin/gomodel` – und starte GoModel neu.
 </Note>
 
 ### Metriken deaktivieren
@@ -76,7 +76,7 @@ metrics:
 
 ### Eigener Metrik-Endpunkt
 
-Ändern Sie den Standardpfad `/metrics`:
+Ändere den Standardpfad `/metrics`:
 
 ```bash
 METRICS_ENABLED=true
@@ -166,7 +166,7 @@ providers:
 
 ### Prüfen, ob Metriken aktiviert sind
 
-Starten Sie den Server und achten Sie auf folgende Log-Meldungen:
+Starte den Server und achte auf folgende Log-Meldungen:
 
 **Metriken aktiviert:**
 
@@ -274,19 +274,19 @@ konfiguriert ist, genau wie andere HTTP-Endpunkte. Ist kein Master-Key konfiguri
 Endpunkt ohne Authentifizierung erreichbar, sodass Prometheus Metriken ohne Zugangsdaten scrapen
 kann.
 
-Wenn Sie den Metrik-Endpunkt zusätzlich schützen müssen:
+Wenn du den Metrik-Endpunkt zusätzlich schützen musst:
 
-1. **Verwenden Sie einen eigenen internen Pfad:**
+1. **Verwende einen eigenen internen Pfad:**
 
    ```yaml
    metrics:
      endpoint: "/internal/prometheus" # Schwerer zu erraten
    ```
 
-2. **Verwenden Sie Sicherheit auf Netzwerkebene:**
-   - Konfigurieren Sie Firewall-Regeln, die nur den Prometheus-Server zulassen
-   - Verwenden Sie ein privates Netzwerk für die Erfassung von Metriken
-   - Betreiben Sie Prometheus in derselben VPC bzw. demselben Netzwerk
+2. **Verwende Sicherheit auf Netzwerkebene:**
+   - Konfiguriere Firewall-Regeln, die nur den Prometheus-Server zulassen
+   - Verwende ein privates Netzwerk für die Erfassung von Metriken
+   - Betreibe Prometheus in derselben VPC bzw. demselben Netzwerk
 
 3. **Reverse Proxy mit Authentifizierung:**
 
@@ -307,7 +307,7 @@ zusätzlich `gomodel_empty_responses_total` und loggt eine Warnung
 
 | Label      | Werte                                     |
 | ---------- | ----------------------------------------- |
-| `provider` | Provider-Name aus Ihrer Konfiguration     |
+| `provider` | Provider-Name aus deiner Konfiguration     |
 | `model`    | An den Upstream gesendetes Modell         |
 | `reason`   | `no_choices`, `no_output` oder `no_usage` |
 
@@ -329,7 +329,7 @@ zählt GoModel ihn in `gomodel_usage_entries_dropped_total` und loggt ihn.
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `reason` | `buffer_full` (`USAGE_BUFFER_SIZE` erreicht), `write_failed` (das Schreiben des Batches gab einen Fehler zurück) oder `logger_closed` (siehe unten) |
 
-Erhöhen Sie `USAGE_BUFFER_SIZE` bei `buffer_full`. Bei `write_failed` enthält das Server-Log
+Erhöhe `USAGE_BUFFER_SIZE` bei `buffer_full`. Bei `write_failed` enthält das Server-Log
 den Schreibfehler. `logger_closed` zählt Nutzung, die erfasst wurde, nachdem der Usage-Logger
 heruntergefahren war, etwa durch einen Request oder eine Session, die beim Herunterfahren noch lief;
 der Prozess kann enden, bevor Prometheus den Wert abruft, daher hält das Log den Verlust fest.
@@ -341,7 +341,7 @@ sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
 ## Token- und Kostenmetriken
 
 GoModel zählt die Token und die Kosten jedes Requests, für den es Nutzung
-aufzeichnet. So können Sie Ausgaben grafisch darstellen und Alerts darauf
+aufzeichnet. So kannst du Ausgaben grafisch darstellen und Alerts darauf
 setzen, ohne die Nutzungsdatenbank abzufragen. Die Zähler werden aktualisiert,
 wenn die Response endet; ein Streaming-Request wird einmal gezählt, wenn sein
 Stream schließt.
@@ -353,7 +353,7 @@ Stream schließt.
 | `gomodel_provider_cost_usd_total` | Was Provider berechnen, in USD                                 |
 | `gomodel_billed_cost_usd_total`   | Was Aufrufern berechnet wird, in USD (Provider-Kosten plus Aufschlag) |
 
-Alle vier tragen `provider` (den Provider-Namen aus Ihrer Konfiguration) und
+Alle vier tragen `provider` (den Provider-Namen aus deiner Konfiguration) und
 `model` (das Modell, das geantwortet hat) sowie die
 [Aufrufer-Labels](/de/guides/prometheus-metrics#aufrufer-dimensionen). Die
 beiden Token-Metriken haben zusätzlich `token_type`:
@@ -448,12 +448,12 @@ exportiert; ein Key, der nicht mehr existiert, wird als `{unknown}` gemeldet.
 
 ### Kardinalität begrenzen
 
-Jede aktive Dimension vervielfacht die Anzahl der Serien. Schalten Sie daher
-nur ein, was Sie abfragen.
+Jede aktive Dimension vervielfacht die Anzahl der Serien. Schalte daher
+nur ein, was du abfragst.
 
 - **User-Path-Tiefe.** Mit der Standardtiefe 2 wird `/team/alice/laptop` als
-  `/team/alice` gemeldet. Senken Sie den Wert, um stärker zu gruppieren;
-  erhöhen Sie ihn nur, wenn die tieferen Ebenen wenige Werte haben.
+  `/team/alice` gemeldet. Senke den Wert, um stärker zu gruppieren;
+  erhöhe ihn nur, wenn die tieferen Ebenen wenige Werte haben.
 - **Obergrenze für Werte.** Jede Dimension behält die ersten
   `METRICS_CALLER_MAX_VALUES` (Standard 100) unterschiedlichen Werte, die sie
   sieht. Die Obergrenze gilt pro Dimension: Mit allen drei Dimensionen werden
@@ -470,13 +470,13 @@ nur ein, was Sie abfragen.
   kann 127 verschiedene Mengen senden und damit allein die
   Standardobergrenze füllen. Jede spätere Menge, ob legitim oder nicht, wird
   dann bis zum Neustart als `{other}` gemeldet. Wenn Clients frei wählbare
-  Labels senden, lassen Sie diese Dimension aus.
+  Labels senden, lass diese Dimension aus.
 - **Ungünstigster Fall.** Jede Dimension trägt höchstens ihre Obergrenze plus
   `{other}` und den leeren Wert bei (bei API-Keys zusätzlich `{unknown}`). Mit
   allen drei Dimensionen und der Standardobergrenze kann ein Provider mit
   einem Modell 102 × 103 × 102 ≈ 1,07 Millionen Serien pro Token-Typ
   erreichen. Exportiert werden nur tatsächlich auftretende Kombinationen,
-  aktivieren Sie trotzdem eine Dimension nach der anderen und senken Sie
+  aktiviere trotzdem eine Dimension nach der anderen und senke
   `METRICS_CALLER_MAX_VALUES` auf die erwartete Anzahl.
 
 ## Prometheus-Konfiguration
@@ -519,15 +519,15 @@ scrape_configs:
 echo $METRICS_ENABLED  # "true" aktiviert; leer oder "false" deaktiviert
 ```
 
-Setzen Sie `METRICS_ENABLED=true` über Ihre `.env`-Datei, ein Inline-Flag
-`-e METRICS_ENABLED=true` oder `export METRICS_ENABLED=true` (die drei Startvarianten finden Sie
-im [Schnellstart](/de/guides/prometheus-metrics#standardmäßig-deaktiviert)) und starten Sie GoModel dann neu.
+Setze `METRICS_ENABLED=true` über deine `.env`-Datei, ein Inline-Flag
+`-e METRICS_ENABLED=true` oder `export METRICS_ENABLED=true` (die drei Startvarianten findest du
+im [Schnellstart](/de/guides/prometheus-metrics#standardmäßig-deaktiviert)) und starte GoModel dann neu.
 
 ### Es erscheinen keine Metrikdaten
 
 **Ursache:** Es wurden noch keine Requests gestellt.
 
-**Lösung:** Stellen Sie einige Requests, um Metriken zu erzeugen:
+**Lösung:** Stelle einige Requests, um Metriken zu erzeugen:
 
 <CodeGroup>
 
@@ -606,21 +606,21 @@ export METRICS_ENDPOINT=/metrics  # Mit führendem Schrägstrich
 
 ### Entwicklung
 
-- **Deaktivieren Sie Metriken** für einen schnelleren Start und weniger Rauschen
-- Aktivieren Sie sie nur, wenn Sie Observability-Features testen
+- **Deaktiviere Metriken** für einen schnelleren Start und weniger Rauschen
+- Aktiviere sie nur, wenn du Observability-Features testest
 
 ### Staging
 
-- **Aktivieren Sie Metriken**, um das Monitoring-Setup zu testen
-- Verwenden Sie bei Bedarf aus Sicherheitsgründen einen eigenen Endpunkt
+- **Aktiviere Metriken**, um das Monitoring-Setup zu testen
+- Verwende bei Bedarf aus Sicherheitsgründen einen eigenen Endpunkt
 
 ### Produktion
 
-- **Aktivieren Sie Metriken** für vollständige Observability
-- Richten Sie Alerting in Prometheus ein
-- Verwenden Sie Grafana-Dashboards zur Visualisierung
-- Erwägen Sie aus Sicherheitsgründen einen eigenen Endpunkt
-- Überwachen Sie die Kardinalität der Metriken, um eine Explosion zu vermeiden
+- **Aktiviere Metriken** für vollständige Observability
+- Richte Alerting in Prometheus ein
+- Verwende Grafana-Dashboards zur Visualisierung
+- Erwäge aus Sicherheitsgründen einen eigenen Endpunkt
+- Überwache die Kardinalität der Metriken, um eine Explosion zu vermeiden
 
 ## Siehe auch
 

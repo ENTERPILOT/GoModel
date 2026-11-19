@@ -115,7 +115,7 @@ einer Session einfach neu gepinnt. Inaktive Sessions laufen nach 6 Stunden ab.
 
 Die API-Key-Affinität ist deterministisch statt gespeichert, daher wählt
 dieselbe geordnete Key-Menge über Replicas und Neustarts hinweg denselben Key.
-Deaktivieren Sie sie pro Provider mit `session_sticky_keys: false`,
+Deaktiviere sie pro Provider mit `session_sticky_keys: false`,
 `<PROVIDER>[_SUFFIX]_SESSION_STICKY_KEYS=false` oder über das Kontrollkästchen
 **Session-sticky API keys** im Dashboard. Requests ohne erkannte Session werden
 weiterhin per Round Robin verteilt.
@@ -212,9 +212,9 @@ Header mit Zugangsdaten (`Authorization`, API-Key-Header, …) werden als
 Session-Quellen abgelehnt, da die Session-ID in Request-Log- und Nutzungsdatensätzen
 gespeichert wird.
 
-**Wann Sie die Standardwerte ändern sollten:** Setzen Sie
+**Wann du die Standardwerte ändern solltest:** Setze
 `SESSION_AUTO_DETECT=false`, wenn nur explizit gekennzeichnete Sessions
-gruppiert werden sollen; setzen Sie `session_affinity: false` bei einer
-Weiterleitung, wenn Ihnen eine strikte Lastverteilung wichtiger ist als
+gruppiert werden sollen; setze `session_affinity: false` bei einer
+Weiterleitung, wenn dir eine strikte Lastverteilung wichtiger ist als
 Cache-Affinität (zum Beispiel reines Round-Robin-Kapazitäts-Balancing über
 identische Deployments).

@@ -1,6 +1,6 @@
 ---
 title: "Höflichkeitsantworten"
-description: "Beantworten Sie Dankes- und Abschiedsnachrichten im Gateway, statt eine lange Unterhaltung zum vollen Preis erneut an das Modell zu senden."
+description: "Beantworte Dankes- und Abschiedsnachrichten im Gateway, statt eine lange Unterhaltung zum vollen Preis erneut an das Modell zu senden."
 icon: "hand-heart"
 tag: "Pro"
 keywords: ["GoModel Pro", "Höflichkeitsantworten", "courtesy replies", "courtesy_reply", "Guardrail", "Prompt-Cache", "prompt cache", "Token-Einsparungen"]
@@ -63,11 +63,11 @@ sein könnte:
 
 Bestätigungen wie „ok“, „perfekt“ oder „verstanden“ werden standardmäßig
 nicht beantwortet, weil sie oft „mach weiter“ mit dem Vorschlag des
-Assistenten bedeuten. Aktivieren Sie sie mit `reply_to_acknowledgments`.
+Assistenten bedeuten. Aktiviere sie mit `reply_to_acknowledgments`.
 
 ## Aktivieren
 
-Fügen Sie dem Abschnitt `guardrails` in `config/config.yaml` eine Regel hinzu:
+Füge dem Abschnitt `guardrails` in `config/config.yaml` eine Regel hinzu:
 
 ```yaml
 guardrails:
@@ -82,7 +82,7 @@ Dank und Abschied, die die obigen Bedingungen erfüllen, erhalten nun eine
 vorgefertigte Antwort ohne Inferenzkosten. Regeln aus `config.yaml` gehören
 zum Standard-Workflow; ein eigener [Workflow](/de/advanced/workflows#guardrail-steps)
 führt die Regel nur aus, wenn einer seiner Prompt-Schritte auf sie verweist.
-Sie können die Regel auch unter
+Du kannst die Regel auch unter
 **Plugins & Guardrails** im Dashboard anlegen, das jede Einstellung mit
 Hilfetext zeigt.
 

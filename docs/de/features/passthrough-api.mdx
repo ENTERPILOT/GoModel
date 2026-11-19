@@ -1,6 +1,6 @@
 ---
 title: "Passthrough-API"
-description: "Nutzen Sie provider-native APIs über GoModel, einschließlich Requests des Anthropic SDK, die über den Passthrough-Endpunkt geroutet werden."
+description: "Nutze provider-native APIs über GoModel, einschließlich Requests des Anthropic SDK, die über den Passthrough-Endpunkt geroutet werden."
 icon: "route"
 tag: "Beta"
 keywords: ["Passthrough-API", "passthrough API", "provider-native API", "Anthropic SDK", "Proxy"]
@@ -9,19 +9,19 @@ keywords: ["Passthrough-API", "passthrough API", "provider-native API", "Anthrop
 ## Übersicht
 
 <Warning>
-  Die Passthrough-API befindet sich in der Beta-Phase. Verwenden Sie sie, wenn Sie
-  die native API-Form eines Providers benötigen, und bevorzugen Sie die
-  OpenAI-kompatiblen `/v1`-Routen, wenn Sie die stabilste Schnittstelle von
-  GoModel brauchen.
+  Die Passthrough-API befindet sich in der Beta-Phase. Verwende sie, wenn du
+  die native API-Form eines Providers benötigst, und bevorzuge die
+  OpenAI-kompatiblen `/v1`-Routen, wenn du die stabilste Schnittstelle von
+  GoModel brauchst.
 </Warning>
 
 Die Passthrough-API leitet provider-native Requests über GoModel weiter, ohne
 den Request- oder Response-Body zu übersetzen.
 
-Verwenden Sie sie, wenn eine Client-Bibliothek die native API eines Providers
+Verwende sie, wenn eine Client-Bibliothek die native API eines Providers
 statt der OpenAI-kompatiblen API erwartet. Das Anthropic SDK sendet Requests zum
-Beispiel an `/v1/messages`, sodass Sie es auf die Anthropic-Passthrough-Basis-URL
-von GoModel richten können:
+Beispiel an `/v1/messages`, sodass du es auf die Anthropic-Passthrough-Basis-URL
+von GoModel richten kannst:
 
 ```text
 http://localhost:8080/p/anthropic
@@ -99,7 +99,7 @@ zuordnen kann, etwa `GET /files`. Der Zugriff ist daher eingeschränkt:
   `POST /p/anthropic/v1/messages` für dieses Modell aufrufen, aber nicht
   `GET /p/anthropic/v1/models`.
 
-Gewähren Sie Passthrough-Zugriff beim Erstellen eines Keys
+Gewähre Passthrough-Zugriff beim Erstellen eines Keys
 (`"passthrough_access": true` bei `POST /admin/auth-keys`), auf der Seite API Keys
 im Dashboard oder später. Nur ein globales Admin-Credential (der Master-Key oder
 ein Dashboard-Key ohne User Path) kann ihn gewähren, da ein Passthrough-Key über
@@ -115,8 +115,8 @@ curl -X PUT "http://localhost:8080/admin/auth-keys/${KEY_ID}/passthrough-access"
 
 ## Beispiel mit dem Anthropic SDK
 
-Setzen Sie die Basis-URL des Anthropic SDK auf die Anthropic-Passthrough-Route
-von GoModel. Verwenden Sie das GoModel-Token als Bearer-Authentifizierung des
+Setze die Basis-URL des Anthropic SDK auf die Anthropic-Passthrough-Route
+von GoModel. Verwende das GoModel-Token als Bearer-Authentifizierung des
 Anthropic SDK.
 
 <CodeGroup>
@@ -168,7 +168,7 @@ console.log(message.content[0].text);
 
 </CodeGroup>
 
-Wenn Ihr Gateway keine Authentifizierung erfordert, verwenden Sie statt
+Wenn dein Gateway keine Authentifizierung erfordert, verwende statt
 `auth_token` bzw. `authToken` einen Platzhalter-API-Key für das SDK, etwa
 `not-needed`. GoModel entfernt `X-Api-Key` aus Passthrough-Requests, bevor es
 sie an den Upstream weiterleitet.
@@ -182,9 +182,9 @@ befindet.
   sind standardmäßig aktiviert.
 - Chutes unterstützt Passthrough, erfordert aber eine explizite Freischaltung
   durch den Betreiber, da Passthrough provider-native Routen weiterleiten kann,
-  die kein Modell identifizieren. Fügen Sie `chutes` nur dann zu
-  `ENABLED_PASSTHROUGH_PROVIDERS` hinzu, wenn Sie diese Schnittstelle bewusst
-  freigeben möchten.
+  die kein Modell identifizieren. Füge `chutes` nur dann zu
+  `ENABLED_PASSTHROUGH_PROVIDERS` hinzu, wenn du diese Schnittstelle bewusst
+  freigeben möchtest.
 - GoModel übersetzt weder Request-Bodys noch Response-Bodys von Passthrough.
 - Das `model`, das ein JSON-Passthrough-Body nennt, wird unabhängig von der
   Body-Größe bis zum konfigurierten Body-Limit gegen die Modell-Allowlist des
@@ -195,8 +195,8 @@ befindet.
   [Zugriffskontrolle](/de/features/passthrough-api#zugriffskontrolle)).
 - Das Upstream-Konto wird gemeinsam genutzt. Ein Key mit Passthrough-Zugriff
   kann dort Objekte erreichen, etwa Dateien oder Batches, die andere Keys erstellt
-  haben. Gewähren Sie `passthrough_access` nur Keys, denen Sie das gesamte
-  Provider-Konto anvertrauen.
+  haben. Gewähre `passthrough_access` nur Keys, denen du das gesamte
+  Provider-Konto anvertraust.
 - Provider-native Fehler-Bodys und Statuscodes werden weitergereicht, statt in
   OpenAI-kompatible Responses umgewandelt zu werden, sodass Provider-SDKs ihre
   eigenen typisierten Fehler auslösen. Fehler, die GoModel selbst erzeugt
@@ -217,5 +217,5 @@ ALLOW_PASSTHROUGH_V1_ALIAS=true
 ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,sglang,vllm,llamacpp,llmd,deepseek,hetzner,edenai,jev
 ```
 
-Setzen Sie `ENABLED_PASSTHROUGH_PROVIDERS` auf die Provider-Typen, die Sie
-freigeben möchten.
+Setze `ENABLED_PASSTHROUGH_PROVIDERS` auf die Provider-Typen, die du
+freigeben möchtest.

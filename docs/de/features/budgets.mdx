@@ -1,13 +1,13 @@
 ---
 title: "Budgets"
-description: "Legen Sie Ausgabenlimits pro User-Path, Request-Label oder Provider fest und setzen Sie sie über die Budget-Steuerung von Workflows durch."
+description: "Lege Ausgabenlimits pro User-Path, Request-Label oder Provider fest und setze sie über die Budget-Steuerung von Workflows durch."
 icon: "wallet"
 keywords: ["Budgets", "budgets", "Ausgabenlimits", "spend limits", "Kostenkontrolle", "cost controls", "user path", "Labels", "labels", "Provider", "providers"]
 ---
 
 ## Übersicht
 
-Mit Budgets legen Sie Ausgabenlimits für einen `user_path`-Teilbaum, ein
+Mit Budgets legst du Ausgabenlimits für einen `user_path`-Teilbaum, ein
 Request-[Label](/de/features/labelling) oder einen Provider fest. GoModel wertet sie
 anhand der erfassten Kostendatensätze der Nutzung aus und blockiert passende
 Requests, wenn ein Limit bereits ausgeschöpft ist.
@@ -20,7 +20,7 @@ Jedes Budget hat einen **Scope**, der benennt, was es begrenzt:
 | `label`     | Ein Label (`Mobile-App-iOS`)       | Jeden Request, der dieses Label trägt                  |
 | `provider`  | Ein Provider-Name (`openai-prod`)  | Jeden Request, der zu dieser Provider-Instanz geroutet wird |
 
-Verwenden Sie Budgets für Limits wie diese:
+Verwende Budgets für Limits wie diese:
 
 - `/team/alpha` darf `$10` pro Tag ausgeben
 - `/team/alpha` darf `$50` pro Woche ausgeben
@@ -44,7 +44,7 @@ abgeschlossen, und ihre Ausgaben zählen zum Budget, sobald sie geschrieben sind
 gemäß der Kostenbasis des Budgets und den Regeln für
 [nicht abrechenbare Provider](#nicht-abrechenbare-provider). Wie weit die
 Ausgaben ein Limit überschreiten können, hängt von Traffic und Request-Dauer ab
-und wächst, solange Schreibvorgänge in den Speicher langsam sind; lassen Sie
+und wächst, solange Schreibvorgänge in den Speicher langsam sind; lass
 daher Spielraum, wenn ein Budget das Kreditlimit eines Kunden ist.
 Nutzungseinträge, die nie gespeichert werden, weil der Puffer
 (`USAGE_BUFFER_SIZE`) voll ist oder ein Schreibvorgang fehlschlägt, werden
@@ -71,7 +71,7 @@ Budgetverwaltung und protokolliert eine Warnung.
 
 ## Budgets erstellen
 
-Sie können Budgets im Dashboard erstellen:
+Du kannst Budgets im Dashboard erstellen:
 
 ```text
 Budgets -> Create Budget
@@ -84,7 +84,7 @@ Budgets -> Create Budget
   className="rounded-lg"
 />
 
-Legen Sie im Formular **Scope**, **Subjekt** (einen User-Path, ein Label oder einen
+Lege im Formular **Scope**, **Subjekt** (einen User-Path, ein Label oder einen
 Provider), **Zeitraum** und **Betrag** fest. Jede Zeile auf der Budgets-Seite zeigt
 dann die Ausgaben als Prozentsatz des Limits, den ausgegebenen Betrag im Verhältnis
 zur Obergrenze und das verbleibende Guthaben für den aktuellen Zeitraum. Label- und
@@ -92,7 +92,7 @@ Provider-Budgets tragen neben dem Zeitraum einen `label`- bzw. `provider`-Chip. 
 Dashboard erstellte Budgets sind als `manual` gekennzeichnet. Aus YAML oder
 Umgebungsvariablen geladene Budgets sind als `config` gekennzeichnet.
 
-Sie können Budgets auch per YAML vorbelegen:
+Du kannst Budgets auch per YAML vorbelegen:
 
 ```yaml
 budgets:
@@ -126,7 +126,7 @@ budgets:
           amount: 100.00
 ```
 
-Oder verwenden Sie Umgebungsvariablen:
+Oder verwende Umgebungsvariablen:
 
 ```env
 SET_BUDGET_TEAM__ALPHA="daily=10,weekly=50"
@@ -136,7 +136,7 @@ SET_BUDGET_CUSTOMERS='[{"period":"daily","amount":5,"per_child":true}]'
 SET_PROVIDER_BUDGET_OPENAI_PROD="daily=100"
 ```
 
-Das Suffix nach `SET_BUDGET_` wird zu einem User-Path. Verwenden Sie doppelte
+Das Suffix nach `SET_BUDGET_` wird zu einem User-Path. Verwende doppelte
 Unterstriche (`__`) zwischen Pfadsegmenten; einfache Unterstriche bleiben Teil eines
 Segments:
 
@@ -145,7 +145,7 @@ Segments:
 - `SET_BUDGET_` -> `/`
 
 Für einen literalen doppelten Unterstrich innerhalb eines Pfadsegments gibt es keine
-Escape-Möglichkeit. Verwenden Sie YAML oder das Dashboard für Pfade, deren
+Escape-Möglichkeit. Verwende YAML oder das Dashboard für Pfade, deren
 Segmentwert ein `__` benötigt.
 
 Provider-Budgets verwenden ein eigenes Präfix, `SET_PROVIDER_BUDGET_<NAME>`, analog zu
@@ -156,7 +156,7 @@ sodass `SET_PROVIDER_BUDGET_OPENAI_PROD` den Provider `openai-prod` begrenzt.
   Für Label-Budgets gibt es keine Form als Umgebungsvariable. Labels werden exakt
   abgeglichen, einschließlich Groß- und Kleinschreibung, und können Zeichen
   enthalten, die sich in Namen von Umgebungsvariablen nicht ausdrücken lassen.
-  Deklarieren Sie sie in YAML unter `budgets.labels` oder legen Sie sie im Dashboard
+  Deklariere sie in YAML unter `budgets.labels` oder lege sie im Dashboard
   oder über die Admin API an.
 </Note>
 
@@ -175,7 +175,7 @@ verwenden die konfigurierte Logik für Reset-Anker; `monthly` wird beispielsweis
 Reset-Tag bei kürzeren Monaten begrenzt wird. Nur benutzerdefinierte
 `period_seconds`-Werte verhalten sich als Fenster mit fester Sekundenzahl.
 
-Für benutzerdefinierte Fenster setzen Sie `period_seconds` in YAML:
+Für benutzerdefinierte Fenster setzt du `period_seconds` in YAML:
 
 ```yaml
 budgets:
@@ -214,7 +214,7 @@ Groß- und Kleinschreibung:
 Labels stammen aus den Tagging-Regeln, aus Labels am verwalteten API-Key, der den
 Request authentifiziert hat, und aus LiteLLM-Tags, die der Client sendet; siehe
 [Labeling](/de/features/labelling). Ein Request mit mehreren Labels wird jedem
-passenden Label-Budget belastet. LiteLLM-Tags wählt der Client selbst; setzen Sie
+passenden Label-Budget belastet. LiteLLM-Tags wählt der Client selbst; setze
 daher `LITELLM_TAGS_ENABLED=false`, wenn ein Client nicht das Label-Budget eines
 anderen Teams belasten darf.
 
@@ -232,7 +232,7 @@ ausgeschöpft ist.
 ### Nicht abrechenbare Provider
 
 Ein Provider mit `billable: false` bedient Requests, deren Kosten der Aufrufer
-Ihnen nicht schuldet, typischerweise der eigene API-Key eines Kunden, der als
+dir nicht schuldet, typischerweise der eigene API-Key eines Kunden, der als
 eigene Provider-Instanz registriert ist. User-Path- und Label-Budgets prüfen
 einen an einen solchen Provider gerouteten Request weder, noch zählen sie seine
 Ausgaben, auf keiner der beiden Kostenbasen. Provider-Budgets gelten weiterhin
@@ -243,9 +243,9 @@ vermerkt `billable: false`; das Flag wird beim Schreiben der Zeile gesetzt,
 sodass eine spätere Änderung vergangene Ausgaben nicht umschreibt.
 
 Ein Beispiel: Eine Plattform lässt Nutzer ihren eigenen OpenAI-Key mitbringen
-und bietet außerdem Ihre gehosteten Modelle an. Registrieren Sie den Key des
-Nutzers als eigenen Provider, markieren Sie ihn als nicht abrechenbar und legen
-Sie das Budget auf den User-Path des Nutzers: Das Budget begrenzt dann nur die
+und bietet außerdem deine gehosteten Modelle an. Registriere den Key des
+Nutzers als eigenen Provider, markiere ihn als nicht abrechenbar und lege
+das Budget auf den User-Path des Nutzers: Das Budget begrenzt dann nur die
 gehosteten Modelle, während die OpenAI-Nutzung des Nutzers in Nutzungsberichten
 und `GET /v1/usage` sichtbar bleibt.
 
@@ -265,9 +265,9 @@ budgets:
           amount: 20.00
 ```
 
-Binden Sie den API-Key des Nutzers an `/users/u123`. Requests an
+Binde den API-Key des Nutzers an `/users/u123`. Requests an
 `openai-u123/...` werden nicht gegen das Budget geprüft und zählen nicht dazu;
-Requests an Ihren gehosteten Provider schon. In `config.yaml` heißt dieselbe
+Requests an deinen gehosteten Provider schon. In `config.yaml` heißt dieselbe
 Einstellung `providers.<name>.billable: false`, in der Umgebung
 `<PROVIDER>[_SUFFIX]_BILLABLE=false`; wie nicht abrechenbare Nutzung
 abgerechnet wird, beschreibt
@@ -287,7 +287,7 @@ Die einzige Ausnahme ist ein Request, der auf einem nicht abrechenbaren Provider
 zugelassen wurde und für den User-Path- und Label-Budgets nicht geprüft wurden.
 Fällt er auf ein abrechenbares Ziel über, prüft das Failover diese Budgets für
 dieses Ziel und überspringt es, wenn eines ausgeschöpft ist; der eigene Key
-eines Kunden öffnet also nie einen Weg an seinem Budget auf Ihren Providern
+eines Kunden öffnet also nie einen Weg an seinem Budget auf deinen Providern
 vorbei.
 
 ### Dynamische Budgets pro Kind
@@ -301,7 +301,7 @@ vorbei.
   der Durchsetzung verändern würde.
 </Info>
 
-Setzen Sie `per_child: true` an einem User-Path-Eintrag, wenn sein Limit eine
+Setze `per_child: true` an einem User-Path-Eintrag, wenn sein Limit eine
 Vorlage für direkte Kinder sein soll statt eines gemeinsamen Teilbaum-Budgets. Für
 eine Vorlage auf `/customers` gilt:
 
@@ -310,7 +310,7 @@ eine Vorlage auf `/customers` gilt:
 - `/customers` selbst passt nicht auf die Vorlage, da es kein Kind hat
 
 Das Dashboard zeigt die Definition als `per child`-Vorlage, statt einen aggregierten
-Nutzungswert zu erfinden. Verwenden Sie `GET /v1/usage` mit dem effektiven User-Path
+Nutzungswert zu erfinden. Verwende `GET /v1/usage` mit dem effektiven User-Path
 eines Kindes, um das aufgelöste Budget dieses Kindes einzusehen. Das Zurücksetzen der
 Vorlage startet für alle ihre Kinder einen neuen Zeitraum.
 
@@ -326,16 +326,16 @@ Vorlage startet für alle ihre Kinder einen neuen Zeitraum.
   Budget (im Dashboard angelegt oder aus einer früheren Konfiguration) blockiert
   den Start nie: Solange Berechtigung oder Aufschläge fehlen, protokolliert
   GoModel einmalig eine Warnung und setzt es auf Provider-Kosten durch, sodass
-  das Limit in Kraft bleibt. Es bleibt als abgerechnet gespeichert: Wenn Sie den
-  Betrag im Dashboard oder mit `"cost_basis": "billed"` ändern, bleibt es
+  das Limit in Kraft bleibt. Es bleibt als abgerechnet gespeichert: Wenn du den
+  Betrag im Dashboard oder mit `"cost_basis": "billed"` änderst, bleibt es
   abgerechnet, und sobald Berechtigung und Aufschläge zurück sind, begrenzt es
   wieder abgerechnete Kosten.
 </Info>
 
-Standardmäßig begrenzt ein Budget die Provider-Kosten: was Sie upstream für
-nicht gecachte Requests bezahlen. Setzen Sie `cost_basis: billed`, um
+Standardmäßig begrenzt ein Budget die Provider-Kosten: was du upstream für
+nicht gecachte Requests bezahlst. Setze `cost_basis: billed`, um
 stattdessen zu begrenzen, was dem Aufrufer berechnet wird – Provider-Kosten plus
-[Aufschlag](/de/features/cost-tracking). Nutzen Sie das, wenn ein Budget das
+[Aufschlag](/de/features/cost-tracking). Nutze das, wenn ein Budget das
 Kreditlimit eines Kunden ist.
 
 ```yaml
@@ -377,7 +377,7 @@ Ein abgerechnetes Budget:
   eines [nicht abrechenbaren Providers](#nicht-abrechenbare-provider) wird in
   jedem Fall zugelassen, wie es der Request selbst würde.
 - zählt bei einem Provider die abgerechneten Cache-Treffer seiner Modelle trotzdem
-  zu den Ausgaben. Setzen Sie `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false`
+  zu den Ausgaben. Setze `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false`
   (`budgets.provider_billed_cache_hits`), damit ein Provider-Budget nur die
   abgerechneten Kosten für vom Provider bediente Requests zählt.
 
@@ -414,7 +414,7 @@ In einem Workflow-Payload:
 }
 ```
 
-Verwenden Sie Scoped Workflows, um die Budget-Durchsetzung für einen Provider, ein
+Verwende Scoped Workflows, um die Budget-Durchsetzung für einen Provider, ein
 Modell oder einen `user_path`-Teilbaum ein- oder auszuschalten. Zur Rangfolge beim
 Abgleich siehe [Workflows](/de/advanced/workflows).
 
@@ -439,7 +439,7 @@ der Reset am letzten Tag dieses Monats. Ein monatlicher Reset-Tag `31` greift
 beispielsweise am 30. April und am 28. bzw. 29. Februar.
 
 Das Bearbeiten eines Budgets ändert das Limit, setzt den aktuellen Zeitraum aber
-nicht zurück. Verwenden Sie die Aktion Reset in der jeweiligen Zeile, um für ein
+nicht zurück. Verwende die Aktion Reset in der jeweiligen Zeile, um für ein
 einzelnes Budget einen neuen Zeitraum zu starten, oder
 `Settings -> Reset All Budgets`, um alle Budgets zurückzusetzen.
 
@@ -548,7 +548,7 @@ console.log(budget);
 
 </CodeGroup>
 
-Derselbe Aufruf für ein Label-Budget (für ein Provider-Budget verwenden Sie
+Derselbe Aufruf für ein Label-Budget (für ein Provider-Budget verwendest du
 `"scope": "provider"` mit einem Provider-Namen als Subjekt):
 
 <CodeGroup>
@@ -670,4 +670,4 @@ console.log(deleted);
 
 </CodeGroup>
 
-Die Liste der Endpunkte finden Sie unter [Admin-Endpunkte](/de/advanced/admin-endpoints).
+Die Liste der Endpunkte findest du unter [Admin-Endpunkte](/de/advanced/admin-endpoints).

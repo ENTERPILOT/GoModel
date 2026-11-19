@@ -1,7 +1,7 @@
 ---
 title: "SAML 2.0 Single Sign-On"
 sidebarTitle: "SAML SSO"
-description: "Schützen Sie das GoModel Dashboard mit einem SAML-2.0-Identity-Provider: Einstellungen, Registrierung, Prüfungen jeder Response, Metadaten-Aktualisierung, Zertifikat-Pinning und Grenzen."
+description: "Schütze das GoModel Dashboard mit einem SAML-2.0-Identity-Provider: Einstellungen, Registrierung, Prüfungen jeder Response, Metadaten-Aktualisierung, Zertifikat-Pinning und Grenzen."
 icon: "fingerprint"
 tag: "Pro"
 keywords: ["GoModel Pro", "SAML", "SAML 2.0", "SSO", "Single Sign-On", "Identity-Provider", "identity provider", "IdP-Metadaten", "IdP metadata", "Assertion Consumer Service", "Zertifikat-Pinning", "certificate pinning", "Dashboard-Authentifizierung", "dashboard authentication"]
@@ -95,31 +95,31 @@ Das Gateway stellt zwei URLs bereit, beide unterhalb eines ggf. konfigurierten
 
 <Steps>
   <Step title="SAML-2.0-Anwendung beim Identity-Provider anlegen">
-    Importieren Sie die URL der Service-Provider-Metadaten, wenn der Provider
-    das unterstützt und das Gateway bereits läuft. Andernfalls tragen Sie die
+    Importiere die URL der Service-Provider-Metadaten, wenn der Provider
+    das unterstützt und das Gateway bereits läuft. Andernfalls trägst du die
     ACS-URL mit HTTP-POST-Binding und die Entity-ID (Audience) von Hand ein.
   </Step>
   <Step title="Assertion signieren">
     Die Assertion selbst muss mit RSA-SHA256 oder stärker und einem
     RSA-Schlüssel von mindestens 2048 Bit signiert sein. Nur die Response zu
-    signieren genügt nicht. Verschlüsseln Sie die Assertion nicht. Das Gateway
+    signieren genügt nicht. Verschlüssle die Assertion nicht. Das Gateway
     sendet unsignierte Requests über HTTP-Redirect.
   </Step>
   <Step title="Stabiles Subject und die verwendeten Attribute senden">
-    Verwenden Sie eine persistente NameID, oder senden Sie eine unveränderliche
-    Benutzer-ID als Attribut und nennen Sie es in `principal_attribute`. Geben
-    Sie das Attribut für den User-Path frei und, falls Sie `admin_groups` oder
-    Gruppen-Mappings verwenden, das Gruppen-Attribut mit nur den Gruppen, die
+    Verwende eine persistente NameID, oder sende eine unveränderliche
+    Benutzer-ID als Attribut und nenne es in `principal_attribute`. Gib
+    das Attribut für den User-Path frei und, falls du `admin_groups` oder
+    Gruppen-Mappings verwendest, das Gruppen-Attribut mit nur den Gruppen, die
     das Gateway benötigt.
   </Step>
   <Step title="Dem Gateway die Metadaten des Identity-Providers geben">
-    Setzen Sie `idp_metadata_url`, oder laden Sie die Metadaten herunter und
-    setzen Sie `idp_metadata_file`. Die Metadaten müssen genau einen
+    Setze `idp_metadata_url`, oder lade die Metadaten herunter und
+    setze `idp_metadata_file`. Die Metadaten müssen genau einen
     Identity-Provider mit einem HTTP-Redirect-Anmeldeendpunkt und mindestens
     einem Signaturzertifikat beschreiben.
   </Step>
   <Step title="Gateway starten und anmelden">
-    Öffnen Sie `/sso/login` unterhalb eines ggf. konfigurierten `BASE_PATH`. Schlägt die Anmeldung fehl, schlagen Sie den Grund
+    Öffne `/sso/login` unterhalb eines ggf. konfigurierten `BASE_PATH`. Schlägt die Anmeldung fehl, schlage den Grund
     unter
     [Gründe für abgelehnte Anmeldungen](/de/pro/sso#gründe-für-abgelehnte-anmeldungen)
     nach.
@@ -130,7 +130,7 @@ Das Gateway stellt zwei URLs bereit, beide unterhalb eines ggf. konfigurierten
   Diese Schritte verwenden allgemeine SAML-2.0-Begriffe; die Namen der
   Einstellungen unterscheiden sich je nach Identity-Provider. Die
   SAML-Anmeldung wurde bisher nur gegen einen Test-Identity-Provider
-  verifiziert. Behandeln Sie die erste Einführung mit Ihrem Provider daher als
+  verifiziert. Behandle die erste Einführung mit deinem Provider daher als
   Integration, die zu testen ist, und nicht als erprobtes Rezept.
 </Note>
 
@@ -194,7 +194,7 @@ E-Mail-Adresse abhängt:
 - einen `groups_claim`, der sie liest, wenn `admin_groups` oder
   Gruppen-Mappings gesetzt sind.
 
-Wählen Sie daher eine der folgenden Möglichkeiten:
+Wähle daher eine der folgenden Möglichkeiten:
 
 ```yaml
 # Der Identity-Provider setzt die E-Mail-Adresse, und Benutzer können sie nicht ändern.
@@ -221,7 +221,7 @@ extensions:
   `urn:oid:1.2.840.113549.1.9.1`, alle ohne Beachtung der Groß- und
   Kleinschreibung, direkt oder über einen Alias. Ein Attribut, das eine
   E-Mail-Adresse oder einen anderen von Personen änderbaren Wert unter einem
-  anderen Namen trägt, besteht die Prüfung. Verwenden Sie für
+  anderen Namen trägt, besteht die Prüfung. Verwende für
   `user_path_claim` oder `groups_claim` niemals ein Attribut, das ein Benutzer
   ändern kann.
 </Warning>
@@ -270,7 +270,7 @@ dient als Identität. Danach gilt die Zulassung wie bei OIDC.
 
 **Aus einer Datei.** Die Datei wird einmal gelesen. Eine nicht lesbare oder
 ungültige Datei bricht den Start ab. Nachdem der Identity-Provider sein
-Signaturzertifikat rotiert hat, müssen Sie die Datei ersetzen und das Gateway
+Signaturzertifikat rotiert hat, musst du die Datei ersetzen und das Gateway
 neu starten.
 
 **Von einer URL.** Das Gateway ruft die Metadaten beim Start und danach alle
@@ -279,7 +279,7 @@ wird also ohne Neustart übernommen. Eine fehlgeschlagene Aktualisierung behält
 die letzten gültigen Metadaten. Ist die URL beim Start nicht erreichbar,
 startet das Gateway trotzdem, Anmeldungen antworten mit `503` und
 `identity_provider_unavailable`, und der Abruf wird im Hintergrund wiederholt
-(5 Sekunden, verdoppelt bis 5 Minuten). Setzen Sie `require_discovery: true`
+(5 Sekunden, verdoppelt bis 5 Minuten). Setze `require_discovery: true`
 (`PRO_SSO_REQUIRE_DISCOVERY=true`), um daraus stattdessen einen Startfehler zu
 machen.
 
@@ -292,7 +292,7 @@ sind.
 Eine Aktualisierung darf die Signaturzertifikate, die Anmelde-URL und
 `validUntil` ersetzen. Die Entity-ID des Identity-Providers darf sie nicht
 ändern: Solche Metadaten werden abgelehnt, die aktuellen Metadaten bleiben in
-Gebrauch, und ein Fehler wird protokolliert. Starten Sie das Gateway neu, um
+Gebrauch, und ein Fehler wird protokolliert. Starte das Gateway neu, um
 zu einer anderen Entity-ID zu wechseln.
 
 Wer die Metadaten-URL kontrolliert, kann ein eigenes Signaturzertifikat
@@ -304,12 +304,12 @@ in `added_fingerprints` und `removed_fingerprints`:
 GoModel Pro: SAML identity provider signing certificates changed on metadata refresh
 ```
 
-Richten Sie einen Alarm auf diese Zeile ein. Beim Start werden die
+Richte einen Alarm auf diese Zeile ein. Beim Start werden die
 Fingerprints protokolliert, denen das Gateway vertraut.
 
 ### Zertifikat-Pinning
 
-Damit eine Rotation nicht automatisch akzeptiert wird, listen Sie die
+Damit eine Rotation nicht automatisch akzeptiert wird, liste die
 SHA-256-Fingerprints der Signaturzertifikate des Identity-Providers auf:
 
 ```yaml
@@ -326,8 +326,8 @@ einer Metadaten-Datei ebenso wie bei einer URL. Metadaten ohne eines dieser
 Zertifikate brechen den Start ab; bei einer Aktualisierung werden sie
 abgelehnt, und die letzten gültigen Metadaten bleiben in Gebrauch.
 
-Zum Rotieren fügen Sie den neuen Fingerprint hinzu, bevor der
-Identity-Provider wechselt, und entfernen den alten danach. Jeder Schritt
+Zum Rotieren fügst du den neuen Fingerprint hinzu, bevor der
+Identity-Provider wechselt, und entfernst den alten danach. Jeder Schritt
 erfordert einen Neustart.
 
 ## Sessions und Abmeldung
@@ -350,7 +350,7 @@ konfigurierten Storage-Backend.
   Replica abgelehnt, die den Storage teilt. Zwei Replicas, die dieselbe
   Assertion im selben Augenblick erhalten, könnten sie beide akzeptieren;
   dafür wird zusätzlich das Transaktions-Cookie der Person benötigt.
-- **SQLite (Standard):** Der Schutz gilt pro Instanz. Betreiben Sie wie bei
+- **SQLite (Standard):** Der Schutz gilt pro Instanz. Betreibe wie bei
   der Abmeldung nur eine Replica; das Gateway protokolliert beim Start eine
   Warnung.
 - **Storage nicht verfügbar:** Die Anmeldung wird mit
@@ -360,14 +360,14 @@ konfigurierten Storage-Backend.
 
 - **Etwa 850 Gruppen pro Person.** Jeder Gruppenwert ist ein XML-Element, und
   eine Response mit mehr als 900 Elementen wird mit `too_many_elements`
-  abgelehnt. Die Grenze ist nicht konfigurierbar. Filtern Sie beim
-  Identity-Provider: Senden Sie nur die Gruppen, die der Anwendung zugewiesen
+  abgelehnt. Die Grenze ist nicht konfigurierbar. Filtere beim
+  Identity-Provider: Sende nur die Gruppen, die der Anwendung zugewiesen
   sind oder die in `admin_groups` und `group_mappings` genannt werden.
 - **Entra ID: höchstens 150 Gruppen in einer Assertion.** Darüber sendet
   Entra ID statt der Gruppen
   `http://schemas.microsoft.com/claims/groups.link`, und solange
   `admin_groups` oder Gruppen-Mappings gesetzt sind, wird die Anmeldung mit
-  `groups_overage` abgelehnt. Senden Sie nur die Gruppen, die der
+  `groups_overage` abgelehnt. Sende nur die Gruppen, die der
   Anwendung zugewiesen sind.
 - **Keine beim Identity-Provider gestartete Anmeldung.** Anmeldungen müssen
   am Gateway beginnen (`/sso/login` unterhalb eines ggf. konfigurierten
