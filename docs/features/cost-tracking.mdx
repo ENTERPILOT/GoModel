@@ -163,6 +163,8 @@ The default is none: without `user_path_markups`, `markups` applies to everyone.
 
 A `---` value means the cost is unknown because no pricing was available, which is not the same as `$0`.
 
+The overview's usage chart draws the **Estimated Cost** as a line on a right-hand axis over the stacked token bands, so you can see how spend follows token volume. A period whose usage has no pricing leaves a gap in the line instead of dropping to `$0`. Without any known cost in the window, the chart shows tokens only.
+
 ## Filter and break down spend
 
 The usage page filters every card, chart, and the request log by model, provider, label, API key, endpoint, user path, and session. Each dropdown takes several values: a request matches a filter when it has any of the selected values, and it must match every filter. The user path picker lists known paths as a tree grouped by prefix; picking a node includes everything below it, and you can type a path that is not listed.

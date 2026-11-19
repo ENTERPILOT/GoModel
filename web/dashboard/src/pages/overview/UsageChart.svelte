@@ -1,5 +1,6 @@
 <script>
-  // Daily/weekly/monthly/yearly token usage chart with the interval picker.
+  // Daily/weekly/monthly/yearly token usage chart with the interval picker;
+  // the estimated cost rides on a second axis of the same chart.
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
   import Spinner from "$lib/components/atoms/Spinner.svelte";
   import NoDataIllustration from "$lib/components/atoms/NoDataIllustration.svelte";
@@ -66,7 +67,7 @@
     />
   </div>
   <div class="chart-wrapper">
-    <ChartCanvas build={buildChart} />
+    <ChartCanvas build={buildChart} ariaLabel={m.overview_usage_chart_label()} />
     {#if usageData.daily.length === 0 && usageData.loading}
       <div class="chart-empty-overlay">
         <Spinner size={24} label={m.usage_loading()} />

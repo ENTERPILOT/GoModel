@@ -3,8 +3,11 @@
 
 import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
 import { formatNumber } from "../../lib/i18n/locale.js";
+import { formatCost } from "../../lib/utils/format.js";
 import * as m from "../../lib/paraglide/messages.js";
 import { tokenAxisTicks } from "./chartStyle.js";
+
+const COST_AXIS = "yCost";
 
 function dateToKey(date) {
   return (
@@ -80,7 +83,33 @@ export function buildOverviewSeries(filledDaily, filledCacheDaily) {
     return c ? num(c.input_tokens) + num(c.output_tokens) : 0;
   });
 
-  return { labels, inputPaid, output, prompt, local };
+  const cost = filledDaily.map(bucketCost);
+
+  return { labels, inputPaid, output, prompt, local, cost };
+}
+
+// bucketCost is the estimated provider cost of one bucket, or null when it is
+// unknown. A bucket with usage but no total_cost had no pricing: it must not
+// plot as $0, so it stays null and the cost line breaks there. A bucket with
+// no usage at all (a quiet, padded day) really cost nothing.
+export function bucketCost(row) {
+  const d = row || {};
+  if (d.total_cost != null && Number.isFinite(Number(d.total_cost))) {
+    return Number(d.total_cost);
+  }
+  const used =
+    (Number(d.requests) || 0) +
+    (Number(d.total_tokens) || 0) +
+    (Number(d.input_tokens) || 0) +
+    (Number(d.output_tokens) || 0);
+  return used > 0 ? null : 0;
+}
+
+// hasCostData reports whether any bucket has a known, non-zero cost. Without
+// one (no pricing at all, or no usage) the cost line and its axis are left
+// out instead of drawing a flat $0 line.
+export function hasCostData(cost) {
+  return (cost || []).some((v) => v != null && v > 0);
 }
 
 // Prompt cache rate: share of the period's provider input tokens that were
@@ -113,7 +142,9 @@ export function promptCacheRateText(summary) {
 // band's top edge is the per-unit total. Same palette as the live throughput
 // chart: paid tokens (input, output) are solid browns; cached tokens are
 // dashed blues, the free "Locally Cached" lighter than the almost-free
-// "Prompt cached".
+// "Prompt cached". When any bucket has a known cost, the estimated cost is a
+// separate, unstacked line with point markers on a right-hand axis, so token
+// volume and spend read in one chart.
 export function overviewChartConfig(colors, series, options = {}) {
   const cacheEnabled = !!options.cacheEnabled;
   const resolve = options.resolve || ((expr) => expr);
@@ -156,6 +187,64 @@ export function overviewChartConfig(colors, series, options = {}) {
       }),
     );
   }
+  const showCost = hasCostData(series.cost);
+  if (showCost) {
+    // Last, so the token series' relative fills ("-1") stay untouched.
+    datasets.push(
+      line(m.overview_estimated_cost(), series.cost, resolve("var(--chart-cost)"), {
+        yAxisID: COST_AXIS,
+        stack: "cost",
+        spanGaps: false,
+        pointRadius: 2,
+        pointHoverRadius: 5,
+        order: -1,
+      }),
+    );
+  }
+  const isCost = (item) => item.dataset.yAxisID === COST_AXIS;
+  const scales = {
+    x: {
+      stacked: true,
+      grid: { color: colors.grid },
+      border: { display: false },
+      ticks: {
+        color: colors.text,
+        font: chartTickFont(),
+        maxRotation: 0,
+        autoSkip: true,
+        maxTicksLimit: 10,
+      },
+    },
+    y: {
+      stacked: true,
+      beginAtZero: true,
+      grid: { color: colors.grid },
+      border: { display: false },
+      ticks: tokenAxisTicks(colors),
+    },
+  };
+  if (showCost) {
+    const axisTitle = (text) => ({
+      display: true,
+      text: text,
+      color: colors.text,
+      font: { size: 11 },
+    });
+    scales.y.title = axisTitle(m.overview_tokens());
+    scales[COST_AXIS] = {
+      position: "right",
+      beginAtZero: true,
+      grid: { drawOnChartArea: false },
+      border: { display: false },
+      title: axisTitle(m.overview_estimated_cost()),
+      ticks: {
+        color: colors.text,
+        font: chartTickFont(),
+        // formatCost keeps small daily spend readable ($0.004, not $0.00).
+        callback: (v) => formatCost(v),
+      },
+    };
+  }
   return {
     type: "line",
     data: {
@@ -172,37 +261,21 @@ export function overviewChartConfig(colors, series, options = {}) {
           labels: { color: colors.text, font: { size: 12 } },
         },
         tooltip: chartTooltip(colors, {
-          label: (c) => c.dataset.label + ": " + formatNumber(c.parsed.y),
+          label: (c) =>
+            c.dataset.label +
+            ": " +
+            (isCost(c) ? formatCost(c.raw) : formatNumber(c.parsed.y)),
           footer: (items) => {
             let total = 0;
             items.forEach((it) => {
+              if (isCost(it)) return;
               total += Number(it.parsed.y) || 0;
             });
             return m.overview_total_label({ total: formatNumber(total) });
           },
         }),
       },
-      scales: {
-        x: {
-          stacked: true,
-          grid: { color: colors.grid },
-          border: { display: false },
-          ticks: {
-            color: colors.text,
-            font: chartTickFont(),
-            maxRotation: 0,
-            autoSkip: true,
-            maxTicksLimit: 10,
-          },
-        },
-        y: {
-          stacked: true,
-          beginAtZero: true,
-          grid: { color: colors.grid },
-          border: { display: false },
-          ticks: tokenAxisTicks(colors),
-        },
-      },
+      scales: scales,
     },
   };
 }

@@ -163,6 +163,8 @@ Domyślnie nic nie jest ustawione: bez `user_path_markups` dla wszystkich obowi�
 
 Wartość `---` oznacza, że koszt jest nieznany, ponieważ cennik nie był dostępny – to nie to samo co `$0`.
 
+Wykres użycia w przeglądzie rysuje **Szacowany koszt** jako linię na prawej osi nad skumulowanymi pasmami tokenów, dzięki czemu widać, jak wydatki podążają za liczbą tokenów. Okres, którego użycie nie ma cennika, zostawia przerwę w linii zamiast spadku do `$0`. Gdy w wybranym okresie nie ma żadnego znanego kosztu, wykres pokazuje tylko tokeny.
+
 ## Filtrowanie i zestawianie wydatków
 
 Strona użycia filtruje każdą kartę, wykres i log requestów według modelu, dostawcy, etykiety, klucza API, endpointu, ścieżki użytkownika i sesji. Każda lista przyjmuje kilka wartości: request spełnia filtr, gdy ma którąkolwiek z wybranych wartości, i musi spełniać każdy filtr. Wybór ścieżki użytkownika pokazuje znane ścieżki jako drzewo pogrupowane według prefiksu; wybrany węzeł obejmuje wszystko poniżej, a ścieżkę spoza listy można wpisać.

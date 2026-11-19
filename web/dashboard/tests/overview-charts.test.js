@@ -9,6 +9,8 @@ import {
   fillMissingDays,
   buildOverviewSeries,
   overviewChartConfig,
+  bucketCost,
+  hasCostData,
   promptCacheRate,
   promptCacheRateHasData,
   promptCacheRateText,
@@ -86,6 +88,92 @@ test("paid input splits out prompt-cache reads when the split is present", () =>
   assert.deepEqual(series.inputPaid, [40, 50]);
   assert.deepEqual(series.prompt, [60, 0]);
   assert.deepEqual(series.output, [20, 5]);
+});
+
+test("bucketCost keeps unknown pricing apart from $0", () => {
+  const cases = [
+    { name: "known cost", row: { total_cost: 0.25, requests: 3 }, want: 0.25 },
+    { name: "known zero cost", row: { total_cost: 0, requests: 1 }, want: 0 },
+    { name: "numeric string", row: { total_cost: "1.5", requests: 1 }, want: 1.5 },
+    { name: "usage without pricing", row: { total_cost: null, requests: 2, total_tokens: 40 }, want: null },
+    { name: "tokens only, no pricing", row: { total_cost: null, input_tokens: 5 }, want: null },
+    { name: "quiet padded day", row: { total_cost: null, requests: 0, total_tokens: 0 }, want: 0 },
+    { name: "missing row", row: undefined, want: 0 },
+  ];
+  for (const tc of cases) {
+    assert.equal(bucketCost(tc.row), tc.want, tc.name);
+  }
+});
+
+test("hasCostData needs a known, non-zero cost", () => {
+  assert.equal(hasCostData([0, null, 0]), false);
+  assert.equal(hasCostData([]), false);
+  assert.equal(hasCostData(undefined), false);
+  assert.equal(hasCostData([null, 0.01]), true);
+});
+
+test("overview chart plots estimated cost on a second, unstacked axis", () => {
+  const daily = fillMissingDays(
+    [
+      { date: "2026-03-28", input_tokens: 10, output_tokens: 2, total_tokens: 12, requests: 1, total_cost: 0.5 },
+      // Usage with no pricing: unknown, not $0.
+      { date: "2026-03-30", input_tokens: 4, output_tokens: 1, total_tokens: 5, requests: 1, total_cost: null },
+    ],
+    "daily",
+    utc("2026-03-28"),
+    utc("2026-03-30"),
+  );
+  const series = buildOverviewSeries(daily, []);
+  assert.deepEqual(series.cost, [0.5, 0, null]);
+
+  const config = overviewChartConfig(colors, series, { cacheEnabled: false });
+  const cost = config.data.datasets.at(-1);
+  assert.equal(cost.label, "Estimated Cost");
+  assert.equal(cost.yAxisID, "yCost");
+  assert.equal(cost.fill, false);
+  assert.equal(cost.spanGaps, false);
+  assert.equal(cost.borderColor, "var(--chart-cost)");
+  assert.deepEqual(cost.data, [0.5, 0, null]);
+  // The token series keep their stacked fills.
+  assert.deepEqual(config.data.datasets.slice(0, 3).map((d) => d.fill), ["origin", "-1", "-1"]);
+
+  const costAxis = config.options.scales.yCost;
+  assert.equal(costAxis.position, "right");
+  assert.notEqual(costAxis.stacked, true);
+  assert.equal(costAxis.grid.drawOnChartArea, false);
+  assert.equal(costAxis.title.text, "Estimated Cost");
+  assert.equal(costAxis.ticks.callback(0.004), "$0.004");
+  assert.equal(config.options.scales.y.title.text, "Tokens");
+});
+
+test("overview tooltip formats cost as money and leaves it out of the token total", () => {
+  const series = buildOverviewSeries(
+    [{ date: "2026-03-29", input_tokens: 3, output_tokens: 4, requests: 1, total_cost: 0.25 }],
+    [],
+  );
+  const config = overviewChartConfig(colors, series, { cacheEnabled: false });
+  const { label, footer } = config.options.plugins.tooltip.callbacks;
+  const [input, output, , cost] = config.data.datasets;
+  const items = [
+    { dataset: input, parsed: { y: 3 }, raw: 3 },
+    { dataset: output, parsed: { y: 4 }, raw: 4 },
+    { dataset: cost, parsed: { y: 0.25 }, raw: 0.25 },
+  ];
+
+  assert.equal(label(items[2]), "Estimated Cost: $0.25");
+  assert.equal(footer(items), "Total: 7");
+});
+
+test("overview chart leaves the cost axis out without any known cost", () => {
+  const series = buildOverviewSeries(
+    [{ date: "2026-03-29", input_tokens: 3, output_tokens: 4, requests: 1, total_cost: null }],
+    [],
+  );
+  const config = overviewChartConfig(colors, series, { cacheEnabled: false });
+
+  assert.equal(config.data.datasets.length, 3);
+  assert.equal(config.options.scales.yCost, undefined);
+  assert.equal(config.options.scales.y.title, undefined);
 });
 
 test("fillMissingDays pads the daily window with zero rows", () => {
