@@ -438,6 +438,18 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
 | `USAGE_FLUSH_INTERVAL`         | Flush interval in seconds                      | `5`     |
 | `USAGE_RETENTION_DAYS`         | Auto-delete after N days (0 = forever)         | `90`    |
 
+#### Lago
+
+Bills token usage in [Lago](/guides/lago). Off by default.
+
+| Variable             | Description                                                                                         | Default                          |
+| -------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------- |
+| `LAGO_ENABLED`       | Send each billable request to Lago as usage events; needs `USAGE_ENABLED=true`                      | `false`                          |
+| `LAGO_API_URL`       | Lago API base URL; change it for the EU cluster or a self-hosted instance                           | `https://api.getlago.com/api/v1` |
+| `LAGO_API_KEY`       | Lago API key; required when enabled                                                                 | none                             |
+| `LAGO_SUBSCRIPTIONS` | Comma-separated `user_path=external_subscription_id` list; requests no path covers are not sent     | none                             |
+| `LAGO_BUFFER_SIZE`   | Requests that may wait while Lago is slow or unreachable; later ones are dropped and counted        | `10000`                          |
+
 #### Budgets
 
 Budgets use tracked usage cost records. If usage tracking is disabled, GoModel

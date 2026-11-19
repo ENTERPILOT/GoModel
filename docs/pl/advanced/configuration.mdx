@@ -443,6 +443,18 @@ strony. Gdy logowanie requestów jest włączone, zapisy są asynchroniczne i mo
 | `USAGE_FLUSH_INTERVAL`         | Interwał zapisu w sekundach                    | `5`     |
 | `USAGE_RETENTION_DAYS`         | Automatyczne usuwanie po N dniach (0 = nigdy)  | `90`    |
 
+#### Lago
+
+Rozlicza użycie tokenów w [Lago](/pl/guides/lago). Domyślnie wyłączone.
+
+| Zmienna              | Opis                                                                                                        | Wartość domyślna                 |
+| -------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| `LAGO_ENABLED`       | Wysyła każdy rozliczany request do Lago jako eventy użycia; wymaga `USAGE_ENABLED=true`                      | `false`                          |
+| `LAGO_API_URL`       | Bazowy URL API Lago; zmień dla klastra EU albo własnej instancji                                             | `https://api.getlago.com/api/v1` |
+| `LAGO_API_KEY`       | Klucz API Lago; wymagany po włączeniu                                                                        | brak                             |
+| `LAGO_SUBSCRIPTIONS` | Lista `user_path=external_subscription_id` rozdzielona przecinkami; requesty spoza ścieżek nie są wysyłane   | brak                             |
+| `LAGO_BUFFER_SIZE`   | Requesty, które mogą czekać, gdy Lago działa wolno albo jest niedostępne; kolejne są odrzucane i zliczane    | `10000`                          |
+
 #### Budżety
 
 Budżety korzystają ze śledzonych rekordów kosztów użycia. Jeśli śledzenie użycia jest wyłączone, GoModel

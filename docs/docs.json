@@ -312,7 +312,8 @@
                             },
                             "guides/prometheus-metrics",
                             "guides/opentelemetry",
-                            "guides/langfuse"
+                            "guides/langfuse",
+                            "guides/lago"
                         ]
                     },
                     {
@@ -500,7 +501,8 @@
                             },
                             "de/guides/prometheus-metrics",
                             "de/guides/opentelemetry",
-                            "de/guides/langfuse"
+                            "de/guides/langfuse",
+                            "de/guides/lago"
                         ]
                     },
                     {
@@ -680,7 +682,8 @@
                             },
                             "zh/guides/prometheus-metrics",
                             "zh/guides/opentelemetry",
-                            "zh/guides/langfuse"
+                            "zh/guides/langfuse",
+                            "zh/guides/lago"
                         ]
                     },
                     {
@@ -860,7 +863,8 @@
                             },
                             "pl/guides/prometheus-metrics",
                             "pl/guides/opentelemetry",
-                            "pl/guides/langfuse"
+                            "pl/guides/langfuse",
+                            "pl/guides/lago"
                         ]
                     },
                     {
