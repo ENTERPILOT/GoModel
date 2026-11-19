@@ -51,16 +51,24 @@ func resolveServiceModel(
 	resolver RequestModelResolver,
 	model, providerHint string,
 ) (core.ModelSelector, error) {
+	selector, _, err := resolveServiceModelRoute(ctx, provider, resolver, model, providerHint)
+	return selector, err
+}
+
+// resolveServiceModelRoute is resolveServiceModel that also returns the
+// virtual-model route routing took, outermost first.
+func resolveServiceModelRoute(
+	ctx context.Context,
+	provider core.RoutableProvider,
+	resolver RequestModelResolver,
+	model, providerHint string,
+) (core.ModelSelector, []string, error) {
 	// Parse first so a malformed selector is a 400 rather than whatever the
 	// resolver chain reports for it.
 	if _, err := core.ParseModelSelector(model, providerHint); err != nil {
-		return core.ModelSelector{}, core.NewInvalidRequestError(err.Error(), err)
+		return core.ModelSelector{}, nil, core.NewInvalidRequestError(err.Error(), err)
 	}
-	selector, _, err := gateway.ResolveExecutionSelector(ctx, provider, resolver, core.NewRequestedModelSelector(model, providerHint))
-	if err != nil {
-		return core.ModelSelector{}, err
-	}
-	return selector, nil
+	return gateway.ResolveExecutionRoute(ctx, provider, resolver, core.NewRequestedModelSelector(model, providerHint))
 }
 
 func storeRequestModelResolution(c *echo.Context, resolution *core.RequestModelResolution) {

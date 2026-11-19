@@ -30,41 +30,31 @@ func (s *Service) ResolveTimeouts(
 	snap := s.snapshot()
 	userPath := core.UserPathFromContext(ctx)
 
-	var rows []VirtualModel
+	var chain []*redirectEntry
 	if !requested.ExplicitProvider {
-		chain := snap.routeChain(route)
+		chain = snap.routeChain(route)
 		if len(chain) == 0 {
 			if redirect, ok := snap.findRedirect(requested.Model, userPath, true); ok {
 				chain = append(chain, redirect)
 			}
 		}
+	}
+	// Each field is looked up on its own, so a row that sets only one field
+	// never decides the other.
+	resolve := func(field func(VirtualModel) *int) time.Duration {
 		for _, entry := range chain {
-			rows = append(rows, entry.vm)
+			if value := field(entry.vm); value != nil {
+				return time.Duration(*value) * time.Second
+			}
 		}
-	}
-	if policy, ok := snap.modelPolicy(resolved.Provider, resolved.Model, userPath, setsTimeout); ok {
-		rows = append(rows, policy)
-	}
-	if policy, ok := snap.modelPolicy(resolved.Provider, resolved.Model, userPath, setsResponseHeaderTimeout); ok {
-		rows = append(rows, policy)
-	}
-
-	var timeouts core.UpstreamTimeouts
-	for _, row := range rows {
-		if timeouts.Timeout == 0 && row.Timeout != nil {
-			timeouts.Timeout = time.Duration(*row.Timeout) * time.Second
+		sets := func(policy VirtualModel) bool { return field(policy) != nil }
+		if policy, ok := snap.modelPolicy(resolved.Provider, resolved.Model, userPath, sets); ok {
+			return time.Duration(*field(policy)) * time.Second
 		}
-		if timeouts.ResponseHeaderTimeout == 0 && row.ResponseHeaderTimeout != nil {
-			timeouts.ResponseHeaderTimeout = time.Duration(*row.ResponseHeaderTimeout) * time.Second
-		}
+		return 0
 	}
-	return timeouts
-}
-
-func setsTimeout(policy VirtualModel) bool {
-	return policy.Timeout != nil
-}
-
-func setsResponseHeaderTimeout(policy VirtualModel) bool {
-	return policy.ResponseHeaderTimeout != nil
+	return core.UpstreamTimeouts{
+		Timeout:               resolve(func(vm VirtualModel) *int { return vm.Timeout }),
+		ResponseHeaderTimeout: resolve(func(vm VirtualModel) *int { return vm.ResponseHeaderTimeout }),
+	}
 }

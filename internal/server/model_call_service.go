@@ -46,7 +46,7 @@ type modelCallRoute struct {
 // Authorization runs on the fully resolved selector so model-override and
 // user-path rules see the same concrete provider name as the inference orchestrator.
 func (s *modelCallService) prepare(c *echo.Context, model, providerHint string) (context.Context, modelCallRoute, error) {
-	selector, err := s.authorizedSelector(c, model, providerHint)
+	selector, vmRoute, err := s.authorizedSelector(c, model, providerHint)
 	if err != nil {
 		return nil, modelCallRoute{}, err
 	}
@@ -63,7 +63,7 @@ func (s *modelCallService) prepare(c *echo.Context, model, providerHint string) 
 	requestlog.EnrichEntryWithResolvedRoute(c, selector.QualifiedModel(), route.providerType, route.providerName)
 	requested := core.NewRequestedModelSelector(model, providerHint)
 	route.slowdown = resolveModelSlowdown(ctx, s.modelResolver, requested, selector)
-	ctx = withModelTimeouts(ctx, s.modelResolver, requested, selector)
+	ctx = withModelTimeouts(ctx, s.modelResolver, requested, selector, vmRoute)
 	return ctx, route, nil
 }
 
@@ -71,17 +71,17 @@ func (s *modelCallService) prepare(c *echo.Context, model, providerHint string) 
 // and checks the caller may use the resolved selector. Resolution failures
 // (unknown alias, registry not ready, malformed selector) surface instead of
 // authorizing an unresolved selector.
-func (s *modelCallService) authorizedSelector(c *echo.Context, model, providerHint string) (core.ModelSelector, error) {
-	selector, err := resolveServiceModel(c.Request().Context(), s.provider, s.modelResolver, model, providerHint)
+func (s *modelCallService) authorizedSelector(c *echo.Context, model, providerHint string) (core.ModelSelector, []string, error) {
+	selector, route, err := resolveServiceModelRoute(c.Request().Context(), s.provider, s.modelResolver, model, providerHint)
 	if err != nil {
-		return core.ModelSelector{}, err
+		return core.ModelSelector{}, nil, err
 	}
 	if s.modelAuthorizer != nil {
 		if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {
-			return core.ModelSelector{}, err
+			return core.ModelSelector{}, nil, err
 		}
 	}
-	return selector, nil
+	return selector, route, nil
 }
 
 // routeFor maps a resolved selector to its canonical provider type and concrete

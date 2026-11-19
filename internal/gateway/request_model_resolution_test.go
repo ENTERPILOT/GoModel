@@ -417,3 +417,18 @@ func TestResolveRequestModelCarriesResolvedTimeouts(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, resolution.Timeouts, "a resolver without the timeouts contract inherits")
 }
+
+func TestResolveExecutionRouteReturnsVirtualModelPath(t *testing.T) {
+	resolver := requestRouteResolver{
+		requestAliasResolver: requestAliasResolver{"team": {Provider: "openai", Model: "gpt-4o"}},
+		path:                 []string{"team", "smart"},
+	}
+
+	selector, route, err := ResolveExecutionRoute(
+		context.Background(), newRequestRefreshProvider(1), resolver,
+		core.NewRequestedModelSelector("team", ""),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "openai/gpt-4o", selector.QualifiedModel())
+	assert.Equal(t, []string{"team", "smart"}, route)
+}

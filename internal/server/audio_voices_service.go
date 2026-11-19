@@ -52,7 +52,7 @@ func (s *audioService) ListVoices(c *echo.Context) error {
 	if model == "" {
 		return handleError(c, core.NewInvalidRequestError("model is required", nil).WithParam("model"))
 	}
-	selector, err := s.authorizedSelector(c, model, strings.TrimSpace(query.Get("provider")))
+	selector, _, err := s.authorizedSelector(c, model, strings.TrimSpace(query.Get("provider")))
 	if err != nil {
 		return handleError(c, err)
 	}

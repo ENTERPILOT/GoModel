@@ -237,6 +237,19 @@ func ResolveExecutionSelector(
 	return selector, aliasApplied, err
 }
 
+// ResolveExecutionRoute is ResolveExecutionSelector that also returns the
+// virtual-model route routing took, outermost first, so per-route settings
+// such as upstream timeouts follow the target that was actually chosen.
+func ResolveExecutionRoute(
+	ctx context.Context,
+	provider core.RoutableProvider,
+	resolver ModelResolver,
+	requested core.RequestedModelSelector,
+) (core.ModelSelector, []string, error) {
+	selector, route, _, err := resolveExecutionRoute(ctx, provider, resolver, requested)
+	return selector, route, err
+}
+
 // resolveExecutionRoute is ResolveExecutionSelector that also returns the
 // virtual-model route a RoutedModelResolver reports.
 func resolveExecutionRoute(

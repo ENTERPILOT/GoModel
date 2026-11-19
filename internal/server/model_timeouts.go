@@ -16,12 +16,13 @@ func withModelTimeouts(
 	resolver RequestModelResolver,
 	requested core.RequestedModelSelector,
 	resolved core.ModelSelector,
+	route []string,
 ) context.Context {
 	timeoutsResolver, ok := resolver.(gateway.ModelTimeoutsResolver)
 	if !ok {
 		return ctx
 	}
-	timeouts := timeoutsResolver.ResolveTimeouts(ctx, requested, resolved, nil)
+	timeouts := timeoutsResolver.ResolveTimeouts(ctx, requested, resolved, route)
 	return httpclient.WithAttemptTimeouts(ctx, httpclient.AttemptTimeouts{
 		Timeout:               timeouts.Timeout,
 		ResponseHeaderTimeout: timeouts.ResponseHeaderTimeout,

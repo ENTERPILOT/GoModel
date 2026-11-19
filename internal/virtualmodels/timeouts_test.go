@@ -56,6 +56,15 @@ func TestResolveTimeouts(t *testing.T) {
 			want:      core.UpstreamTimeouts{Timeout: 20 * time.Second, ResponseHeaderTimeout: 15 * time.Second},
 		},
 		{
+			name: "exact field is not hidden by a model-wide row that sets both",
+			rows: []VirtualModel{
+				wide,
+				{Source: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", ResponseHeaderTimeout: new(5), Enabled: true},
+			},
+			requested: core.NewRequestedModelSelector("openai/gpt-4o", ""),
+			want:      core.UpstreamTimeouts{Timeout: 90 * time.Second, ResponseHeaderTimeout: 5 * time.Second},
+		},
+		{
 			name: "outer redirect on the route wins over inner",
 			rows: []VirtualModel{
 				{Source: "outer", Targets: []Target{{Model: "inner"}}, ResponseHeaderTimeout: new(5), Enabled: true},
@@ -135,4 +144,22 @@ func TestVirtualModelCloneDoesNotShareTimeouts(t *testing.T) {
 	*cloned.ResponseHeaderTimeout = 1
 	assert.Equal(t, 30, *original.Timeout)
 	assert.Equal(t, 10, *original.ResponseHeaderTimeout)
+}
+
+// Routing records the virtual-model route when only a timeout depends on it,
+// so an inner redirect's timeout applies to requests for the outer name.
+func TestResolveTimeoutsFollowsRecordedRoute(t *testing.T) {
+	service := newSlowdownService(t,
+		VirtualModel{Source: "outer", Targets: []Target{{Model: "inner"}}, Enabled: true},
+		VirtualModel{Source: "inner", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Timeout: new(60), Enabled: true},
+	)
+	requested := core.NewRequestedModelSelector("outer", "")
+
+	resolved, route, changed, err := service.ResolveModelRouteForUserPath(context.Background(), requested)
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.Equal(t, []string{"outer", "inner"}, route)
+
+	got := service.ResolveTimeouts(context.Background(), requested, resolved, route)
+	assert.Equal(t, core.UpstreamTimeouts{Timeout: 60 * time.Second}, got)
 }

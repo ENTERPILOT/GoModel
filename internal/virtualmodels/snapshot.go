@@ -82,11 +82,12 @@ type snapshot struct {
 	defaultEnable bool
 
 	// overrides reports whether any row forces a reasoning effort or request
-	// parameters, and redirectOverrides whether any redirect does. Without
+	// parameters, and recordRoute whether any redirect sets a per-request
+	// value (overrides or upstream timeouts) that follows the route. Without
 	// the first, override resolution has nothing to find; without the second,
 	// routing need not record the route it takes.
-	overrides         bool
-	redirectOverrides bool
+	overrides   bool
+	recordRoute bool
 }
 
 func emptySnapshot(defaultEnable bool) snapshot {
@@ -137,7 +138,10 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 			next.bySource[normalized.Source] = normalized
 			if normalized.setsOverrides() {
 				next.overrides = true
-				next.redirectOverrides = true
+				next.recordRoute = true
+			}
+			if normalized.setsTimeouts() {
+				next.recordRoute = true
 			}
 			continue
 		}
