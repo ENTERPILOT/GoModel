@@ -61,6 +61,9 @@ class ConversationDrawerStore {
   conversationReturnFocusEl = null;
   bodyPointerStart = null;
   revisionDetailRequested = new Set();
+  // The entry whose last revision-detail fetch failed, so the drawer can say
+  // its rewritten body is not shown instead of waiting for it.
+  revisionDetailFailedID = $state("");
 
   conversationDialogEl = $state(null);
   conversationCloseBtnEl = $state(null);
@@ -176,6 +179,7 @@ class ConversationDrawerStore {
     this.conversationRequestStep =
       normalizedConversationRequestStep(entry, requestStep);
     this.revisionDetailRequested = new Set();
+    this.revisionDetailFailedID = "";
     this.followUpText = "";
     this.followUpError = "";
     this.followUpRequestID = "";
@@ -237,9 +241,11 @@ class ConversationDrawerStore {
   // The selected step rewrote the request but its body was not stored, so
   // the transcript shows the original request under that step's name.
   requestStepBodyMissing() {
+    const entry = this.selectedConversationEntry();
     return conversationRequestStepBodyMissing(
-      this.selectedConversationEntry(),
+      entry,
       this.conversationRequestStep,
+      !!entry && String(entry.id || "") === this.revisionDetailFailedID,
     );
   }
 
@@ -271,14 +277,17 @@ class ConversationDrawerStore {
       // selection retries.
       if (!result.ok || result.stale || !result.data) {
         requested.delete(entryID);
+        if (!result.stale) this.revisionDetailFailedID = entryID;
         return;
       }
+      if (this.revisionDetailFailedID === entryID) this.revisionDetailFailedID = "";
       liveLogs.upsertRequestLogRecord(
         { ...result.data, _detail_loaded: true },
         "audit.detail",
       );
     } catch (e) {
       requested.delete(entryID);
+      this.revisionDetailFailedID = entryID;
       console.error("Failed to fetch request log detail for request steps:", e);
     }
   }

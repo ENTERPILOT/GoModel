@@ -1466,7 +1466,7 @@ test("a later snapshot that drops the opened request replaces its step preview",
   ]);
 });
 
-test("a selected step whose body was not stored is reported once the detail is loaded", () => {
+test("a selected step whose body was not stored is reported once the detail is loaded or failed", () => {
   const stored = revisionedEntry({ _detail_loaded: true });
   const notStored = revisionedEntry({ _detail_loaded: true });
   notStored.data = {
@@ -1485,10 +1485,11 @@ test("a selected step whose body was not stored is reported once the detail is l
     { name: "original request", entry: notStored, step: "original", missing: false },
     // Revisions arrive without bodies until the detail fetch fills them in.
     { name: "detail not loaded yet", entry: { ...notStored, _detail_loaded: false }, step: "revision-1", missing: false },
+    { name: "detail fetch failed", entry: { ...notStored, _detail_loaded: false }, step: "revision-1", detailFailed: true, missing: true },
     { name: "no entry", entry: null, step: "final", missing: false },
   ];
-  for (const { name, entry, step, missing } of cases) {
-    assert.equal(conversationRequestStepBodyMissing(entry, step), missing, name);
+  for (const { name, entry, step, detailFailed, missing } of cases) {
+    assert.equal(conversationRequestStepBodyMissing(entry, step, detailFailed), missing, name);
   }
 });
 

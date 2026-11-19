@@ -421,9 +421,10 @@ export function conversationRequestStepBody(entry, step) {
 // conversationRequestStepBodyMissing reports that the selected step rewrote
 // the request but its body was not stored (revision bodies off, or over the
 // capture limit), so the preview shows the original request instead. False
-// until the record's detail is loaded: revisions arrive without bodies first.
-export function conversationRequestStepBodyMissing(entry, step) {
-    if (!entry || !entry._detail_loaded) return false;
+// until the record's detail is loaded or its fetch failed: revisions arrive
+// without bodies first.
+export function conversationRequestStepBodyMissing(entry, step, detailFailed) {
+    if (!entry || !(entry._detail_loaded || detailFailed)) return false;
     const wanted = String(step || REQUEST_STEP_FINAL);
     const selected = conversationRequestSteps(entry).find((candidate) =>
         candidate.id === wanted || conversationRequestStepID(candidate) === wanted);
