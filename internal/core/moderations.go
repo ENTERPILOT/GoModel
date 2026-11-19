@@ -16,7 +16,9 @@ const DefaultModerationModel = "omni-moderation-latest"
 // an array of strings, or an array of text / image_url parts (multimodal
 // models). Unknown fields are kept in ExtraFields and forwarded upstream.
 type ModerationRequest struct {
-	Model string          `json:"model,omitempty"`
+	Model string `json:"model,omitempty"`
+	// Input is a string, an array of strings, or an array of text and
+	// image_url parts.
 	Input json.RawMessage `json:"input" swaggertype:"object"`
 
 	// Provider is gateway routing metadata, stripped before dispatching upstream.
@@ -61,8 +63,8 @@ type ModerationInput struct {
 
 // moderationPart is one element of a multimodal input array.
 type moderationPart struct {
-	Type     string `json:"type"`
-	Text     string `json:"text"`
+	Type     string  `json:"type"`
+	Text     *string `json:"text"`
 	ImageURL *struct {
 		URL string `json:"url"`
 	} `json:"image_url"`
@@ -105,6 +107,9 @@ func (r *ModerationRequest) ModerationInputs() ([]ModerationInput, error) {
 	inputs := make([]ModerationInput, 0, len(items))
 	for _, item := range items {
 		var text string
+		if item = bytes.TrimSpace(item); len(item) == 0 || item[0] != '"' {
+			return nil, NewInvalidRequestError("input array must hold only strings or only text and image_url objects", nil)
+		}
 		if err := json.Unmarshal(item, &text); err != nil {
 			return nil, NewInvalidRequestError("input array must hold only strings or only text and image_url objects", err)
 		}
@@ -123,7 +128,10 @@ func parseModerationParts(items []json.RawMessage) (ModerationInput, error) {
 		}
 		switch part.Type {
 		case "text":
-			texts = append(texts, part.Text)
+			if part.Text == nil {
+				return ModerationInput{}, NewInvalidRequestError("text input requires a text string", nil)
+			}
+			texts = append(texts, *part.Text)
 		case "image_url":
 			if part.ImageURL == nil || strings.TrimSpace(part.ImageURL.URL) == "" {
 				return ModerationInput{}, NewInvalidRequestError("image_url input requires image_url.url", nil)

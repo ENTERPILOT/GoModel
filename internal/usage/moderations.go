@@ -26,13 +26,14 @@ func ExtractFromModerationResponse(resp *core.ModerationResponse, requestID, mod
 		return nil
 	}
 	entry := &UsageEntry{
-		ID:        uuid.New().String(),
-		RequestID: requestID,
-		Timestamp: time.Now().UTC(),
-		Model:     model,
-		Provider:  provider,
-		Endpoint:  endpointModerations,
-		RawData:   map[string]any{rawKeyModerationInputs: len(resp.Results)},
+		ID:         uuid.New().String(),
+		RequestID:  requestID,
+		ProviderID: resp.ID,
+		Timestamp:  time.Now().UTC(),
+		Model:      model,
+		Provider:   provider,
+		Endpoint:   endpointModerations,
+		RawData:    map[string]any{rawKeyModerationInputs: len(resp.Results)},
 	}
 	applyUsageCosts(entry, provider, endpointModerations, pricing...)
 	if !isProviderReportedCostSource(entry.CostSource) &&

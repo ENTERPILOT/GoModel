@@ -436,6 +436,41 @@ function ensureBearerAuthSecurityScheme() {
   };
 }
 
+// OpenAI takes moderation input as a string, an array of strings, or an array
+// of text / image_url parts.
+function applyModerationInputOneOf() {
+  const properties = schema("core.ModerationRequest").properties;
+  if (!properties?.input) {
+    throw new Error("missing input property on schema: core.ModerationRequest");
+  }
+
+  const input = {};
+  if (properties.input.description) {
+    input.description = properties.input.description;
+  }
+  input.oneOf = [
+    { type: "string" },
+    { type: "array", items: { type: "string" } },
+    {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["type"],
+        properties: {
+          type: { type: "string", enum: ["text", "image_url"] },
+          text: { type: "string" },
+          image_url: {
+            type: "object",
+            required: ["url"],
+            properties: { url: { type: "string" } },
+          },
+        },
+      },
+    },
+  ];
+  properties.input = input;
+}
+
 function ensureRequiredProperty(schemaName, propertyName) {
   const target = schema(schemaName);
   if (!target.properties?.[propertyName]) {
@@ -628,6 +663,7 @@ applyImageEditMultiImageSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("core.AudioSpeechRequest", "model");
 applySpeechVoiceOneOf();
+applyModerationInputOneOf();
 ensureRequiredProperty("core.AudioSpeechRequest", "input");
 ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
 ensureRequiredProperty("admin.upsertBudgetRequest", "amount");

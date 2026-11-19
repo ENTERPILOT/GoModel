@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/goccy/go-json"
+
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 )
@@ -13,8 +15,9 @@ var _ core.ModerationProvider = (*Provider)(nil)
 // moderationRequest is Mistral's POST /v1/moderations body: text only, one
 // result per string.
 type moderationRequest struct {
-	Model string   `json:"model"`
-	Input []string `json:"input"`
+	Model    string          `json:"model"`
+	Input    []string        `json:"input"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
 // moderationResponse is Mistral's moderation reply. It has no flagged field.
@@ -50,10 +53,16 @@ func (p *Provider) CreateModeration(ctx context.Context, req *core.ModerationReq
 
 	var upstream moderationResponse
 	err = p.Compatible().Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/moderations",
-		Model:    req.Model,
-		Body:     moderationRequest{Model: req.Model, Input: texts},
+		Method:    http.MethodPost,
+		Endpoint:  "/moderations",
+		Model:     req.Model,
+		Operation: llmclient.OperationModerations,
+		Body: moderationRequest{
+			Model: req.Model,
+			Input: texts,
+			// metadata is the only other field Mistral's endpoint takes.
+			Metadata: req.ExtraFields.Lookup("metadata"),
+		},
 	}, &upstream)
 	if err != nil {
 		return nil, err

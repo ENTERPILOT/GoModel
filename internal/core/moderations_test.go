@@ -47,6 +47,8 @@ func TestModerationInputs(t *testing.T) {
 		{name: "empty array", input: `[]`, wantErr: "input must not be empty"},
 		{name: "number", input: `42`, wantErr: "input must be a string or an array"},
 		{name: "mixed array", input: `["a",{"type":"text","text":"b"}]`, wantErr: "only strings or only text and image_url objects"},
+		{name: "null in string array", input: `["a",null]`, wantErr: "only strings or only text and image_url objects"},
+		{name: "text part without text", input: `[{"type":"text"}]`, wantErr: "text input requires a text string"},
 		{name: "unknown part type", input: `[{"type":"audio"}]`, wantErr: `got "audio"`},
 		{name: "image part without url", input: `[{"type":"image_url","image_url":{}}]`, wantErr: "image_url.url"},
 	}

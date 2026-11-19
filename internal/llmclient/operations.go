@@ -8,4 +8,5 @@ const (
 	OperationGenerateContent = "generate_content"
 	OperationTextCompletion  = "text_completion"
 	OperationEmbeddings      = "embeddings"
+	OperationModerations     = "moderations"
 )

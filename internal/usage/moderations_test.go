@@ -27,6 +27,7 @@ func TestExtractFromModerationResponse(t *testing.T) {
 			entry := ExtractFromModerationResponse(resp, "req-1", "omni-moderation-latest", "openai", tt.pricing)
 			require.NotNil(t, entry)
 			assert.Equal(t, "req-1", entry.RequestID)
+			assert.Equal(t, "modr-1", entry.ProviderID)
 			assert.Equal(t, "omni-moderation-latest", entry.Model)
 			assert.Equal(t, "openai", entry.Provider)
 			assert.Equal(t, "/v1/moderations", entry.Endpoint)

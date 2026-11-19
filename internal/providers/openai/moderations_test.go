@@ -28,8 +28,13 @@ const openAIModerationJSON = `{
 
 func newModerationTestProvider(t *testing.T, status int, body string) (*Provider, *providertest.Capture) {
 	t.Helper()
+	return newModerationTestProviderWithHooks(t, status, body, llmclient.Hooks{})
+}
+
+func newModerationTestProviderWithHooks(t *testing.T, status int, body string, hooks llmclient.Hooks) (*Provider, *providertest.Capture) {
+	t.Helper()
 	server, capture := providertest.JSONServer(t, status, body)
-	opts := providertest.Options(llmclient.Hooks{})
+	opts := providertest.Options(hooks)
 	opts.HTTPClient = server.Client()
 	provider := New(providers.ProviderConfig{APIKey: "test-key", BaseURL: server.URL}, opts).(*Provider)
 	return provider, capture
@@ -74,6 +79,20 @@ func TestCreateModeration_ForwardsInputVerbatim(t *testing.T) {
 			assert.Equal(t, []string{"text", "image"}, result.CategoryAppliedInputTypes["violence"])
 		})
 	}
+}
+
+func TestCreateModeration_ReportsModerationOperation(t *testing.T) {
+	var operations []string
+	provider, _ := newModerationTestProviderWithHooks(t, http.StatusOK, openAIModerationJSON, llmclient.Hooks{
+		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
+			operations = append(operations, info.Operation)
+			return ctx
+		},
+	})
+
+	_, err := provider.CreateModeration(context.Background(), &core.ModerationRequest{Input: json.RawMessage(`"hi"`)})
+	require.NoError(t, err)
+	assert.Equal(t, []string{llmclient.OperationModerations}, operations)
 }
 
 func TestCreateModeration_DefaultsModel(t *testing.T) {

@@ -12936,7 +12936,50 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "input": {
-                    "type": "object"
+                    "description": "Input is a string, an array of strings, or an array of text and\nimage_url parts.",
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "type"
+                                ],
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "text",
+                                            "image_url"
+                                        ]
+                                    },
+                                    "text": {
+                                        "type": "string"
+                                    },
+                                    "image_url": {
+                                        "type": "object",
+                                        "required": [
+                                            "url"
+                                        ],
+                                        "properties": {
+                                            "url": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
                 },
                 "model": {
                     "type": "string"

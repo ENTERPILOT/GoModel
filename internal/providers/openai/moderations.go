@@ -20,10 +20,11 @@ func (p *Provider) CreateModeration(ctx context.Context, req *core.ModerationReq
 	}
 	var resp core.ModerationResponse
 	err := p.Do(ctx, llmclient.Request{
-		Method:   http.MethodPost,
-		Endpoint: "/moderations",
-		Model:    req.Model,
-		Body:     req,
+		Method:    http.MethodPost,
+		Endpoint:  "/moderations",
+		Model:     req.Model,
+		Operation: llmclient.OperationModerations,
+		Body:      req,
 	}, &resp)
 	if err != nil {
 		return nil, err
