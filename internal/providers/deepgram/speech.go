@@ -1,0 +1,164 @@
+package deepgram
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
+)
+
+// speechFormat maps an OpenAI-compatible response_format to Deepgram's
+// encoding, container and sample_rate query parameters. Every OpenAI format has
+// a Deepgram encoding. pcm pins 24 kHz, the rate OpenAI's raw pcm uses and the
+// gateway meters it at; the other formats keep Deepgram's own rate.
+func speechFormat(responseFormat string) (format string, query url.Values, err error) {
+	format = strings.ToLower(strings.TrimSpace(responseFormat))
+	if format == "" {
+		format = "mp3"
+	}
+	switch format {
+	case "mp3", "opus", "aac", "flac":
+		query = url.Values{"encoding": {format}}
+	case "wav":
+		query = url.Values{"encoding": {"linear16"}, "container": {"wav"}}
+	case "pcm":
+		query = url.Values{"encoding": {"linear16"}, "container": {"none"}, "sample_rate": {"24000"}}
+	default:
+		return "", nil, core.NewInvalidRequestError("deepgram speech supports mp3, opus, aac, flac, wav, or pcm response formats", nil).WithParam("response_format")
+	}
+	return format, query, nil
+}
+
+// speechSpeed adapts the OpenAI speed (0.25-4.0) to the 0.7-1.5 range Deepgram
+// accepts in 0.05 steps: per Postel's Law the request is fitted to the provider
+// rather than rejected. Zero means unset and 1 is Deepgram's default, so
+// neither is sent.
+func speechSpeed(speed float64) string {
+	if speed == 0 {
+		return ""
+	}
+	speed = math.Round(min(max(speed, 0.7), 1.5)*20) / 20
+	if speed == 1 {
+		return ""
+	}
+	return strconv.FormatFloat(speed, 'f', -1, 64)
+}
+
+// splitVoiceModel splits a Deepgram voice model id into its family and its
+// voice: "aura-2-thalia-en" is family "aura-2", voice "thalia-en". A bare
+// family has an empty voice, and ok is false for an id outside the Aura
+// naming scheme.
+func splitVoiceModel(model string) (family, voice string, ok bool) {
+	parts := strings.Split(model, "-")
+	if parts[0] != "aura" {
+		return "", "", false
+	}
+	n := 1
+	if len(parts) > 1 {
+		if _, err := strconv.ParseUint(parts[1], 10, 8); err == nil {
+			n = 2
+		}
+	}
+	return strings.Join(parts[:n], "-"), strings.Join(parts[n:], "-"), true
+}
+
+// isVoiceFamily reports whether model names a Deepgram voice family ("aura",
+// "aura-2") rather than one voice of it.
+func isVoiceFamily(model string) bool {
+	_, voice, ok := splitVoiceModel(model)
+	return ok && voice == ""
+}
+
+// speechModel resolves the model Deepgram synthesizes with. Deepgram has no
+// separate voice parameter: a model id names family, voice and language
+// together ("aura-2-thalia-en"). OpenAI clients send both fields, so either
+// spelling is accepted: the full id as model, or the family as model with the
+// rest ("thalia-en") as voice. A voice that names another voice or family than
+// the model is rejected rather than dropped, which also keeps a request on the
+// model it was authorized for.
+func speechModel(model, voice string) (string, error) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	voice = strings.ToLower(strings.TrimSpace(voice))
+	family, own, ok := splitVoiceModel(model)
+	switch {
+	case voice == "":
+		if ok && own == "" {
+			return "", core.NewInvalidRequestError(
+				fmt.Sprintf("voice is required with the deepgram model %q, for example \"thalia-en\"", model), nil).WithParam("voice")
+		}
+		return model, nil
+	case ok && own == "":
+		// A family takes the voice from the request, short ("thalia-en") or as
+		// the full model id, as long as the result stays in the family.
+		resolved := voice
+		if _, _, isModel := splitVoiceModel(voice); !isModel {
+			resolved = family + "-" + voice
+		}
+		if resolvedFamily, resolvedVoice, _ := splitVoiceModel(resolved); resolvedFamily == family && resolvedVoice != "" {
+			return resolved, nil
+		}
+		return "", core.NewInvalidRequestError(
+			fmt.Sprintf("voice %q is not a voice of the deepgram model %q; send it as name and language, for example \"thalia-en\"", voice, model), nil).WithParam("voice")
+	case voice == model:
+		return model, nil
+	case ok && (voice == own || strings.HasPrefix(own, voice+"-")):
+		// The voice repeats the one the model id already names, with or
+		// without its language.
+		return model, nil
+	}
+	return "", core.NewInvalidRequestError(
+		fmt.Sprintf("voice %q does not match the deepgram model %q: a Deepgram model id names its own voice, so omit voice or send the voice family (for example \"aura-2\") as the model", voice, model), nil).WithParam("voice")
+}
+
+// CreateSpeech translates the OpenAI-compatible request into Deepgram's
+// POST /speak, which takes the text as JSON and every option as a query
+// parameter. Deepgram streams the audio as it synthesizes it, so the body is
+// relayed as it arrives rather than buffered.
+func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("audio speech request is required", nil)
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		return nil, core.NewInvalidRequestError("model is required", nil)
+	}
+	if strings.TrimSpace(req.Input) == "" {
+		return nil, core.NewInvalidRequestError("input is required", nil)
+	}
+	if strings.TrimSpace(req.Instructions) != "" {
+		return nil, core.NewInvalidRequestError("deepgram speech does not support instructions", nil).WithParam("instructions")
+	}
+	model, err := speechModel(req.Model, req.Voice)
+	if err != nil {
+		return nil, err
+	}
+	format, query, err := speechFormat(req.ResponseFormat)
+	if err != nil {
+		return nil, err
+	}
+	query.Set("model", model)
+	if speed := speechSpeed(req.Speed); speed != "" {
+		query.Set("speed", speed)
+	}
+
+	raw, err := p.client.DoStreamResponse(ctx, llmclient.Request{
+		Method:   http.MethodPost,
+		Endpoint: "/speak?" + query.Encode(),
+		Model:    req.Model,
+		Body:     map[string]string{"text": req.Input},
+	})
+	if err != nil {
+		return nil, refineError(err)
+	}
+	// Labeled from the requested format rather than the upstream header, which
+	// spells raw pcm as "audio/l16;rate=24000".
+	return &core.AudioResponse{
+		ContentType: core.SpeechResponseContentType(format),
+		Stream:      raw.Stream,
+	}, nil
+}

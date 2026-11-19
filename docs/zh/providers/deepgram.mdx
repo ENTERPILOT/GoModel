@@ -1,0 +1,115 @@
+---
+title: "Deepgram"
+description: "在 GoModel 中配置 Deepgram：通过兼容 OpenAI 的音频端点使用 Nova 语音转文本和 Aura 文本转语音。"
+icon: "audio-waveform"
+keywords: ["Deepgram", "Nova", "Aura", "语音转文本", "speech-to-text", "STT", "文本转语音", "text-to-speech", "TTS", "语音", "voice", "提供商配置", "provider setup"]
+---
+
+Deepgram 是一个仅提供语音能力的提供商：它通过标准的 `/v1/audio/transcriptions` 和
+`/v1/audio/speech` 端点提供语音转文本和文本转语音。它没有聊天、`/responses` 或嵌入 API，因此对于路由到 Deepgram 的模型，这些端点会返回 `invalid_request_error`。
+
+<Note>
+  请求和响应的映射依据 Deepgram 公开的 API 参考实现，尚未使用真实的 Deepgram 账号验证。模型列表和错误格式已针对线上 API 验证。
+</Note>
+
+## 配置
+
+```bash
+DEEPGRAM_API_KEY=...
+```
+
+或者在 `config.yaml` 中：
+
+```yaml
+providers:
+  deepgram:
+    type: deepgram
+    api_key: "${DEEPGRAM_API_KEY}"
+    # base_url 默认为 "https://api.deepgram.com/v1"。
+```
+
+只有在使用区域端点（例如 `https://api.eu.deepgram.com/v1`）、专用端点或自托管的 Deepgram 部署时才需要设置 `base_url`。请保留 `/v1` 后缀。
+
+## 模型
+
+GoModel 读取 Deepgram 的模型列表并提供：
+
+- 所有用于预录音频的语音转文本模型（`nova-3-general`、`nova-3-medical`、`nova-2-general` 等），以及 Deepgram 为通用模型记录的短 ID（`nova-3`、`nova-2`）；
+- 所有文本转语音的语音模型（`aura-2-thalia-en` 等），以及语音系列 `aura-2` 和 `aura`。
+
+仅由 Deepgram 实时流式 API 提供的模型不会列出。
+
+## 语音转文本
+
+```bash
+curl https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F model=deepgram/nova-3 \
+  -F file=@meeting.mp3
+```
+
+GoModel 将音频发送到 Deepgram 用于预录音频的 `POST /listen`，并把 OpenAI 字段映射为它的查询参数：
+
+| OpenAI 字段 | Deepgram |
+| --- | --- |
+| `model` | `model` |
+| `language` | `language`。省略时 GoModel 会发送 `detect_language=true`，否则 Deepgram 会假定为英语 |
+| `response_format` | `json`（默认）、`text`、`verbose_json`、`srt` 和 `vtt` 均由 Deepgram 的结果生成 |
+| `timestamp_granularities[]` | `segment`（默认）和 `word` 分别选择 `verbose_json` 的 `segments` 和 `words` 数组 |
+| `temperature` | 忽略；Deepgram 没有这个设置 |
+| `prompt` | 不支持；返回 `400`。请改用 Deepgram 的 `keyterm` |
+
+默认启用 `smart_format=true`，使转写结果像 OpenAI 的一样带有标点、大小写和格式化的数字。
+
+`verbose_json` 的分段以及 `srt` 和 `vtt` 由 Deepgram 的
+[utterances](https://developers.deepgram.com/docs/utterances) 生成，每个 utterance 对应一个分段或一条字幕。
+
+### Deepgram 选项
+
+其他任何表单字段都会作为查询参数转发给 Deepgram，因此它自身的功能可以在同一个端点上使用：
+
+```bash
+curl https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F model=deepgram/nova-3 \
+  -F file=@meeting.mp3 \
+  -F keyterm=GoModel \
+  -F diarize=true \
+  -F smart_format=false
+```
+
+有三个选项会返回 `400`，因为它们会使响应不再是一份转写结果：`callback`、`callback_method` 和 `multichannel`。`stream=true` 同样返回 `400`。
+
+## 文本转语音
+
+Deepgram 的模型 ID 同时指定语音系列、语音和语言：`aura-2-thalia-en`。它没有单独的语音参数，因此可以用两种方式指定语音：
+
+```json
+{ "model": "deepgram/aura-2-thalia-en", "input": "Hello there" }
+```
+
+```json
+{ "model": "deepgram/aura-2", "voice": "thalia-en", "input": "Hello there" }
+```
+
+使用完整模型 ID 时，`voice` 是可选的。总是发送语音的客户端可以重复该模型自身的语音（`thalia`、`thalia-en` 或完整 ID）。与模型不一致的语音（例如 OpenAI 的 `alloy`）会返回 `400`，而不是被忽略。
+
+| OpenAI 字段 | Deepgram |
+| --- | --- |
+| `response_format` | `mp3`（默认）、`opus`、`aac` 和 `flac` 映射为同名的 `encoding`；`wav` 为 `wav` 容器中的 `linear16`；`pcm` 为 24 kHz 的原始 `linear16` |
+| `speed` | 调整到 Deepgram 的 `0.7`-`1.5` 范围，步长为 `0.05`（OpenAI 接受 `0.25`-`4.0`） |
+| `instructions` | 不支持；返回 `400` |
+
+音频会在 Deepgram 生成的同时流式传输给客户端。Deepgram 将每次请求的输入限制为 2000 个字符。
+
+## 成本追踪
+
+转写按 Deepgram 报告的音频时长计量，语音合成按输入字符数计量。Deepgram 尚未收录在模型目录中，因此请在 `providers.deepgram.models[].metadata.pricing` 下声明价格（转写使用 `per_second_input`，语音合成使用 `per_character_input`），以便为请求计算成本。参见[成本追踪](/zh/advanced/audio-api#成本追踪)。
+
+## 未实现
+
+- 语音转文本和文本转语音的**实时流式传输**（Deepgram 的 WebSocket API，包括 Flux）以及 Voice Agent API。`/v1/realtime` 只转发兼容 OpenAI 的会话。
+- **Flux 文本转语音**（`/v2/speak`）以及从远程 URL 转写。
+- 音频翻译（`/v1/audio/translations`）和语音列表（`/v1/audio/voices`）。
+
+将 `deepgram` 添加到 `ENABLED_PASSTHROUGH_PROVIDERS` 后，可以通过[透传](/zh/features/passthrough-api)访问 Deepgram 的原生 API，例如 `/p/deepgram/listen` 和 `/p/deepgram/speak`。

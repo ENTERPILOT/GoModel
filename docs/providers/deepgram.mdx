@@ -1,0 +1,146 @@
+---
+title: "Deepgram"
+description: "Configure Deepgram in GoModel: Nova speech-to-text and Aura text-to-speech behind the OpenAI-compatible audio endpoints."
+icon: "audio-waveform"
+keywords: ["Deepgram", "Nova", "Aura", "speech-to-text", "STT", "text-to-speech", "TTS", "voice", "provider setup"]
+---
+
+Deepgram is a voice-only provider: it exposes speech-to-text and
+text-to-speech behind the standard `/v1/audio/transcriptions` and
+`/v1/audio/speech` endpoints. It has no chat, `/responses`, or embeddings API,
+so those endpoints return `invalid_request_error` for Deepgram-routed models.
+
+<Note>
+  The request and response mapping follows Deepgram's published API reference
+  and has not yet been checked against a live Deepgram account. Model listing
+  and the error format were checked against the live API.
+</Note>
+
+## Configure
+
+```bash
+DEEPGRAM_API_KEY=...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  deepgram:
+    type: deepgram
+    api_key: "${DEEPGRAM_API_KEY}"
+    # base_url defaults to "https://api.deepgram.com/v1".
+```
+
+Set `base_url` only for a regional endpoint (for example
+`https://api.eu.deepgram.com/v1`), a dedicated endpoint, or a self-hosted
+Deepgram deployment. Keep the `/v1` suffix.
+
+## Models
+
+GoModel reads Deepgram's model list and exposes:
+
+- every pre-recorded speech-to-text model (`nova-3-general`, `nova-3-medical`,
+  `nova-2-general`, ...) and the short id Deepgram documents for the general
+  ones (`nova-3`, `nova-2`);
+- every text-to-speech voice model (`aura-2-thalia-en`, ...) and the voice
+  families `aura-2` and `aura`.
+
+Models served only by Deepgram's live streaming API are not listed.
+
+## Speech-to-text
+
+```bash
+curl https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F model=deepgram/nova-3 \
+  -F file=@meeting.mp3
+```
+
+GoModel sends the audio to Deepgram's pre-recorded `POST /listen` and maps the
+OpenAI fields onto its query parameters:
+
+| OpenAI field | Deepgram |
+| --- | --- |
+| `model` | `model` |
+| `language` | `language`. When it is omitted GoModel sends `detect_language=true`, because Deepgram would otherwise assume English |
+| `response_format` | `json` (default), `text`, `verbose_json`, `srt`, and `vtt` are all built from Deepgram's result |
+| `timestamp_granularities[]` | `segment` (default) and `word` select the `segments` and `words` arrays of `verbose_json` |
+| `temperature` | Ignored; Deepgram has no such setting |
+| `prompt` | Not supported; returns `400`. Use Deepgram's `keyterm` instead |
+
+`smart_format=true` is on by default so transcripts carry punctuation,
+capitalization, and formatted numbers like OpenAI's do.
+
+`verbose_json` segments, `srt`, and `vtt` are built from Deepgram's
+[utterances](https://developers.deepgram.com/docs/utterances), one segment or
+caption cue per utterance.
+
+### Deepgram options
+
+Any other form field is forwarded to Deepgram as a query parameter, so its own
+features work on the same endpoint:
+
+```bash
+curl https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F model=deepgram/nova-3 \
+  -F file=@meeting.mp3 \
+  -F keyterm=GoModel \
+  -F diarize=true \
+  -F smart_format=false
+```
+
+Three options return `400` because they change the response into something
+that is not a transcript: `callback`, `callback_method`, and `multichannel`.
+`stream=true` also returns `400`.
+
+## Text-to-speech
+
+A Deepgram model id names the voice family, the voice, and the language
+together: `aura-2-thalia-en`. There is no separate voice parameter, so pass
+the voice in either of two ways:
+
+```json
+{ "model": "deepgram/aura-2-thalia-en", "input": "Hello there" }
+```
+
+```json
+{ "model": "deepgram/aura-2", "voice": "thalia-en", "input": "Hello there" }
+```
+
+With a full model id, `voice` is optional. Clients that always send one can
+repeat the model's own voice (`thalia`, `thalia-en`, or the full id). A voice
+that names a different voice than the model, such as OpenAI's `alloy`, returns
+`400` instead of being ignored.
+
+| OpenAI field | Deepgram |
+| --- | --- |
+| `response_format` | `mp3` (default), `opus`, `aac`, and `flac` map to the `encoding` of the same name; `wav` is `linear16` in a `wav` container; `pcm` is raw `linear16` at 24 kHz |
+| `speed` | Fitted to Deepgram's `0.7`-`1.5` range in `0.05` steps (OpenAI accepts `0.25`-`4.0`) |
+| `instructions` | Not supported; returns `400` |
+
+Audio is streamed to the client as Deepgram produces it. Deepgram limits the
+input to 2000 characters per request.
+
+## Cost tracking
+
+Transcriptions are metered by the audio duration Deepgram reports, and speech
+by input characters. Deepgram is not in the model catalog yet, so declare
+prices under `providers.deepgram.models[].metadata.pricing`
+(`per_second_input` for transcription, `per_character_input` for speech) to
+have requests costed. See [cost tracking](/advanced/audio-api#cost-tracking).
+
+## Not implemented
+
+- **Live streaming** speech-to-text and text-to-speech (Deepgram's WebSocket
+  APIs, including Flux) and the Voice Agent API. `/v1/realtime` relays
+  OpenAI-compatible sessions only.
+- **Flux text-to-speech** (`/v2/speak`) and transcription from a remote URL.
+- Audio translation (`/v1/audio/translations`) and voice listing
+  (`/v1/audio/voices`).
+
+Deepgram's native API is reachable through
+[passthrough](/features/passthrough-api) once `deepgram` is added to
+`ENABLED_PASSTHROUGH_PROVIDERS`, for example `/p/deepgram/listen` and
+`/p/deepgram/speak`.
