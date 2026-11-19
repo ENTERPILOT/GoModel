@@ -137,7 +137,7 @@ func TestHeaderTimeoutVariantsAreCapped(t *testing.T) {
 	for i := range maxHeaderTimeoutVariants {
 		variants.get(time.Duration(i+2)*time.Second, build)
 	}
-	assert.LessOrEqual(t, len(variants.transports), maxHeaderTimeoutVariants)
+	assert.Len(t, variants.transports, maxHeaderTimeoutVariants, "past the cap one pool is evicted per new value")
 	assert.Equal(t, maxHeaderTimeoutVariants+1, built)
 }
 

@@ -264,10 +264,11 @@ virtual_models:
   streamed response body, so a short `timeout` on a streaming chat model cuts
   long streams off. To bound only the wait for the first byte, set
   `response_header_timeout` instead.
-- An attempt that times out counts as failed and moves on to the next
-  [failover](/features/failover) target, as the failover policy allows.
-- Each field resolves on its own: redirects the request routed through win
-  (outermost first), then the resolved model's exact policy
+- An attempt that times out is not retried on the same provider; it counts as
+  failed and moves on to the next [failover](/features/failover) target, as
+  the failover policy allows.
+- Each field resolves on its own: the redirects that route the request come
+  first (outermost first), then the resolved model's exact policy
   (`openai/gpt-4o`), then its model-wide policy (`gpt-4o`), then the
   gateway-wide setting. A policy whose `user_paths` exclude the caller is
   skipped.

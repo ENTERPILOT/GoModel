@@ -857,7 +857,7 @@
   "models_response_header_timeout_field": "Response header timeout (seconds)",
   "models_inherit": "Inherit",
   "models_timeout_invalid": "Timeouts must be whole seconds from 1 to 86400.",
-  "models_timeouts_help": "Overrides HTTP_TIMEOUT and HTTP_RESPONSE_HEADER_TIMEOUT for this model or redirect. Per upstream attempt; retries and failovers get a fresh budget. Empty inherits the gateway default.",
+  "models_timeouts_help": "Overrides HTTP_TIMEOUT and HTTP_RESPONSE_HEADER_TIMEOUT for this model or redirect. Per upstream attempt; retries and failovers get a fresh budget. Empty inherits the target model's policy, then the gateway default.",
   "models_upstream_timeouts": "Timeouts",
   "models_timeout_per_attempt": "{value}s per attempt",
   "models_timeout_headers": "{value}s to headers",

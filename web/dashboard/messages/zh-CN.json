@@ -767,7 +767,7 @@
   "models_response_header_timeout_field": "响应头超时（秒）",
   "models_inherit": "继承",
   "models_timeout_invalid": "超时必须是 1 到 86400 之间的整数秒。",
-  "models_timeouts_help": "为此模型或重定向覆盖 HTTP_TIMEOUT 和 HTTP_RESPONSE_HEADER_TIMEOUT。按每次上游尝试计算；重试和故障转移会获得新的时间预算。留空则继承网关默认值。",
+  "models_timeouts_help": "为此模型或重定向覆盖 HTTP_TIMEOUT 和 HTTP_RESPONSE_HEADER_TIMEOUT。按每次上游尝试计算；重试和故障转移会获得新的时间预算。留空则继承目标模型的策略，其次是网关默认值。",
   "models_upstream_timeouts": "超时",
   "models_timeout_per_attempt": "每次尝试 {value} 秒",
   "models_timeout_headers": "响应头 {value} 秒",

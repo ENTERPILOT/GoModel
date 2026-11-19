@@ -61,8 +61,8 @@ func Do(client *http.Client, req *http.Request) (*http.Response, error) {
 }
 
 // maxHeaderTimeoutVariants caps the pooled transports kept for distinct
-// response-header overrides. Values come from operator configuration, so the
-// cap only matters after many edits; reaching it drops the idle pools.
+// response-header overrides. Values come from operator configuration, so few
+// are live at once; past the cap one pool is evicted for each new value.
 const maxHeaderTimeoutVariants = 16
 
 // headerTimeoutVariants keeps one pooled transport per configured
@@ -79,10 +79,12 @@ func (v *headerTimeoutVariants) get(timeout time.Duration, build func() *http.Tr
 		return rt
 	}
 	if len(v.transports) >= maxHeaderTimeoutVariants {
-		for _, rt := range v.transports {
+		// Evict one pool; in-flight requests on it finish normally.
+		for key, rt := range v.transports {
 			rt.CloseIdleConnections()
+			delete(v.transports, key)
+			break
 		}
-		v.transports = nil
 	}
 	if v.transports == nil {
 		v.transports = make(map[time.Duration]*http.Transport)

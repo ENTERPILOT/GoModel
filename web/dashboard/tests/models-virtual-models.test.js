@@ -1793,7 +1793,7 @@ test("toggle payloads preserve configured timeouts", () => {
   assert.equal(payload.response_header_timeout, 20);
 });
 
-test("rowUpstreamTimeouts resolves each field from the redirect, then the model policy", () => {
+test("rowUpstreamTimeouts shows the masking redirect's timeouts, else the model policy", () => {
   const cases = [
     {
       name: "alias row",
@@ -1801,12 +1801,17 @@ test("rowUpstreamTimeouts resolves each field from the redirect, then the model 
       want: { timeout: 30, response_header_timeout: null },
     },
     {
-      name: "redirect over model wins per field",
+      name: "a masking redirect replaces the model's own policy",
       row: {
         masking_alias: { timeout: 30 },
         access: { override: { timeout: 60, response_header_timeout: 10 } },
       },
-      want: { timeout: 30, response_header_timeout: 10 },
+      want: { timeout: 30, response_header_timeout: null },
+    },
+    {
+      name: "model policy without a masking redirect",
+      row: { access: { override: { timeout: 60, response_header_timeout: 10 } } },
+      want: { timeout: 60, response_header_timeout: 10 },
     },
     {
       name: "nothing configured",

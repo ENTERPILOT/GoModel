@@ -534,12 +534,16 @@ export function modelOverrideEditButtonLabel(subject, hasOverride) {
 }
 
 // rowUpstreamTimeouts resolves the per-attempt upstream timeouts a row shows,
-// field by field: an alias row shows its own; a model row prefers the
-// redirect over it, then its own policy. Null means inherited.
+// field by field: an alias row shows its own; a model row replaced by a
+// masking redirect shows the redirect's, since requests never reach the
+// model's own policy; any other model row shows its own policy. Null means
+// inherited.
 export function rowUpstreamTimeouts(row) {
   const sources = row && row.is_alias
     ? [row.alias]
-    : [row && row.masking_alias, row && row.access && row.access.override];
+    : row && row.masking_alias
+      ? [row.masking_alias]
+      : [row && row.access && row.access.override];
   const pick = (field) => {
     for (const source of sources) {
       const value = source && source[field];
