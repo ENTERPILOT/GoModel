@@ -9,8 +9,34 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
+// ResponsesChatOption changes how a Responses request is translated to chat
+// for a provider whose chat dialect differs from the default.
+type ResponsesChatOption func(*responsesChatOptions)
+
+type responsesChatOptions struct {
+	replayOrdinaryTurnReasoning bool
+}
+
+func newResponsesChatOptions(opts []ResponsesChatOption) responsesChatOptions {
+	var options responsesChatOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	return options
+}
+
+// ReplayOrdinaryTurnReasoning keeps a replayed reasoning item as
+// reasoning_content on the assistant turn it belongs to even when that turn
+// made no tool call. By default only tool-call turns keep it. Use it for a
+// provider that wants every earlier turn's reasoning back, and that adapts or
+// accepts reasoning_content on a plain assistant message.
+func ReplayOrdinaryTurnReasoning() ResponsesChatOption {
+	return func(o *responsesChatOptions) { o.replayOrdinaryTurnReasoning = true }
+}
+
 // ConvertResponsesInputToMessages converts a Responses API input payload into Chat API messages.
-func ConvertResponsesInputToMessages(input any) ([]core.Message, error) {
+func ConvertResponsesInputToMessages(input any, opts ...ResponsesChatOption) ([]core.Message, error) {
+	options := newResponsesChatOptions(opts)
 	switch in := input.(type) {
 	case string:
 		return []core.Message{{Role: "user", Content: in}}, nil
@@ -19,15 +45,15 @@ func ConvertResponsesInputToMessages(input any) ([]core.Message, error) {
 		for _, item := range in {
 			items = append(items, item)
 		}
-		return convertResponsesInputItems(items)
+		return convertResponsesInputItems(items, options)
 	case []any:
-		return convertResponsesInputItems(in)
+		return convertResponsesInputItems(in, options)
 	case []core.ResponsesInputElement:
 		items := make([]any, 0, len(in))
 		for _, item := range in {
 			items = append(items, item)
 		}
-		return convertResponsesInputItems(items)
+		return convertResponsesInputItems(items, options)
 	case nil:
 		return nil, core.NewInvalidRequestError("invalid responses input: unsupported type", nil)
 	default:
@@ -35,7 +61,7 @@ func ConvertResponsesInputToMessages(input any) ([]core.Message, error) {
 	}
 }
 
-func convertResponsesInputItems(items []any) ([]core.Message, error) {
+func convertResponsesInputItems(items []any, options responsesChatOptions) ([]core.Message, error) {
 	messages := make([]core.Message, 0, len(items))
 	var pendingAssistant *core.Message
 	var pendingReasoning string
@@ -55,8 +81,8 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 		// assistant tool-call message. DeepSeek requires it on the following
 		// tool-result request, while reasoning from ordinary assistant turns is
 		// intentionally omitted because it is not part of their next-turn
-		// context.
-		if reasoning != "" && len(pendingAssistant.ToolCalls) > 0 {
+		// context, unless the provider asks for it (ReplayOrdinaryTurnReasoning).
+		if reasoning != "" && (len(pendingAssistant.ToolCalls) > 0 || options.replayOrdinaryTurnReasoning) {
 			raw, err := json.Marshal(reasoning)
 			if err != nil {
 				return err

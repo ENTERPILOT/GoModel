@@ -816,6 +816,89 @@ func TestConvertResponsesRequestToChat_DropsReasoningWithoutToolCall(t *testing.
 	require.Nil(t, got)
 }
 
+// A provider that wants every turn's reasoning back opts in with
+// ReplayOrdinaryTurnReasoning: each reasoning item then stays on the assistant
+// turn it precedes, tool call or not, and never moves to another turn.
+func TestConvertResponsesRequestToChat_ReplayOrdinaryTurnReasoning(t *testing.T) {
+	reasoningOf := func(t *testing.T, msg core.Message) string {
+		t.Helper()
+		raw := msg.ExtraFields.Lookup("reasoning_content")
+		if raw == nil {
+			return ""
+		}
+		var reasoning string
+		require.NoError(t, json.Unmarshal(raw, &reasoning))
+		return reasoning
+	}
+	tests := []struct {
+		name  string
+		input string
+		// want is the reasoning_content of each converted message, "" for none.
+		want []string
+	}{
+		{
+			name: "ordinary turn keeps its reasoning",
+			input: `[
+				{"type":"message","role":"user","content":"hello"},
+				{"type":"reasoning","id":"rs_1","summary":[],"content":[{"type":"reasoning_text","text":"first thoughts"}]},
+				{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi there"}]},
+				{"type":"message","role":"user","content":"again"}
+			]`,
+			want: []string{"", "first thoughts", ""},
+		},
+		{
+			name: "each turn keeps its own reasoning",
+			input: `[
+				{"type":"message","role":"user","content":"hello"},
+				{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"first thoughts"}]},
+				{"type":"message","role":"assistant","content":"hi there"},
+				{"type":"message","role":"user","content":"again"},
+				{"type":"message","role":"assistant","content":"no thoughts here"},
+				{"type":"message","role":"user","content":"weather?"},
+				{"type":"reasoning","id":"rs_2","summary":[],"content":[{"type":"reasoning_text","text":"need the tool"}]},
+				{"type":"function_call","call_id":"call_1","name":"lookup_weather","arguments":"{}"},
+				{"type":"function_call_output","call_id":"call_1","output":"sunny"},
+				{"type":"reasoning","id":"rs_3","summary":[],"content":[{"type":"reasoning_text","text":"last thoughts"}]},
+				{"type":"message","role":"assistant","content":"It is sunny."}
+			]`,
+			want: []string{"", "first thoughts", "", "", "", "need the tool", "", "last thoughts"},
+		},
+		{
+			name: "reasoning without an assistant turn is dropped",
+			input: `[
+				{"type":"message","role":"user","content":"hello"},
+				{"type":"reasoning","id":"rs_1","summary":[],"content":[{"type":"reasoning_text","text":"orphan"}]},
+				{"type":"message","role":"user","content":"again"},
+				{"type":"message","role":"assistant","content":"hi there"}
+			]`,
+			want: []string{"", "", ""},
+		},
+		{
+			name: "encrypted-only reasoning adds nothing",
+			input: `[
+				{"type":"message","role":"user","content":"hello"},
+				{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque"},
+				{"type":"message","role":"assistant","content":"hi there"}
+			]`,
+			want: []string{"", ""},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var req core.ResponsesRequest
+			require.NoError(t, json.Unmarshal([]byte(`{"model":"test-model","input":`+tt.input+`}`), &req))
+
+			chatReq, err := ConvertResponsesRequestToChat(&req, ReplayOrdinaryTurnReasoning())
+			require.NoError(t, err)
+			got := make([]string, 0, len(chatReq.Messages))
+			for _, msg := range chatReq.Messages {
+				got = append(got, reasoningOf(t, msg))
+			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 // DeepSeek requires reasoning_content to be replayed on the assistant message
 // that made a tool call. Codex echoes Responses output items back as input, so
 // the reasoning item and function-call item must be reassembled here.

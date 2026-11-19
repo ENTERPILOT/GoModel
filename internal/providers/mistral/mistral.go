@@ -38,7 +38,8 @@ var Registration = providers.Registration{
 // Provider implements the core.Provider interface for Mistral AI. Transport
 // and the request dialect go through the shared chat-centric adapter's hooks;
 // StreamChatCompletion is overridden only to wrap the stream that flattens
-// Mistral's thinking chunk lists.
+// Mistral's thinking chunk lists, and the Responses methods to keep replayed
+// reasoning in the translated chat request.
 type Provider struct {
 	*openai.ChatCompatible
 }
@@ -78,10 +79,17 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	return newThinkingChunkStream(stream), nil
 }
 
-// StreamResponses streams a Responses API request through chat-completions
-// translation, picking up the StreamChatCompletion override. Buffered
-// Responses needs no override: the embedded adapter's chat path already
-// applies the response hook.
+// Responses serves a Responses API request through chat-completions
+// translation. Mistral wants the reasoning of every earlier assistant turn
+// back, so a replayed reasoning item is kept on a turn without a tool call
+// too, where the shared conversion drops it by default; adaptChatWire then
+// sends it as a thinking chunk.
+func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+	return providers.ResponsesViaChat(ctx, p, req, p.ProviderName(), providers.ReplayOrdinaryTurnReasoning())
+}
+
+// StreamResponses is the streaming counterpart of Responses. It also picks up
+// the StreamChatCompletion override.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	return providers.StreamResponsesViaChat(ctx, p, req, p.ProviderName())
+	return providers.StreamResponsesViaChat(ctx, p, req, p.ProviderName(), providers.ReplayOrdinaryTurnReasoning())
 }
