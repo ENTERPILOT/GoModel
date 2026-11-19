@@ -1,13 +1,14 @@
 ---
 title: "ElevenLabs"
-description: "Skonfiguruj ElevenLabs w GoModel: voice_id a nazwane głosy, obsługiwane formaty audio i znaczniki czasu w zamianie mowy na tekst."
+description: "Skonfiguruj ElevenLabs w GoModel: voice_id a nazwane głosy, obsługiwane formaty audio, znaczniki czasu w zamianie mowy na tekst i transkrypcja w czasie rzeczywistym przez Scribe Realtime."
 icon: "audio-lines"
-keywords: ["ElevenLabs", "text-to-speech", "zamiana tekstu na mowę", "TTS", "speech-to-text", "zamiana mowy na tekst", "STT", "voice", "głos", "konfiguracja providera", "provider setup"]
+keywords: ["ElevenLabs", "text-to-speech", "zamiana tekstu na mowę", "TTS", "speech-to-text", "zamiana mowy na tekst", "STT", "Scribe Realtime", "transkrypcja w czasie rzeczywistym", "voice", "głos", "konfiguracja providera", "provider setup"]
 ---
 
 ElevenLabs to provider wyłącznie głosowy: udostępnia zamianę tekstu na mowę
 i mowy na tekst za standardowymi endpointami `/v1/audio/speech` i
-`/v1/audio/transcriptions`. Nie ma API czatu, `/responses` ani embeddingów,
+`/v1/audio/transcriptions`, a także strumieniową zamianę mowy na tekst (Scribe
+Realtime) za websocketem `/v1/realtime`. Nie ma API czatu, `/responses` ani embeddingów,
 więc te endpointy zwracają `invalid_request_error` dla modeli kierowanych do
 ElevenLabs.
 
@@ -74,6 +75,58 @@ zwracane przez listę `/v1/models` ElevenLabs – GoModel sam dodaje je do wynik
 które GoModel mapuje na tablicę `words` w formacie OpenAI. `prompt` nie jest
 obsługiwany.
 
+## Transkrypcja w czasie rzeczywistym
+
+`scribe_v2_realtime` i `scribe_v3_live` transkrybują strumień audio na żywo przez
+[websocket realtime](/pl/advanced/api-endpoints). Scribe Realtime ma własny
+protokół WebSocket, więc GoModel go tłumaczy: klienty wysyłają i odbierają
+zdarzenia transkrypcji OpenAI Realtime i nie potrzebują kodu specyficznego dla
+ElevenLabs.
+
+```bash
+wscat -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -c "ws://localhost:8080/v1/realtime?model=scribe_v2_realtime"
+```
+
+| Zdarzenie OpenAI Realtime | Klient | Komunikat ElevenLabs |
+| --------------------------------------------------- | --------- | ------------------------------------------- |
+| `input_audio_buffer.append`                         | wysyła | `input_audio_chunk` |
+| `input_audio_buffer.commit`                         | wysyła | `input_audio_chunk` z `commit: true` |
+| `session.created`                                   | odbiera | `session_started` |
+| `conversation.item.input_audio_transcription.delta` | odbiera | `partial_transcript` |
+| `input_audio_buffer.committed`, a potem `conversation.item.input_audio_transcription.completed` | odbiera | `committed_transcript` |
+| `error`                                             | odbiera | `auth_error`, `quota_exceeded`, `input_error` i pozostałe komunikaty błędów |
+
+Ustawienia domyślne i różnice względem sesji transkrypcji OpenAI:
+
+- **Audio to PCM16 mono, 24 kHz** – domyślny format OpenAI Realtime.
+  `session.update` żądający innego formatu dostaje zdarzenie `error`.
+- **Segment kończy wykrywanie aktywności głosowej**, tak jak domyślny
+  `server_vad` w OpenAI. `input_audio_buffer.commit` kończy go wcześniej.
+- **Ustawienia sesji są ustalone w chwili jej otwarcia.** ElevenLabs przyjmuje
+  je w URL websocketu, zanim może dotrzeć `session.update`. GoModel odpowiada na
+  `session.update` zdarzeniem `session.updated`, które opisuje faktycznie
+  obowiązującą sesję; ustawienia `language`, `prompt` i `turn_detection` nie są
+  stosowane. Język mowy jest wykrywany automatycznie.
+- **Delty tylko dopisują tekst.** ElevenLabs może poprawiać wcześniejsze słowa,
+  dopóki segment jest otwarty. GoModel nie wysyła wtedy delty; ostateczny tekst
+  zawiera zdarzenie `completed`.
+- **Pozostałe zdarzenia klienta** (`input_audio_buffer.clear`,
+  `response.create`, elementy konwersacji) dostają zdarzenie `error`: ElevenLabs
+  nie ma dla nich odpowiednika.
+- **Bezczynne sesje są zamykane.** ElevenLabs zamyka sesję, która przez
+  15 sekund nie otrzymuje audio, więc wysyłaj audio przez cały czas trwania
+  sesji.
+- **Użycie jest mierzone na podstawie audio przekazanego przez GoModel**, według
+  stawki modelu za sekundę wejścia, bo ElevenLabs nie raportuje użycia. Jeśli
+  model nie ma ceny w katalogu, czas trwania i tak jest zapisywany;
+  [nadpisz cennik](/pl/features/cost-tracking), żeby wyliczyć koszt.
+
+Te dwa modele obsługują wyłącznie sesje realtime: ElevenLabs odrzuca je w
+`/v1/audio/transcriptions`. Połączenia WebRTC i client secrets
+(`/v1/realtime/calls`, `/v1/realtime/client_secrets`) nie są dostępne dla modeli
+ElevenLabs.
+
 ## Funkcje nieobsługiwane przez ElevenLabs
 
 Wszystkie poniższe zwracają `invalid_request_error`, zamiast po cichu pomijać
@@ -87,8 +140,9 @@ opcję:
 
 ## Nie zaimplementowano
 
-GoModel implementuje tylko dwie funkcje ElevenLabs, które mapują się na
-endpointy kompatybilne z OpenAI: zamianę tekstu na mowę i mowy na tekst.
+GoModel implementuje tylko te funkcje ElevenLabs, które mapują się na
+endpointy kompatybilne z OpenAI: zamianę tekstu na mowę, mowy na tekst oraz
+transkrypcję w czasie rzeczywistym.
 Cała reszta oferty ElevenLabs nie ma dziś typowanej obsługi w GoModel:
 
 - **Speech-to-speech (zmiana głosu)** – `POST /v1/speech-to-speech/{voice_id}`
@@ -104,9 +158,8 @@ Cała reszta oferty ElevenLabs nie ma dziś typowanej obsługi w GoModel:
   dostępnych wyłącznie pod `/v1`) obowiązuje to samo ograniczenie passthrough.
   To rozsądni kandydaci do przyszłej natywnej obsługi passthrough, gdy to
   ograniczenie zostanie usunięte.
-- **TTS i STT w czasie rzeczywistym/streaming**
-  (`/v1/text-to-speech/{voice_id}/stream`, streaming przez WebSocket) –
-  `/v1/audio/speech` i `/v1/audio/transcriptions` w GoModel działają synchronicznie
+- **Streaming TTS** (`/v1/text-to-speech/{voice_id}/stream`, streaming
+  wejścia przez WebSocket) – `/v1/audio/speech` w GoModel działa synchronicznie
   w modelu request/odpowiedź; dla ElevenLabs nie zaimplementowano wariantu
   streamingowego.
 

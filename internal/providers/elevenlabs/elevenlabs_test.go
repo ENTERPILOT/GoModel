@@ -54,6 +54,16 @@ func TestListModels_FiltersToTextToSpeechAndAddsScribe(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, scribe.Metadata)
 	assert.Equal(t, []string{"audio_transcription"}, scribe.Metadata.Modes)
+
+	// The streaming models are listed too, marked as realtime so they are not
+	// mistaken for file transcription models.
+	for _, id := range []string{"scribe_v2_realtime", "scribe_v3_live"} {
+		realtime, ok := byID[id]
+		require.True(t, ok, "model %s is not listed", id)
+		require.NotNil(t, realtime.Metadata)
+		assert.Equal(t, []string{"audio_transcription", "realtime"}, realtime.Metadata.Modes)
+		assert.Equal(t, []core.ModelCategory{core.CategoryAudio}, realtime.Metadata.Categories)
+	}
 }
 
 func TestListModels_FallsBackToStaticModelsOnFirstFetchFailure(t *testing.T) {
