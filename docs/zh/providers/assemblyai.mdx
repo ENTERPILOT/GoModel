@@ -1,0 +1,109 @@
+---
+title: "AssemblyAI"
+description: "在 GoModel 中配置 AssemblyAI：语音转文本模型、响应格式、欧盟端点，以及每次请求后如何删除转录。"
+icon: "audio-lines"
+tag: "Beta"
+keywords: ["AssemblyAI", "语音转文本", "speech-to-text", "STT", "转录", "transcription", "字幕", "subtitles", "语音", "voice", "提供商配置", "provider setup"]
+---
+
+<Warning>
+  AssemblyAI 支持目前处于 Beta 阶段。它已通过针对模拟 API 的自动化测试，该模拟 API 依据 AssemblyAI
+  公开的参考文档构建，但尚未在真实的 AssemblyAI 服务上验证。如遇问题，请反馈给我们。
+</Warning>
+
+AssemblyAI 是语音转文本提供商。GoModel 在标准的 `/v1/audio/transcriptions` 端点之后提供它的
+[预录音频转录 API](https://www.assemblyai.com/docs/pre-recorded-audio/getting-started/transcribe-an-audio-file)。
+对于路由到 AssemblyAI 的模型，聊天、`/responses`、嵌入和 `/v1/audio/speech` 会返回
+`invalid_request_error`。
+
+## 配置
+
+```bash
+ASSEMBLYAI_API_KEY=...
+```
+
+或者在 `config.yaml` 中：
+
+```yaml
+providers:
+  assemblyai:
+    type: assemblyai
+    api_key: "${ASSEMBLYAI_API_KEY}"
+    # base_url 默认为 "https://api.assemblyai.com"。
+```
+
+默认端点在美国处理音频。如需数据留在欧盟，请设置
+`ASSEMBLYAI_BASE_URL=https://api.eu.assemblyai.com`。
+
+## 模型
+
+| 模型 | 适用场景 |
+| ---- | -------- |
+| `assemblyai-stt-3-7` | AssemblyAI 最准确的模型，支持 32 种语言 |
+| `universal-2` | 成本更低，支持 99 种语言 |
+
+AssemblyAI 没有模型列表端点，因此 GoModel 自行列出这两个模型。模型 ID 会作为 AssemblyAI 的
+`speech_models` 值发送。AssemblyAI 如何按语言在模型之间选择，请参阅
+[AssemblyAI 模型指南](https://www.assemblyai.com/docs/pre-recorded-audio/select-the-speech-model)。
+
+```bash curl
+curl https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F "file=@meeting.mp3" \
+  -F "model=assemblyai-stt-3-7"
+```
+
+## 请求字段
+
+| OpenAI 字段 | 发送给 AssemblyAI 的字段 |
+| ----------- | ------------------------ |
+| `model` | `speech_models` |
+| `language` | `language_code`；省略时由 AssemblyAI 自动检测语言 |
+| `prompt` | `prompt`（关于音频的上下文；只有 `assemblyai-stt-3-7` 使用） |
+| `temperature` | `temperature`（只有 `assemblyai-stt-3-7` 使用） |
+
+`response_format` 接受 `json`（默认）、`text`、`verbose_json`、`srt` 和 `vtt`：
+
+- `srt` 和 `vtt` 由 AssemblyAI 的字幕导出生成。
+- `verbose_json` 返回由 AssemblyAI 的句子构成的 `segments`。添加
+  `timestamp_granularities[]=word` 可获得 `words` 数组。AssemblyAI 没有 Whisper 解码数据，因此分段字段
+  `seek`、`tokens`、`temperature`、`avg_logprob`、`compression_ratio` 和 `no_speech_prob`
+  始终为零或为空。`language` 是 AssemblyAI 的语言代码，例如 `en_us`。
+
+其他表单字段不会被转发。对于没有 OpenAI 对应项的 AssemblyAI 功能（例如说话人标签），请使用
+[透传](#透传)。
+
+## 上游转录是异步的
+
+AssemblyAI 在后台转录，因此一次 GoModel 请求会发起多次上游调用：上传音频、创建转录任务，并每隔一到三秒检查一次任务，直到完成。客户端仍然只收到一个普通响应。
+
+GoModel 最多等待任务 10 分钟，之后返回 `504`。AssemblyAI 无法转录的任务（没有音频流、不支持的文件类型、音频短于
+160 毫秒）会返回 `400` 并附带 AssemblyAI 的消息；因 AssemblyAI 内部错误而失败的任务返回 `502`。
+
+## 数据保留
+
+AssemblyAI 会保存上传的音频和完成的转录，直到其
+[保留期](https://www.assemblyai.com/docs/data-retention-and-model-training)结束。GoModel
+不会把它们留在那里：每次请求之后（包括失败、超时和被取消的请求），它都会删除转录，同时也会删除上传的音频。删除失败时会连同转录
+ID 一起记入日志，不会导致请求失败。
+
+如果转录任务未能创建，对应的音频没有可删除的转录，会一直保留到 AssemblyAI 的保留机制将其移除。
+
+## 成本追踪
+
+AssemblyAI 按音频小时数计费。GoModel 会记录 AssemblyAI 为每次请求报告的音频时长，但 AssemblyAI
+的模型不在模型目录中，因此需要自行设置价格：添加带有 `per_second_input` 的
+[定价覆盖](/zh/features/cost-tracking#覆盖定价)，其值为
+[AssemblyAI 定价](https://www.assemblyai.com/pricing)中的每小时价格除以 3600。
+
+## 透传
+
+将 `assemblyai` 加入 `ENABLED_PASSTHROUGH_PROVIDERS`，即可通过 `/p/assemblyai/...` 访问 AssemblyAI
+的原生 API，例如 `POST /p/assemblyai/v2/transcript`。透传请求不会被清理：删除这些转录由调用方负责。
+
+## 未实现
+
+- **流式语音转文本。** AssemblyAI 的实时 websocket 使用自己的消息协议，而 GoModel 的 `/v1/realtime`
+  只转发兼容 OpenAI 的会话。
+- **文本转语音、Sync STT 和 Dictation API。** 它们运行在 AssemblyAI 的其他主机上。
+- **音频翻译**（`/v1/audio/translations`）。

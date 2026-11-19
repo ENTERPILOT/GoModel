@@ -75,6 +75,7 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
 | Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional) | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/de/providers/bailian) |
 | MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional) | `MiniMax-M3` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [MiniMax](/de/providers/minimax) |
 | Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/de/providers/xiaomi) |
+| AssemblyAI (nur Speech-to-Text) | `ASSEMBLYAI_API_KEY` (`ASSEMBLYAI_BASE_URL` optional) | `assemblyai-stt-3-7` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [AssemblyAI](/de/providers/assemblyai) |
 | ElevenLabs (nur Sprache) | `ELEVENLABS_API_KEY` (`ELEVENLABS_BASE_URL` optional) | `eleven_multilingual_v2` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [ElevenLabs](/de/providers/elevenlabs) |
 | audio.cpp (nur Audio) | `AUDIOCPP_BASE_URL` (`AUDIOCPP_API_KEY` optional) | `pocket-tts` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [audio.cpp](/de/providers/audiocpp) |
 | Jev / Kev (nur Decisions) | `JEV_API_KEY` (`JEV_BASE_URL` optional) | `jev-latest` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [Jev](/de/providers/jev) |
@@ -150,6 +151,11 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
 - **Fireworks AI** – Modell-IDs sind kontobezogene Pfade wie
   `accounts/fireworks/models/gpt-oss-120b`; verwenden Sie sie unverändert in Requests und in
   `FIREWORKS_MODELS`.
+- **AssemblyAI** – ein Speech-to-Text-Provider: `/v1/audio/transcriptions` wird unterstützt,
+  Chat, `/v1/responses`, Embeddings und `/v1/audio/speech` dagegen nicht. GoModel löscht jedes
+  Transkript und das dafür hochgeladene Audio nach der Anfrage bei AssemblyAI. Modelle,
+  Antwortformate und den EU-Endpunkt beschreibt der
+  [AssemblyAI-Leitfaden](/de/providers/assemblyai).
 - **ElevenLabs** – ein reiner Sprach-Provider: `/v1/audio/speech` (Text-to-Speech) und
   `/v1/audio/transcriptions` (Speech-to-Text) werden unterstützt, Chat, `/v1/responses` und
   Embeddings dagegen nicht (die ❌ oben spiegeln das wider, keine Einschränkung des Gateways). Das

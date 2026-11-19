@@ -80,6 +80,7 @@ support, not every individual model capability exposed by an upstream provider.
 | MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional) | `MiniMax-M3` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [MiniMax](/providers/minimax) |
 | Mistral AI | `MISTRAL_API_KEY` (`MISTRAL_BASE_URL` optional) | `mistral-large-latest` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Mistral AI](/providers/mistral) |
 | Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/providers/xiaomi) |
+| AssemblyAI (speech-to-text only) | `ASSEMBLYAI_API_KEY` (`ASSEMBLYAI_BASE_URL` optional) | `assemblyai-stt-3-7` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [AssemblyAI](/providers/assemblyai) |
 | ElevenLabs (voice only) | `ELEVENLABS_API_KEY` (`ELEVENLABS_BASE_URL` optional) | `eleven_multilingual_v2` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [ElevenLabs](/providers/elevenlabs) |
 | audio.cpp (audio only) | `AUDIOCPP_BASE_URL` (`AUDIOCPP_API_KEY` optional) | `pocket-tts` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [audio.cpp](/providers/audiocpp) |
 | Jev / Kev (decisions only) | `JEV_API_KEY` (`JEV_BASE_URL` optional) | `jev-latest` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [Jev](/providers/jev) |
@@ -158,6 +159,11 @@ support, not every individual model capability exposed by an upstream provider.
 - **Fireworks AI** — model IDs are account-scoped paths such as
   `accounts/fireworks/models/gpt-oss-120b`; use them verbatim in requests and
   in `FIREWORKS_MODELS`.
+- **AssemblyAI** — a speech-to-text provider: `/v1/audio/transcriptions` is
+  supported, but chat, `/v1/responses`, embeddings, and `/v1/audio/speech` are
+  not. GoModel deletes each transcript, and the audio uploaded for it, from
+  AssemblyAI after the request. See the [AssemblyAI guide](/providers/assemblyai)
+  for models, response formats, and the EU endpoint.
 - **ElevenLabs** — a voice-only provider: `/v1/audio/speech` (text-to-speech)
   and `/v1/audio/transcriptions` (speech-to-text) are supported, but chat,
   `/v1/responses`, and embeddings are not (the ❌s above reflect that, not a
