@@ -2,6 +2,7 @@ package geminiapi
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -11,7 +12,8 @@ import (
 // responseSchema) into JSON Schema. Gemini's Schema is an OpenAPI 3.0 subset
 // that differs from JSON Schema in ways the SDKs rely on: type names are
 // upper-case enum values ("OBJECT", "STRING"), a nullable value is marked
-// with nullable: true instead of a "null" type, propertyOrdering has no JSON
+// with nullable: true instead of a "null" type (or a null alternative, or a
+// null enum value), propertyOrdering has no JSON
 // Schema counterpart, and keywords may arrive in snake_case (the Python SDK
 // sends property_ordering). Providers that validate schemas strictly reject
 // each of these, so they are normalized; every other keyword is already JSON
@@ -51,6 +53,7 @@ func convertSchema(schema map[string]any) {
 	delete(schema, "propertyOrdering")
 	nullable, _ := schema["nullable"].(bool)
 	delete(schema, "nullable")
+	anyOf, hasAnyOf := schema["anyOf"].([]any)
 	if schemaType, ok := schema["type"].(string); ok {
 		schemaType = strings.ToLower(schemaType)
 		if nullable && schemaType != "null" {
@@ -58,6 +61,15 @@ func convertSchema(schema map[string]any) {
 		} else {
 			schema["type"] = schemaType
 		}
+	} else if nullable && hasAnyOf {
+		// Without a type of its own, the schema is nullable through one more
+		// alternative.
+		anyOf = append(anyOf, map[string]any{"type": "null"})
+		schema["anyOf"] = anyOf
+	}
+	// An enum lists every allowed value, so a nullable one must list null.
+	if enum, ok := schema["enum"].([]any); ok && nullable && !slices.ContainsFunc(enum, func(value any) bool { return value == nil }) {
+		schema["enum"] = append(enum, nil)
 	}
 	if properties, ok := schema["properties"].(map[string]any); ok {
 		for _, property := range properties {
@@ -65,10 +77,8 @@ func convertSchema(schema map[string]any) {
 		}
 	}
 	convertSubschema(schema["items"])
-	if anyOf, ok := schema["anyOf"].([]any); ok {
-		for _, option := range anyOf {
-			convertSubschema(option)
-		}
+	for _, option := range anyOf {
+		convertSubschema(option)
 	}
 }
 

@@ -61,6 +61,22 @@ func TestFromChatResponse_FunctionCalls(t *testing.T) {
 		encode(t, out.Candidates[0].Content.Parts))
 }
 
+// functionCall.args is an object in the Gemini schema, whatever a provider
+// put in the arguments string.
+func TestArgumentsToRaw(t *testing.T) {
+	tests := map[string]string{
+		`{"city": "Paris"}`: `{"city":"Paris"}`,
+		``:                  `{}`,
+		`null`:              `{}`,
+		`[]`:                `{}`,
+		`"text"`:            `{}`,
+		`{"city":`:          `{}`,
+	}
+	for arguments, want := range tests {
+		assert.Equal(t, want, string(argumentsToRaw(arguments)), arguments)
+	}
+}
+
 func TestFromChatResponse_Thoughts(t *testing.T) {
 	fields, err := core.MergeUnknownJSONFields(thoughtSignatureFields("sig-text"), map[string]json.RawMessage{
 		"reasoning_content": json.RawMessage(`"pondering"`),
@@ -191,13 +207,21 @@ func TestFromModels(t *testing.T) {
 		}},
 		{ID: "openai/text-embedding-3-small", Metadata: &core.ModelMetadata{Modes: []string{"embedding"}}},
 		{ID: "ollama/llama3:8b"},
+		// Neither a completion-only model nor a utility model without a
+		// mode answers chat, which generateContent is translated to.
+		{ID: "openai/davinci-002", Metadata: &core.ModelMetadata{Modes: []string{"completion"}}},
+		{ID: "jev/jev-1", Metadata: &core.ModelMetadata{Categories: []core.ModelCategory{core.CategoryUtility}}},
+		{ID: "local/unknown", Metadata: &core.ModelMetadata{}},
 	}
 
 	assert.Equal(t,
 		`{"models":[`+
 			`{"name":"models/gemini/gemini-2.5-flash","displayName":"Gemini 2.5 Flash","description":"Fast","inputTokenLimit":1048576,"outputTokenLimit":65536,"supportedGenerationMethods":["generateContent"]},`+
 			`{"name":"models/openai/text-embedding-3-small","displayName":"openai/text-embedding-3-small","supportedGenerationMethods":[]},`+
-			`{"name":"models/ollama/llama3:8b","displayName":"ollama/llama3:8b","supportedGenerationMethods":["generateContent"]}`+
+			`{"name":"models/ollama/llama3:8b","displayName":"ollama/llama3:8b","supportedGenerationMethods":["generateContent"]},`+
+			`{"name":"models/openai/davinci-002","displayName":"openai/davinci-002","supportedGenerationMethods":[]},`+
+			`{"name":"models/jev/jev-1","displayName":"jev/jev-1","supportedGenerationMethods":[]},`+
+			`{"name":"models/local/unknown","displayName":"local/unknown","supportedGenerationMethods":["generateContent"]}`+
 			`]}`,
 		encode(t, FromModels(models)))
 	assert.Equal(t, `{"models":[]}`, encode(t, FromModels(nil)))

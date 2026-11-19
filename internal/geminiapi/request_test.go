@@ -60,12 +60,12 @@ func TestToChatRequest_TextSystemAndGenerationConfig(t *testing.T) {
 		"camelCase": `{
 			"systemInstruction":{"role":"user","parts":[{"text":"Be brief."},{"text":"Be kind."}]},
 			"contents":[{"role":"user","parts":[{"text":"Hello"}]},{"role":"model","parts":[{"text":"Hi"}]},{"parts":[{"text":"Bye"}]}],
-			"generationConfig":{"temperature":0.2,"topP":0.9,"topK":40,"maxOutputTokens":128,"stopSequences":["END"],"seed":7,"candidateCount":1}
+			"generationConfig":{"temperature":0.2,"topP":0.9,"topK":40,"maxOutputTokens":128,"stopSequences":["END"],"seed":7,"candidateCount":1,"presencePenalty":0.5,"frequencyPenalty":-1}
 		}`,
 		"snake_case": `{
 			"system_instruction":{"parts":[{"text":"Be brief."},{"text":"Be kind."}]},
 			"contents":[{"role":"user","parts":[{"text":"Hello"}]},{"role":"model","parts":[{"text":"Hi"}]},{"parts":[{"text":"Bye"}]}],
-			"generation_config":{"temperature":0.2,"top_p":0.9,"top_k":40,"max_output_tokens":128,"stop_sequences":["END"],"seed":7,"candidate_count":1}
+			"generation_config":{"temperature":0.2,"top_p":0.9,"top_k":40,"max_output_tokens":128,"stop_sequences":["END"],"seed":7,"candidate_count":1,"presence_penalty":0.5,"frequency_penalty":-1}
 		}`,
 	}
 	for name, body := range bodies {
@@ -89,6 +89,8 @@ func TestToChatRequest_TextSystemAndGenerationConfig(t *testing.T) {
 			assert.Equal(t, 128, *chat.MaxTokens)
 			assert.Equal(t, []string{"END"}, extraField[[]string](t, chat.ExtraFields, "stop"))
 			assert.Equal(t, 7, extraField[int](t, chat.ExtraFields, "seed"))
+			assert.InDelta(t, 0.5, extraField[float64](t, chat.ExtraFields, "presence_penalty"), 1e-9)
+			assert.InDelta(t, -1, extraField[float64](t, chat.ExtraFields, "frequency_penalty"), 1e-9)
 			// topK has no portable equivalent and must not reach providers
 			// that reject unknown fields.
 			assert.Empty(t, chat.ExtraFields.Lookup("top_k"))
@@ -150,13 +152,14 @@ func TestToChatRequest_FunctionDeclarations(t *testing.T) {
 	assert.Equal(t, "get_weather", weather["name"])
 	assert.Equal(t, "Get the weather", weather["description"])
 	// Gemini's Schema becomes JSON Schema: lower-case types, a "null" type
-	// for nullable, camelCase keywords, and no propertyOrdering.
+	// (and enum value) for nullable, camelCase keywords, and no
+	// propertyOrdering.
 	assert.Equal(t, map[string]any{
 		"type":     "object",
 		"required": []any{"city"},
 		"properties": map[string]any{
 			"city":  map[string]any{"type": "string"},
-			"unit":  map[string]any{"type": []any{"string", "null"}, "enum": []any{"c", "f"}},
+			"unit":  map[string]any{"type": []any{"string", "null"}, "enum": []any{"c", "f", nil}},
 			"days":  map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "maxItems": float64(7)},
 			"where": map[string]any{"anyOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "number"}}},
 		},
@@ -167,6 +170,18 @@ func TestToChatRequest_FunctionDeclarations(t *testing.T) {
 
 	ping := chat.Tools[2]["function"].(map[string]any)
 	assert.NotContains(t, ping, "parameters")
+}
+
+// A nullable schema without a type of its own is nullable through anyOf.
+func TestJSONSchemaFromGemini_NullableAnyOf(t *testing.T) {
+	schema, err := jsonSchemaFromGemini([]byte(`{"nullable":true,"anyOf":[{"type":"STRING"},{"type":"INTEGER"}]}`))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"anyOf": []any{
+		map[string]any{"type": "string"}, map[string]any{"type": "integer"}, map[string]any{"type": "null"},
+	}}, schema)
+
+	_, err = jsonSchemaFromGemini([]byte(`[]`))
+	require.Error(t, err)
 }
 
 func TestToChatRequest_ToolConfig(t *testing.T) {
@@ -180,6 +195,7 @@ func TestToChatRequest_ToolConfig(t *testing.T) {
 	}{
 		{name: "absent", config: `null`, want: nil},
 		{name: "unspecified mode", config: `{"functionCallingConfig":{}}`, want: nil},
+		{name: "explicitly unspecified mode", config: `{"functionCallingConfig":{"mode":"MODE_UNSPECIFIED"}}`, want: nil},
 		{name: "auto", config: `{"functionCallingConfig":{"mode":"AUTO"}}`, want: "auto"},
 		{name: "none", config: `{"function_calling_config":{"mode":"none"}}`, want: "none"},
 		{name: "any", config: `{"functionCallingConfig":{"mode":"ANY"}}`, want: "required"},
@@ -342,8 +358,8 @@ func TestToChatRequest_ResponseFormat(t *testing.T) {
 			want:   `{"type":"json_schema","json_schema":{"name":"response","schema":{"type":"object","additionalProperties":false}}}`,
 		},
 		{
-			name:   "json schema wins over gemini schema",
-			config: `{"responseJsonSchema":{"type":"array"},"responseSchema":{"type":"OBJECT"}}`,
+			name:   "schema without a mime type",
+			config: `{"responseJsonSchema":{"type":"array"}}`,
 			want:   `{"type":"json_schema","json_schema":{"name":"response","schema":{"type":"array"}}}`,
 		},
 	}
@@ -471,6 +487,36 @@ func TestToChatRequest_Rejects(t *testing.T) {
 			message: `generationConfig.responseMimeType "text/x.enum" is not supported on this endpoint`, param: "generationConfig.responseMimeType",
 		},
 		{
+			name:    "function response in a model turn",
+			body:    `{"contents":[{"role":"model","parts":[{"functionResponse":{"name":"a","response":{}}}]}]}`,
+			message: "contents[0]: functionResponse belongs in a user turn", param: "contents",
+		},
+		{
+			name:    "function call in a user turn",
+			body:    `{"contents":[{"role":"user","parts":[{"functionCall":{"name":"a"}}]}]}`,
+			message: "contents[0]: functionCall belongs in a model turn", param: "contents",
+		},
+		{
+			name:    "unknown function calling mode",
+			body:    `{"contents":[{"parts":[{"text":"Hi"}]}],"toolConfig":{"functionCallingConfig":{"mode":"sometimes"}}}`,
+			message: `toolConfig.functionCallingConfig.mode "SOMETIMES" is not one of AUTO, ANY, NONE, VALIDATED`, param: "toolConfig.functionCallingConfig.mode",
+		},
+		{
+			name:    "both parameter schemas",
+			body:    `{"contents":[{"parts":[{"text":"Hi"}]}],"tools":[{"functionDeclarations":[{"name":"a","parameters":{"type":"OBJECT"},"parametersJsonSchema":{"type":"object"}}]}]}`,
+			message: "tools[0].functionDeclarations[0]: parameters and parametersJsonSchema are mutually exclusive", param: "tools",
+		},
+		{
+			name:    "both response schemas",
+			body:    `{"contents":[{"parts":[{"text":"Hi"}]}],"generationConfig":{"responseSchema":{"type":"OBJECT"},"responseJsonSchema":{"type":"object"}}}`,
+			message: "generationConfig.responseSchema and responseJsonSchema are mutually exclusive", param: "generationConfig.responseJsonSchema",
+		},
+		{
+			name:    "system instruction function call",
+			body:    `{"contents":[{"parts":[{"text":"Hi"}]}],"systemInstruction":{"parts":[{"text":"x"},{"functionCall":{"name":"a"}}]}}`,
+			message: "systemInstruction supports text parts only", param: "systemInstruction",
+		},
+		{
 			name:    "system instruction media",
 			body:    `{"contents":[{"parts":[{"text":"Hi"}]}],"systemInstruction":{"parts":[{"inlineData":{"mimeType":"image/png","data":"aW1n"}}]}}`,
 			message: "systemInstruction supports text parts only", param: "systemInstruction",
@@ -494,5 +540,10 @@ func TestToChatRequest_RequiresModel(t *testing.T) {
 	req, err := DecodeGenerateContentRequest([]byte(`{"contents":[{"parts":[{"text":"Hi"}]}]}`))
 	require.NoError(t, err)
 	_, err = ToChatRequest(req, " ", false)
-	require.Error(t, err)
+	gatewayErr, ok := errors.AsType[*core.GatewayError](err)
+	require.True(t, ok, "err = %T", err)
+	assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+	assert.Equal(t, "model is required", gatewayErr.Message)
+	require.NotNil(t, gatewayErr.Param)
+	assert.Equal(t, "model", *gatewayErr.Param)
 }

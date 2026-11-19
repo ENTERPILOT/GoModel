@@ -151,6 +151,33 @@ func TestMiddlewarePublishesStartedEventWithRedactedRequestHeaders(t *testing.T)
 	require.Equal(t, "visible", started.requestHeaders["X-Test"])
 }
 
+// The Gemini routes carry the model in the path. The entry records the path
+// template, so every model shares one path that the operation filters match.
+func TestMiddlewareRecordsGeminiRequestsUnderThePathTemplate(t *testing.T) {
+	tests := map[string]string{
+		"/v1beta/models/gemini-2.5-flash:generateContent":    core.GeminiGenerateContentEndpoint,
+		"/v1beta/models/openai/gpt-4o:streamGenerateContent": core.GeminiStreamGenerateContentEndpoint,
+		"/v1/chat/completions":                               "/v1/chat/completions",
+	}
+	for target, want := range tests {
+		t.Run(target, func(t *testing.T) {
+			logger := &captureLiveLogger{cfg: Config{Enabled: true}}
+			c, _ := echotest.Post(t, target, nil)
+
+			var path string
+			handler := Middleware(logger)(func(c *echo.Context) error {
+				entry, ok := c.Get(string(LogEntryKey)).(*LogEntry)
+				require.True(t, ok)
+				path = entry.Path
+				return nil
+			})
+			require.NoError(t, handler(c))
+			assert.Equal(t, want, path)
+			assert.Equal(t, core.OperationChatCompletions, core.DescribeEndpointPath(path).Operation)
+		})
+	}
+}
+
 func TestMiddlewarePublishesWorkflowUpdateWithCapturedRequestBody(t *testing.T) {
 	logger := &captureLiveLogger{
 		cfg: Config{

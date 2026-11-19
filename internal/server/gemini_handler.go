@@ -200,7 +200,7 @@ func (s *translatedInferenceService) dispatchGenerateContent(c *echo.Context, re
 	s.observeLiveProviderAttempts(c, workflow)
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
-	endpoint := core.UsageEndpoint(c.Request().URL.Path)
+	endpoint := core.RecordedEndpoint(c.Request().URL.Path)
 
 	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker,
 		rateLimitRouteFromWorkflow(workflow).withFailovers(len(s.inference().FailoverSelectors(workflow))))

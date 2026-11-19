@@ -22,9 +22,9 @@ i innych), nie tylko do Gemini.
 
 <Warning>
   Wejście Gemini API jest w wersji beta i obejmuje tekst, obrazy, function calling
-  oraz ustrukturyzowany output. Request używający funkcji Gemini spoza tego zakresu
-  jest odrzucany z `400`, które ją nazywa, a nigdy nie dostaje odpowiedzi takiej,
-  jakby funkcji nie wysłano. Zobacz [Ograniczenia](#ograniczenia).
+  oraz ustrukturyzowany output. Funkcje Gemini spoza tego zakresu są albo odrzucane
+  z `400`, które je nazywa, albo ignorowane, zgodnie z listą w sekcji
+  [Ograniczenia](#ograniczenia).
 </Warning>
 
 ## Obsługiwane endpointy
@@ -37,8 +37,9 @@ i innych), nie tylko do Gemini.
 | `GET /v1beta/models/{model}` | Pobiera jeden model w kształcie modelu Gemini. |
 
 `{model}` to dowolne ID modelu obsługiwane przez GoModel: `gemini-2.5-flash`,
-`openai/gpt-4o-mini`, nazwa modelu wirtualnego. Nazwa zwracana przez listę modeli
-(`models/openai/gpt-4o-mini`) działa bez zmian.
+`openai/gpt-4o-mini`, nazwa modelu wirtualnego. Lista modeli zwraca nazwy zasobów
+(`models/openai/gpt-4o-mini`): SDK przyjmuje taką nazwę bez zmian, a w ścieżce REST
+dopisuje się ją do `/v1beta/`.
 
 ## Uwierzytelnianie
 
@@ -122,7 +123,7 @@ typowane błędy.
 | `toolConfig.functionCallingConfig` | `AUTO`, `ANY`, `NONE` i `VALIDATED`, z `allowedFunctionNames`. `VALIDATED` bez `allowedFunctionNames` jest obsługiwane jak `AUTO`: gwarancja zgodności ze schematem nie ma przenośnego odpowiednika. |
 | `functionCall`, `functionResponse` | Pełne round tripy wywołań narzędzi, także równoległych. Odpowiedzi mają `id` przy każdym `functionCall`; turę należy odesłać bez zmian, tak jak robią to SDK. `functionResponse` bez `id` odpowiada na wywołanie o tej samej nazwie, po kolei. |
 | `thoughtSignature` | Zwracany przy wywołaniach funkcji Gemini 3 i odsyłany do Gemini, gdy rozmowa jest kontynuowana. |
-| `generationConfig` | `temperature`, `topP`, `maxOutputTokens`, `stopSequences`, `seed`. |
+| `generationConfig` | `temperature`, `topP`, `maxOutputTokens`, `stopSequences`, `seed`, `presencePenalty`, `frequencyPenalty`. |
 | `responseMimeType`, `responseSchema`, `responseJsonSchema` | Output JSON, ze schematem, jeśli został podany. |
 | `thinkingConfig` | Staje się reasoning effort: `thinkingLevel` według nazwy, `thinkingBudget` według wielkości (`0` wyłącza, do 1024 `low`, do 8192 `medium`, powyżej `high`). Z `includeThoughts` reasoning zwrócony przez providera wraca jako części `thought`. |
 | `usageMetadata` | `promptTokenCount` (cały prompt, łącznie z tokenami z cache'u), `cachedContentTokenCount`, `candidatesTokenCount`, `thoughtsTokenCount`, `totalTokenCount`, dla każdego providera. |
@@ -130,11 +131,11 @@ typowane błędy.
 ## Śledzenie kosztów i logi requestów
 
 Requesty są śledzone i logowane tak jak trasy kompatybilne z OpenAI, a koszt jest
-wyliczany na podstawie providera, który obsłużył request. Log requestów pokazuje
-ścieżkę requestu. Użycie jest zapisywane pod szablonem ścieżki,
+wyliczany na podstawie providera, który obsłużył request. Ponieważ ścieżka requestu
+zawiera model, użycie i log requestów zapisują te trasy pod szablonem ścieżki,
 `/v1beta/models/{model}:generateContent` i
 `/v1beta/models/{model}:streamGenerateContent`, więc jeden filtr obejmuje wszystkie
-modele.
+modele. Model jest zapisywany w osobnym polu.
 
 ## Ograniczenia
 
@@ -147,15 +148,17 @@ jeszcze dostępne:
   i YouTube), części `executableCode` i `codeExecutionResult`, `candidateCount`
   powyżej 1, `responseModalities` inne niż `TEXT` oraz wartości `responseMimeType`
   inne niż `text/plain` i `application/json`.
-- **Ignorowane:** `topK` i `safetySettings`. Obowiązują własne domyślne ustawienia
-  bezpieczeństwa providera, który obsługuje request.
+- **Ignorowane:** `topK`, `safetySettings` (obowiązują własne domyślne ustawienia
+  bezpieczeństwa providera, który obsługuje request) oraz inne parametry strojenia
+  bez przenośnego odpowiednika, na przykład `logprobs`, `mediaResolution`
+  i `videoMetadata`.
 - **Podsumowania myśli z modeli Gemini** nie są zwracane, a dokładny
   `thinkingBudget` staje się jednym z poziomów effort opisanych wyżej.
 - **Wygenerowane obrazy** nie są zwracane; dla modeli obrazów użyj
   [`/v1/images/generations`](/pl/advanced/images-api).
 - **Nieobsługiwane:** `countTokens`, `embedContent`, `batchGenerateContent`, API
-  Files i cached content, układ ścieżek Vertex AI oraz `streamGenerateContent` bez
-  `alt=sse`. Nieznane metody odpowiadają `404`.
+  Files i cached content oraz układ ścieżek Vertex AI; nieznane metody odpowiadają
+  `404`. `streamGenerateContent` bez `alt=sse` odpowiada `400`.
 - **Cache odpowiedzi** nie jest używany na tych trasach.
 
 Uzasadnienie projektu i to, co dodałaby natywna ścieżka do Gemini, opisuje

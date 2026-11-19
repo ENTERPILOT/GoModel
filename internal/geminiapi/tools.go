@@ -49,6 +49,9 @@ func convertTools(tools []Tool) ([]map[string]any, error) {
 // parametersJsonSchema as sent, or parameters converted from Gemini's Schema.
 func declarationParameters(declaration FunctionDeclaration) (any, error) {
 	if raw := firstRaw(declaration.ParametersJSONSchema, declaration.ParametersJSONSchemaAlt); raw != nil {
+		if firstRaw(declaration.Parameters) != nil {
+			return nil, fmt.Errorf("parameters and parametersJsonSchema are mutually exclusive")
+		}
 		var schema any
 		if err := json.Unmarshal(raw, &schema); err != nil {
 			return nil, fmt.Errorf("parametersJsonSchema: %v", err)
@@ -77,30 +80,38 @@ func firstRaw(values ...json.RawMessage) json.RawMessage {
 
 // convertToolConfig maps functionCallingConfig onto tool_choice. A subset of
 // allowed functions becomes an allowed_tools choice, which every provider
-// either supports or narrows the tool list for.
-func convertToolConfig(cfg *FunctionCallingConfig) any {
+// either supports or narrows the tool list for. VALIDATED without a subset
+// is served as auto: its guarantee that calls follow the declared schema has
+// no portable equivalent, and the model may call a function or answer in
+// text either way.
+func convertToolConfig(cfg *FunctionCallingConfig) (any, error) {
 	if cfg == nil {
-		return nil
+		return nil, nil
 	}
 	names := cfg.allowedFunctionNames()
-	switch strings.ToUpper(strings.TrimSpace(cfg.Mode)) {
+	switch mode := strings.ToUpper(strings.TrimSpace(cfg.Mode)); mode {
+	case "", "MODE_UNSPECIFIED":
+		return nil, nil
 	case "NONE":
-		return "none"
+		return "none", nil
 	case "ANY":
 		switch len(names) {
 		case 0:
-			return "required"
+			return "required", nil
 		case 1:
-			return map[string]any{"type": "function", "function": map[string]any{"name": names[0]}}
+			return map[string]any{"type": "function", "function": map[string]any{"name": names[0]}}, nil
 		}
-		return allowedTools("required", names)
+		return allowedTools("required", names), nil
 	case "AUTO", "VALIDATED":
 		if len(names) > 0 {
-			return allowedTools("auto", names)
+			return allowedTools("auto", names), nil
 		}
-		return "auto"
+		return "auto", nil
+	default:
+		return nil, core.NewInvalidRequestError(
+			fmt.Sprintf("toolConfig.functionCallingConfig.mode %q is not one of AUTO, ANY, NONE, VALIDATED", mode), nil,
+		).WithParam("toolConfig.functionCallingConfig.mode")
 	}
-	return nil
 }
 
 func allowedTools(mode string, names []string) map[string]any {

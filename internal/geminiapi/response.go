@@ -142,10 +142,11 @@ func reasoningContent(fields core.UnknownJSONFields) string {
 }
 
 // argumentsToRaw renders a tool-call arguments string as the JSON object
-// functionCall.args holds.
+// functionCall.args holds. Anything but an object (empty, null, an array,
+// invalid JSON) becomes {}: the Gemini SDKs decode args as an object only.
 func argumentsToRaw(arguments string) json.RawMessage {
 	trimmed := strings.TrimSpace(arguments)
-	if trimmed == "" {
+	if !strings.HasPrefix(trimmed, "{") {
 		return json.RawMessage("{}")
 	}
 	var compact bytes.Buffer

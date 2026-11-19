@@ -83,8 +83,10 @@ type Part struct {
 	ThoughtSignature    string `json:"thoughtSignature,omitempty"`
 	ThoughtSignatureAlt string `json:"thought_signature,omitempty" swaggerignore:"true"`
 
-	// Members the translation cannot represent. They are decoded only so a
-	// request carrying one is refused by name instead of losing it silently.
+	// Members that carry content the translation cannot represent. They are
+	// decoded only so a request carrying one is refused by name instead of
+	// losing it silently. Members that only tune how a part is read
+	// (videoMetadata, mediaResolution) are not declared and are ignored.
 	FileData               json.RawMessage `json:"fileData,omitempty" swaggerignore:"true"`
 	FileDataAlt            json.RawMessage `json:"file_data,omitempty" swaggerignore:"true"`
 	ExecutableCode         json.RawMessage `json:"executableCode,omitempty" swaggerignore:"true"`
@@ -261,6 +263,10 @@ type GenerationConfig struct {
 	CandidateCount        *int            `json:"candidateCount,omitempty"`
 	CandidateCountAlt     *int            `json:"candidate_count,omitempty" swaggerignore:"true"`
 	Seed                  *int64          `json:"seed,omitempty"`
+	PresencePenalty       *float64        `json:"presencePenalty,omitempty"`
+	PresencePenaltyAlt    *float64        `json:"presence_penalty,omitempty" swaggerignore:"true"`
+	FrequencyPenalty      *float64        `json:"frequencyPenalty,omitempty"`
+	FrequencyPenaltyAlt   *float64        `json:"frequency_penalty,omitempty" swaggerignore:"true"`
 	ResponseMimeType      string          `json:"responseMimeType,omitempty"`
 	ResponseMimeTypeAlt   string          `json:"response_mime_type,omitempty" swaggerignore:"true"`
 	ResponseSchema        json.RawMessage `json:"responseSchema,omitempty" swaggertype:"object"`
@@ -292,6 +298,20 @@ func (c *GenerationConfig) stopSequences() []string {
 		return c.StopSequences
 	}
 	return c.StopSequencesAlt
+}
+
+func (c *GenerationConfig) presencePenalty() *float64 {
+	if c.PresencePenalty != nil {
+		return c.PresencePenalty
+	}
+	return c.PresencePenaltyAlt
+}
+
+func (c *GenerationConfig) frequencyPenalty() *float64 {
+	if c.FrequencyPenalty != nil {
+		return c.FrequencyPenalty
+	}
+	return c.FrequencyPenaltyAlt
 }
 
 func (c *GenerationConfig) candidateCount() *int {

@@ -34,7 +34,7 @@ func TestParseGeminiModelMethodPath(t *testing.T) {
 	}
 }
 
-func TestUsageEndpoint(t *testing.T) {
+func TestRecordedEndpoint(t *testing.T) {
 	tests := map[string]string{
 		"/v1/chat/completions":                               "/v1/chat/completions",
 		"/v1/responses/resp_1":                               "/v1/responses/resp_1",
@@ -44,7 +44,7 @@ func TestUsageEndpoint(t *testing.T) {
 		"/v1beta/models/gemini-2.5-flash":                    "/v1beta/models/gemini-2.5-flash",
 	}
 	for path, want := range tests {
-		assert.Equal(t, want, UsageEndpoint(path), path)
+		assert.Equal(t, want, RecordedEndpoint(path), path)
 	}
 }
 

@@ -13,7 +13,8 @@ import (
 // applyGenerationConfig carries the generation options that have a portable
 // equivalent. topK is deliberately not carried: it is no OpenAI parameter,
 // and OpenAI-family providers reject unknown request fields (the same
-// decision ADR-0007 records for the Anthropic dialect).
+// decision ADR-0007 records for the Anthropic dialect). Options the type
+// does not declare (logprobs, mediaResolution, …) are ignored likewise.
 func applyGenerationConfig(chat *core.ChatRequest, cfg *GenerationConfig) error {
 	if cfg == nil {
 		return nil
@@ -41,6 +42,14 @@ func applyGenerationConfig(chat *core.ChatRequest, cfg *GenerationConfig) error 
 	if cfg.Seed != nil {
 		fields["seed"] = json.RawMessage(strconv.FormatInt(*cfg.Seed, 10))
 	}
+	for name, penalty := range map[string]*float64{
+		"presence_penalty":  cfg.presencePenalty(),
+		"frequency_penalty": cfg.frequencyPenalty(),
+	} {
+		if penalty != nil {
+			fields[name] = json.RawMessage(strconv.FormatFloat(*penalty, 'f', -1, 64))
+		}
+	}
 	format, err := responseFormat(cfg)
 	if err != nil {
 		return err
@@ -60,6 +69,9 @@ func applyGenerationConfig(chat *core.ChatRequest, cfg *GenerationConfig) error 
 func responseFormat(cfg *GenerationConfig) (json.RawMessage, error) {
 	var schema any
 	if raw := firstRaw(cfg.responseJSONSchema()); raw != nil {
+		if firstRaw(cfg.responseSchema()) != nil {
+			return nil, core.NewInvalidRequestError("generationConfig.responseSchema and responseJsonSchema are mutually exclusive", nil).WithParam("generationConfig.responseJsonSchema")
+		}
 		if err := json.Unmarshal(raw, &schema); err != nil {
 			return nil, core.NewInvalidRequestError("generationConfig.responseJsonSchema: "+err.Error(), err).WithParam("generationConfig.responseJsonSchema")
 		}

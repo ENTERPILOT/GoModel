@@ -22,9 +22,9 @@ Anthropic, Bedrock, and others), not only Gemini.
 
 <Warning>
   The Gemini API ingress is in beta and covers text, images, function calling,
-  and structured output. A request that uses a Gemini feature outside that set
-  is rejected with a `400` that names it, never answered as if the feature had
-  not been sent. See [Limitations](#limitations).
+  and structured output. Gemini features outside that set are either rejected
+  with a `400` that names them or ignored, as listed under
+  [Limitations](#limitations).
 </Warning>
 
 ## Supported endpoints
@@ -37,8 +37,9 @@ Anthropic, Bedrock, and others), not only Gemini.
 | `GET /v1beta/models/{model}` | Retrieves one model in the Gemini model shape. |
 
 `{model}` is any model ID GoModel serves: `gemini-2.5-flash`,
-`openai/gpt-4o-mini`, a virtual model name. The name a model list returns
-(`models/openai/gpt-4o-mini`) works as it is.
+`openai/gpt-4o-mini`, a virtual model name. A model list returns resource names
+(`models/openai/gpt-4o-mini`): pass one to an SDK as it is, or append it to
+`/v1beta/` in a REST path.
 
 ## Authentication
 
@@ -123,7 +124,7 @@ their own typed errors.
 | `toolConfig.functionCallingConfig` | `AUTO`, `ANY`, `NONE`, and `VALIDATED`, with `allowedFunctionNames`. `VALIDATED` without `allowedFunctionNames` is served as `AUTO`: its schema guarantee has no portable equivalent. |
 | `functionCall`, `functionResponse` | Full tool-call round trips, including parallel calls. Responses carry an `id` on each `functionCall`; echo the turn back unchanged, as the SDKs do. A `functionResponse` without an `id` answers the call of the same name, in order. |
 | `thoughtSignature` | Returned on Gemini 3 function calls and replayed to Gemini when the conversation continues. |
-| `generationConfig` | `temperature`, `topP`, `maxOutputTokens`, `stopSequences`, `seed`. |
+| `generationConfig` | `temperature`, `topP`, `maxOutputTokens`, `stopSequences`, `seed`, `presencePenalty`, `frequencyPenalty`. |
 | `responseMimeType`, `responseSchema`, `responseJsonSchema` | JSON output, with the schema when one is given. |
 | `thinkingConfig` | Becomes a reasoning effort: `thinkingLevel` by name, `thinkingBudget` by size (`0` off, up to 1024 `low`, up to 8192 `medium`, above that `high`). With `includeThoughts`, reasoning a provider returns comes back as `thought` parts. |
 | `usageMetadata` | `promptTokenCount` (the whole prompt, cached tokens included), `cachedContentTokenCount`, `candidatesTokenCount`, `thoughtsTokenCount`, `totalTokenCount`, for every provider. |
@@ -131,11 +132,11 @@ their own typed errors.
 ## Cost tracking and request logs
 
 Requests are tracked and logged like the OpenAI-compatible routes, and cost is
-computed from the provider that served the request. The request log shows the
-request path. Usage is recorded under the path template,
-`/v1beta/models/{model}:generateContent` and
+computed from the provider that served the request. Because the request path
+carries the model, usage and the request log record these routes under their
+path template, `/v1beta/models/{model}:generateContent` and
 `/v1beta/models/{model}:streamGenerateContent`, so one filter covers every
-model.
+model. The model is recorded in its own field.
 
 ## Limitations
 
@@ -148,15 +149,16 @@ equivalent are therefore not available yet:
   YouTube URIs), `executableCode` and `codeExecutionResult` parts,
   `candidateCount` above 1, `responseModalities` other than `TEXT`, and
   `responseMimeType` values other than `text/plain` and `application/json`.
-- **Ignored:** `topK` and `safetySettings`. The serving provider's own safety
-  defaults apply.
+- **Ignored:** `topK`, `safetySettings` (the serving provider's own safety
+  defaults apply), and other tuning members without a portable equivalent, such
+  as `logprobs`, `mediaResolution`, and `videoMetadata`.
 - **Thought summaries from Gemini models** are not returned, and an exact
   `thinkingBudget` becomes one of the effort levels above.
 - **Generated images** are not returned; use
   [`/v1/images/generations`](/advanced/images-api) for image models.
 - **Not served:** `countTokens`, `embedContent`, `batchGenerateContent`, the
-  Files and cached-content APIs, the Vertex AI path layout, and
-  `streamGenerateContent` without `alt=sse`. Unknown methods answer `404`.
+  Files and cached-content APIs, and the Vertex AI path layout; unknown methods
+  answer `404`. `streamGenerateContent` without `alt=sse` answers `400`.
 - **The response cache** is not consulted on these routes.
 
 See [ADR-0017](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0017-gemini-api-ingress.md)

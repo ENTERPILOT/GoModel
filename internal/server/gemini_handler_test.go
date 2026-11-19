@@ -313,6 +313,27 @@ func TestGeminiAPI_ThroughServer(t *testing.T) {
 	}
 }
 
+// The snapshot is taken before authentication, so it must leave the query
+// credential out by itself.
+func TestRequestSnapshotCapture_LeavesOutTheGeminiQueryKey(t *testing.T) {
+	var query map[string][]string
+	handler := RequestSnapshotCapture()(func(c *echo.Context) error {
+		snapshot := core.GetRequestSnapshot(c.Request().Context())
+		require.NotNil(t, snapshot)
+		query = snapshot.GetQueryParams()
+		return nil
+	})
+
+	c, _ := echotest.Post(t, "/v1beta/models/gemini-test:streamGenerateContent?alt=sse&key=secret-key-123", geminiTestBody)
+	require.NoError(t, handler(c))
+	assert.Equal(t, map[string][]string{"alt": {"sse"}}, query)
+
+	// Other routes keep a parameter of that name: it is no credential there.
+	c, _ = echotest.Post(t, "/v1/chat/completions?key=value", `{"model":"m"}`)
+	require.NoError(t, handler(c))
+	assert.Equal(t, map[string][]string{"key": {"value"}}, query)
+}
+
 func TestAuthMiddleware_StripsGeminiQueryKey(t *testing.T) {
 	const masterKey = "secret-key-123"
 	tests := []struct {

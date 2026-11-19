@@ -13984,8 +13984,14 @@ const docTemplate = `{
                 "candidateCount": {
                     "type": "integer"
                 },
+                "frequencyPenalty": {
+                    "type": "number"
+                },
                 "maxOutputTokens": {
                     "type": "integer"
+                },
+                "presencePenalty": {
+                    "type": "number"
                 },
                 "responseJsonSchema": {
                     "type": "object"

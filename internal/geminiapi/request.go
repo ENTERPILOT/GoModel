@@ -34,10 +34,11 @@ func DecodeGenerateContentRequest(body []byte) (*GenerateContentRequest, error) 
 
 // ToChatRequest translates a generateContent request into the canonical chat
 // request. model comes from the request path and stream from the method
-// (streamGenerateContent). The translation is provider-agnostic; members the
-// canonical request cannot represent are rejected with a 400 that names them
-// rather than dropped, because the model would answer as if they were never
-// sent.
+// (streamGenerateContent). The translation is provider-agnostic. A member the
+// canonical request cannot represent is rejected with a 400 that names it
+// when dropping it would change what the model is asked (cached content,
+// built-in tools, file references); tuning members without a portable
+// equivalent (topK, safetySettings, …) are ignored.
 func ToChatRequest(req *GenerateContentRequest, model string, stream bool) (*core.ChatRequest, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("generateContent request is required", nil)
@@ -68,10 +69,14 @@ func ToChatRequest(req *GenerateContentRequest, model string, stream bool) (*cor
 	if chat.Tools, err = convertTools(req.Tools); err != nil {
 		return nil, err
 	}
+	toolChoice, err := convertToolConfig(req.toolConfig().functionCallingConfig())
+	if err != nil {
+		return nil, err
+	}
 	// A tool choice without tools is an error on OpenAI-family providers,
 	// while Gemini accepts a toolConfig on its own.
 	if len(chat.Tools) > 0 {
-		chat.ToolChoice = convertToolConfig(req.toolConfig().functionCallingConfig())
+		chat.ToolChoice = toolChoice
 	}
 
 	if err := applyGenerationConfig(chat, req.generationConfig()); err != nil {
@@ -159,13 +164,12 @@ func convertContents(req *GenerateContentRequest) ([]core.Message, error) {
 func systemText(system *Content) (string, error) {
 	texts := make([]string, 0, len(system.Parts))
 	for _, part := range system.Parts {
-		if part.Text == "" {
-			if part.inlineData() != nil || part.unsupportedMember() != "" {
-				return "", core.NewInvalidRequestError("systemInstruction supports text parts only", nil).WithParam("systemInstruction")
-			}
-			continue
+		if part.inlineData() != nil || part.functionCall() != nil || part.functionResponse() != nil || part.unsupportedMember() != "" {
+			return "", core.NewInvalidRequestError("systemInstruction supports text parts only", nil).WithParam("systemInstruction")
 		}
-		texts = append(texts, part.Text)
+		if part.Text != "" {
+			texts = append(texts, part.Text)
+		}
 	}
 	return strings.Join(texts, "\n"), nil
 }
@@ -187,6 +191,9 @@ func (c *contentConverter) modelTurn(parts []Part) error {
 		}
 		if part.inlineData() != nil {
 			return unsupported("inlineData in a model turn", "contents")
+		}
+		if part.functionResponse() != nil {
+			return fmt.Errorf("functionResponse belongs in a user turn")
 		}
 		if call := part.functionCall(); call != nil {
 			if strings.TrimSpace(call.Name) == "" {

@@ -44,10 +44,11 @@ gateway model ID may contain slashes (`openai/gpt-4o`) and colons
 method is whatever follows the last colon. Workflow resolution reads the model
 from the path for this dialect; a `model` member in the body is ignored.
 
-Because the path carries the model, usage is recorded under the path template
-(`/v1beta/models/{model}:generateContent`), not the request path. Otherwise
-every model would be its own endpoint in usage breakdowns and operation filters
-could not match the endpoint by equality. The request log keeps the real path.
+Because the path carries the model, usage and the request log record these
+routes under the path template (`/v1beta/models/{model}:generateContent`), not
+the request path. Otherwise every model would be its own endpoint in usage
+breakdowns, and the operation filters of both, which match paths by equality
+or prefix, could not classify it. The model is recorded in its own field.
 
 ### Gemini credentials map onto gateway keys
 
@@ -70,9 +71,12 @@ failover target of another provider type receives a request it can serve.
 Members without a portable equivalent follow the ADR-0011 ladder:
 
 - dropped: `topK` (the ADR-0007 decision: OpenAI-family providers reject
-  unknown request fields) and `safetySettings` (no other provider has an
+  unknown request fields), `safetySettings` (no other provider has an
   equivalent, so the serving provider's own safety defaults apply; rejecting
-  would turn away the many clients that set them on every request);
+  would turn away the many clients that set them on every request), and other
+  tuning members without a portable equivalent (`logprobs`, `mediaResolution`,
+  `videoMetadata`). `VALIDATED` function calling without a function subset is
+  served as `AUTO` for the same reason;
 - rejected with a `400` naming the member, because dropping them would change
   the answer: `cachedContent`, built-in tools (`googleSearch`, `codeExecution`,
   `urlContext`, ...), `fileData`, `executableCode` and `codeExecutionResult`

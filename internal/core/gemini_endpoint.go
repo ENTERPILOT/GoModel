@@ -12,9 +12,10 @@ const (
 	GeminiMethodGenerateContent       = "generateContent"
 	GeminiMethodStreamGenerateContent = "streamGenerateContent"
 
-	// The endpoints usage is recorded under. The request path carries the
-	// model, so recording it verbatim would split one endpoint into one per
-	// model; the path template keeps it a single, filterable value.
+	// The endpoints usage and the request log record these routes under. The
+	// request path carries the model, so recording it verbatim would split
+	// one endpoint into one per model, which no operation filter could match;
+	// the path template keeps it a single, filterable value.
 	GeminiGenerateContentEndpoint       = geminiModelsPathPrefix + "{model}:" + GeminiMethodGenerateContent
 	GeminiStreamGenerateContentEndpoint = geminiModelsPathPrefix + "{model}:" + GeminiMethodStreamGenerateContent
 
@@ -49,10 +50,10 @@ func isGeminiInferencePath(path string) bool {
 	return ok && (method == GeminiMethodGenerateContent || method == GeminiMethodStreamGenerateContent)
 }
 
-// UsageEndpoint returns the endpoint a request path is recorded under in usage
-// data: the path itself, except for routes that carry the model in the path,
-// which are recorded under their path template.
-func UsageEndpoint(path string) string {
+// RecordedEndpoint returns the endpoint a request path is recorded under in
+// usage data and the request log: the path itself, except for routes that
+// carry the model in the path, which are recorded under their path template.
+func RecordedEndpoint(path string) string {
 	if !IsGeminiAPIPath(path) {
 		return path
 	}
