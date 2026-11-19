@@ -8,14 +8,19 @@ keywords: ["playground", "dashboard", "chat completions", "responses", "messages
 Strona **Playground** (`/admin/dashboard/playground`) wysyła requesty przez
 publiczne API gatewaya z Twoim kluczem dashboardu, więc każde wywołanie jest routowane,
 logowane i rozliczane dokładnie tak jak request klienta. Wybierz endpoint (`/v1/chat/completions`,
-`/v1/responses` lub `/v1/messages`), model z inwentarza albo dowolny alias
-lub model wirtualny po nazwie oraz to, czy używać streamingu; zbuduj rozmowę
+`/v1/responses` lub `/v1/messages`), model oraz to, czy używać streamingu; zbuduj rozmowę
 z edytowalnych wiadomości System, User i Assistant, których kolejność można zmieniać, i wyślij prompt.
 Panel JSON po prawej stronie pokazuje body requestu w postaci, w jakiej zostanie wysłane (aktualizowane na żywo
 podczas edycji), oraz ostatnią odpowiedź z jej statusem, opóźnieniem i użyciem tokenów —
 odpowiedzi streamowane są składane do tego samego kształtu, jaki zwraca wywołanie bez streamingu.
 Requesty podlegają tym samym budżetom, limitom żądań, guardrails i logowaniu requestów
 co każdy inny klient gatewaya.
+
+Lista wyboru modelu pokazuje najpierw włączone
+[modele wirtualne](/pl/features/virtual-models), oznaczone jako
+**Model wirtualny**, a potem modele Twoich providerów. Możesz też wpisać dowolną
+nazwę modelu. Klucz dashboardu przypisany do ścieżki użytkownika nie widzi
+modeli wirtualnych na liście; wpisz wtedy ich nazwę.
 
 ## Obrazy, mowa, transkrypcja i embeddingi
 

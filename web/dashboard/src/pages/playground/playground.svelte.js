@@ -6,6 +6,7 @@
 import { apiFetch, isAbortError } from "$lib/api/client.js";
 import { errorPayloadMessage, isGatewayAuthError } from "$lib/api/errors.js";
 import { consumeEventStream } from "$lib/api/eventStream.js";
+import { access } from "$lib/stores/access.svelte.js";
 import { auth } from "$lib/stores/auth.svelte.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
@@ -27,6 +28,7 @@ import {
   playgroundUserPathHeader,
 } from "./playgroundLogic.js";
 import { normalizeMode } from "./playgroundMedia.js";
+import { virtualModels as virtualModelsStore } from "../models/virtualModels.svelte.js";
 
 const STORAGE = {
   mode: "gomodel_playground_mode",
@@ -91,6 +93,12 @@ class PlaygroundStore {
     return !this.sending && (this.draft.trim() !== "" || this.messages.length > 0);
   }
 
+  // Virtual models the picker lists next to the inventory. Their endpoint is
+  // global-only, so a scoped admin gets none and types the name instead.
+  get virtualModels() {
+    return access.loaded && !access.scoped ? virtualModelsStore.aliases : [];
+  }
+
   // Header name the selected user path is sent under: the deployment's
   // USER_PATH_HEADER when customized, otherwise X-GoModel-User-Path.
   get userPathHeaderName() {
@@ -105,7 +113,7 @@ class PlaygroundStore {
     this.mode = mode;
     writeStored(STORAGE.mode, mode);
     this.model = readStored(modelStorageKey(mode), "") || "";
-    this.userPath = defaultUserPathForModel(modelsStore.models, this.model.trim());
+    this.userPath = defaultUserPathForModel(modelsStore.models, this.model.trim(), this.virtualModels);
   }
 
   setEndpoint(id) {
@@ -116,7 +124,7 @@ class PlaygroundStore {
   setModel(model) {
     this.model = String(model || "");
     writeStored(modelStorageKey(this.mode), this.model);
-    this.userPath = defaultUserPathForModel(modelsStore.models, this.model.trim());
+    this.userPath = defaultUserPathForModel(modelsStore.models, this.model.trim(), this.virtualModels);
   }
 
   setUserPath(value) {

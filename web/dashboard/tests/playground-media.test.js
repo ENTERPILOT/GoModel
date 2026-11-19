@@ -53,6 +53,33 @@ test("the model picker lists models advertising the mode first, then unannotated
   assert.deepEqual(modeModelOptions(undefined, "image"), []);
 });
 
+test("the model picker lists virtual models first in every mode they can serve (#1533)", () => {
+  const inventory = [
+    { selector: "openai/gpt-4o", provider_name: "openai", model: { id: "gpt-4o", metadata: { modes: ["chat"] } } },
+    { selector: "openai/gpt-image-1", provider_name: "openai", model: { id: "gpt-image-1", metadata: { modes: ["image_generation"] } } },
+    { selector: "ollama/local", provider_name: "ollama", model: { id: "local" } },
+  ];
+  const virtualModels = [
+    { name: "test-alias", targets: [{ provider: "openai", model: "gpt-4o" }], enabled: true, valid: true },
+    { name: "painter", targets: [{ provider: "openai", model: "gpt-image-1" }], enabled: true, valid: true },
+    // Named like an inventory model: it answers that name, so it is listed once.
+    { name: "ollama/local", targets: [{ provider: "openai", model: "gpt-4o" }], enabled: true, valid: true },
+  ];
+  const ids = (mode) => modeModelOptions(inventory, mode, virtualModels).map((o) => o.id);
+  assert.deepEqual(ids("chat"), ["ollama/local", "test-alias", "openai/gpt-4o"]);
+  assert.deepEqual(ids("image"), ["painter", "openai/gpt-image-1", "ollama/local"]);
+
+  const chat = modeModelOptions(inventory, "chat", virtualModels);
+  assert.deepEqual(chat[1], { id: "test-alias", label: "test-alias", provider: "", virtual: true });
+  assert.deepEqual(chat[0], { id: "ollama/local", label: "ollama/local", provider: "", virtual: true });
+  assert.deepEqual(chat[2], { id: "openai/gpt-4o", label: "gpt-4o", provider: "openai" });
+  // Without virtual models the list is the inventory alone.
+  assert.deepEqual(
+    modeModelOptions(inventory, "chat").map((o) => o.id),
+    ["ollama/local", "openai/gpt-4o"],
+  );
+});
+
 test("buildImageRequest sends n and size only when they differ from the defaults", () => {
   assert.deepEqual(buildImageRequest({ model: " dall-e-3 ", prompt: "a cat", size: "", n: 1 }), {
     model: "dall-e-3",
