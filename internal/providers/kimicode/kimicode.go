@@ -4,7 +4,8 @@
 // completions, model listing, embeddings, and passthrough go through the
 // shared chat-centric adapter, while the Responses API is served natively by
 // the upstream /responses endpoint. Kimi Code retains no responses, so
-// store=true is pinned to false.
+// store=true is pinned to false. Tool schemas are adapted to the JSON Schema
+// subset Moonshot accepts on both paths (see tool_schema.go).
 package kimicode
 
 import (
@@ -43,16 +44,29 @@ var _ core.Provider = (*Provider)(nil)
 // New creates a new Kimi Code provider.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	return &Provider{openai.NewChatCompatible(cfg.APIKey, opts, openai.CompatibleProviderConfig{
-		ProviderName: "kimicode",
-		BaseURL:      providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
+		ProviderName:     "kimicode",
+		BaseURL:          providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
+		AdaptChatRequest: adaptChatRequest,
 	})}
+}
+
+// adaptChatRequest rewrites the tool schemas Moonshot's validator rejects (see
+// sanitizeTools). It returns req itself when no schema needs a repair.
+func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
+	tools, changed := sanitizeTools(req.Tools)
+	if !changed {
+		return req, nil
+	}
+	adapted := *req
+	adapted.Tools = tools
+	return &adapted, nil
 }
 
 // Responses serves the Responses API natively through the upstream /responses
 // endpoint. Kimi Code retains no responses, so a non-empty
 // previous_response_id is rejected before any upstream call (see
-// rejectPreviousResponseID); store=true is pinned to false by
-// adaptResponsesRequest.
+// rejectPreviousResponseID); adaptResponsesRequest pins store=true to false
+// and repairs tool schemas.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
 	if err := rejectPreviousResponseID(req); err != nil {
 		return nil, err
@@ -98,21 +112,26 @@ func rejectPreviousResponseID(req *core.ResponsesRequest) error {
 // instead of failing). A whitespace-only previous_response_id is treated as
 // empty by rejectPreviousResponseID and cleared here, because omitempty does
 // not omit a non-empty whitespace string and the upstream cannot resolve it.
+// Tool schemas Moonshot's validator rejects are rewritten (see sanitizeTools).
+// It returns req itself when nothing changes.
 func adaptResponsesRequest(req *core.ResponsesRequest) *core.ResponsesRequest {
 	if req == nil {
 		return nil
 	}
+	stored := req.Store != nil && *req.Store
 	whitespaceID := req.PreviousResponseID != "" && strings.TrimSpace(req.PreviousResponseID) == ""
-	if (req.Store == nil || !*req.Store) && !whitespaceID {
+	tools, toolsChanged := sanitizeTools(req.Tools)
+	if !stored && !whitespaceID && !toolsChanged {
 		return req
 	}
 	cp := *req
-	if req.Store != nil && *req.Store {
+	if stored {
 		disabled := false
 		cp.Store = &disabled
 	}
 	if whitespaceID {
 		cp.PreviousResponseID = ""
 	}
+	cp.Tools = tools
 	return &cp
 }

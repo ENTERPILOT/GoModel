@@ -66,6 +66,26 @@ virtual_models:
     target: kimicode/kimi-for-coding
 ```
 
+## Tool schemas
+
+Kimi validates every tool's `parameters` against Moonshot Flavored JSON Schema, a subset
+of JSON Schema. One tool outside it fails the whole request with
+`400 ... is not a valid moonshot flavored json schema`. GoModel rewrites the constructs
+the validator rejects before forwarding, on `/v1/chat/completions`, `/v1/responses`, and
+`/v1/messages`, so schemas from MCP servers and agent frameworks work as they are:
+
+| Sent by the client | Forwarded to Kimi |
+| --- | --- |
+| `enum` without `type` | `type` inferred from the values; values of several types become typed `anyOf` branches |
+| Tuple `items` (an array of schemas) | One schema accepting any of the members |
+| Boolean schema (`true`, `false`) | `{}`, `{"not": {}}` |
+| `type` beside `anyOf` | `type` moved into the branches |
+| `type` or `enum` beside `$ref` | Dropped; the referenced definition applies |
+| `required` names missing from `properties` | Pruned |
+
+Keywords Kimi accepts and ignores, such as `oneOf`, `const`, and `format`, are forwarded
+unchanged. Passthrough requests are forwarded as sent.
+
 ## Embeddings
 
 Kimi Code exposes `bge_m3_embed` for embeddings, but this model is not documented

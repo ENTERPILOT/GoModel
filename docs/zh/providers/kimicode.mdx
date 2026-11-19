@@ -52,6 +52,21 @@ virtual_models:
     target: kimicode/kimi-for-coding
 ```
 
+## 工具 Schema
+
+Kimi 会按照 Moonshot Flavored JSON Schema（JSON Schema 的一个子集）校验每个工具的 `parameters`。只要有一个工具不符合，整个请求就会以 `400 ... is not a valid moonshot flavored json schema` 失败。GoModel 会在转发前改写校验器拒绝的写法，适用于 `/v1/chat/completions`、`/v1/responses` 和 `/v1/messages`，因此来自 MCP 服务器和 Agent 框架的 Schema 无需修改即可使用：
+
+| 客户端发送 | 转发给 Kimi |
+| --- | --- |
+| 没有 `type` 的 `enum` | 根据取值推断 `type`；多种类型的取值会拆分为带类型的 `anyOf` 分支 |
+| 元组形式的 `items`（Schema 数组） | 一个可接受其中任意成员的 Schema |
+| 布尔 Schema（`true`、`false`） | `{}`、`{"not": {}}` |
+| 与 `anyOf` 并列的 `type` | `type` 移入各分支 |
+| 与 `$ref` 并列的 `type` 或 `enum` | 被移除；以所引用的定义为准 |
+| `required` 中未在 `properties` 声明的名称 | 被移除 |
+
+Kimi 接受但会忽略的关键字（例如 `oneOf`、`const` 和 `format`）会原样转发。透传请求按发送时的内容转发。
+
 ## 嵌入
 
 Kimi Code 提供用于嵌入的 `bge_m3_embed`，但上游并未为该模型提供文档。请将其视为实验性功能：在生产工作流中依赖它之前，请先在您的账户中测试其可用性和维度。
