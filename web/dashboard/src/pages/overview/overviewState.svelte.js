@@ -22,6 +22,9 @@ class ProviderStatusState {
   status = $state(emptyProviderStatus());
   loading = $state(false);
   loadedOnce = $state(false);
+  // True while `status` is what the gateway last answered, false after a
+  // failed load: an empty provider list is then unknown, not "none".
+  loadSucceeded = $state(false);
   detailsExpanded = $state(false);
   cardOverrides = $state({});
   #controller = null;
@@ -78,6 +81,7 @@ class ProviderStatusState {
       if (result.stale || controller.signal.aborted) return;
       if (!result.ok) {
         this.status = emptyProviderStatus();
+        this.loadSucceeded = false;
         this.#clearPoll();
         return;
       }
@@ -92,11 +96,13 @@ class ProviderStatusState {
         payload.providers = [];
       }
       this.status = payload;
+      this.loadSucceeded = true;
       this.#schedulePoll();
     } catch (e) {
       if (isAbortError(e)) return;
       console.error("Failed to fetch provider status:", e);
       this.status = emptyProviderStatus();
+      this.loadSucceeded = false;
       this.#clearPoll();
     } finally {
       if (this.#controller === controller) {
@@ -208,6 +214,9 @@ class CalendarState {
   data = $state([]);
   mode = $state("tokens");
   loading = $state(false);
+  // True while `data` is what the gateway last answered; see
+  // ProviderStatusState.loadSucceeded.
+  loadSucceeded = $state(false);
   #controller = null;
 
   async fetch() {
@@ -223,13 +232,16 @@ class CalendarState {
       if (result.stale || controller.signal.aborted) return;
       if (!result.ok) {
         this.data = [];
+        this.loadSucceeded = false;
         return;
       }
       this.data = Array.isArray(result.data) ? result.data : [];
+      this.loadSucceeded = true;
     } catch (e) {
       if (isAbortError(e)) return;
       console.error("Failed to fetch calendar data:", e);
       this.data = [];
+      this.loadSucceeded = false;
     } finally {
       if (this.#controller === controller) {
         this.#controller = null;
