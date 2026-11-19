@@ -241,7 +241,8 @@ type Options struct {
 	// one database, so a session continues on whichever replica a request
 	// reaches. Nil keeps every session on the instance that opened it.
 	SharedStore ext.SharedStore
-	// ToolCache stores the tool results of servers that opt into caching.
+	// ToolCache stores the tool results of servers that opt into caching,
+	// except stdio servers, whose results stay in this instance's memory.
 	// Nil caches nothing. The caller owns and closes it.
 	ToolCache cache.Store
 }
@@ -270,7 +271,7 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		stop:              make(chan struct{}),
 	}
 	if opts.ToolCache != nil {
-		s.manager.toolCache = &toolCache{store: opts.ToolCache}
+		s.manager.toolCache = newToolCache(opts.ToolCache)
 	}
 	if opts.oauthStore != nil {
 		s.oauth = newOAuthManager(opts.oauthStore, opts.HTTPClient)

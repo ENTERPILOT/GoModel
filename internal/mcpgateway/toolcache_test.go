@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -238,23 +239,27 @@ func (s *recordingStore) Set(ctx context.Context, key string, value []byte, ttl 
 
 func TestToolCachePutStoresOnlyBoundedSuccessfulResults(t *testing.T) {
 	store := &recordingStore{ttls: map[string]time.Duration{}, Store: cache.NewMapStore()}
-	toolCache := &toolCache{store: store}
+	toolCache := newToolCache(store)
 	ctx := context.Background()
 	text := func(s string) []mcp.Content { return []mcp.Content{&mcp.TextContent{Text: s}} }
 
 	toolCache.put(ctx, cachedCall{key: "nil", ttl: time.Minute}, nil)
 	toolCache.put(ctx, cachedCall{key: "error", ttl: time.Minute}, &mcp.CallToolResult{IsError: true, Content: text("boom")})
 	toolCache.put(ctx, cachedCall{key: "huge", ttl: time.Minute}, &mcp.CallToolResult{Content: text(strings.Repeat("x", maxCachedToolResultBytes))})
+	var needsInput mcp.CallToolResult
+	require.NoError(t, json.Unmarshal([]byte(`{"content":[],"resultType":"input_required","requestState":"s"}`), &needsInput))
+	require.True(t, needsInput.NeedsInput())
+	toolCache.put(ctx, cachedCall{key: "input", ttl: time.Minute}, &needsInput)
 	toolCache.put(ctx, cachedCall{key: "ok", ttl: 90 * time.Second}, &mcp.CallToolResult{Content: text("fine")})
 
-	assert.Equal(t, map[string]time.Duration{"ok": 90 * time.Second}, store.ttls, "only the successful result within the size bound is stored, for the server's TTL")
-	hit := toolCache.get(ctx, "ok")
+	assert.Equal(t, map[string]time.Duration{"ok": 90 * time.Second}, store.ttls, "only the complete, successful result within the size bound is stored, for the server's TTL")
+	hit := toolCache.get(ctx, cachedCall{key: "ok"})
 	require.NotNil(t, hit)
 	assert.Equal(t, "fine", resultText(t, hit))
-	assert.Nil(t, toolCache.get(ctx, "error"))
+	assert.Nil(t, toolCache.get(ctx, cachedCall{key: "error"}))
 
 	require.NoError(t, store.Store.Set(ctx, "garbage", []byte("not json"), time.Minute))
-	assert.Nil(t, toolCache.get(ctx, "garbage"), "an unreadable entry is a miss")
+	assert.Nil(t, toolCache.get(ctx, cachedCall{key: "garbage"}), "an unreadable entry is a miss")
 }
 
 func TestCanonicalArguments(t *testing.T) {
@@ -270,7 +275,13 @@ func TestCanonicalArguments(t *testing.T) {
 		{name: "keeps array order", args: `{"ids":[3,1,2]}`, want: `{"ids":[3,1,2]}`, wantOK: true},
 		{name: "keeps number text", args: `{"n":1.0,"big":12345678901234567890}`, want: `{"big":12345678901234567890,"n":1.0}`, wantOK: true},
 		{name: "does not escape html", args: `{"q":"a<b && c>d"}`, want: `{"q":"a<b && c>d"}`, wantOK: true},
-		{name: "last duplicate key wins", args: `{"q":"first","q":"last"}`, want: `{"q":"last"}`, wantOK: true},
+		{name: "scalar", args: ` "go" `, want: `"go"`, wantOK: true},
+		{name: "empty containers", args: `{"a":[],"b":{}}`, want: `{"a":[],"b":{}}`, wantOK: true},
+		{name: "repeated key", args: `{"q":"first","q":"last"}`, wantOK: false},
+		{name: "repeated nested key", args: `{"filter":[{"q":1,"q":2}]}`, wantOK: false},
+		{name: "nesting at the limit", args: strings.Repeat("[", maxCachedArgumentsDepth) + strings.Repeat("]", maxCachedArgumentsDepth), want: strings.Repeat("[", maxCachedArgumentsDepth) + strings.Repeat("]", maxCachedArgumentsDepth), wantOK: true},
+		{name: "nesting past the limit", args: strings.Repeat("[", maxCachedArgumentsDepth+1) + strings.Repeat("]", maxCachedArgumentsDepth+1), wantOK: false},
+		{name: "unclosed object", args: `{"q":1`, wantOK: false},
 		{name: "invalid json", args: `{"q":`, wantOK: false},
 		{name: "trailing value", args: `{"q":1} {"q":2}`, wantOK: false},
 	}
@@ -290,14 +301,14 @@ func TestToolCacheKeyCoversServerCredentialsToolAndArguments(t *testing.T) {
 			URL:       "https://docs.example/mcp",
 			Transport: config.MCPTransportHTTP,
 			Headers:   map[string]string{"Authorization": "Bearer one", "X-Team": "a"},
+			CacheTTL:  time.Minute,
 		}
 	}
 	args := []byte(`{"q":"go"}`)
 	key := toolCacheKey(base(), "search", args)
 
 	assert.Equal(t, key, toolCacheKey(base(), "search", args), "the key is stable, so replicas and restarts share entries")
-	assert.Len(t, key, 64)
-	assert.NotContains(t, key, "one", "the key is a digest, never the credential")
+	assert.Regexp(t, `^[0-9a-f]{64}$`, key, "the key is a digest of its inputs, never the inputs")
 
 	signIn := func(clientID string, at time.Time) *oauthSource {
 		return newOAuthSource("docs", oauthRecord{ClientID: clientID, SignedInAt: at, AccessToken: "token"}, nil, nil)
@@ -321,6 +332,7 @@ func TestToolCacheKeyCoversServerCredentialsToolAndArguments(t *testing.T) {
 		"another url":       toolCacheKey(testSpecWith(base(), func(s *ServerSpec) { s.URL = "https://other.example/mcp" }), "search", args),
 		"another token":     toolCacheKey(testSpecWith(base(), func(s *ServerSpec) { s.Headers["Authorization"] = "Bearer two" }), "search", args),
 		"moved header":      toolCacheKey(testSpecWith(base(), func(s *ServerSpec) { s.Headers = map[string]string{"Authorization": "Bearer one", "X-Team a": ""} }), "search", args),
+		"another ttl":       toolCacheKey(testSpecWith(base(), func(s *ServerSpec) { s.CacheTTL = time.Second }), "search", args),
 		"stdio environment": toolCacheKey(testSpecWith(base(), func(s *ServerSpec) { s.Env = map[string]string{"TOKEN": "x"} }), "search", args),
 		"oauth sign-in":     withSignIn(signIn("client-a", signedInAt)),
 		"a later sign-in":   withSignIn(signIn("client-a", signedInAt.Add(time.Hour))),
@@ -335,6 +347,111 @@ func TestToolCacheKeyCoversServerCredentialsToolAndArguments(t *testing.T) {
 	}
 }
 
+// A stdio server answers from its own host's files and state, so its results
+// stay in the memory of the instance that ran it even when Redis is shared.
+func TestToolCacheKeepsStdioResultsOnTheInstance(t *testing.T) {
+	readOnly := &catalog{discovered: []*mcp.Tool{{Name: "read", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}}}}
+	entry := func(transport string) cachedCall {
+		u := newUpstream(ServerSpec{Name: "files", Transport: transport, Enabled: true, CacheTTL: time.Minute}, nil)
+		u.catalog = readOnly
+		call, ok := u.cachedCall("read", nil)
+		require.True(t, ok)
+		return call
+	}
+	stdio, remote := entry(config.MCPTransportStdio), entry(config.MCPTransportHTTP)
+	require.True(t, stdio.local)
+	require.False(t, remote.local)
+
+	shared := &recordingStore{ttls: map[string]time.Duration{}, Store: cache.NewMapStore()}
+	toolCache := newToolCache(shared)
+	ctx := context.Background()
+	result := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "local file"}}}
+
+	toolCache.put(ctx, stdio, result)
+	assert.Empty(t, shared.ttls, "a stdio result must not reach the store replicas share")
+	hit := toolCache.get(ctx, stdio)
+	require.NotNil(t, hit)
+	assert.Equal(t, "local file", resultText(t, hit))
+
+	toolCache.put(ctx, remote, result)
+	assert.Contains(t, shared.ttls, remote.key)
+
+	// Without Redis the configured store is process memory already: both
+	// kinds of entry share it, and its one byte budget.
+	memory := cache.NewMemoryStore(1 << 20)
+	inProcess := newToolCache(memory)
+	assert.Same(t, memory, inProcess.shared)
+	assert.Same(t, memory, inProcess.local)
+}
+
+// A cached result must not outlive the sign-in that fetched it: once the
+// token has expired for good, the call goes upstream and reports that.
+func TestToolCacheSkipsServersWhoseSignInLapsed(t *testing.T) {
+	cacheable := func(record oauthRecord) bool {
+		u := newUpstream(ServerSpec{
+			Name: "notion", URL: "https://mcp.example/mcp", Transport: config.MCPTransportHTTP, Enabled: true,
+			CacheTTL: time.Minute, CacheTools: []string{"search"},
+			oauth: newOAuthSource("notion", record, nil, nil),
+		}, nil)
+		u.catalog = &catalog{discovered: []*mcp.Tool{{Name: "search"}}}
+		_, ok := u.cachedCall("search", nil)
+		return ok
+	}
+
+	assert.True(t, cacheable(oauthRecord{AccessToken: "live", Expiry: time.Now().Add(time.Hour)}))
+	assert.True(t, cacheable(oauthRecord{AccessToken: "stale", RefreshToken: "refresh", Expiry: time.Now().Add(-time.Hour)}), "an expired token that can be refreshed is still signed in")
+	assert.False(t, cacheable(oauthRecord{AccessToken: "stale", Expiry: time.Now().Add(-time.Hour)}))
+}
+
+// A tool the server no longer lists must fail upstream, not be answered from
+// an entry stored while it existed.
+func TestToolCacheSkipsToolsMissingFromCatalog(t *testing.T) {
+	var calls atomic.Int32
+	url := newTestUpstream(t, "docs", addCountingTool("search", false, &calls))
+	service, _ := newCachingService(t, nil, cache.NewMemoryStore(1<<20), cachingSpec("docs", url, "search", "removed"))
+	u, ok := service.manager.get("docs")
+	require.True(t, ok)
+
+	_, cacheable := u.cachedCall("search", nil)
+	assert.True(t, cacheable)
+	_, cacheable = u.cachedCall("removed", nil)
+	assert.False(t, cacheable)
+}
+
+// The cache policy is gateway policy like the tool filters: changing it must
+// not redial the server, and results stored under another TTL are not served.
+func TestToolCachePolicyEditAppliesInPlace(t *testing.T) {
+	var calls atomic.Int32
+	url := newTestUpstream(t, "docs", addCountingTool("search", true, &calls))
+	spec := cachingSpec("docs", url)
+	service, _ := newCachingService(t, nil, cache.NewMemoryStore(1<<20), spec)
+	ctx := context.Background()
+
+	_, _, err := service.manager.CallTool(ctx, "docs", "search", nil)
+	require.NoError(t, err)
+	before, ok := service.manager.get("docs")
+	require.True(t, ok)
+	session := before.session
+
+	spec.CacheTTL = time.Second
+	service.manager.Apply([]ServerSpec{spec})
+
+	after, ok := service.manager.get("docs")
+	require.True(t, ok)
+	assert.Same(t, before, after, "a cache-only edit must not replace the upstream")
+	assert.Same(t, session, after.session, "a cache-only edit must not redial")
+	_, cached, err := service.manager.CallTool(ctx, "docs", "search", nil)
+	require.NoError(t, err)
+	assert.False(t, cached, "an entry stored under the previous TTL must not outlive the new one")
+
+	spec.CacheTTL = 0
+	service.manager.Apply([]ServerSpec{spec})
+	_, cached, err = service.manager.CallTool(ctx, "docs", "search", nil)
+	require.NoError(t, err)
+	assert.False(t, cached, "turning the cache off applies to the next call")
+	assert.Equal(t, int32(3), calls.Load())
+}
+
 func testSpecWith(spec ServerSpec, mutate func(*ServerSpec)) ServerSpec {
 	mutate(&spec)
 	return spec
@@ -344,7 +461,15 @@ func TestNewToolCacheStoreDefaultsToMemory(t *testing.T) {
 	store := newToolCacheStore(config.MCPCacheConfig{})
 	assert.IsType(t, &cache.MemoryStore{}, store, "without Redis, results are cached in process memory")
 
-	// A Redis that cannot be used must not stop the gateway from starting.
+	// A Redis that cannot be used must not stop the gateway from starting:
+	// neither a URL that does not parse nor one nothing listens on.
 	store = newToolCacheStore(config.MCPCacheConfig{Redis: config.RedisMCPConfig{URL: "not-a-redis-url"}})
+	assert.IsType(t, &cache.MemoryStore{}, store)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	closedPort := listener.Addr().String()
+	require.NoError(t, listener.Close())
+	store = newToolCacheStore(config.MCPCacheConfig{Redis: config.RedisMCPConfig{URL: "redis://" + closedPort}})
 	assert.IsType(t, &cache.MemoryStore{}, store)
 }

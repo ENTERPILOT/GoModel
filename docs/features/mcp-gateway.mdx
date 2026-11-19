@@ -543,7 +543,7 @@ mcp:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `cache.ttl` | `0` (off) | Seconds a result is served from the cache |
+| `cache.ttl` | `0` (off) | Seconds a result is served from the cache, at most one year. Required when `tools` is set |
 | `cache.tools` | read-only tools | Upstream tool names to cache. Empty caches only the tools the server annotates with `readOnlyHint` |
 
 Turn it on for lookups that are slow, rate-limited, or billed per call, such
@@ -557,21 +557,25 @@ current.
   tool is cached with or without the hint.
 - **One entry** is one server, the credentials it is called with, one tool,
   and one set of arguments. Key order and whitespace do not matter; the
-  upstream receives the arguments with sorted keys. Changing the server's URL
-  or headers, or signing in again with OAuth, starts from an empty cache.
+  upstream receives the arguments with sorted keys. Changing the server's URL,
+  headers, or TTL, or signing in again with OAuth, starts from an empty cache.
+  A server whose OAuth sign-in has expired is not answered from the cache.
 - **Entries are shared between callers.** Every client reaches a server with
   the server's own credentials, so a result does not depend on who asks. User
   paths and tool filters are still checked on every call, before the cache is
   read.
-- **Never cached:** failed calls, results marked `isError`, and results larger
-  than 1 MB.
+- **Never cached:** failed calls, results marked `isError`, results that ask
+  the client for input, results larger than 1 MB, and calls whose arguments
+  repeat an object key. Those calls reach the server every time.
 - **Usage.** A cache hit is still a usage entry, with `cache_type` `exact`
   like a [response cache](/features/cache#cache-analytics) hit: usage totals
   leave it out unless you pass `cache_mode=all`.
 - **Storage.** Process memory by default, up to 64 MB per instance. With
   `REDIS_URL` (or `cache.mcp.redis.url`) set, entries go to Redis under the
   `gomodel:mcp:` prefix (`REDIS_KEY_MCP`) and all replicas share them. If Redis
-  cannot be reached at startup, that instance caches in memory.
+  cannot be reached at startup, that instance caches in memory. Results of a
+  stdio server always stay in the memory of the instance that runs it, because
+  they come from that host's files and state.
 
 Caching is set in `config.yaml` or `MCP_SERVERS`; servers added in the
 dashboard are not cached yet.

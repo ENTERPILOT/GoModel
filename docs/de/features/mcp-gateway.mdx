@@ -574,7 +574,7 @@ mcp:
 
 | Feld | Standard | Bedeutung |
 | --- | --- | --- |
-| `cache.ttl` | `0` (aus) | Sekunden, für die ein Ergebnis aus dem Cache ausgeliefert wird |
+| `cache.ttl` | `0` (aus) | Sekunden, für die ein Ergebnis aus dem Cache ausgeliefert wird, höchstens ein Jahr. Erforderlich, wenn `tools` gesetzt ist |
 | `cache.tools` | Read-only-Tools | Upstream-Tool-Namen, die gecacht werden. Leer cacht nur die Tools, die der Server mit `readOnlyHint` annotiert |
 
 Sinnvoll ist das für Abfragen, die langsam, ratenlimitiert oder pro Aufruf
@@ -589,20 +589,26 @@ aktuell sein müssen, bleibt es aus.
 - **Ein Eintrag** ist ein Server, die Zugangsdaten, mit denen er aufgerufen wird, ein
   Tool und ein Satz Argumente. Schlüsselreihenfolge und Leerraum spielen keine Rolle;
   der Upstream erhält die Argumente mit sortierten Schlüsseln. Eine geänderte URL,
-  geänderte Header oder eine erneute OAuth-Anmeldung beginnen mit einem leeren Cache.
+  geänderte Header, eine geänderte TTL oder eine erneute OAuth-Anmeldung beginnen mit
+  einem leeren Cache. Ein Server, dessen OAuth-Anmeldung abgelaufen ist, wird nicht
+  aus dem Cache beantwortet.
 - **Einträge werden von allen Aufrufern geteilt.** Jeder Client erreicht einen Server
   mit den Zugangsdaten des Servers, das Ergebnis hängt also nicht davon ab, wer fragt.
   User-Paths und Tool-Filter werden weiterhin bei jedem Aufruf geprüft, bevor der
   Cache gelesen wird.
-- **Nie gecacht werden** fehlgeschlagene Aufrufe, Ergebnisse mit `isError` und
-  Ergebnisse über 1 MB.
+- **Nie gecacht werden** fehlgeschlagene Aufrufe, Ergebnisse mit `isError`,
+  Ergebnisse, die den Client um Eingaben bitten, Ergebnisse über 1 MB und Aufrufe,
+  deren Argumente einen Objektschlüssel wiederholen. Solche Aufrufe erreichen den
+  Server jedes Mal.
 - **Nutzung.** Ein Cache-Hit bleibt ein Nutzungseintrag, mit `cache_type` `exact` wie
   ein Hit im [Response-Cache](/de/features/cache#cache-analysen): Nutzungssummen
   lassen ihn aus, außer mit `cache_mode=all`.
 - **Speicherort.** Standardmäßig der Prozessspeicher, bis zu 64 MB pro Instanz. Ist
   `REDIS_URL` (oder `cache.mcp.redis.url`) gesetzt, liegen die Einträge in Redis unter
   dem Präfix `gomodel:mcp:` (`REDIS_KEY_MCP`) und alle Replikate teilen sie. Ist Redis
-  beim Start nicht erreichbar, cacht diese Instanz im Speicher.
+  beim Start nicht erreichbar, cacht diese Instanz im Speicher. Ergebnisse eines
+  stdio-Servers bleiben immer im Speicher der Instanz, die ihn ausführt, weil sie aus
+  den Dateien und dem Zustand dieses Hosts stammen.
 
 Das Caching wird in der `config.yaml` oder in `MCP_SERVERS` gesetzt; im Dashboard
 hinzugefügte Server werden noch nicht gecacht.

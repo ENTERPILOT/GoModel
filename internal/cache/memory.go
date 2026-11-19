@@ -1,41 +1,84 @@
 package cache
 
 import (
-	"container/list"
+	"container/heap"
 	"context"
 	"sync"
 	"time"
 )
 
+// memoryEntryOverhead approximates what one entry costs beyond its key and
+// value (the entry itself, its map slot, and its queue slot), so a store full
+// of small values still stays near its byte budget.
+const memoryEntryOverhead = 128
+
 // MemoryStore is a bounded in-memory Store for caches that must work without
-// Redis. Entries expire after their TTL, and the oldest entries are evicted
-// once keys and values together exceed the byte budget. It is local to the
-// process: replicas each keep their own entries.
+// Redis. Entries expire after their TTL. Once the entries exceed the byte
+// budget, the ones closest to expiry are evicted first, so an expired entry
+// always goes before a live one. It is local to the process: replicas each
+// keep their own entries.
 type MemoryStore struct {
 	maxBytes int
 	now      func() time.Time
 
 	mu      sync.Mutex
 	bytes   int
-	order   *list.List // of *memoryEntry, oldest first
-	entries map[string]*list.Element
+	queue   expiryQueue
+	entries map[string]*memoryEntry
 }
 
 type memoryEntry struct {
-	key     string
-	value   []byte
+	key   string
+	value []byte
+	// expires is zero for an entry stored without a TTL.
 	expires time.Time
+	// index is the entry's position in the queue.
+	index int
 }
 
-func (e *memoryEntry) size() int { return len(e.key) + len(e.value) }
+func (e *memoryEntry) size() int { return memoryEntryOverhead + len(e.key) + len(e.value) }
+
+// expiryQueue is a heap with the entry that expires first on top; entries
+// that never expire sort last.
+type expiryQueue []*memoryEntry
+
+func (q expiryQueue) Len() int { return len(q) }
+
+func (q expiryQueue) Less(i, j int) bool {
+	a, b := q[i].expires, q[j].expires
+	if a.IsZero() || b.IsZero() {
+		return !a.IsZero()
+	}
+	return a.Before(b)
+}
+
+func (q expiryQueue) Swap(i, j int) {
+	q[i], q[j] = q[j], q[i]
+	q[i].index = i
+	q[j].index = j
+}
+
+func (q *expiryQueue) Push(x any) {
+	entry := x.(*memoryEntry)
+	entry.index = len(*q)
+	*q = append(*q, entry)
+}
+
+func (q *expiryQueue) Pop() any {
+	old := *q
+	last := len(old) - 1
+	entry := old[last]
+	old[last] = nil
+	*q = old[:last]
+	return entry
+}
 
 // NewMemoryStore creates an in-memory store holding at most maxBytes.
 func NewMemoryStore(maxBytes int) *MemoryStore {
 	return &MemoryStore{
 		maxBytes: maxBytes,
 		now:      time.Now,
-		order:    list.New(),
-		entries:  make(map[string]*list.Element),
+		entries:  make(map[string]*memoryEntry),
 	}
 }
 
@@ -43,13 +86,12 @@ func NewMemoryStore(maxBytes int) *MemoryStore {
 func (s *MemoryStore) Get(_ context.Context, key string) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	elem, ok := s.entries[key]
+	entry, ok := s.entries[key]
 	if !ok {
 		return nil, nil
 	}
-	entry := elem.Value.(*memoryEntry)
 	if !entry.expires.IsZero() && !s.now().Before(entry.expires) {
-		s.remove(elem)
+		s.remove(entry)
 		return nil, nil
 	}
 	return append([]byte(nil), entry.value...), nil
@@ -65,23 +107,24 @@ func (s *MemoryStore) Set(_ context.Context, key string, value []byte, ttl time.
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if elem, ok := s.entries[key]; ok {
-		s.remove(elem)
+	if previous, ok := s.entries[key]; ok {
+		s.remove(previous)
 	}
 	if entry.size() > s.maxBytes {
 		return nil
 	}
-	s.entries[key] = s.order.PushBack(entry)
+	heap.Push(&s.queue, entry)
+	s.entries[key] = entry
 	s.bytes += entry.size()
 	for s.bytes > s.maxBytes {
-		s.remove(s.order.Front())
+		s.remove(s.queue[0])
 	}
 	return nil
 }
 
 // remove drops one entry. The caller must hold s.mu.
-func (s *MemoryStore) remove(elem *list.Element) {
-	entry := s.order.Remove(elem).(*memoryEntry)
+func (s *MemoryStore) remove(entry *memoryEntry) {
+	heap.Remove(&s.queue, entry.index)
 	delete(s.entries, entry.key)
 	s.bytes -= entry.size()
 }

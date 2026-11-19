@@ -228,7 +228,8 @@ cache:
     #   ttl: 86400 # 24 hours in seconds
   # Where MCP tool results are cached for servers that set mcp.servers.<name>.cache.
   # Default: process memory (64 MB, per instance). Set a Redis URL to share entries
-  # between replicas; an unreachable Redis falls back to memory at startup.
+  # between replicas; an unreachable Redis falls back to memory at startup. Results
+  # of stdio servers always stay in the memory of the instance that runs them.
   # mcp:
   #   redis:
   #     url: "redis://localhost:6379" # env: REDIS_URL

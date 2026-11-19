@@ -63,8 +63,8 @@ func NewManager(httpClient *http.Client) *Manager {
 // Apply reconciles the running upstreams with the desired specs: removed
 // servers are closed, new servers are added, changed servers are redialed.
 // Unchanged servers keep their live session and catalog; servers whose only
-// change is the access policy (tool filters, user-path scopes) keep their
-// session and apply the new policy in place.
+// change is gateway policy (tool filters, user-path scopes, tool-result
+// caching) keep their session and apply the new policy in place.
 // Initial connects run asynchronously so startup and admin edits never block
 // on upstream IO.
 func (m *Manager) Apply(specs []ServerSpec) {
@@ -233,7 +233,7 @@ func (m *Manager) CallTool(ctx context.Context, server, tool string, args json.R
 		result, err = u.callTool(ctx, tool, args)
 		return result, false, err
 	}
-	if hit := m.toolCache.get(ctx, call.key); hit != nil {
+	if hit := m.toolCache.get(ctx, call); hit != nil {
 		return hit, true, nil
 	}
 	result, err = u.callTool(ctx, tool, call.args)

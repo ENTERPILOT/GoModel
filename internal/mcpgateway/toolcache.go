@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"maps"
@@ -26,6 +27,9 @@ import (
 // arguments. Every caller of a server shares its one upstream session and
 // credentials (see upstream), so an entry holds nothing caller-specific; who
 // may call the tool is still decided on every call, before the cache is read.
+// Replicas share entries through Redis, except those of stdio servers: a
+// subprocess answers from its own host's files and state, so its results
+// never leave the instance that ran it.
 
 const (
 	// toolCacheKeyPrefix is the default Redis key prefix of cached results.
@@ -33,13 +37,17 @@ const (
 	// toolCacheRedisTTL expires an entry stored without a TTL of its own.
 	// Every entry carries its server's TTL, so this is only a backstop.
 	toolCacheRedisTTL = time.Hour
-	// toolCacheMemoryBytes bounds the in-memory store used without Redis.
+	// toolCacheMemoryBytes bounds process memory used for results: all of
+	// them without Redis, those of stdio servers with it.
 	toolCacheMemoryBytes = 64 << 20
+	// maxCachedArgumentsDepth is the deepest arguments nesting that is
+	// canonicalized; deeper arguments are relayed uncached.
+	maxCachedArgumentsDepth = 64
 	// maxCachedToolResultBytes is the largest encoded result that is cached;
 	// a larger one is relayed and fetched again on the next call.
 	maxCachedToolResultBytes = 1 << 20
-	// toolCacheOpTimeout bounds one cache read or write, so a store that
-	// stops answering costs a tool call about this much.
+	// toolCacheOpTimeout bounds one cache read or write. A call that misses
+	// does both, so a store that stops answering costs it up to twice this.
 	toolCacheOpTimeout = time.Second
 )
 
@@ -58,7 +66,9 @@ func newToolCacheStore(cfg config.MCPCacheConfig) cache.Store {
 	}
 	store, err := cache.NewRedisStore(cache.RedisStoreConfig{URL: cfg.Redis.URL, Prefix: prefix, TTL: toolCacheRedisTTL})
 	if err != nil {
-		slog.Warn("mcp tool cache: redis is unavailable; caching in memory on this instance", "error", err)
+		// The error is not logged: for a URL that does not parse it can
+		// quote part of the URL, password included.
+		slog.Warn("mcp tool cache: the redis url is invalid or redis is unreachable; caching in memory on this instance")
 		return cache.NewMemoryStore(toolCacheMemoryBytes)
 	}
 	slog.Info("mcp tool cache enabled", "store", "redis", "prefix", prefix)
@@ -72,58 +82,71 @@ type cachedCall struct {
 	// what is sent upstream, so a stored result always answers its key.
 	args json.RawMessage
 	ttl  time.Duration
+	// local keeps the entry on this instance; see toolCache.
+	local bool
 }
 
 // cachedCall returns the cache entry of a call to name, and whether the
 // server's cache policy covers it: the server caches, the tool is still
-// exposed, and it is one of the listed tools or, with none listed, one the
-// upstream annotates as read-only.
+// exposed and still in the server's catalog, and it is one of the listed
+// tools or, with none listed, one the upstream annotates as read-only.
 func (u *upstream) cachedCall(name string, args json.RawMessage) (cachedCall, bool) {
 	spec, ok := u.cachingSpec(name)
 	if !ok {
+		return cachedCall{}, false
+	}
+	// A sign-in that expired or failed to refresh no longer authorizes the
+	// call, so it goes upstream, which reports that and retries the refresh.
+	if spec.oauth != nil && spec.oauth.view().Status != OAuthStatusSignedIn {
 		return cachedCall{}, false
 	}
 	canonical, ok := canonicalArguments(args)
 	if !ok {
 		return cachedCall{}, false
 	}
-	return cachedCall{key: toolCacheKey(spec, name, canonical), args: canonical, ttl: spec.CacheTTL}, true
+	return cachedCall{
+		key:   toolCacheKey(spec, name, canonical),
+		args:  canonical,
+		ttl:   spec.CacheTTL,
+		local: spec.Transport == config.MCPTransportStdio,
+	}, true
 }
 
-// cachingSpec returns the server's spec when its cache policy covers name.
+// cachingSpec returns the server's spec when its cache policy covers name. A
+// tool the server no longer lists is not covered, so a removed tool fails
+// upstream instead of being answered from the cache.
 func (u *upstream) cachingSpec(name string) (ServerSpec, bool) {
 	u.stateMu.Lock()
 	defer u.stateMu.Unlock()
 	spec := u.spec
-	if spec.CacheTTL <= 0 || !spec.Enabled || !toolAllowed(name, spec.AllowedTools, spec.DisallowedTools) {
+	if spec.CacheTTL <= 0 || !spec.Enabled || u.catalog == nil || !toolAllowed(name, spec.AllowedTools, spec.DisallowedTools) {
+		return ServerSpec{}, false
+	}
+	listed := slices.IndexFunc(u.catalog.discovered, func(tool *mcp.Tool) bool { return tool.Name == name })
+	if listed < 0 {
 		return ServerSpec{}, false
 	}
 	if len(spec.CacheTools) > 0 {
 		return spec, slices.Contains(spec.CacheTools, name)
 	}
-	if u.catalog == nil {
-		return ServerSpec{}, false
-	}
-	for _, tool := range u.catalog.discovered {
-		if tool.Name == name {
-			return spec, tool.Annotations != nil && tool.Annotations.ReadOnlyHint
-		}
-	}
-	return ServerSpec{}, false
+	annotations := u.catalog.discovered[listed].Annotations
+	return spec, annotations != nil && annotations.ReadOnlyHint
 }
 
 // canonicalArguments re-encodes tools/call arguments with sorted object keys,
 // so calls that differ only in key order or whitespace share an entry.
-// Numbers keep their text. It reports false for arguments that are not one
-// JSON value, which are relayed uncached.
+// Numbers keep their text. It reports false for arguments that are relayed
+// as they came, uncached: anything that is not one JSON value, nesting past
+// maxCachedArgumentsDepth, and objects that repeat a key, which servers
+// resolve differently.
 func canonicalArguments(args json.RawMessage) (json.RawMessage, bool) {
 	if len(bytes.TrimSpace(args)) == 0 {
 		return nil, true
 	}
 	decoder := json.NewDecoder(bytes.NewReader(args))
 	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
+	value, err := decodeUniqueKeys(decoder, maxCachedArgumentsDepth)
+	if err != nil {
 		return nil, false
 	}
 	if _, err := decoder.Token(); err != io.EOF {
@@ -138,11 +161,58 @@ func canonicalArguments(args json.RawMessage) (json.RawMessage, bool) {
 	return bytes.TrimSuffix(canonical.Bytes(), []byte("\n")), true
 }
 
+var errUncacheableArguments = errors.New("arguments repeat an object key or nest too deeply")
+
+// decodeUniqueKeys reads one JSON value, failing on an object that repeats a
+// key instead of keeping the last one as json.Unmarshal does.
+func decodeUniqueKeys(decoder *json.Decoder, depth int) (any, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return token, nil
+	}
+	if depth == 0 {
+		return nil, errUncacheableArguments
+	}
+	if delim == '[' {
+		list := []any{}
+		for decoder.More() {
+			item, err := decodeUniqueKeys(decoder, depth-1)
+			if err != nil {
+				return nil, err
+			}
+			list = append(list, item)
+		}
+		_, err = decoder.Token()
+		return list, err
+	}
+	object := map[string]any{}
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, _ := keyToken.(string)
+		if _, repeated := object[key]; repeated {
+			return nil, errUncacheableArguments
+		}
+		if object[key], err = decodeUniqueKeys(decoder, depth-1); err != nil {
+			return nil, err
+		}
+	}
+	_, err = decoder.Token()
+	return object, err
+}
+
 // toolCacheKey digests everything a result depends on. The connection and
 // its credentials are part of it, so a server pointed at another endpoint,
 // given another token, or signed in again starts from an empty cache instead
-// of serving what the previous account could see. The digest is one-way: no
-// credential can be read back from a key.
+// of serving what the previous account could see. The TTL is part of it too,
+// so a changed TTL never serves entries stored under the previous one. The
+// digest is one-way: no credential can be read back from a key.
 func toolCacheKey(spec ServerSpec, tool string, args []byte) string {
 	digest := sha256.New()
 	// Each list is written as its length followed by length-prefixed items,
@@ -165,7 +235,7 @@ func toolCacheKey(spec ServerSpec, tool string, args []byte) string {
 		write(pairs...)
 	}
 
-	write("v1", spec.Name, spec.URL, spec.Transport, spec.Command)
+	write("v1", spec.Name, spec.URL, spec.Transport, spec.Command, strconv.FormatInt(int64(spec.CacheTTL), 10))
 	write(spec.Args...)
 	writeMap(spec.Headers)
 	writeMap(spec.Env)
@@ -179,17 +249,36 @@ func toolCacheKey(spec ServerSpec, tool string, args []byte) string {
 	return hex.EncodeToString(digest.Sum(nil))
 }
 
-// toolCache stores successful tool results in a cache.Store.
+// toolCache stores successful tool results. shared is the configured store,
+// which replicas share when it is Redis. local is process memory, for results
+// that are only valid on this instance; it is the shared store when that is
+// process memory already, so both fit one byte budget.
 type toolCache struct {
-	store cache.Store
+	shared cache.Store
+	local  cache.Store
 }
 
-// get returns the cached result under key, or nil. A store failure is a miss:
+func newToolCache(shared cache.Store) *toolCache {
+	local := shared
+	if _, inProcess := shared.(*cache.MemoryStore); !inProcess {
+		local = cache.NewMemoryStore(toolCacheMemoryBytes)
+	}
+	return &toolCache{shared: shared, local: local}
+}
+
+func (c *toolCache) store(call cachedCall) cache.Store {
+	if call.local {
+		return c.local
+	}
+	return c.shared
+}
+
+// get returns the cached result of call, or nil. A store failure is a miss:
 // the call goes upstream as if nothing were cached.
-func (c *toolCache) get(ctx context.Context, key string) *mcp.CallToolResult {
+func (c *toolCache) get(ctx context.Context, call cachedCall) *mcp.CallToolResult {
 	ctx, cancel := context.WithTimeout(ctx, toolCacheOpTimeout)
 	defer cancel()
-	data, err := c.store.Get(ctx, key)
+	data, err := c.store(call).Get(ctx, call.key)
 	if err != nil {
 		slog.Warn("mcp tool cache read failed", "error", err)
 		return nil
@@ -219,7 +308,7 @@ func (c *toolCache) put(ctx context.Context, call cachedCall, result *mcp.CallTo
 	// stop it from being stored.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), toolCacheOpTimeout)
 	defer cancel()
-	if err := c.store.Set(ctx, call.key, data, call.ttl); err != nil {
+	if err := c.store(call).Set(ctx, call.key, data, call.ttl); err != nil {
 		slog.Warn("mcp tool cache write failed", "error", err)
 	}
 }

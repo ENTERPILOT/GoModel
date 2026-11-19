@@ -120,14 +120,17 @@ func (s ServerSpec) equal(other ServerSpec) bool {
 		s.oauth == other.oauth
 }
 
-// withoutAccessPolicy clears the gateway-side access policy (tool filters and
-// user-path scopes), so callers can tell a policy-only edit, applied in place,
-// from one that changes the upstream connection and needs a redial.
+// withoutAccessPolicy clears the gateway-side policy (tool filters, user-path
+// scopes, and tool-result caching), so callers can tell a policy-only edit,
+// applied in place, from one that changes the upstream connection and needs a
+// redial.
 func (s ServerSpec) withoutAccessPolicy() ServerSpec {
 	s.AllowedTools = nil
 	s.DisallowedTools = nil
 	s.UserPaths = nil
 	s.DisallowedUserPaths = nil
+	s.CacheTTL = 0
+	s.CacheTools = nil
 	return s
 }
 

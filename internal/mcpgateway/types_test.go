@@ -60,9 +60,19 @@ func TestSpecFromConfigMapsToolCache(t *testing.T) {
 	assert.Equal(t, []string{"search"}, spec.CacheTools)
 	assert.Zero(t, SpecFromConfig("plain", config.MCPServerConfig{URL: cfg.URL}).CacheTTL, "caching is off unless configured")
 
-	// A changed cache policy is a changed spec, so a reload applies it.
+	// The spec owns its list: later edits to the config must not leak in.
+	cfg.Cache.Tools[0] = "mutated"
+	assert.Equal(t, []string{"search"}, spec.CacheTools)
+	cfg.Cache.Tools[0] = "search"
+
+	// A changed cache policy is a changed spec, but gateway policy only: it
+	// is applied in place, without a redial.
 	cfg.Cache.TTL = 60
-	assert.False(t, spec.equal(SpecFromConfig("docs", cfg)))
+	shorter := SpecFromConfig("docs", cfg)
+	assert.False(t, spec.equal(shorter))
+	assert.True(t, spec.withoutAccessPolicy().equal(shorter.withoutAccessPolicy()))
 	cfg.Cache = config.MCPToolCacheConfig{TTL: 300, Tools: []string{"fetch"}}
-	assert.False(t, spec.equal(SpecFromConfig("docs", cfg)))
+	otherTools := SpecFromConfig("docs", cfg)
+	assert.False(t, spec.equal(otherTools))
+	assert.True(t, spec.withoutAccessPolicy().equal(otherTools.withoutAccessPolicy()))
 }

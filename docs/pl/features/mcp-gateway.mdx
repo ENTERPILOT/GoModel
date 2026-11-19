@@ -547,7 +547,7 @@ mcp:
 
 | Pole | Wartość domyślna | Znaczenie |
 | --- | --- | --- |
-| `cache.ttl` | `0` (wyłączony) | Liczba sekund, przez które wynik jest serwowany z cache'u |
+| `cache.ttl` | `0` (wyłączony) | Liczba sekund, przez które wynik jest serwowany z cache'u, najwyżej rok. Wymagane, gdy ustawiono `tools` |
 | `cache.tools` | narzędzia tylko do odczytu | Upstreamowe nazwy narzędzi do cache'owania. Pusta lista cache'uje tylko narzędzia, które serwer oznacza `readOnlyHint` |
 
 Włącz go dla odczytów, które są wolne, limitowane albo płatne za wywołanie, takich
@@ -561,21 +561,26 @@ odczytów, które muszą być aktualne.
   narzędzie jest cache'owane niezależnie od wskazówki.
 - **Jeden wpis** to jeden serwer, poświadczenia, z którymi jest wywoływany, jedno
   narzędzie i jeden zestaw argumentów. Kolejność kluczy i białe znaki nie mają
-  znaczenia; upstream dostaje argumenty z posortowanymi kluczami. Zmiana URL-a lub
-  nagłówków serwera albo ponowne zalogowanie przez OAuth zaczyna od pustego cache'u.
+  znaczenia; upstream dostaje argumenty z posortowanymi kluczami. Zmiana URL-a,
+  nagłówków lub TTL serwera albo ponowne zalogowanie przez OAuth zaczyna od pustego
+  cache'u. Serwer, którego logowanie OAuth wygasło, nie jest obsługiwany z cache'u.
 - **Wpisy są wspólne dla wszystkich wywołujących.** Każdy klient łączy się z serwerem
   przy użyciu poświadczeń samego serwera, więc wynik nie zależy od tego, kto pyta.
   Ścieżki użytkowników i filtry narzędzi są nadal sprawdzane przy każdym wywołaniu,
   przed odczytem z cache'u.
-- **Nigdy nie są cache'owane:** nieudane wywołania, wyniki oznaczone `isError` oraz
-  wyniki większe niż 1 MB.
+- **Nigdy nie są cache'owane:** nieudane wywołania, wyniki oznaczone `isError`,
+  wyniki proszące klienta o dane wejściowe, wyniki większe niż 1 MB oraz wywołania,
+  których argumenty powtarzają klucz obiektu. Takie wywołania za każdym razem
+  trafiają do serwera.
 - **Użycie.** Cache hit nadal jest wpisem użycia, z `cache_type` równym `exact`, tak
   jak trafienie w [cache odpowiedzi](/pl/features/cache#analityka-cache’u): sumy użycia
   pomijają go, chyba że przekażesz `cache_mode=all`.
 - **Przechowywanie.** Domyślnie pamięć procesu, do 64 MB na instancję. Po ustawieniu
   `REDIS_URL` (lub `cache.mcp.redis.url`) wpisy trafiają do Redisa z prefiksem
   `gomodel:mcp:` (`REDIS_KEY_MCP`) i są wspólne dla wszystkich replik. Jeśli Redis jest
-  nieosiągalny przy starcie, ta instancja cache'uje w pamięci.
+  nieosiągalny przy starcie, ta instancja cache'uje w pamięci. Wyniki serwera stdio
+  zawsze pozostają w pamięci instancji, która go uruchamia, bo pochodzą z plików
+  i stanu tego hosta.
 
 Cache ustawia się w `config.yaml` lub `MCP_SERVERS`; serwery dodane w dashboardzie
 nie są jeszcze cache'owane.
