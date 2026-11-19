@@ -61,12 +61,9 @@ func (s *modelCallService) prepare(c *echo.Context, model, providerHint string) 
 	// Stamp the executed route so request log rows carry the resolved model and
 	// provider, as the inference orchestrator does for chat.
 	requestlog.EnrichEntryWithResolvedRoute(c, selector.QualifiedModel(), route.providerType, route.providerName)
-	route.slowdown = resolveModelSlowdown(
-		ctx,
-		s.modelResolver,
-		core.NewRequestedModelSelector(model, providerHint),
-		selector,
-	)
+	requested := core.NewRequestedModelSelector(model, providerHint)
+	route.slowdown = resolveModelSlowdown(ctx, s.modelResolver, requested, selector)
+	ctx = withModelTimeouts(ctx, s.modelResolver, requested, selector)
 	return ctx, route, nil
 }
 

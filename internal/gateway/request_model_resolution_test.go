@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/stretchr/testify/assert"
@@ -382,4 +383,37 @@ func TestResolveRequestModelCarriesVirtualModelPath(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"team", "smart"}, resolution.VirtualModelPath)
+}
+
+type requestTimeoutsResolver struct {
+	requestAliasResolver
+	timeouts core.UpstreamTimeouts
+	route    []string
+}
+
+func (r *requestTimeoutsResolver) ResolveTimeouts(_ context.Context, _ core.RequestedModelSelector, _ core.ModelSelector, route []string) core.UpstreamTimeouts {
+	r.route = route
+	return r.timeouts
+}
+
+func TestResolveRequestModelCarriesResolvedTimeouts(t *testing.T) {
+	want := core.UpstreamTimeouts{Timeout: 30 * time.Second, ResponseHeaderTimeout: 5 * time.Second}
+	resolver := &requestTimeoutsResolver{
+		requestAliasResolver: requestAliasResolver{"smart": {Provider: "openai", Model: "gpt-4o"}},
+		timeouts:             want,
+	}
+
+	resolution, err := ResolveRequestModelWithAuthorizer(
+		context.Background(), newRequestRefreshProvider(1), resolver, nil,
+		core.NewRequestedModelSelector("smart", ""),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, want, resolution.Timeouts)
+
+	resolution, err = ResolveRequestModelWithAuthorizer(
+		context.Background(), newRequestRefreshProvider(1), requestAliasResolver{}, nil,
+		core.NewRequestedModelSelector("openai/gpt-4o", ""),
+	)
+	require.NoError(t, err)
+	assert.Zero(t, resolution.Timeouts, "a resolver without the timeouts contract inherits")
 }

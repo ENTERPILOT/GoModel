@@ -21,6 +21,7 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 			Targets:         []Target{{Provider: "openai", Model: "gpt-4o", ReasoningEffort: "high"}},
 			Description:     "primary",
 			Slowdown:        new(0.4),
+			Timeout:         new(30),
 			ReasoningEffort: "medium",
 			Params:          requestparams.Set{"chat_template_kwargs": json.RawMessage(`{"enable_thinking":true}`), "stale": nil},
 			DefaultParams:   requestparams.Set{"temperature": json.RawMessage(`1`), "stop": json.RawMessage(`["a","b"]`)},
@@ -29,13 +30,14 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 			Enabled:         true,
 		}
 		policy := VirtualModel{
-			Source:        "openai/gpt-4o",
-			ProviderName:  "openai",
-			Model:         "gpt-4o",
-			UserPaths:     []string{"/team"},
-			Slowdown:      new(0.2),
-			DefaultParams: requestparams.Set{"top_k": json.RawMessage(`20`)},
-			Enabled:       true,
+			Source:                "openai/gpt-4o",
+			ProviderName:          "openai",
+			Model:                 "gpt-4o",
+			UserPaths:             []string{"/team"},
+			Slowdown:              new(0.2),
+			DefaultParams:         requestparams.Set{"top_k": json.RawMessage(`20`)},
+			ResponseHeaderTimeout: new(45),
+			Enabled:               true,
 		}
 		disabledOverride := VirtualModel{
 			Source:   "no-slowdown",
@@ -63,6 +65,9 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		assert.Equal(t, "high", gotRedirect.Targets[0].ReasoningEffort)
 		require.NotNil(t, gotRedirect.Slowdown)
 		require.Equal(t, 0.4, *gotRedirect.Slowdown)
+		require.NotNil(t, gotRedirect.Timeout)
+		assert.Equal(t, 30, *gotRedirect.Timeout)
+		assert.Nil(t, gotRedirect.ResponseHeaderTimeout)
 		assert.Equal(t, "medium", gotRedirect.ReasoningEffort)
 		require.Len(t, gotRedirect.Params, 2)
 		assert.JSONEq(t, `{"enable_thinking":true}`, string(gotRedirect.Params["chat_template_kwargs"]))
@@ -84,6 +89,9 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		require.Equal(t, "/team", gotPolicy.UserPaths[0])
 		require.NotNil(t, gotPolicy.Slowdown)
 		require.Equal(t, 0.2, *gotPolicy.Slowdown)
+		assert.Nil(t, gotPolicy.Timeout)
+		require.NotNil(t, gotPolicy.ResponseHeaderTimeout)
+		assert.Equal(t, 45, *gotPolicy.ResponseHeaderTimeout)
 		require.Nil(t, gotPolicy.SessionAffinity)
 		require.Nil(t, gotPolicy.Failover)
 		assert.Empty(t, gotPolicy.ReasoningEffort)

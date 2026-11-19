@@ -78,6 +78,9 @@ export function defaultVirtualModelForm() {
     user_paths: "",
     description: "",
     slowdown: "",
+    // Per-attempt upstream timeouts in whole seconds; empty inherits.
+    timeout: "",
+    response_header_timeout: "",
     reasoning_effort: "",
     // JSON-object text; see parseParamsJSON/formatParamsJSON.
     params: "",
@@ -288,6 +291,55 @@ export function vmFormSupportsSlowdown(form) {
     source !== GLOBAL_OVERRIDE_SELECTOR &&
     !source.endsWith("/")
   );
+}
+
+// TIMEOUT_FIELDS are the per-attempt upstream HTTP timeouts, in whole
+// seconds, a redirect or model may override (HTTP_TIMEOUT and
+// HTTP_RESPONSE_HEADER_TIMEOUT); empty inherits.
+export const TIMEOUT_FIELDS = ["timeout", "response_header_timeout"];
+export const TIMEOUT_MIN_SECONDS = 1;
+export const TIMEOUT_MAX_SECONDS = 86400;
+
+// parseTimeoutSeconds reads a timeout input: blank is null (inherit), a whole
+// number of seconds in range is returned, and anything else is NaN so the
+// caller can refuse to save.
+export function parseTimeoutSeconds(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const seconds = Number(text);
+  if (
+    !Number.isInteger(seconds) ||
+    seconds < TIMEOUT_MIN_SECONDS ||
+    seconds > TIMEOUT_MAX_SECONDS
+  ) {
+    return NaN;
+  }
+  return seconds;
+}
+
+// vmFormTimeoutsValid reports whether the form's timeouts are blank or whole
+// seconds in range. Hidden fields (provider-wide or global sources) are not
+// sent, so they never block a save.
+export function vmFormTimeoutsValid(form) {
+  if (!vmFormSupportsSlowdown(form)) return true;
+  return TIMEOUT_FIELDS.every(
+    (field) => !Number.isNaN(parseTimeoutSeconds(form && form[field])),
+  );
+}
+
+// timeoutPayloadFields returns the configured timeouts of a form or an
+// API-shaped view as payload fields; unset or invalid values are left out so
+// they inherit.
+export function timeoutPayloadFields(source) {
+  const fields = {};
+  for (const field of TIMEOUT_FIELDS) {
+    const seconds = parseTimeoutSeconds(source && source[field]);
+    if (seconds != null && !Number.isNaN(seconds)) {
+      fields[field] = seconds;
+    }
+  }
+  return fields;
 }
 
 // vmFormHasExtraTargetRows: a second target row (filled or not) means the
@@ -521,6 +573,11 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
       payload.slowdown = slowdown;
     }
   }
+  // Timeouts are only valid on a model or redirect; the backend rejects them
+  // on provider-wide and global policies, where the fields are hidden.
+  if (vmFormSupportsSlowdown(form)) {
+    Object.assign(payload, timeoutPayloadFields(form));
+  }
   // A model left as its own only target saves as a policy, which has no
   // targets: the effort still shown on that row becomes the policy's, as it
   // beat the virtual model's own while the redirect existed.
@@ -597,6 +654,7 @@ export function buildAliasTogglePayload(alias) {
       payload.slowdown = slowdown;
     }
   }
+  Object.assign(payload, timeoutPayloadFields(alias));
   if (alias.reasoning_effort) {
     payload.reasoning_effort = alias.reasoning_effort;
   }
@@ -672,6 +730,9 @@ export function buildModelTogglePayload(selector, existingPolicy, access) {
   if (hasExistingSlowdown && Number.isFinite(existingSlowdown)) {
     preserved.slowdown = existingSlowdown;
   }
+  const existingTimeouts = timeoutPayloadFields(existingPolicy);
+  const hasExistingTimeouts = Object.keys(existingTimeouts).length > 0;
+  Object.assign(preserved, existingTimeouts);
   if (existingReasoningEffort) {
     preserved.reasoning_effort = existingReasoningEffort;
   }
@@ -692,6 +753,7 @@ export function buildModelTogglePayload(selector, existingPolicy, access) {
     existingPaths.length === 0 &&
     !existingDescription &&
     !hasExistingSlowdown &&
+    !hasExistingTimeouts &&
     !existingReasoningEffort &&
     !hasExistingParams &&
     safeAccess.default_enabled !== false

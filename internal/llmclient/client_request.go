@@ -18,6 +18,7 @@ import (
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // maxErrorBodyBytes caps how much of an upstream error body is read into
@@ -71,7 +72,7 @@ func extractStatusCode(err error) int {
 // live upstream response. Metrics hooks are called at the logical request
 // level, not here, to avoid counting each attempt separately.
 func (c *Client) doHTTPRequest(ctx context.Context, req Request) (*http.Response, error) {
-	httpReq, err := c.buildRequest(ctx, req)
+	httpReq, err := c.buildRequest(withUpstreamTimeouts(ctx), req)
 	if err != nil {
 		// The transport owns closing the body once the request reaches it;
 		// a request that never gets there must release the reader here.
@@ -79,12 +80,30 @@ func (c *Client) doHTTPRequest(ctx context.Context, req Request) (*http.Response
 		return nil, err
 	}
 
-	resp, err := c.httpClient.Do(httpReq)
+	resp, err := httpclient.Do(c.httpClient, httpReq)
 	if err != nil {
 		logTransportError("provider request failed", c.config.ProviderName, req.Endpoint, err)
 		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), transportErrorMessage(err), err)
 	}
 	return resp, nil
+}
+
+// withUpstreamTimeouts applies the per-attempt timeouts resolved for the
+// request's model (see core.RequestModelResolution.Timeouts) unless the
+// context already carries explicit overrides.
+func withUpstreamTimeouts(ctx context.Context) context.Context {
+	if !httpclient.AttemptTimeoutsFromContext(ctx).IsZero() {
+		return ctx
+	}
+	workflow := core.GetWorkflow(ctx)
+	if workflow == nil || workflow.Resolution == nil {
+		return ctx
+	}
+	timeouts := workflow.Resolution.Timeouts
+	return httpclient.WithAttemptTimeouts(ctx, httpclient.AttemptTimeouts{
+		Timeout:               timeouts.Timeout,
+		ResponseHeaderTimeout: timeouts.ResponseHeaderTimeout,
+	})
 }
 
 // logTransportError records the transport error for operators, including the

@@ -506,6 +506,24 @@ function applySlowdownSchemaConstraints() {
   }
 }
 
+function applyUpstreamTimeoutSchemaConstraints() {
+  for (const name of [
+    "admin.upsertVirtualModelRequest",
+    "virtualmodels.View",
+    "virtualmodels.VirtualModel",
+  ]) {
+    const properties = schema(name).properties;
+    for (const field of ["timeout", "response_header_timeout"]) {
+      const property = properties?.[field];
+      if (!property || property.type !== "integer") {
+        throw new Error(`expected integer ${field} property on schema: ${name}`);
+      }
+      property.minimum = 1;
+      property.maximum = 86400;
+    }
+  }
+}
+
 // applyPathSidebarTitles sets the API Reference sidebar entry of every
 // operation to its path so endpoints are listed by URL rather than by
 // natural-language summary. Mintlify renders the HTTP method as a colored
@@ -642,6 +660,7 @@ ensureRequiredProperty("core.ResponsesConversationRef", "id");
 applyBudgetKeySchemaConstraints();
 applyStringArrayPropertyBounds("admin.upsertVirtualModelRequest", "user_paths", 100, 1024);
 applySlowdownSchemaConstraints();
+applyUpstreamTimeoutSchemaConstraints();
 applyPricingSchemaConstraints();
 markDeprecatedSummaries();
 applyPathSidebarTitles();
