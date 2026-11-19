@@ -855,7 +855,7 @@
   "models_response_header_timeout_field": "Limit czasu nagłówków odpowiedzi (sekundy)",
   "models_inherit": "Dziedzicz",
   "models_timeout_invalid": "Limity czasu muszą być pełnymi sekundami od 1 do 86400.",
-  "models_timeouts_help": "Nadpisuje HTTP_TIMEOUT i HTTP_RESPONSE_HEADER_TIMEOUT dla tego modelu lub przekierowania. Dotyczy każdej próby upstream; ponowienia i failover dostają nowy limit. Puste pole dziedziczy politykę modelu docelowego, a potem domyślną wartość bramy.",
+  "models_timeouts_help": "Nadpisuje HTTP_TIMEOUT i HTTP_RESPONSE_HEADER_TIMEOUT dla tego modelu lub przekierowania. Dotyczy każdej próby upstream; ponowienia i failover dostają nowy limit. Puste pole dziedziczy wartość z innych przekierowań na trasie, potem z polityki modelu docelowego, a na końcu domyślną wartość bramy.",
   "models_upstream_timeouts": "Limity czasu",
   "models_timeout_per_attempt": "{value} s na próbę",
   "models_timeout_headers": "{value} s do nagłówków",
