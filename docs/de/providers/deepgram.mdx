@@ -132,8 +132,9 @@ benennt, etwa `alloy` von OpenAI, liefert `400`, statt ignoriert zu werden.
 
 Deepgrams eigene `/speak`-Optionen `bit_rate`, `sample_rate`, `mip_opt_out`
 und `tag` können als zusätzliche JSON-Felder gesendet werden und werden als
-Query-Parameter weitergeleitet. `sample_rate` ändert `pcm` nicht, das immer
-24 kHz hat. `callback`, `callback_method` und `stream_format: "sse"` liefern
+Query-Parameter weitergeleitet. `pcm` hat immer 24 kHz, daher liefert mit
+`pcm` jede andere `sample_rate` `400`; verwenden Sie `wav` für eine andere
+Rate. `callback`, `callback_method` und `stream_format: "sse"` liefern
 `400`.
 
 Das Audio wird an den Client gestreamt, während Deepgram es erzeugt. Deepgram

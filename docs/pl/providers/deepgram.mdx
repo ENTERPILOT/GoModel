@@ -130,7 +130,8 @@ zwraca `400`, zamiast zostać zignorowany.
 
 Własne opcje `/speak` Deepgram — `bit_rate`, `sample_rate`, `mip_opt_out` i
 `tag` — można wysłać jako dodatkowe pola JSON; są przekazywane jako parametry
-zapytania. `sample_rate` nie zmienia `pcm`, który zawsze ma 24 kHz.
+zapytania. `pcm` ma zawsze 24 kHz, więc z `pcm` każda inna wartość
+`sample_rate` zwraca `400`; dla innej częstotliwości użyj `wav`.
 `callback`, `callback_method` i `stream_format: "sse"` zwracają `400`.
 
 Audio jest przesyłane do klienta strumieniowo, w miarę jak Deepgram je

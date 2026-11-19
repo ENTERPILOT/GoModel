@@ -104,7 +104,7 @@ Deepgram 的模型 ID 同时指定语音系列、语音和语言：`aura-2-thali
 | `speed` | 调整到 Deepgram 的 `0.7`-`1.5` 范围，步长为 `0.05`（OpenAI 接受 `0.25`-`4.0`） |
 | `instructions` | 不支持；返回 `400` |
 
-Deepgram 自身的 `/speak` 选项 `bit_rate`、`sample_rate`、`mip_opt_out` 和 `tag` 可以作为额外的 JSON 字段发送，并作为查询参数转发。`sample_rate` 不会改变 `pcm`，其采样率始终为 24 kHz。`callback`、`callback_method` 和 `stream_format: "sse"` 返回 `400`。
+Deepgram 自身的 `/speak` 选项 `bit_rate`、`sample_rate`、`mip_opt_out` 和 `tag` 可以作为额外的 JSON 字段发送，并作为查询参数转发。`pcm` 的采样率始终为 24 kHz，因此使用 `pcm` 时任何其他 `sample_rate` 都会返回 `400`；如需其他采样率，请使用 `wav`。`callback`、`callback_method` 和 `stream_format: "sse"` 返回 `400`。
 
 音频会在 Deepgram 生成的同时流式传输给客户端。Deepgram 将每次请求的输入限制为 2000 个字符。
 
