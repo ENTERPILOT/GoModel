@@ -29,8 +29,11 @@ Przełącznik **Tryb** nad selektorem modelu pozwala testować także modele mul
 wywołuje odpowiedni endpoint gatewaya kompatybilny z OpenAI i wyświetla na początku listy modele,
 których metadane deklarują dany tryb; nadal możesz wpisać dowolny model lub alias.
 Model wirtualny jest ukrywany w danym trybie tylko wtedy, gdy każdy jego model docelowy
-jest znanym modelem, który deklaruje inne tryby. Model providera o tej samej nazwie co model
-wirtualny nie jest oferowany w żadnym trybie, bo requesty z tą nazwą obsługuje model wirtualny.
+jest znanym modelem, który deklaruje inne tryby. Model providera o tej samej nazwie co włączony
+model wirtualny z dostępnym modelem docelowym nie jest oferowany w żadnym trybie, bo requesty
+z tą nazwą obsługuje model wirtualny. Gdy model wirtualny jest wyłączony albo nie ma dostępnego
+modelu docelowego, model providera zostaje na liście. Zostaje też przy kluczu dashboardu
+przypisanym do ścieżki użytkownika, który nie widzi modeli wirtualnych.
 
 | Tryb | Endpoint | Wejście | Wynik |
 | --- | --- | --- | --- |

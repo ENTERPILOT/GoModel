@@ -34,8 +34,11 @@ listet Modelle, deren Metadaten diesen Modus ausweisen, zuerst auf; Sie können
 weiterhin jedes beliebige Modell oder jeden Alias eingeben. Ein virtuelles
 Modell wird in einem Modus nur dann ausgeblendet, wenn jedes seiner Ziele ein
 bekanntes Modell ist, das andere Modi ausweist. Ein Provider-Modell, das wie ein
-virtuelles Modell heißt, wird in keinem Modus angeboten, weil das virtuelle
-Modell Requests für diesen Namen beantwortet.
+aktiviertes virtuelles Modell mit verfügbarem Ziel heißt, wird in keinem Modus
+angeboten, weil das virtuelle Modell Requests für diesen Namen beantwortet. Ist
+das virtuelle Modell deaktiviert oder hat es kein verfügbares Ziel, bleibt das
+Provider-Modell in der Auswahl. Das gilt auch für einen Dashboard-Key, der an
+einen User-Path gebunden ist: Ihm werden keine virtuellen Modelle angezeigt.
 
 | Modus | Endpunkt | Eingabe | Ergebnis |
 | --- | --- | --- | --- |

@@ -28,8 +28,11 @@ The **Mode** switch above the model picker tests media models too. Each mode
 calls the gateway's OpenAI-compatible endpoint and lists models whose metadata
 advertises that mode first; you can still type any model or alias. A virtual
 model is hidden in a mode only when every one of its targets is a known model
-that advertises other modes. A provider model named like a virtual model is not
-offered in any mode, because the virtual model answers requests for that name.
+that advertises other modes. A provider model named like a virtual model that is
+enabled and has an available target is not offered in any mode, because the
+virtual model answers requests for that name. A disabled virtual model, or one
+without an available target, leaves the provider model in the picker. So does a
+dashboard key bound to a user path, which is shown no virtual models.
 
 | Mode | Endpoint | Input | Result |
 | --- | --- | --- | --- |
