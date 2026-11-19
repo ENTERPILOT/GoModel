@@ -165,7 +165,7 @@ func TestBuildResponsesOutputItems_MessageReplayStateBecomesReasoningItem(t *tes
 	messages, err := convertResponsesInputItems([]any{
 		map[string]any{"type": "reasoning", "summary": []any{}, "extra_content": map[string]any{"google": map[string]any{"thought_signature": "sig-1"}}},
 		map[string]any{"type": "message", "role": "assistant", "content": "hi"},
-	})
+	}, responsesChatOptions{})
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
 	got = string(messages[0].ExtraFields.ExtraContent(core.ExtraContentVendorGoogle))

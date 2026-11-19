@@ -340,6 +340,63 @@ func TestStreamResponses_PreservesFlattenedThinking(t *testing.T) {
 		"the answer must stream as its own exact delta sequence")
 }
 
+// A Responses client replays a reasoning turn as a reasoning item followed by
+// the assistant message. On a turn without a tool call the shared converter
+// drops that reasoning by default; Mistral asks for it back, so it must reach
+// the upstream as a thinking chunk on both Responses paths.
+func TestResponses_ReplaysOrdinaryTurnReasoning(t *testing.T) {
+	const replay = `{
+		"model": "mistral-large-4-0",
+		"input": [
+			{"type": "message", "role": "user", "content": "What is 17 * 23?"},
+			{"type": "reasoning", "id": "rs_1", "summary": [], "content": [{"type": "reasoning_text", "text": "17 * 23 = 391."}]},
+			{"type": "message", "id": "msg_1", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "391."}]},
+			{"type": "message", "role": "user", "content": "And doubled?"}
+		]
+	}`
+	tests := []struct {
+		name string
+		send func(t *testing.T, req *core.ResponsesRequest) *providertest.Capture
+	}{
+		{name: "buffered", send: func(t *testing.T, req *core.ResponsesRequest) *providertest.Capture {
+			server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+			_, err := newTestProvider(server).Responses(context.Background(), req)
+			require.NoError(t, err)
+			return capture
+		}},
+		{name: "streaming", send: func(t *testing.T, req *core.ResponsesRequest) *providertest.Capture {
+			server, capture := providertest.SSEServer(t, providertest.ChatChunkSSE)
+			req.Stream = true
+			stream, err := newTestProvider(server).StreamResponses(context.Background(), req)
+			require.NoError(t, err)
+			_, err = io.ReadAll(stream)
+			require.NoError(t, err)
+			require.NoError(t, stream.Close())
+			return capture
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var req core.ResponsesRequest
+			require.NoError(t, json.Unmarshal([]byte(replay), &req))
+
+			wire := tt.send(t, &req).Last(t).JSON(t)
+			messages, ok := wire["messages"].([]any)
+			require.True(t, ok)
+			require.Len(t, messages, 3)
+			assistant, ok := messages[1].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, "assistant", assistant["role"])
+			assert.NotContains(t, assistant, reasoningContentKey, "Mistral 422s on a replayed reasoning_content member")
+			content, ok := assistant["content"].([]any)
+			require.True(t, ok, "replayed content = %#v, want chunk list", assistant["content"])
+			require.Len(t, content, 2)
+			assert.JSONEq(t, `{"type":"thinking","thinking":[{"type":"text","text":"17 * 23 = 391."}]}`, string(mustJSON(content[0])))
+			assert.JSONEq(t, `{"type":"text","text":"391."}`, string(mustJSON(content[1])))
+		})
+	}
+}
+
 // A request without reasoning and without replayed thinking must reach the
 // upstream byte-identical in shape: no injected members.
 func TestChatCompletion_AdaptsRequest_Noop(t *testing.T) {

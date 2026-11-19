@@ -56,7 +56,8 @@ Turns als Mistral-`thinking`-Chunk innerhalb des Nachrichteninhalts zurück — 
 das Entfernen des Traces die Ausgabe verschlechtert — und verwirft Member, die Mistral nicht
 parsen kann (`mistral_content_chunks`), für die Mistral einen 422 zurückgeben würde. Ein
 zurückgespieltes `reasoning`-Member (die Schreibweise mancher Clients) wird wie
-`reasoning_content` behandelt.
+`reasoning_content` behandelt. Auf `/v1/responses` wird ein zurückgespieltes `reasoning`-Item
+genauso zurückgegeben, bei Turns mit und ohne Tool Call.
 
 Mistral lehnt Request-Member ab, die sein Schema nicht definiert. GoModel passt deshalb
 gängige OpenAI-Felder an, statt den Request scheitern zu lassen:

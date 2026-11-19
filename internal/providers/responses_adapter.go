@@ -22,8 +22,9 @@ type ChatProvider interface {
 
 // ConvertResponsesRequestToChat converts a ResponsesRequest to a ChatRequest.
 // It also validates the supported Responses input shapes and returns an error
-// when the request cannot be converted safely.
-func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatRequest, error) {
+// when the request cannot be converted safely. Options select a provider's
+// deviation from the default translation.
+func ConvertResponsesRequestToChat(req *core.ResponsesRequest, opts ...ResponsesChatOption) (*core.ChatRequest, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("responses request is required", nil)
 	}
@@ -89,7 +90,7 @@ func ConvertResponsesRequestToChat(req *core.ResponsesRequest) (*core.ChatReques
 		})
 	}
 
-	messages, err := ConvertResponsesInputToMessages(req.Input)
+	messages, err := ConvertResponsesInputToMessages(req.Input, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -407,8 +408,8 @@ func dropUnavailableResponsesToolChoice(choice any, tools []map[string]any) any 
 // ResponsesViaChat implements the Responses API by converting to/from Chat format.
 // providerName attributes errors raised here, before the router stamps the
 // response with its provider.
-func ResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRequest, providerName string) (*core.ResponsesResponse, error) {
-	chatReq, err := ConvertResponsesRequestToChat(req)
+func ResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRequest, providerName string, opts ...ResponsesChatOption) (*core.ResponsesResponse, error) {
+	chatReq, err := ConvertResponsesRequestToChat(req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -428,8 +429,8 @@ func ResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRe
 }
 
 // StreamResponsesViaChat implements streaming Responses API by converting to/from Chat format.
-func StreamResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRequest, providerName string) (io.ReadCloser, error) {
-	chatReq, err := ConvertResponsesRequestToChat(req)
+func StreamResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRequest, providerName string, opts ...ResponsesChatOption) (io.ReadCloser, error) {
+	chatReq, err := ConvertResponsesRequestToChat(req, opts...)
 	if err != nil {
 		return nil, err
 	}
