@@ -665,7 +665,7 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
 
 - `name` 是在 `name/model` 选择器中使用的提供商实例名称，因此不能包含 `/`。
 - 在 `config.yaml` 或环境变量中声明的提供商会以 `"managed": true` 列出，并且是只读的：对此类名称执行 `PUT` 或 `DELETE` 会返回 `400`。被同名已声明提供商遮盖的已存储记录不会被列出。
-- 响应会将 `api_keys`、`service_account_json` 和 `service_account_json_base64` 遮蔽为一串星号（`***********`），并遮蔽 `proxy_url` 中的任何密码。回传任何由三个或更多星号组成的值会保留已存储的值，因此编辑时无需重复提交 Secret；若遮蔽条目背后没有已存储的值，则返回 `400`。完全由 Secret 引用组成的值会按原样显示。
+- 响应会将 `api_keys`、`service_account_json` 和 `service_account_json_base64` 遮蔽为一串星号（`***********`），并遮蔽 `proxy_url` 中的任何密码。回传任何由三个或更多星号组成的值会保留已存储的值，因此编辑时无需重复提交 Secret；若遮蔽条目背后没有已存储的值，则返回 `400`。每个遮蔽的 API 密钥都会标明它所代表的已存储密钥（`***********#2` 表示第二个），因此删除或重新排序条目时会保留正确的密钥；不带编号的遮蔽值保留同一位置上的已存储密钥。完全由 Secret 引用组成的值会按原样显示。
 - `billable: false` 标记的是其成本不由调用方向您支付的提供商；参见[预算](/zh/features/budgets#非计费提供商)。
 - `DELETE` 返回 `204`，名称未知时返回 `404`。
 

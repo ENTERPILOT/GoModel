@@ -840,7 +840,10 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   `service_account_json_base64` to a run of asterisks (`***********`), and
   mask any password in `proxy_url`. Sending back any value of three or more
   asterisks keeps the stored one, so an edit never has to repeat a secret; a
-  redacted entry with no stored value behind it returns `400`. A `proxy_url`
+  redacted entry with no stored value behind it returns `400`. Each masked
+  API key names the stored key it stands for (`***********#2` is the second),
+  so removing or reordering entries keeps the right keys; a bare mask keeps
+  the stored key at its own position. A `proxy_url`
   sent back with its password still masked (`xxxxx`) keeps the stored
   password, also when the scheme, host, port, or username changes. A value
   made only of secret references is shown as is.

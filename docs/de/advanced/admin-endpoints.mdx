@@ -813,7 +813,11 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   und maskieren ein Passwort in `proxy_url`. Wird ein Wert aus drei oder mehr
   Sternchen zurückgesendet, bleibt der gespeicherte Wert erhalten, sodass eine
   Bearbeitung ein Secret nie wiederholen muss; ein maskierter Eintrag, hinter
-  dem kein gespeicherter Wert steht, liefert `400`. Ein Wert, der nur aus
+  dem kein gespeicherter Wert steht, liefert `400`. Jeder maskierte API-Key
+  nennt den gespeicherten Key, für den er steht (`***********#2` ist der
+  zweite), sodass Entfernen oder Umsortieren von Einträgen die richtigen Keys
+  behält; eine Maske ohne Nummer behält den gespeicherten Key an ihrer
+  Position. Ein Wert, der nur aus
   Secret-Referenzen besteht, wird unverändert angezeigt.
 - `billable: false` kennzeichnet einen Provider, dessen Kosten der Aufrufer
   Ihnen nicht schuldet; siehe
