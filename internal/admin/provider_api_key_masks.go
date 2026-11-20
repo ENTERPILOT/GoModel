@@ -54,9 +54,11 @@ func apiKeyHint(value string) string {
 // list at save time and also returns the stored keys it resolved that way. A
 // mask naming a position ("sk-pr***********7Qa#2") keeps that stored key
 // wherever it now sits. A bare all-asterisk mask, as older clients send,
-// keeps the stored key at its own index. A mask with no stored key behind it,
-// or whose visible characters no longer match that key because the list
-// changed since it was read, is rejected, so a mask never saves another key.
+// keeps the stored key at its own index. A mask with no stored key behind it
+// is rejected, and so is one whose visible characters no longer match that
+// key because the list changed since it was read. The check is best effort:
+// a fully masked short key, or another key with the same visible characters,
+// still resolves by slot alone.
 func mergeRedactedAPIKeys(incoming, stored []string) (merged, kept []string, err error) {
 	if incoming == nil {
 		return nil, nil, nil

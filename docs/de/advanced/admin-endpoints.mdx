@@ -818,9 +818,10 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   den gespeicherten Key, für den er steht (`sk-pr***********7Qa#2` ist der
   zweite), sodass Einträge entfernt oder umsortiert werden können. Die Nummern
   beziehen sich auf die beim Speichern gespeicherte Liste: Eine Maske, deren
-  Zeichen nicht mehr zu ihrem Key passen, liefert `400`; ein vollständig
-  maskierter kurzer Key lässt sich nicht prüfen, daher nach gleichzeitigen
-  Änderungen vor dem Speichern neu laden. Eine Maske ohne Nummer behält den gespeicherten Key an ihrer
+  Zeichen nicht mehr zu ihrem Key passen, liefert `400`. Diese Prüfung
+  erfasst weder vollständig maskierte kurze Keys noch Keys mit denselben
+  sichtbaren Zeichen, daher nach gleichzeitigen Änderungen vor dem Speichern
+  neu laden. Eine Maske ohne Nummer behält den gespeicherten Key an ihrer
   Position. Ein Wert, der nur aus
   Secret-Referenzen besteht, wird unverändert angezeigt.
 - `billable: false` kennzeichnet einen Provider, dessen Kosten der Aufrufer
