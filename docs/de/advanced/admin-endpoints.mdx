@@ -813,8 +813,9 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   und maskieren ein Passwort in `proxy_url`. Wird ein Wert aus drei oder mehr
   Sternchen zurückgesendet, bleibt der gespeicherte Wert erhalten, sodass eine
   Bearbeitung ein Secret nie wiederholen muss; ein maskierter Eintrag, hinter
-  dem kein gespeicherter Wert steht, liefert `400`. Jeder maskierte API-Key
-  nennt den gespeicherten Key, für den er steht (`***********#2` ist der
+  dem kein gespeicherter Wert steht, liefert `400`. Ein maskierter API-Key
+  zeigt seine ersten 5 und letzten 3 Zeichen (Keys ab 20 Zeichen) und nennt
+  den gespeicherten Key, für den er steht (`sk-pr***********7Qa#2` ist der
   zweite), sodass Entfernen oder Umsortieren von Einträgen die richtigen Keys
   behält; eine Maske ohne Nummer behält den gespeicherten Key an ihrer
   Position. Ein Wert, der nur aus

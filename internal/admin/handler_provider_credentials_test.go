@@ -324,6 +324,11 @@ func TestUpsertProviderCredential_RedactedKeyPreservesStoredValuePositionally(t 
 
 // The view's masks name their stored key, so removing or reordering masked
 // rows keeps exactly the keys the client left in place.
+func TestRedactAPIKeys_ShowsHintOnlyForLongKeys(t *testing.T) {
+	got := redactAPIKeys([]string{"sk-proj-abcdefghijklmnop7Qa", "sk-short", "${env:OPENAI_KEY}"})
+	assert.Equal(t, []string{"sk-pr***********7Qa#1", "***********#2", "${env:OPENAI_KEY}"}, got)
+}
+
 func TestUpsertProviderCredential_SlotMasksPreserveTheNamedStoredKey(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -333,6 +338,7 @@ func TestUpsertProviderCredential_SlotMasksPreserveTheNamedStoredKey(t *testing.
 		{name: "middle key removed", apiKeys: `["***********#1","***********#3"]`, want: []string{"sk-a", "sk-c"}},
 		{name: "first key removed", apiKeys: `["***********#2","***********#3"]`, want: []string{"sk-b", "sk-c"}},
 		{name: "reordered with a new key", apiKeys: `["sk-new","***********#3","***********#1"]`, want: []string{"sk-new", "sk-c", "sk-a"}},
+		{name: "visible characters are display only", apiKeys: `["sk-pr***********7Qa#2"]`, want: []string{"sk-b"}},
 	}
 
 	for _, tt := range tests {
@@ -356,7 +362,7 @@ func TestUpsertProviderCredential_SlotMasksPreserveTheNamedStoredKey(t *testing.
 }
 
 func TestUpsertProviderCredential_SlotMaskWithoutStoredKeyIsRejected(t *testing.T) {
-	for _, mask := range []string{"***********#3", "***********#0", "***********#x", "***********#"} {
+	for _, mask := range []string{"***********#3", "***********#0", "***********#x", "***********#", "sk-pr***********7Qa"} {
 		t.Run(mask, func(t *testing.T) {
 			fake := newProviderCredentialsAdminFake()
 			fake.rows["multi"] = providers.ManagedProviderCredential{

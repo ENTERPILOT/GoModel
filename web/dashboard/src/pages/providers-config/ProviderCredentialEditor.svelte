@@ -1,7 +1,7 @@
 <script>
   // Provider credential editor modal (create + edit), built on the shared
   // EditorDialog shell. Name and Type are immutable once a provider exists;
-  // API keys ("***********#N") and service-account secrets ("***********")
+  // API keys ("sk-pr***********7Qa#N") and service-account secrets ("***********")
   // round-trip as masks that preserve the stored value.
   //
   // Everything below Name is rendered from the selected type's credential

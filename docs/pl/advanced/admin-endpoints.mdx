@@ -809,10 +809,11 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   maskują hasło w `proxy_url`. Odesłanie dowolnej wartości złożonej z trzech
   lub więcej gwiazdek zachowuje zapisaną wartość, więc edycja nigdy nie
   wymaga powtórzenia sekretu; zamaskowany wpis, za którym nie stoi żadna
-  zapisana wartość, zwraca `400`. Każdy zamaskowany klucz API wskazuje
-  zapisany klucz, który zastępuje (`***********#2` to drugi), więc usunięcie
-  lub zmiana kolejności wpisów zachowuje właściwe klucze; sama maska zachowuje
-  zapisany klucz na tej samej pozycji. `proxy_url` odesłane z wciąż zamaskowanym
+  zapisana wartość, zwraca `400`. Zamaskowany klucz API pokazuje pierwsze 5
+  i ostatnie 3 znaki (klucze o długości co najmniej 20 znaków) i wskazuje
+  zapisany klucz, który zastępuje: `sk-pr***********7Qa#2` to drugi.
+  Usunięcie lub zmiana kolejności wpisów zachowuje właściwe klucze; sama maska
+  zachowuje zapisany klucz na tej samej pozycji. `proxy_url` odesłane z wciąż zamaskowanym
   hasłem (`xxxxx`) zachowuje zapisane hasło, także gdy zmienia się schemat,
   host, port lub nazwa użytkownika. Wartość złożona wyłącznie z referencji do
   sekretów jest pokazywana bez zmian.
