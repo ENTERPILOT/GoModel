@@ -336,8 +336,10 @@ snapshot() {
   curl -fsS "$BASE/admin/mcp-servers" \
     | jq -S 'map(select(.name|startswith("compat")) | del(.status, .last_error, .connected_at, .last_listed_at, .tool_count, .prompt_count, .resource_count))' \
     > "$out/mcp-servers.json"
+  # API key masks gained a "#N" stored-key suffix; compare count and order only.
   curl -fsS "$BASE/admin/provider-credentials" \
-    | jq -S 'map(select(.name|startswith("compat")))' > "$out/provider-credentials.json"
+    | jq -S 'map(select(.name|startswith("compat")) | if .api_keys then .api_keys |= map(sub("#[0-9]+$"; "")) else . end)' \
+    > "$out/provider-credentials.json"
   curl -fsS "$BASE/admin/model-pricing-overrides" | jq -S '.' > "$out/pricing-overrides.json"
   # last_used_at comes from the newest request log entry for the key, and the vget
   # reads below add one, so only its presence is compared.
