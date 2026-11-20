@@ -843,8 +843,11 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   redacted entry with no stored value behind it returns `400`. A masked API
   key shows its first 5 and last 3 characters (keys of 20 or more
   characters) and names the stored key it stands for:
-  `sk-pr***********7Qa#2` is the second. Removing or reordering entries keeps
-  the right keys; a bare mask keeps the stored key at its own position. A `proxy_url`
+  `sk-pr***********7Qa#2` is the second, so entries can be removed or
+  reordered. Slots refer to the stored list at save time: a mask whose
+  characters no longer match its stored key returns `400`, but a fully masked
+  short key cannot be checked, so reload before saving after concurrent
+  edits. A bare mask keeps the stored key at its own position. A `proxy_url`
   sent back with its password still masked (`xxxxx`) keeps the stored
   password, also when the scheme, host, port, or username changes. A value
   made only of secret references is shown as is.

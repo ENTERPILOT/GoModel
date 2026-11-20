@@ -811,9 +811,12 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   wymaga powtórzenia sekretu; zamaskowany wpis, za którym nie stoi żadna
   zapisana wartość, zwraca `400`. Zamaskowany klucz API pokazuje pierwsze 5
   i ostatnie 3 znaki (klucze o długości co najmniej 20 znaków) i wskazuje
-  zapisany klucz, który zastępuje: `sk-pr***********7Qa#2` to drugi.
-  Usunięcie lub zmiana kolejności wpisów zachowuje właściwe klucze; sama maska
-  zachowuje zapisany klucz na tej samej pozycji. `proxy_url` odesłane z wciąż zamaskowanym
+  zapisany klucz, który zastępuje: `sk-pr***********7Qa#2` to drugi, więc
+  wpisy można usuwać i zmieniać ich kolejność. Numery odnoszą się do listy
+  zapisanej w chwili zapisu: maska, której znaki nie pasują już do jej
+  klucza, zwraca `400`, ale w pełni zamaskowanego krótkiego klucza nie da się
+  sprawdzić, więc po równoczesnych edycjach przeładuj dane przed zapisem.
+  Sama maska zachowuje zapisany klucz na tej samej pozycji. `proxy_url` odesłane z wciąż zamaskowanym
   hasłem (`xxxxx`) zachowuje zapisane hasło, także gdy zmienia się schemat,
   host, port lub nazwa użytkownika. Wartość złożona wyłącznie z referencji do
   sekretów jest pokazywana bez zmian.

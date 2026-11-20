@@ -51,11 +51,12 @@ func apiKeyHint(value string) string {
 }
 
 // mergeRedactedAPIKeys resolves masked entries in api_keys against the stored
-// list and also returns the stored keys it resolved that way. A mask naming a
-// position ("sk-pr***********7Qa#2") keeps that stored key wherever it now
-// sits; its visible characters are display only. A bare all-asterisk mask,
-// as older clients send, keeps the stored key at its own index. A mask with
-// no stored key behind it is rejected, so a mask is never saved as a key.
+// list at save time and also returns the stored keys it resolved that way. A
+// mask naming a position ("sk-pr***********7Qa#2") keeps that stored key
+// wherever it now sits. A bare all-asterisk mask, as older clients send,
+// keeps the stored key at its own index. A mask with no stored key behind it,
+// or whose visible characters no longer match that key because the list
+// changed since it was read, is rejected, so a mask never saves another key.
 func mergeRedactedAPIKeys(incoming, stored []string) (merged, kept []string, err error) {
 	if incoming == nil {
 		return nil, nil, nil
@@ -69,6 +70,10 @@ func mergeRedactedAPIKeys(incoming, stored []string) (merged, kept []string, err
 		}
 		if slot < 0 || slot >= len(stored) {
 			return nil, nil, core.NewInvalidRequestError("api_keys entry is redacted but has no stored value to preserve; provide the real value", nil).
+				WithParam(providers.CredentialFieldAPIKeys)
+		}
+		if staleAPIKeyHint(value, stored[slot]) {
+			return nil, nil, core.NewInvalidRequestError("api_keys entry no longer matches its stored key; reload the provider and try again", nil).
 				WithParam(providers.CredentialFieldAPIKeys)
 		}
 		merged[i] = stored[slot]
@@ -113,4 +118,12 @@ func isAPIKeyHint(value string) bool {
 		return false
 	}
 	return string(runes[apiKeyHintPrefixLength:len(runes)-apiKeyHintSuffixLength]) == redactedCredentialValue
+}
+
+// staleAPIKeyHint reports whether a hinted slot mask shows characters other
+// than those of the stored key it names. A mask without visible characters
+// cannot be checked and is never stale.
+func staleAPIKeyHint(mask, stored string) bool {
+	hint := mask[:max(strings.LastIndex(mask, apiKeyMaskSlotSeparator), 0)]
+	return isAPIKeyHint(hint) && hint != apiKeyHint(stored)
 }
