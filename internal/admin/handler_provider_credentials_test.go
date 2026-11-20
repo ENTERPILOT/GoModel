@@ -402,7 +402,7 @@ func TestUpsertProviderCredential_SlotMasksPreserveTheNamedStoredKey(t *testing.
 }
 
 func TestUpsertProviderCredential_SlotMaskWithoutStoredKeyIsRejected(t *testing.T) {
-	for _, mask := range []string{"***********#3", "***********#0", "***********#x", "***********#", "sk-pr***********7Qa", "sk-pr***********a#3"} {
+	for _, mask := range []string{"***********#3", "***********#0", "***********#x", "***********#", "sk-pr***********7Qa", "sk-pr***********7Qa2", "sk-pr***********a#3", "x-***********#2"} {
 		t.Run(mask, func(t *testing.T) {
 			fake := newProviderCredentialsAdminFake()
 			fake.rows["multi"] = providers.ManagedProviderCredential{

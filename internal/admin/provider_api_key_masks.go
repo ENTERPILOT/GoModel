@@ -83,23 +83,24 @@ func mergeRedactedAPIKeys(incoming, stored []string) (merged, kept []string, err
 }
 
 // maskedAPIKeySlot reports whether value is a mask and, if so, the 0-based
-// stored index it stands for. Only the shapes redactAPIKeys emits count, so a
-// real key that happens to contain asterisks is kept as sent. A bare mask
-// stands for its own index. A hinted mask whose "#N" was removed or garbled
-// returns -1, which matches no stored key, instead of being saved as a key.
+// stored index it stands for. A bare all-asterisk mask, as older clients
+// send, stands for its own index. Any other value holding the view's fixed
+// run of asterisks is a generated mask and must be exactly "<mask>#N"; an
+// edited one returns -1, which matches no stored key, instead of being saved
+// as a key. A real key with a shorter run of asterisks is kept as sent.
 func maskedAPIKeySlot(value string, index int) (int, bool) {
 	if isRedactedCredentialValue(value) {
 		return index, true
 	}
-	if isAPIKeyHint(value) {
-		return -1, true
+	if !strings.Contains(value, redactedCredentialValue) {
+		return 0, false
 	}
 	sep := strings.LastIndex(value, apiKeyMaskSlotSeparator)
 	if sep < 0 {
-		return 0, false
+		return -1, true
 	}
-	if mask := value[:sep]; !isAPIKeyHint(mask) && !isRedactedCredentialValue(mask) {
-		return 0, false
+	if mask := value[:sep]; mask != redactedCredentialValue && !isAPIKeyHint(mask) {
+		return -1, true
 	}
 	n, err := strconv.Atoi(value[sep+1:])
 	if err != nil || n < 1 {
