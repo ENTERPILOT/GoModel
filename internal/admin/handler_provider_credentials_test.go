@@ -339,6 +339,8 @@ func TestUpsertProviderCredential_SlotMasksPreserveTheNamedStoredKey(t *testing.
 		{name: "first key removed", apiKeys: `["***********#2","***********#3"]`, want: []string{"sk-b", "sk-c"}},
 		{name: "reordered with a new key", apiKeys: `["sk-new","***********#3","***********#1"]`, want: []string{"sk-new", "sk-c", "sk-a"}},
 		{name: "visible characters are display only", apiKeys: `["sk-pr***********7Qa#2"]`, want: []string{"sk-b"}},
+		{name: "hash among visible characters", apiKeys: `["sk-pr***********a#3#2"]`, want: []string{"sk-b"}},
+		{name: "real key containing asterisks", apiKeys: `["sk-***-literal#2"]`, want: []string{"sk-***-literal#2"}},
 	}
 
 	for _, tt := range tests {
@@ -362,7 +364,7 @@ func TestUpsertProviderCredential_SlotMasksPreserveTheNamedStoredKey(t *testing.
 }
 
 func TestUpsertProviderCredential_SlotMaskWithoutStoredKeyIsRejected(t *testing.T) {
-	for _, mask := range []string{"***********#3", "***********#0", "***********#x", "***********#", "sk-pr***********7Qa"} {
+	for _, mask := range []string{"***********#3", "***********#0", "***********#x", "***********#", "sk-pr***********7Qa", "sk-pr***********a#3"} {
 		t.Run(mask, func(t *testing.T) {
 			fake := newProviderCredentialsAdminFake()
 			fake.rows["multi"] = providers.ManagedProviderCredential{

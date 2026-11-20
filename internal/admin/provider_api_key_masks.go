@@ -78,24 +78,39 @@ func mergeRedactedAPIKeys(incoming, stored []string) (merged, kept []string, err
 }
 
 // maskedAPIKeySlot reports whether value is a mask and, if so, the 0-based
-// stored index it stands for; a bare mask stands for its own index. Any other
-// value holding a run of asterisks is treated as a mask with an unreadable
-// position and returns -1, which matches no stored key: real keys never
-// contain one, and saving an edited mask as a key would break the provider.
+// stored index it stands for. Only the shapes redactAPIKeys emits count, so a
+// real key that happens to contain asterisks is kept as sent. A bare mask
+// stands for its own index. A hinted mask whose "#N" was removed or garbled
+// returns -1, which matches no stored key, instead of being saved as a key.
 func maskedAPIKeySlot(value string, index int) (int, bool) {
 	if isRedactedCredentialValue(value) {
 		return index, true
 	}
-	if !strings.Contains(value, "***") {
-		return 0, false
+	if isAPIKeyHint(value) {
+		return -1, true
 	}
 	sep := strings.LastIndex(value, apiKeyMaskSlotSeparator)
 	if sep < 0 {
-		return -1, true
+		return 0, false
+	}
+	if mask := value[:sep]; !isAPIKeyHint(mask) && !isRedactedCredentialValue(mask) {
+		return 0, false
 	}
 	n, err := strconv.Atoi(value[sep+1:])
 	if err != nil || n < 1 {
 		return -1, true
 	}
 	return n - 1, true
+}
+
+// isAPIKeyHint reports whether value has the hinted shape apiKeyHint emits:
+// the prefix, the fixed run of asterisks, then the suffix. Checking the
+// asterisks at their fixed position keeps a "#" among the visible characters
+// from being read as the slot separator.
+func isAPIKeyHint(value string) bool {
+	runes := []rune(value)
+	if len(runes) != apiKeyHintPrefixLength+len(redactedCredentialValue)+apiKeyHintSuffixLength {
+		return false
+	}
+	return string(runes[apiKeyHintPrefixLength:len(runes)-apiKeyHintSuffixLength]) == redactedCredentialValue
 }
