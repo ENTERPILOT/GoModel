@@ -12420,7 +12420,13 @@ const docTemplate = `{
                 "b64_json": {
                     "type": "string"
                 },
+                "error": {
+                    "$ref": "#/definitions/core.ImageItemError"
+                },
                 "revised_prompt": {
+                    "type": "string"
+                },
+                "size": {
                     "type": "string"
                 },
                 "url": {
@@ -12492,11 +12498,25 @@ const docTemplate = `{
                 "quality": {
                     "type": "string"
                 },
+                "request_id": {
+                    "type": "string"
+                },
                 "size": {
                     "type": "string"
                 },
                 "usage": {
                     "$ref": "#/definitions/core.ImageUsage"
+                }
+            }
+        },
+        "core.ImageItemError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
                 }
             }
         },

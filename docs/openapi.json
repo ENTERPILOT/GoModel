@@ -17091,7 +17091,13 @@
           "b64_json": {
             "type": "string"
           },
+          "error": {
+            "$ref": "#/components/schemas/core.ImageItemError"
+          },
           "revised_prompt": {
+            "type": "string"
+          },
+          "size": {
             "type": "string"
           },
           "url": {
@@ -17163,11 +17169,25 @@
           "quality": {
             "type": "string"
           },
+          "request_id": {
+            "type": "string"
+          },
           "size": {
             "type": "string"
           },
           "usage": {
             "$ref": "#/components/schemas/core.ImageUsage"
+          }
+        }
+      },
+      "core.ImageItemError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
           }
         }
       },
