@@ -539,7 +539,7 @@ czatowy albo model decyzyjny:
 | `message` | Nie | `This request was blocked by policy` | Komunikat błędu dla `block`, notatka w logu requestów dla `warn`. |
 | `block_status` | Nie | domyślna dla fazy | Jeden kod statusu HTTP z zakresu 400–599 dla `block`, na przykład `403`. Pusta wartość oznacza 400 przy zablokowaniu promptu i 502 przy zablokowaniu odpowiedzi. |
 | `respond_text` | Nie | `I can't help with that request.` | Odpowiedź asystenta dla `respond`. |
-| `on_unclear` | Nie | `warn` | Gdy odpowiedzi sędziego nie da się sparsować, została ucięta przez `max_tokens` albo w całości zużyta na reasoning: `allow`, `warn` lub `block` (stosuje `action`). Werdykt liczy się tylko jako obiekt JSON albo samo `allow` lub `block`, nigdy jako słowo wewnątrz zdania. |
+| `on_unclear` | Nie | `block` | Gdy odpowiedzi sędziego nie da się sparsować, została ucięta przez `max_tokens` albo w całości zużyta na reasoning: `allow`, `warn` lub `block` (stosuje `action`). Werdykt liczy się tylko jako obiekt JSON albo samo `allow` lub `block`, nigdy jako słowo wewnątrz zdania. |
 | `max_tokens` | Nie | `2048` | Silnik `chat`: limit completion dla wywołania sędziego. Niewykorzystane tokeny nic nie kosztują; dobierz go do reasoningu modelu sędziego, a nie do samego werdyktu. |
 | `temperature` | Nie | `0` | Silnik `chat`: temperatura próbkowania dla wywołania sędziego (od 0 do 2). |
 
@@ -591,8 +591,8 @@ przeciwnym razie jest przepuszczany bez wywołania sędziego.
 
 Model sędziego z reasoningiem zużywa completion na myślenie, zanim cokolwiek
 napisze: przy limicie, który wyczerpie się wcześniej, sędzia nie zwraca
-werdyktu, a instancja niczego nie egzekwuje – zamiast tego stosuje
-`on_unclear`, które domyślnie tylko ostrzega. Domyślny limit `2048` zostawia na
+werdyktu, a instancja stosuje zamiast tego `on_unclear`, które domyślnie
+blokuje request. Domyślny limit `2048` zostawia na
 to miejsce; za niewykorzystane tokeny nigdy nie płacisz, więc gdy model sędziego
 dużo rozumuje, raczej podnieś limit, niż go obcinaj.
 
@@ -606,8 +606,10 @@ która nadeszła, ale nie dała się sparsować:
 | `llm_judge_unclear` | Sędzia odpowiedział, ale odpowiedź nie jest werdyktem albo model decyzyjny odmówił odpowiedzi na pytanie. Stosowane jest `on_unclear`. |
 
 Po skonfigurowaniu instancji sprawdź w logu gatewaya komunikat
-`judge returned no verdict` i ustaw `on_unclear: block` dla polityki, która
-musi obowiązywać nawet wtedy, gdy sędzia nie odpowie niczym użytecznym.
+`judge returned no verdict`: przy domyślnym `on_unclear: block` taki request
+jest blokowany tak jak przy werdykcie block. Ustaw `on_unclear: warn` lub
+`allow` tylko dla polityki, która może przepuścić request, gdy sędzia nie
+odpowie niczym użytecznym.
 Wywołanie sędziego, które zakończy się wprost błędem – błąd providera,
 timeout – nie jest niejasnym werdyktem: decyduje o nim `fail_mode`, jak przy
 każdym innym błędzie guardraila.

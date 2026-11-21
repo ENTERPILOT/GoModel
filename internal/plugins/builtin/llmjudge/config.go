@@ -37,7 +37,8 @@ const (
 )
 
 // OnUnclear values for the "on_unclear" config key: what happens when the
-// judge reply cannot be parsed.
+// judge reply cannot be parsed. The default is UnclearBlock: a guardrail that
+// got no usable verdict fails closed, like one that errored.
 const (
 	UnclearAllow = "allow"
 	UnclearWarn  = "warn"
@@ -105,7 +106,7 @@ func decodeConfig(raw json.RawMessage) (settings, error) {
 			BlockStatus: cfg.BlockStatus("block_status"),
 			RespondText: cfg.String("respond_text", DefaultRespondText),
 		},
-		onUnclear:   cfg.Choice("on_unclear", UnclearWarn, UnclearAllow, UnclearWarn, UnclearBlock),
+		onUnclear:   cfg.Choice("on_unclear", UnclearBlock, UnclearAllow, UnclearWarn, UnclearBlock),
 		maxTokens:   cfg.Int("max_tokens", DefaultMaxTokens, 1, 1<<20),
 		temperature: cfg.Float("temperature", DefaultTemperature, 0, 2),
 		engine:      cfg.Choice("engine", EngineAuto, EngineAuto, EngineChat, EngineDecision),

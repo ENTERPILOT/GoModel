@@ -109,8 +109,8 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 				Placeholder: DefaultRespondText,
 			},
 			{
-				Key: "on_unclear", Label: "On unclear verdict", Input: pluginapi.InputSelect, Default: UnclearWarn,
-				Help: "What to do when the judge reply is neither a JSON verdict nor a bare allow or block, was cut off before it finished, or was spent entirely on reasoning. Allow and warn let the request through: choose block for a policy the instance must enforce even when the judge answers nothing usable. A judge call that fails outright follows the instance's fail mode instead.",
+				Key: "on_unclear", Label: "On unclear verdict", Input: pluginapi.InputSelect, Default: UnclearBlock,
+				Help: "What to do when the judge reply is neither a JSON verdict nor a bare allow or block, was cut off before it finished, or was spent entirely on reasoning. Block, the default, keeps the policy enforced even when the judge answers nothing usable; allow and warn let the request through. A judge call that fails outright follows the instance's fail mode instead.",
 				Options: []pluginapi.Option{
 					{Value: UnclearAllow, Label: "Allow"},
 					{Value: UnclearWarn, Label: "Warn"},
