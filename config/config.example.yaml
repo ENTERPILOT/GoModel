@@ -9,6 +9,16 @@
 # References may sit inside a value ("Bearer ${env:TOKEN}"); write $${ for a literal ${.
 # The plain ${NAME} / ${NAME:-default} form still works and leaves an unset NAME in place.
 
+# Split a large file by listing further files here, as paths or glob patterns
+# relative to this file. Sections merge key by key (two files can each add
+# providers, or one can hold a provider's api_key); a value or a list may be
+# set in one file only. Only this file may hold include. Keep the files a
+# pattern matches in their own directory: "*.yaml" here would also match
+# config.example.yaml. Default: none
+# include:
+#   - providers.yaml
+#   - "conf.d/*.yaml"
+
 server:
   port: "8080"
   base_path: "/" # env: BASE_PATH; set to "/g" to serve the gateway under https://example.com/g/

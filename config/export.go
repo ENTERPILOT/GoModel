@@ -96,8 +96,8 @@ func (r *LoadResult) ExportYAML(doc ExportDocument, environ []string) ([]byte, e
 	}
 	// Without the file as written, a value an environment variable supplied
 	// through $NAME could be written out in place of $NAME.
-	if r.expandedUnknown {
-		return nil, fmt.Errorf("export configuration: config.yaml parses only once environment variables are expanded, so the export cannot tell which values they supplied; quote the values that hold them")
+	if r.expandedUnknown != "" {
+		return nil, fmt.Errorf("export configuration: %s parses only once environment variables are expanded, so the export cannot tell which values they supplied; quote the values that hold them", r.expandedUnknown)
 	}
 	cfg := *doc.Config
 	if len(cfg.Extensions) > 0 {
