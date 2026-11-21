@@ -34,6 +34,10 @@ func (p *Provider) CreateImage(ctx context.Context, req *core.ImageGenerationReq
 	if req.Quality != "" {
 		return nil, core.NewInvalidRequestError("minimax images do not support quality", nil)
 	}
+	switch req.Model {
+	case "MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed":
+		return p.createH3Image(ctx, req)
+	}
 	format := req.ResponseFormat
 	switch format {
 	case "", "url":

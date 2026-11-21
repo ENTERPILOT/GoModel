@@ -325,3 +325,14 @@ func TestExtractFromImageResponse_IgnoresProviderImagesCount(t *testing.T) {
 	assert.NotContains(t, entry.RawData, rawKeyImages)
 	assert.Nil(t, entry.OutputCost)
 }
+
+func TestExtractFromImageResponse_PartialSuccess(t *testing.T) {
+	resp := &core.ImageGenerationResponse{Data: []core.ImageData{
+		{URL: "https://example.com/generated.jpg"},
+		{Error: &core.ImageItemError{Code: "1027", Message: "image withheld"}},
+	}}
+	entry := ExtractFromImageResponse(resp, "req", "MiniMax-H3-Image", "minimax", &core.ModelPricing{PerImage: new(0.04)})
+	assert.Equal(t, 1, entry.RawData[rawKeyImages])
+	require.NotNil(t, entry.OutputCost)
+	assert.InDelta(t, 0.04, *entry.OutputCost, 1e-9)
+}

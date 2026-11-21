@@ -51,7 +51,8 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 	}
 
 	raw := map[string]any{}
-	if count := len(resp.Data); count > 0 {
+	count := resp.GeneratedImageCount()
+	if count > 0 {
 		raw[rawKeyImages] = count
 	}
 	if u := resp.Usage; u != nil {
@@ -75,7 +76,7 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 		// The image count is always the number of returned images, never a
 		// provider usage member of the same name, so per_image pricing cannot
 		// bill images the response did not contain.
-		if len(resp.Data) == 0 {
+		if count == 0 {
 			delete(raw, rawKeyImages)
 		}
 	}
@@ -90,7 +91,7 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 	// A provider-reported cost is exact, so missing catalog rates do not matter.
 	if entry.CostsCalculationCaveat == "" && !isProviderReportedCostSource(entry.CostSource) {
 		entry.CostsCalculationCaveat = imageCostCaveat(
-			effectiveEndpointPricing(endpoint, entry.Timestamp, pricing...), entry.OutputTokens, len(resp.Data))
+			effectiveEndpointPricing(endpoint, entry.Timestamp, pricing...), entry.OutputTokens, count)
 	}
 
 	return entry

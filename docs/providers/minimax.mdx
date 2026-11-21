@@ -182,6 +182,33 @@ for model-specific parameter limits.
 
 ## Image generation
 
+### H3 images
+
+Send `MiniMax-H3-Image` or `MiniMax-H3-Image-Highspeed` to
+`/v1/images/generations`. Use the global or China base URL matching your key.
+
+```json
+{"model":"MiniMax-H3-Image","provider":"minimax","prompt":"A lighthouse at sunrise","size":"2720x1536","n":2}
+```
+
+Use an explicit pixel size, or omit it and set `aspect_ratio` and `area`.
+H3 returns URLs by default and accepts `b64_json` for inline images.
+Options such as `output_format`, `output_compression`, and
+`disable_prompt_enhanced` pass through. The China endpoint also accepts
+`aigc_watermark`. GoModel serves non-streaming image requests.
+
+Inspect each `data` item for an `error` when generating multiple images.
+A partial success returns HTTP 200 and only successful images count toward
+per-image pricing. Keep client, proxy, and gateway request and response-header
+timeouts at 600 seconds or longer. H3 generation is billed and non-idempotent:
+a disconnected call may still complete. GoModel sends one attempt. Disable
+automatic retries in your calling client as well.
+
+See the [global H3 reference](https://platform.minimax.io/docs/api-reference/image-generation-h3-generations)
+and [China H3 reference](https://platform.minimax.cn/docs/api-reference/image-generation-h3-generations).
+
+### Legacy images
+
 Use `image-01` or `image-01-live` with `/v1/images/generations`. GoModel translates
 requests to MiniMax's native `/v1/image_generation` endpoint using the configured
 base URL and returns generated images in `data`.
