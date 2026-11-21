@@ -69,11 +69,10 @@ func collapseResponsesStream(stream io.Reader) (*core.ResponsesResponse, error) 
 			}
 			return event.Response, nil
 		case "error":
-			message := event.Message
-			if message == "" {
-				message = "upstream reported a stream error"
+			if event.Message == "" {
+				return nil, core.NewProviderError("chatgpt", http.StatusBadGateway, "upstream reported a stream error", nil)
 			}
-			return nil, core.NewProviderError("chatgpt", http.StatusBadGateway, message, nil)
+			return nil, core.NewProviderError("chatgpt", http.StatusBadGateway, event.Message, nil).WithUpstreamMessage()
 		}
 	}
 	if err := scanner.Err(); err != nil {

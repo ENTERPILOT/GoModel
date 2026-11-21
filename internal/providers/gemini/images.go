@@ -170,11 +170,10 @@ func (p *Provider) predictImage(ctx context.Context, req *core.ImageGenerationRe
 		})
 	}
 	if len(resp.Data) == 0 {
-		message := "Gemini returned no images"
 		if filteredReason != "" {
-			message += ": " + filteredReason
+			return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, "Gemini returned no images: "+filteredReason, nil).WithUpstreamMessage()
 		}
-		return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, message, nil)
+		return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, "Gemini returned no images", nil)
 	}
 	return resp, nil
 }
@@ -336,7 +335,9 @@ func (p *Provider) imageResponseFromGenerateContent(resp *geminiGenerateContentR
 		}
 	}
 	if len(out.Data) == 0 {
-		return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, imageFailureMessage(resp, text.String()), nil)
+		// The message can carry the model's own text or the provider's
+		// explanation.
+		return nil, core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, imageFailureMessage(resp, text.String()), nil).WithUpstreamMessage()
 	}
 	if text.Len() > 0 {
 		out.Data[0].RevisedPrompt = text.String()

@@ -502,7 +502,9 @@ func cohereGenerationError(reason, detail string) *core.GatewayError {
 			message = "Cohere generation failed"
 		}
 	}
-	return core.NewProviderError("cohere", status, message, nil)
+	gatewayErr := core.NewProviderError("cohere", status, message, nil)
+	gatewayErr.UpstreamMessage = detail != ""
+	return gatewayErr
 }
 
 func toCoreUsage(value usage) core.Usage {

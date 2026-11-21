@@ -24,6 +24,25 @@ func TestGatewayError_WithResponseBody(t *testing.T) {
 	assert.Len(t, bounded.ResponseBody, maxGatewayErrorBodyBytes)
 }
 
+func TestGatewayError_MessageFromUpstream(t *testing.T) {
+	tests := []struct {
+		name string
+		err  *GatewayError
+		want bool
+	}{
+		{name: "gateway message", err: NewProviderError("openai", http.StatusBadGateway, "upstream connection failed", nil), want: false},
+		{name: "marked upstream message", err: NewProviderError("openai", http.StatusBadGateway, "boom", nil).WithUpstreamMessage(), want: true},
+		{name: "retained upstream body", err: NewProviderError("minimax", http.StatusBadGateway, "failed", nil).WithResponseBody([]byte(`{}`)), want: true},
+		{name: "parsed provider error", err: ParseProviderError("openai", http.StatusBadRequest, []byte(`{"error":{"message":"bad"}}`), nil), want: true},
+		{name: "parsed provider error without a body", err: ParseProviderError("openai", http.StatusBadGateway, nil, nil), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.err.MessageFromUpstream())
+		})
+	}
+}
+
 func TestGatewayError_Error(t *testing.T) {
 	tests := []struct {
 		name     string

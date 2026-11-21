@@ -17,7 +17,11 @@ import (
 // chatResponseFromResponses renders a Responses result as a chat completion.
 func chatResponseFromResponses(resp *core.ResponsesResponse, provider string) (*core.ChatResponse, error) {
 	if resp.Status == "failed" {
-		return nil, core.NewProviderError(provider, http.StatusBadGateway, responsesErrorMessage(resp.Error), nil)
+		gatewayErr := core.NewProviderError(provider, http.StatusBadGateway, responsesErrorMessage(resp.Error), nil)
+		if resp.Error != nil && strings.TrimSpace(resp.Error.Message) != "" {
+			gatewayErr = gatewayErr.WithUpstreamMessage()
+		}
+		return nil, gatewayErr
 	}
 	var text, refusal strings.Builder
 	var reasoning []string
