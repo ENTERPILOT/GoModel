@@ -44,6 +44,11 @@ func (r *LoadResult) resolveSecrets(ctx context.Context) error {
 	if err := checkResolvedServerTLS(configuredServer, r.Config.Server); err != nil {
 		return err
 	}
+	origins, err := normalizeRealtimeAllowedOrigins(r.Config.Server.RealtimeAllowedOrigins, true)
+	if err != nil {
+		return err
+	}
+	r.Config.Server.RealtimeAllowedOrigins = origins
 	return validateResolvedMCP(&r.Config.MCP)
 }
 

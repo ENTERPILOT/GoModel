@@ -54,6 +54,7 @@ type Handler struct {
 	normalizePassthroughV1Prefix bool
 	enabledPassthroughProviders  map[string]struct{}
 	realtimeEnabled              bool
+	realtimeOrigins              *realtimeOriginGuard
 	mcpEnabled                   bool
 	mcpGateway                   *mcpgateway.Service
 	realtimeCalls                *realtime.CallRegistry
@@ -300,6 +301,7 @@ func (h *Handler) realtime() *realtimeService {
 		calls:           h.realtimeCalls,
 		httpClient:      h.realtimeHTTPClient,
 		enabled:         h.realtimeEnabled,
+		origins:         h.realtimeOrigins,
 	}
 }
 

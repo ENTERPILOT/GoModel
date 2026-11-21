@@ -475,6 +475,12 @@ func (a *App) logStartupInfo() {
 			"recommendation", "list the specific origins you serve an MCP web client from instead of \"*\"")
 	}
 
+	if cfg.Server.RealtimeEnabled && slices.Contains(cfg.Server.RealtimeAllowedOrigins, config.TrustAnyOrigin) {
+		slog.Warn("SECURITY WARNING: server.realtime_allowed_origins trusts every browser origin",
+			"security_risk", "any web page can open a realtime websocket to the gateway from a visitor's browser",
+			"recommendation", "list the specific origins you serve a realtime web client from instead of \"*\"")
+	}
+
 	// Client address resolution. Reported whenever a proxy is trusted, because
 	// it decides which address every request log entry, rate limit key, and log line
 	// attributes a request to.
