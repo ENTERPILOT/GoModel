@@ -124,12 +124,74 @@ func TestProviderFactory_SelectorIsConsultedPerRequest(t *testing.T) {
 	assert.Equal(t, "api.openai.com", last.URL.Host)
 }
 
+// The selector learns which key a request carries from the request the
+// transport is about to send, so each rotated key reports its own position.
+// Its error ends every request before a connection is opened.
+func TestProviderFactory_SelectorSeesTheKeyOfEachRequest(t *testing.T) {
+	factory, captured := captureOptionsFactory(t)
+	selector := &fakeProxySelector{err: errors.New("stop before dialing")}
+	factory.SetProxySelector(selector)
+	_, err := factory.Create(ProviderConfig{Name: "groq", Type: "capture", APIKeys: []string{"sk-account-a", "sk-account-b"}})
+	require.NoError(t, err)
+
+	var positions []int
+	for range 3 {
+		req, err := http.NewRequest(http.MethodGet, "https://upstream.invalid/v1/models", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+captured.Keys.Next())
+		_, err = captured.HTTPClient.Do(req)
+		require.ErrorContains(t, err, "stop before dialing")
+		last := selector.last.Load()
+		require.NotNil(t, last)
+		assert.Equal(t, "groq", last.Provider)
+		positions = append(positions, last.KeyPosition)
+	}
+
+	assert.Equal(t, []int{1, 2, 1}, positions)
+}
+
+// A config built by hand may name its one key in APIKey alone; the provider
+// falls back to it, and so must the transport.
+func TestProviderFactory_SelectorSeesTheKeyOfASingleKeyConfig(t *testing.T) {
+	factory, captured := captureOptionsFactory(t)
+	selector := &fakeProxySelector{}
+	factory.SetProxySelector(selector)
+	_, err := factory.Create(ProviderConfig{Name: "p", Type: "capture", APIKey: "sk-only"})
+	require.NoError(t, err)
+
+	transport, ok := httpclient.CurrentTransport(captured.HTTPClient)
+	require.True(t, ok)
+	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/v1/models", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer sk-only")
+	_, err = transport.Proxy(req)
+	require.NoError(t, err)
+
+	last := selector.last.Load()
+	require.NotNil(t, last)
+	assert.Equal(t, 1, last.KeyPosition)
+}
+
+func TestProviderFactory_SelectorSeesNoKeyOnAnUnauthenticatedRequest(t *testing.T) {
+	factory, captured := captureOptionsFactory(t)
+	selector := &fakeProxySelector{}
+	factory.SetProxySelector(selector)
+	_, err := factory.Create(ProviderConfig{Name: "groq", Type: "capture", APIKeys: []string{"sk-account-a", "sk-account-b"}})
+	require.NoError(t, err)
+
+	transportProxy(t, captured.HTTPClient, "https://api.groq.com/openai/v1/models")
+
+	last := selector.last.Load()
+	require.NotNil(t, last)
+	assert.Zero(t, last.KeyPosition)
+}
+
 // http.ProxyFromEnvironment reads the environment once per process, so the
 // fallback is exercised through the seam rather than by setting HTTPS_PROXY.
 func TestSelectedProxy_WithoutOpinionUsesTheFallback(t *testing.T) {
 	selector := &fakeProxySelector{}
 	fallback := func(*http.Request) (*url.URL, error) { return &url.URL{Scheme: "http", Host: "env-proxy:3128"}, nil }
-	proxyFunc := selectedProxy(selector, "openai-eu", "openai", fallback)
+	proxyFunc := selectedProxy(selector, "openai-eu", "openai", nil, fallback)
 
 	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/v1/models", nil)
 	require.NoError(t, err)

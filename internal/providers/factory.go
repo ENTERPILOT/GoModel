@@ -196,7 +196,9 @@ func (f *ProviderFactory) create(cfg ProviderConfig, keys *Keyring) (core.Provid
 	// One trimmed name for the clients and the hooks, so both attribute a
 	// request to the same instance.
 	name := strings.TrimSpace(cfg.Name)
-	httpClient, err := providerHTTPClient(cfg, proxySelector)
+	// The transport reads the key off each request with the ring the provider
+	// authenticates from, including its single-key fallback.
+	httpClient, err := providerHTTPClient(cfg, proxySelector, ProviderOptions{Keys: keys}.Keyring(cfg.APIKey))
 	if err != nil {
 		return nil, err
 	}
