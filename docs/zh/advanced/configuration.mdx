@@ -42,7 +42,7 @@ GoModel 会根据常用的环境变量自动发现提供商。
 | -------------------- | ----------------------------------------------------- | ---------------------- |
 | `PORT`               | HTTP 服务端口                                      | `8080`                 |
 | `BASE_PATH`          | 挂载路径前缀，例如 `/g`                   | `/`                    |
-| `GOMODEL_MASTER_KEY` | 用于保护网关的认证密钥           | _（空，不安全模式）_ |
+| `GOMODEL_MASTER_KEY` | 用于保护网关的认证密钥。请使用 `openssl rand -hex 32` 生成；如果密钥是模板占位符 `your-secret-key`、`your-secret-key-here` 或 `my-secret-key`，启动会失败；密钥短于 16 个字符（例如指南中的本地示例 `change-me`）时会记录警告。设置 `MASTER_KEY_DISABLED=true` 时，该密钥会被直接丢弃，不做检查 | _（空，不安全模式）_ |
 | `MASTER_KEY_DISABLED` | 关闭主密钥认证，仅保留[托管密钥](/zh/features/users)和认证扩展作为凭据 | `false`                |
 | `AUTH_KEY_PREFIX`    | 新签发的[托管密钥](/zh/features/users)所用的前缀；已有密钥继续有效 | `sk_gom_`              |
 | `GOMODEL_DEMO_MODE`  | 在日志和控制台中启用公开演示警告  | `false`                |
@@ -456,7 +456,7 @@ server:
   port: "3000"
   base_path: "/g"
   user_path_header: "X-GoModel-User-Path"
-  master_key: "my-secret-key"
+  master_key: "${env:GOMODEL_MASTER_KEY}"
 
 cache:
   model:

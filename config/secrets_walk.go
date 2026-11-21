@@ -44,6 +44,13 @@ func (r *LoadResult) resolveSecrets(ctx context.Context) error {
 	if err := checkResolvedServerTLS(configuredServer, r.Config.Server); err != nil {
 		return err
 	}
+	// Load rejected a literal placeholder; a key behind a reference is only
+	// known now. The weak-key warning waits for this point too, so it is
+	// logged once per started gateway rather than by every probe command.
+	if err := rejectPlaceholderMasterKey(r.Config.Server.MasterKey); err != nil {
+		return err
+	}
+	warnWeakMasterKey(r.Config.Server.MasterKey)
 	return validateResolvedMCP(&r.Config.MCP)
 }
 
