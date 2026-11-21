@@ -49,6 +49,7 @@ Najczęstszy sposób konfigurowania GoModel. Ustaw dowolną z poniższych zmienn
 | `GOMODEL_DEMO_MODE`  | Włącza ostrzeżenia o publicznym demo w logach i w dashboardzie | `false`                |
 | `BODY_SIZE_LIMIT`    | Maksymalny rozmiar body requestu (np. `10M`, `1024K`, `500KB`), po kompresji i po dekompresji | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | Liczba sekund, przez którą pojedynczy zapis odpowiedzi na trasie modelu może czekać, aż klient go odczyta; `0` wyłącza | `60`                   |
+| `AUDIO_SPEECH_CHUNK_CHARS` | Maksymalna liczba znaków [tekstu `/v1/audio/speech`](/pl/advanced/audio-api#długi-tekst) wysyłana do providera w jednym requeście; dłuższy tekst z `response_format` `wav` lub `pcm` (bez SSE) jest dzielony na granicach zdań i zwracany jako jeden strumień audio. `0` nigdy nie dzieli | `0`                    |
 | `USER_PATH_HEADER`   | Nagłówek używany do odczytu/zapisu wartości `user_path` requestu | `X-GoModel-User-Path`  |
 | `SERVER_TRUSTED_PROXIES` | Sieci, w których stoją Twoje własne proxy; włącza odczyt adresu klienta z nagłówka | _(pusty)_ |
 | `SERVER_CLIENT_IP_HEADER` | Nagłówek, w którym zaufane proxy przekazuje adres klienta | `X-Forwarded-For` |

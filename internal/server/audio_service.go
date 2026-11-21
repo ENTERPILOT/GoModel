@@ -70,6 +70,10 @@ type audioService struct {
 	logBodies      bool
 	logAudioBodies bool
 	media          *requestlog.MediaCapturer
+	// speechChunkChars is the most input characters one upstream speech request
+	// carries; longer input is split and its audio joined (see speechParts).
+	// 0 never splits.
+	speechChunkChars int
 }
 
 // audioCapture returns the media capture for this request, or nil when audio
@@ -131,19 +135,19 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	}
 	defer release()
 	started := time.Now()
-	resp, err := router.CreateSpeech(ctx, req)
+	resp, spoken, err := s.synthesizeSpeech(ctx, router, route.providerName, req)
 	if err != nil {
 		return handleError(c, err)
 	}
 	format := speechResponseFormat(req, resp)
 	return s.finishAudio(c, route, resp, started, audioUsageAccounting{
 		extract: func(data []byte, pricing *core.ModelPricing) *usage.UsageEntry {
-			return usage.ExtractFromSpeechRequest(req.Input, data, format, route.requestID, route.model, route.providerType, pricing)
+			return usage.ExtractFromSpeechRequest(spoken(), data, format, route.requestID, route.model, route.providerType, pricing)
 		},
 		newStreamSink: func() audioUsageSink {
 			meter := usage.NewSpeechDurationMeter(format)
 			return audioStreamSink{Writer: meter, entry: func(pricing *core.ModelPricing) *usage.UsageEntry {
-				return usage.ExtractFromStreamedSpeechRequest(req.Input, meter, format, route.requestID, route.model, route.providerType, pricing)
+				return usage.ExtractFromStreamedSpeechRequest(spoken(), meter, format, route.requestID, route.model, route.providerType, pricing)
 			}}
 		},
 	})

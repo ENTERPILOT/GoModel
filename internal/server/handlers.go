@@ -54,6 +54,7 @@ type Handler struct {
 	normalizePassthroughV1Prefix bool
 	enabledPassthroughProviders  map[string]struct{}
 	realtimeEnabled              bool
+	audioSpeechChunkChars        int
 	mcpEnabled                   bool
 	mcpGateway                   *mcpgateway.Service
 	realtimeCalls                *realtime.CallRegistry
@@ -237,7 +238,7 @@ func (h *Handler) modelCalls() modelCallService {
 }
 
 func (h *Handler) audio() *audioService {
-	svc := &audioService{modelCallService: h.modelCalls(), media: h.mediaCapturer}
+	svc := &audioService{modelCallService: h.modelCalls(), media: h.mediaCapturer, speechChunkChars: h.audioSpeechChunkChars}
 	if h.logger != nil {
 		cfg := h.logger.Config()
 		svc.logBodies = cfg.LogBodies
