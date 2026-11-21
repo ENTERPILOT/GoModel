@@ -22,6 +22,7 @@ import {
   conversationEntryByRequestID,
   conversationEntryIsLatest,
   conversationFollowUpEntry,
+  conversationRequestStepBodyMissing,
   conversationRequestSteps,
   followUpEndpointKind,
   formatJSON,
@@ -60,6 +61,9 @@ class ConversationDrawerStore {
   conversationReturnFocusEl = null;
   bodyPointerStart = null;
   revisionDetailRequested = new Set();
+  // The entry whose last revision-detail fetch failed, so the drawer can say
+  // its rewritten body is not shown instead of waiting for it.
+  revisionDetailFailedID = $state("");
 
   conversationDialogEl = $state(null);
   conversationCloseBtnEl = $state(null);
@@ -175,6 +179,7 @@ class ConversationDrawerStore {
     this.conversationRequestStep =
       normalizedConversationRequestStep(entry, requestStep);
     this.revisionDetailRequested = new Set();
+    this.revisionDetailFailedID = "";
     this.followUpText = "";
     this.followUpError = "";
     this.followUpRequestID = "";
@@ -233,6 +238,17 @@ class ConversationDrawerStore {
     void this._ensureAnchorRevisionBodies();
   }
 
+  // The selected step rewrote the request but its body was not stored, so
+  // the transcript shows the original request under that step's name.
+  requestStepBodyMissing() {
+    const entry = this.selectedConversationEntry();
+    return conversationRequestStepBodyMissing(
+      entry,
+      this.conversationRequestStep,
+      !!entry && String(entry.id || "") === this.revisionDetailFailedID,
+    );
+  }
+
   // Conversation entries arrive with revision bodies stripped (metadata
   // only). When the previewed entry has rewrite steps whose bodies are
   // missing, load the full record once from the detail endpoint so the step
@@ -261,16 +277,25 @@ class ConversationDrawerStore {
       // selection retries.
       if (!result.ok || result.stale || !result.data) {
         requested.delete(entryID);
+        if (!result.stale) this._markRevisionDetailFailed(requested, entryID);
         return;
       }
+      if (this.revisionDetailFailedID === entryID) this.revisionDetailFailedID = "";
       liveLogs.upsertRequestLogRecord(
         { ...result.data, _detail_loaded: true },
         "audit.detail",
       );
     } catch (e) {
       requested.delete(entryID);
+      this._markRevisionDetailFailed(requested, entryID);
       console.error("Failed to fetch request log detail for request steps:", e);
     }
+  }
+
+  // A fetch started before the drawer was reopened must not mark the new
+  // session's entry as failed.
+  _markRevisionDetailFailed(requested, entryID) {
+    if (requested === this.revisionDetailRequested) this.revisionDetailFailedID = entryID;
   }
 
   // Re-render an open conversation when its normalized request log record changes.

@@ -350,6 +350,9 @@
           {/each}
         </select>
       </label>
+      {#if drawer.requestStepBodyMissing()}
+        <p class="conversation-step-note">{m.requests_rewritten_body_not_captured()}</p>
+      {/if}
     {/if}
     {#if drawer.conversationMessages.some((msg) =>
       Number(msg.promptCacheRatio || 0) > 0
@@ -731,6 +734,12 @@
   .conversation-step-picker select:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 38%, transparent);
     outline-offset: 1px;
+  }
+
+  .conversation-step-note {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 11px;
   }
 
   .conversation-cache-legend {
