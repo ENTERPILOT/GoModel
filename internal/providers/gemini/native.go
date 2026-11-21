@@ -948,6 +948,10 @@ func copyJSONNumber(raw json.RawMessage, cfg map[string]any, key string) {
 	}
 }
 
+// maxStopSequences is the longest GenerationConfig.stopSequences list Gemini
+// accepts; a longer client list is truncated rather than failed upstream.
+const maxStopSequences = 5
+
 func copyStopSequences(raw json.RawMessage, cfg map[string]any) {
 	if len(raw) == 0 {
 		return
@@ -959,6 +963,10 @@ func copyStopSequences(raw json.RawMessage, cfg map[string]any) {
 	}
 	var many []string
 	if err := json.Unmarshal(raw, &many); err == nil && len(many) > 0 {
+		// generateContent rejects a stopSequences list longer than five.
+		if len(many) > maxStopSequences {
+			many = many[:maxStopSequences]
+		}
 		cfg["stopSequences"] = many
 	}
 }

@@ -96,3 +96,28 @@ func TestGeminiGenerationConfig_DropsPenalties(t *testing.T) {
 		})
 	}
 }
+
+// Gemini's GenerationConfig.stopSequences accepts at most five entries and
+// answers HTTP 400 for a longer list, so longer client lists are truncated.
+func TestGeminiGenerationConfig_CapsStopSequences(t *testing.T) {
+	tests := []struct {
+		name string
+		stop string
+		want []string
+	}{
+		{name: "within limit is kept", stop: `["a","b","c","d","e"]`, want: []string{"a", "b", "c", "d", "e"}},
+		{name: "over limit is truncated", stop: `["a","b","c","d","e","f","g"]`, want: []string{"a", "b", "c", "d", "e"}},
+		{name: "bare string is kept", stop: `"END"`, want: []string{"END"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var req core.ChatRequest
+			body := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],"stop":` + tt.stop + `}`
+			require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+			cfg := geminiGenerationConfig(&req)
+
+			assert.Equal(t, tt.want, cfg["stopSequences"])
+		})
+	}
+}
