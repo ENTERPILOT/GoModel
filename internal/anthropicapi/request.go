@@ -945,7 +945,7 @@ func thinkingToReasoning(thinking *Thinking) *core.Reasoning {
 	effort := "low"
 	switch {
 	case thinking.Type == "adaptive":
-		effort = "medium"
+		effort = adaptiveEffort
 	case thinking.BudgetTokens >= 20000:
 		effort = "high"
 	case thinking.BudgetTokens >= 10000:

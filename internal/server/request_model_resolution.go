@@ -95,6 +95,7 @@ func ensureRequestModelResolution(c *echo.Context, provider core.RoutableProvide
 	if err != nil || !parsed {
 		return nil, parsed, err
 	}
+	model = modelOrPathDefault(c, resolver, model, providerHint)
 	resolution, err := resolveAndStoreRequestModelResolution(c, provider, resolver, nil, model, providerHint)
 	return resolution, true, err
 }

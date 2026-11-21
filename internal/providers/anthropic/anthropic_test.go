@@ -4527,7 +4527,7 @@ func TestAlwaysThinks(t *testing.T) {
 		"claude-haiku-5-5":           false,
 		"claude-opus-4-8":            false,
 	} {
-		assert.Equal(t, want, alwaysThinks(model), model)
+		assert.Equal(t, want, AlwaysThinks(model), model)
 	}
 }
 

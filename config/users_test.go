@@ -36,3 +36,10 @@ func TestApplyUsersEnv_Invalid(t *testing.T) {
 	err := applyUsersEnv(cfg, false)
 	require.NoError(t, err)
 }
+
+func TestApplyUsersEnv_ParsesRequestPolicy(t *testing.T) {
+	cfg := &Config{Users: []UserConfig{{Path: "/acme", MaxReasoningEffort: "high", MaxOutputTokens: 8000}}}
+	t.Setenv(envUsers, `[{"path":"/acme","default_model":"team-model","max_reasoning_effort":"medium","max_output_tokens":4096}]`)
+	require.NoError(t, applyUsersEnv(cfg, true))
+	require.Equal(t, []UserConfig{{Path: "/acme", DefaultModel: "team-model", MaxReasoningEffort: "medium", MaxOutputTokens: 4096}}, cfg.Users)
+}

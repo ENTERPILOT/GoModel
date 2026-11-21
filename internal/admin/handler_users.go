@@ -21,7 +21,16 @@ type userNodeResponse struct {
 	// AllowedModels is the node's own allowlist; empty means it does not
 	// restrict models itself.
 	AllowedModels []string `json:"allowed_models"`
-	Description   string   `json:"description,omitempty"`
+	// DefaultModel, MaxReasoningEffort, and MaxOutputTokens are the node's
+	// own request policy; empty and zero mean the node sets none.
+	DefaultModel       string `json:"default_model,omitempty"`
+	MaxReasoningEffort string `json:"max_reasoning_effort,omitempty"`
+	MaxOutputTokens    int    `json:"max_output_tokens,omitempty"`
+	// RequestPolicy is the request policy in force on this path once its
+	// own and every ancestor's are combined, with the path each value comes
+	// from. Nil when no path sets any.
+	RequestPolicy *users.RequestPolicy `json:"request_policy,omitempty"`
+	Description   string               `json:"description,omitempty"`
 	// Configured reports whether a policy row exists for this exact path.
 	Configured bool `json:"configured"`
 	// Managed reports whether the policy is declared in config and read-only.
@@ -51,7 +60,15 @@ type userListResponse struct {
 type upsertUserRequest struct {
 	UserPath      string   `json:"user_path"`
 	AllowedModels []string `json:"allowed_models"`
-	Description   string   `json:"description,omitempty"`
+	// DefaultModel serves chat, Responses and Messages requests under the
+	// path that name neither a model nor a provider.
+	DefaultModel string `json:"default_model,omitempty"`
+	// MaxReasoningEffort and MaxOutputTokens cap what requests under the
+	// path may send upstream, batches and /p/ passthrough excepted. A PUT
+	// replaces the whole policy: a field left out is cleared.
+	MaxReasoningEffort string `json:"max_reasoning_effort,omitempty"`
+	MaxOutputTokens    int    `json:"max_output_tokens,omitempty"`
+	Description        string `json:"description,omitempty"`
 }
 
 // ListUsers handles GET /admin/users. It returns the user-path tree derived
@@ -79,9 +96,12 @@ func (h *Handler) UpsertUser(c *echo.Context) error {
 	h.mutationMu.Lock()
 	defer h.mutationMu.Unlock()
 	if _, err := h.users.Upsert(c.Request().Context(), users.User{
-		UserPath:      req.UserPath,
-		AllowedModels: req.AllowedModels,
-		Description:   req.Description,
+		UserPath:           req.UserPath,
+		AllowedModels:      req.AllowedModels,
+		DefaultModel:       req.DefaultModel,
+		MaxReasoningEffort: req.MaxReasoningEffort,
+		MaxOutputTokens:    req.MaxOutputTokens,
+		Description:        req.Description,
 	}); err != nil {
 		return handleError(c, userWriteError(err))
 	}
@@ -112,9 +132,10 @@ func (h *Handler) DeleteUser(c *echo.Context) error {
 }
 
 // requireUserPathInScope rejects writes to user nodes outside the caller's
-// scope, and to the scope root itself: the model policy on the root is what
-// the tenant was granted, so only a global credential changes it. Unparseable
-// paths pass through so the service reports the usual validation error.
+// scope, and to the scope root itself: the policy on the root (its models,
+// its default model, its ceilings) is what the tenant was granted, so only a
+// global credential changes it. Unparseable paths pass through so the service
+// reports the usual validation error.
 func requireUserPathInScope(c *echo.Context, raw string) error {
 	scope := requestScope(c)
 	if scope.Global() {
@@ -204,6 +225,9 @@ func (h *Handler) userNodes(scope core.AccessScope) []userNodeResponse {
 		node.Configured = true
 		node.Managed = user.Managed
 		node.Description = user.Description
+		node.DefaultModel = user.DefaultModel
+		node.MaxReasoningEffort = user.MaxReasoningEffort
+		node.MaxOutputTokens = user.MaxOutputTokens
 		if len(user.AllowedModels) > 0 {
 			node.AllowedModels = user.AllowedModels
 		}
@@ -242,6 +266,11 @@ func (h *Handler) userNodes(scope core.AccessScope) []userNodeResponse {
 			if constraint.UserPath != userPath {
 				node.InheritedFrom = append(node.InheritedFrom, constraint.UserPath)
 			}
+		}
+		// Ancestors above a scoped caller's root still bound it, so the
+		// policy in force is reported whole, like the effective models.
+		if policy := h.users.RequestPolicy(userPath); !policy.IsZero() {
+			node.RequestPolicy = &policy
 		}
 		node.EffectiveModels = h.effectiveModels(core.WithEffectiveUserPath(context.Background(), userPath), catalog)
 		result = append(result, *node)
