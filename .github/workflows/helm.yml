@@ -63,15 +63,18 @@ jobs:
           ! helm template gomodel helm --set env.PORT=9000 >/dev/null 2>&1
           helm template gomodel helm --set storage.type=postgresql \
             --set 'extraEnv[0].name=POSTGRES_URL' --set 'extraEnv[0].value=postgres://x' >/dev/null
-          test "$(helm template gomodel helm --set 'env.BASE_PATH=//g//api/../secure//' -s templates/deployment.yaml | grep -c 'path: /g/secure/health')" = 2
+          test "$(helm template gomodel helm --set 'env.BASE_PATH=//g//api/../secure//' -s templates/deployment.yaml | grep -c 'path: /g/secure/health')" = 3
           helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt -s templates/tests/test-connection.yaml | grep -q '"https://gomodel:8080/health/ready"'
           helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt -s templates/tests/test-connection.yaml | grep -q -- '- --insecure'
-          test "$(helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt -s templates/deployment.yaml | grep -c 'scheme: HTTPS')" = 2
+          test "$(helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt -s templates/deployment.yaml | grep -c 'scheme: HTTPS')" = 3
           ! helm template gomodel helm -s templates/deployment.yaml | grep -q 'scheme:'
           test "$(helm template gomodel helm -s templates/deployment.yaml | grep -c 'mountPath: /tmp$')" = 1
           test "$(helm template gomodel helm -s templates/deployment.yaml --set 'extraVolumes[0].name=scratch' --set 'extraVolumeMounts[0].name=scratch' --set 'extraVolumeMounts[0].mountPath=/tmp' | grep -c -e 'mountPath: /tmp$' -e 'name: tmp$')" = 1
-          test "$(helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt --set env.BASE_PATH=/g -s templates/deployment.yaml | grep -c -e 'path: /g/health' -e 'scheme: HTTPS')" = 4
+          test "$(helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt --set env.BASE_PATH=/g -s templates/deployment.yaml | grep -c -e 'path: /g/health' -e 'scheme: HTTPS')" = 6
           helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt --set readinessProbe.httpGet.scheme=HTTP -s templates/deployment.yaml | grep -q 'scheme: HTTP$'
+          test "$(helm template gomodel helm --set livenessProbe.httpGet.scheme=HTTPS --set readinessProbe.httpGet.scheme=HTTPS -s templates/deployment.yaml | grep -c 'scheme: HTTPS')" = 3
+          test "$(helm template gomodel helm --set livenessProbe.httpGet.scheme=HTTPS --set startupProbe.httpGet.scheme=HTTP -s templates/deployment.yaml | grep -c 'scheme: HTTPS')" = 1
+          test "$(helm template gomodel helm --set startupProbe=null -s templates/deployment.yaml | grep -c 'Probe:$')" = 2
           helm template gomodel helm --set replicaCount=2 --set storage.type=postgresql --set storage.url=postgres://x \
             --set podDisruptionBudget.maxUnavailable=0 -s templates/pdb.yaml | grep -q 'maxUnavailable: 0'
 

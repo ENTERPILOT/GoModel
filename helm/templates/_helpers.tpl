@@ -138,16 +138,24 @@ native TLS, http otherwise.
 {{- end }}
 
 {{/*
-Render a liveness or readiness probe. An httpGet probe gets its path prefixed
+Render a startup, liveness or readiness probe. An httpGet probe gets its path prefixed
 with BASE_PATH and, when the gateway serves native TLS, scheme HTTPS, so the
 kubelet does not probe a TLS listener over plain HTTP (which answers 400 and
-keeps the pod from ever becoming Ready). A scheme set in values wins.
+keeps the pod from ever becoming Ready). A scheme set in values wins. The
+optional "schemeFrom" probe lends its scheme to one that sets none, so the
+startup probe follows a liveness (or, without one, readiness) probe switched
+to HTTPS by hand.
 Usage: include "gomodel.httpProbe" (dict "root" $ "probe" .Values.livenessProbe)
 */}}
 {{- define "gomodel.httpProbe" -}}
 {{- $probe := deepCopy .probe }}
 {{- if $probe.httpGet }}
 {{- $_ := set $probe.httpGet "path" (include "gomodel.pathWithBasePath" (dict "root" .root "path" $probe.httpGet.path)) }}
+{{- if and (not $probe.httpGet.scheme) .schemeFrom }}
+{{- with dig "httpGet" "scheme" "" .schemeFrom }}
+{{- $_ := set $probe.httpGet "scheme" . }}
+{{- end }}
+{{- end }}
 {{- if and (not $probe.httpGet.scheme) (eq (include "gomodel.scheme" .root) "https") }}
 {{- $_ := set $probe.httpGet "scheme" "HTTPS" }}
 {{- end }}

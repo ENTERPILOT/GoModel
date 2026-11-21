@@ -148,6 +148,20 @@ podDisruptionBudget:
   maxUnavailable: null
 
 # Probe paths are prefixed with env.BASE_PATH automatically.
+
+# Holds off the liveness probe until the listener answers, for up to 5 minutes
+# (periodSeconds x failureThreshold). The gateway listens only after storage is
+# set up, and on PostgreSQL a replica waits while another one builds an index.
+# Without its own httpGet.scheme it uses the liveness probe's (the readiness
+# probe's when liveness is off). null disables it.
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 60
+
 livenessProbe:
   httpGet:
     path: /health
