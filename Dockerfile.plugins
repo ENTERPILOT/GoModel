@@ -17,6 +17,16 @@
 #
 # Build a plugin with the exact toolchain of that image:
 #   docker build -f Dockerfile.plugins --target plugin-builder -t gomodel-plugin-builder .
+#
+#   A package in this repository, such as an example, is already in the image
+#   under /app; pass its path there:
+#   docker run --rm -v "$PWD/plugins:/out" gomodel-plugin-builder \
+#       -o /out/keyword_block.so /app/docs/example_plugins/keywordblock
+#
+#   A plugin in its own module (a directory with a go.mod) is mounted at /src.
+#   Have its go.mod `replace github.com/enterpilot/gomodel => /app` so it
+#   builds against the sources in the image; a host path such as ../gomodel
+#   does not exist there:
 #   docker run --rm -v "$PWD/my-plugin:/src" -v "$PWD/plugins:/out" \
 #       gomodel-plugin-builder -o /out/my-plugin.so /src
 #
@@ -45,9 +55,11 @@ RUN CGO_ENABLED=1 go build \
 RUN mkdir -p /app/.cache /app/data /app/plugins && touch /app/.cache/.keep /app/data/.keep /app/plugins/.keep
 
 # Plugin builder: the same toolchain, sources, and gomodel binary, so
-# `gomodel plugin build` reproduces the host's build exactly. Mount a plugin
-# package at /src (an in-tree example directory, or an external module that
-# `replace`s github.com/enterpilot/gomodel => /app) and an output dir at /out.
+# `gomodel plugin build` reproduces the host's build exactly. Mount an output
+# dir at /out. A package in this repository builds in place from its path
+# under /app. A plugin in its own module is mounted at /src and `replace`s
+# github.com/enterpilot/gomodel => /app; a bare package directory mounted
+# there has no go.mod and does not build.
 FROM builder AS plugin-builder
 WORKDIR /src
 ENTRYPOINT ["/gomodel", "plugin", "build"]
