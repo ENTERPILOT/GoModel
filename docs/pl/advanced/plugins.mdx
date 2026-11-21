@@ -691,7 +691,10 @@ Uwagi dla autorów:
   ```
 - Dodaj `Summarize(config json.RawMessage) string`, aby wyświetlać jednolinijkowe podsumowanie
   na liście guardrails, oraz `Normalize(config) (json.RawMessage, error)`, aby
-  kanonizować konfigurację przed zapisaniem. Obie metody są opcjonalne.
+  kanonizować konfigurację przed zapisaniem. Dodaj
+  `ValidateSave(config json.RawMessage) error`, aby przy zapisie instancji odrzucić
+  konfigurację, którą `Init` nadal toleruje w instancji już zapisanej. Wszystkie trzy metody są
+  opcjonalne.
 - Zaimplementuj `pluginapi.HealthChecker` (`Health(ctx) error`), gdy instancja
   zależy od czegoś poza procesem, na przykład od sidecara z klasyfikatorem.
   GoModel sprawdza ją poza ścieżką requestu po zbudowaniu instancji i przy

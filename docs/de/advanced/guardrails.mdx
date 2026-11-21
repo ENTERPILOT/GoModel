@@ -490,10 +490,13 @@ gesetzt werden. Das gilt auch für die Schlüssel von AI-Gateways vor einem Prov
 (`Helicone-Auth`, `cf-aig-authorization`, `x-portkey-api-key`,
 `Ocp-Apim-Subscription-Key`): Ein Failover auf einen anderen Provider würde sie
 dorthin senden. Namen werden verglichen, wobei `_` als `-` gilt, also wird auch
-`X_Api_Key` abgelehnt. Eine Zeile, die einen abgelehnten Header nennt, wird mit
-einer Warnung im Log übersprungen, und der Rest der Konfiguration wird geladen:
-Die Liste wächst zwischen Releases, und ein gespeicherter Guardrail muss nach
-einem Upgrade weiterhin laden.
+`X_Api_Key` abgelehnt. Das Speichern einer Instanz mit einer Zeile, die einen
+abgelehnten Header nennt, schlägt mit einem Validierungsfehler fehl, der Feld
+und Zeile nennt; so werden dort eingetippte Zugangsdaten nie gespeichert. Eine
+bereits gespeicherte oder in der Konfigurationsdatei deklarierte Instanz lädt
+weiterhin: Die Zeile wird mit einer Warnung im Log übersprungen, denn die Liste
+wächst zwischen Releases, und ein gespeicherter Guardrail muss nach einem
+Upgrade weiterhin laden.
 
 `upstream_set` überspringt auf dieselbe Weise außerdem die Namen, die ein
 Plugin am Provider-Aufruf nicht setzen darf, weil sie dem Transport, dem Gateway

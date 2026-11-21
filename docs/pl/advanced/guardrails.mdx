@@ -474,9 +474,12 @@ Nagłówków z danymi uwierzytelniającymi (`Authorization`, `X-Api-Key`,
 providerem (`Helicone-Auth`, `cf-aig-authorization`, `x-portkey-api-key`,
 `Ocp-Apim-Subscription-Key`): failover do innego providera wysłałby je tam.
 Nazwy są porównywane z `_` traktowanym jak `-`, więc `X_Api_Key` też jest
-odrzucany. Linia z odrzuconym nagłówkiem jest pomijana z ostrzeżeniem w logu, a
-reszta konfiguracji się wczytuje: lista rośnie między wydaniami, a zapisany
-guardrail musi nadal się wczytywać po aktualizacji.
+odrzucany. Zapis instancji z linią zawierającą odrzucony nagłówek kończy się
+błędem walidacji wskazującym pole i linię, więc wpisane tam dane
+uwierzytelniające nigdy nie są zapisywane. Instancja już zapisana albo
+zadeklarowana w pliku konfiguracyjnym nadal się wczytuje: linia jest pomijana z
+ostrzeżeniem w logu, bo lista rośnie między wydaniami, a zapisany guardrail musi
+nadal się wczytywać po aktualizacji.
 
 `upstream_set` pomija też w ten sam sposób nazwy, których plugin
 nie może ustawić w wywołaniu providera, bo należą do transportu, gatewaya lub
