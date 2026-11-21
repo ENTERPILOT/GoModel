@@ -8,6 +8,8 @@
   import { labelColor } from "$lib/utils/chartTheme.js";
   import { budgetsStore as store } from "./budgets.svelte.js";
   import {
+    budgetAlertThresholds,
+    budgetAlertThresholdsLabel,
     budgetBilledOnProviderCost,
     budgetCostBasis,
     budgetKey,
@@ -19,6 +21,8 @@
     budgetPeriodPercent,
     budgetPeriodPercentLabel,
     budgetPeriodTrackClass,
+    budgetProjectedOver,
+    budgetProjectedSpend,
     budgetRemainingLabel,
     budgetScope,
     budgetScopeLabel,
@@ -253,6 +257,54 @@
               </span>
             </div>
           </div>
+          {#if budgetAlertThresholds(item, store.alerts).length > 0 || budgetProjectedSpend(item) !== null}
+            <div class="budget-bar-line budget-outlook">
+              <div class="budget-bar-label">
+                <span>{m.budgets_outlook()}</span>
+              </div>
+              <div class="budget-outlook-items">
+                {#if budgetProjectedSpend(item) !== null}
+                  <span
+                    class="budget-outlook-item"
+                    class:budget-outlook-over={budgetProjectedOver(item)}
+                    title={m.budgets_projected_title()}
+                  >
+                    {m.budgets_projected({
+                      amount: formatCost(budgetProjectedSpend(item)),
+                    })}
+                  </span>
+                {/if}
+                {#if item.projected_exhaustion_at}
+                  <span
+                    class="budget-outlook-item budget-outlook-over"
+                    title={timestampTimeZoneTitle(item.projected_exhaustion_at)}
+                  >
+                    {m.budgets_projected_exhaustion({
+                      time: timezone.formatTimestamp(item.projected_exhaustion_at),
+                    })}
+                  </span>
+                {/if}
+                {#if budgetAlertThresholds(item, store.alerts).length > 0}
+                  <span
+                    class="budget-outlook-item"
+                    class:budget-outlook-inactive={!store.alerts.enabled}
+                    title={store.alerts.enabled
+                      ? m.budgets_alerts_at_title()
+                      : m.budgets_alerts_inactive_title()}
+                  >
+                    {m.budgets_alerts_at({
+                      thresholds: budgetAlertThresholdsLabel(
+                        budgetAlertThresholds(item, store.alerts),
+                      ),
+                    })}
+                    {#if !store.alerts.enabled}
+                      <span class="budget-source">{m.budgets_alerts_inactive()}</span>
+                    {/if}
+                  </span>
+                {/if}
+              </div>
+            </div>
+          {/if}
         </div>
       </div>
     </section>
@@ -266,6 +318,32 @@
     border-radius: 0.5rem;
     color: var(--text-muted);
     line-height: 1.45;
+  }
+
+  .budget-outlook-items {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 14px;
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .budget-outlook-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .budget-outlook-over {
+    color: var(--danger);
+    font-weight: 600;
+  }
+
+  .budget-outlook-inactive {
+    opacity: 0.75;
   }
 
   .budget-bar-text-row-on-fill {
