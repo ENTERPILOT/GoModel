@@ -14,6 +14,18 @@
       "required": ["repository"]
     },
     "imagePullSecrets": { "type": "array" },
+    "testConnection": {
+      "type": "object",
+      "properties": {
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string" }
+          }
+        }
+      }
+    },
     "nameOverride": { "type": "string" },
     "fullnameOverride": { "type": "string" },
     "env": { "$ref": "#/definitions/envMap" },

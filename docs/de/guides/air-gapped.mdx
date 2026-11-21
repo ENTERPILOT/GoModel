@@ -1,0 +1,244 @@
+---
+title: "Air-Gapped-Deployment"
+description: "GoModel ohne Route ins öffentliche Internet betreiben: was Sie mitbringen, die eine Einstellung, die Sie aktivieren, wie Preise mit einem Offline-Modellkatalog erhalten bleiben und wie Sie prüfen, dass nichts nach außen geht."
+icon: "unplug"
+keywords: ["Air-Gapped", "air-gapped", "offline", "GOMODEL_OFFLINE", "private Registry", "private registry", "Image-Mirror", "image mirror", "Modellkatalog", "model catalog", "Egress", "egress", "NetworkPolicy"]
+---
+
+GoModel ist ein einzelnes statisches Binary mit eingebettetem Dashboard. Neben
+lokalen Modellservern wie [Ollama](/de/providers/multiple-ollama),
+[vLLM](/de/providers/vllm) oder [SGLang](/de/providers/sglang) benötigt es keine
+Route ins öffentliche Internet. Diese Seite ist das Runbook: Artefakte
+mitbringen, Offline-Modus aktivieren, Modellkatalog bereitstellen, prüfen.
+
+## Was das Gateway von sich aus kontaktiert
+
+Eine Standardinstallation öffnet zwei Verbindungen, die Sie nicht konfiguriert
+haben:
+
+| Aufruf | Host | Zweck |
+| --- | --- | --- |
+| [Modellkatalog](/de/advanced/model-metadata) | `raw.githubusercontent.com` | Preise, Kontextfenster, Fähigkeiten. Beim Start und bei jeder Cache-Aktualisierung. |
+| [Update-Prüfung](/de/advanced/version-awareness) | `gomodel.enterpilot.io` | Neueste Release-Nummer. Täglich und beim ersten Dashboard-Besuch eines Tages. |
+
+Beide sind Best-Effort: Schlagen sie fehl, startet das Gateway, meldet sich
+bereit und bedient Anfragen. Keiner von beiden überträgt etwas über Ihren
+Traffic; die Update-Prüfung sendet die laufende Version und eine anonyme
+Installations-ID (siehe
+[Was die Prüfung sendet](/de/advanced/version-awareness#was-die-prüfung-sendet)).
+Es gibt keine Lizenzprüfung. Das Dashboard lädt nichts von einem CDN, und seine
+Content-Security-Policy hält den Browser auf dem eigenen Origin des Gateways.
+Nur die Links zur Dokumentation zeigen nach außen.
+
+Alles andere, was das Gateway erreicht, haben Sie selbst deklariert: Provider,
+die Datenbank, Redis, einen OTLP-Collector, MCP-Upstreams, Vector Stores,
+Guardrail-Dienste.
+
+<Note>
+  Diese Liste wird erzwungen. Ein Test im Repository
+  (`run/offline_egress_test.go`) startet das Gateway hinter einem Proxy, der
+  jedes Ziel ablehnt, und schlägt fehl, sobald eine Standardinstallation einen
+  dritten Host oder eine Offline-Installation irgendeinen Host anspricht.
+</Note>
+
+## 1. Artefakte mitbringen
+
+Pinnen Sie eine Version; spiegeln Sie nicht `latest`.
+
+<Tabs>
+  <Tab title="Docker-Image">
+    Auf einer Maschine mit Internetzugang:
+
+    ```bash
+    # --platform ist die Plattform der Hosts, auf denen das Image laufen soll
+    docker pull --platform linux/amd64 enterpilot/gomodel:X.Y.Z
+    docker save enterpilot/gomodel:X.Y.Z -o gomodel-X.Y.Z.tar
+    ```
+
+    Innerhalb des Air Gaps:
+
+    ```bash
+    docker load -i gomodel-X.Y.Z.tar
+    docker tag enterpilot/gomodel:X.Y.Z registry.internal/enterpilot/gomodel:X.Y.Z
+    docker push registry.internal/enterpilot/gomodel:X.Y.Z
+    ```
+
+    Das Image wird für `linux/amd64`, `linux/arm64` und `linux/arm/v7`
+    veröffentlicht; das Archiv enthält nur die eine Plattform, die Sie gezogen
+    haben. Erreicht ein Host beide Registries, kopiert
+    `skopeo copy --all docker://enterpilot/gomodel:X.Y.Z docker://registry.internal/enterpilot/gomodel:X.Y.Z`
+    alle Plattformen in einem Schritt.
+  </Tab>
+  <Tab title="Binary">
+    Laden Sie das Archiv für Ihre Plattform und `checksums.txt` von der
+    [Release-Seite](https://github.com/ENTERPILOT/GoModel/releases) herunter,
+    und prüfen und entpacken Sie beides innen:
+
+    ```bash
+    sha256sum -c --ignore-missing checksums.txt
+    tar -xzf gomodel_X.Y.Z_linux_amd64.tar.gz
+    ```
+
+    Die Installer `install.sh` und `install.ps1` laden von GitHub herunter und
+    funktionieren daher nur auf einer Maschine mit Internetzugang.
+  </Tab>
+  <Tab title="Helm-Chart">
+    Das Chart liegt im Verzeichnis `helm/` des Repositorys und hat keine
+    Abhängigkeiten. Paketieren Sie es auf einer Maschine mit Internetzugang und
+    kopieren Sie das Archiv hinein:
+
+    ```bash
+    helm package helm
+    ```
+
+    Es zieht zwei Images: das Gateway und, nur für `helm test`,
+    `curlimages/curl`. Spiegeln Sie beide und verweisen Sie das Chart auf Ihre
+    Registry:
+
+    ```yaml
+    image:
+      repository: registry.internal/enterpilot/gomodel
+    testConnection:
+      image:
+        repository: registry.internal/curlimages/curl
+    imagePullSecrets:
+      - name: registry-credentials
+    env:
+      GOMODEL_OFFLINE: "true"
+    ```
+  </Tab>
+</Tabs>
+
+Laden Sie im selben Zug den Modellkatalog herunter:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/ENTERPILOT/ai-model-list/refs/heads/main/models.min.json
+```
+
+## 2. Offline-Modus aktivieren
+
+```bash
+GOMODEL_OFFLINE=true
+MODEL_LIST_URL=/etc/gomodel/models.json
+```
+
+`GOMODEL_OFFLINE=true` (`offline: true` in `config.yaml`) deaktiviert die
+Update-Prüfung, verwirft jede HTTP-URL für den Katalog und stoppt bei Providern
+im Modus `allowlist` die Abfrage von `/models`, die nur Metadaten dient. Die
+Einstellung wird nach allen anderen angewendet, sodass nichts in `config.yaml`
+oder in der Umgebung darunter einen Aufruf wieder aktivieren kann.
+Standardwert: `false`.
+
+Mit Docker:
+
+```bash
+docker run -d --name gomodel -p 8080:8080 \
+  -v gomodel_data:/app/data \
+  -v "$PWD/models.min.json":/etc/gomodel/models.json:ro \
+  -e GOMODEL_OFFLINE=true \
+  -e MODEL_LIST_URL=/etc/gomodel/models.json \
+  -e GOMODEL_MASTER_KEY=change-me \
+  -e VLLM_BASE_URL=http://vllm.internal:8000/v1 \
+  registry.internal/enterpilot/gomodel:X.Y.Z
+```
+
+Verwenden Ihre Modellserver eine interne Zertifizierungsstelle, ergänzen Sie
+`HTTP_TLS_CA_FILE`; siehe
+[Private CAs und Proxys](/de/guides/production#private-cas-und-proxys). Die
+Einstellung gilt nur für die HTTP-Clients des Gateways: PostgreSQL und MongoDB
+beziehen ihre CA aus der eigenen Verbindungs-URL (`sslrootcert`, `tlsCAFile`).
+
+## 3. Modellkatalog bereitstellen
+
+Ohne den Katalog hat ein Modell keine Preise, sofern sein Provider keine meldet
+oder Sie keine deklarieren (in `config.yaml` oder als Preisüberschreibung im
+Dashboard). Die [Kostenerfassung](/de/features/cost-tracking)
+zeichnet dann keine Kosten auf, und [Budgets](/de/features/budgets) haben
+nichts, was sie durchsetzen könnten.
+
+Ein Katalog, der als Dateipfad (oder `file://`-URL) angegeben ist, wird gelesen
+und nie abgerufen, bleibt also im Offline-Modus aktiv. Die Datei wird bei jeder
+Cache-Aktualisierung neu gelesen (`CACHE_REFRESH_INTERVAL`, Standard: eine
+Stunde): Ersetzen Sie sie auf der Festplatte, um Preise ohne Neustart zu
+aktualisieren.
+
+Zwei Alternativen:
+
+- **Ein interner Mirror.** Stellen Sie die Datei innerhalb des Air Gaps per
+  HTTP bereit und setzen Sie `MODEL_LIST_URL` darauf. Der Offline-Modus verwirft
+  HTTP-URLs für den Katalog; lassen Sie `GOMODEL_OFFLINE` daher ungesetzt und
+  setzen Sie stattdessen `GOMODEL_VERSION_CHECK_ENABLED=false`.
+- **Preise, die Sie deklarieren.** Setzen Sie
+  `providers.<name>.models[].metadata.pricing` in `config.yaml` für die
+  Modelle, die Sie bereitstellen, oder eine Preisüberschreibung auf der Seite
+  **Models** des Dashboards.
+
+## 4. Prüfen
+
+Das Startprotokoll enthält eine Zeile, die den Modus nennt; `model_catalog`
+steht dabei auf `local file` (oder auf `disabled`, wenn keine Katalogdatei
+konfiguriert ist):
+
+```text
+offline mode: update check, remote model catalog download, and allowlist metadata listing disabled; only configured providers and declared endpoints are contacted
+```
+
+`GET /version` meldet die Update-Prüfung als deaktiviert:
+
+```bash
+curl -s http://localhost:8080/version
+# {"app":"GoModel","version":"X.Y.Z","update_available":false,"enabled":false}
+```
+
+In einem Cluster, der ausgehenden Verkehr einschränkt, statt physisch isoliert
+zu sein, erzwingen Sie das mit einer NetworkPolicy, die nur DNS und das
+erlaubt, was Sie selbst betreiben:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gomodel-egress
+  namespace: gomodel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gomodel
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: models
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+```
+
+Ergänzen Sie eine Regel für die Datenbank und für Redis, wenn diese außerhalb
+dieser Namespaces laufen.
+
+## Aktualisierungen
+
+Bei deaktivierter Update-Prüfung kündigt das Dashboard keine neuen Releases an.
+Verfolgen Sie die
+[Release-Seite](https://github.com/ENTERPILOT/GoModel/releases) von einer
+Maschine mit Internetzugang, wiederholen Sie Schritt 1 mit dem neuen Tag und
+folgen Sie [GoModel aktualisieren](/de/guides/updating); die Anleitung beginnt
+mit einer Sicherung der Datenbank. Aktualisieren Sie im selben Zug
+`models.min.json`, um neue Modelle und Preise zu übernehmen.
+
+## Gut zu wissen
+
+- **Cloud-SDKs.** Bei einem konfigurierten Bedrock-Provider kann das AWS SDK
+  den Endpunkt für Instanz-Metadaten (`169.254.169.254`) nach Zugangsdaten
+  abfragen, und ein Vertex-AI-Provider mit Application Default Credentials
+  fragt den Metadatenserver von Google. Beides betrifft keine Installation ohne
+  diese Provider.
+- **GoModel Pro.** Eine [Pro-Lizenz](/de/pro/overview#lizenzierung) ist ein
+  signiertes Token, das ohne Netzwerkzugriff validiert wird, und funktioniert
+  daher auch in einem Air Gap.

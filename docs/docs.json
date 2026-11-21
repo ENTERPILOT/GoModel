@@ -290,6 +290,7 @@
                         "icon": "compass",
                         "pages": [
                             "guides/production",
+                            "guides/air-gapped",
                             "guides/updating",
                             "guides/migrate-from-litellm",
                             "guides/caddy",
@@ -478,6 +479,7 @@
                         "icon": "compass",
                         "pages": [
                             "de/guides/production",
+                            "de/guides/air-gapped",
                             "de/guides/updating",
                             "de/guides/migrate-from-litellm",
                             "de/guides/caddy",
@@ -658,6 +660,7 @@
                         "icon": "compass",
                         "pages": [
                             "zh/guides/production",
+                            "zh/guides/air-gapped",
                             "zh/guides/updating",
                             "zh/guides/migrate-from-litellm",
                             "zh/guides/caddy",
@@ -838,6 +841,7 @@
                         "icon": "compass",
                         "pages": [
                             "pl/guides/production",
+                            "pl/guides/air-gapped",
                             "pl/guides/updating",
                             "pl/guides/migrate-from-litellm",
                             "pl/guides/caddy",

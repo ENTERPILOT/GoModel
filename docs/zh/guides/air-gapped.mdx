@@ -1,0 +1,192 @@
+---
+title: "离线隔离部署"
+description: "在没有公共互联网路由的环境中运行 GoModel：需要带入哪些制品、需要开启的唯一设置、如何通过离线模型目录保留定价，以及如何确认没有任何流量外发。"
+icon: "unplug"
+keywords: ["离线隔离", "air-gapped", "离线", "offline", "GOMODEL_OFFLINE", "私有镜像仓库", "private registry", "镜像同步", "image mirror", "模型目录", "model catalog", "出站", "egress", "NetworkPolicy"]
+---
+
+GoModel 是一个内嵌控制台的静态二进制文件。搭配 [Ollama](/zh/providers/multiple-ollama)、[vLLM](/zh/providers/vllm)
+或 [SGLang](/zh/providers/sglang) 等本地模型服务器时，它无需任何通往公共互联网的路由。本页是操作手册：带入制品、开启离线模式、提供模型目录、验证。
+
+## 网关会主动联系什么
+
+默认安装会打开两个并非由您配置的连接：
+
+| 调用 | 主机 | 用途 |
+| --- | --- | --- |
+| [模型目录](/zh/advanced/model-metadata) | `raw.githubusercontent.com` | 定价、上下文窗口和能力信息。在启动时及每次缓存刷新时获取。 |
+| [更新检查](/zh/advanced/version-awareness) | `gomodel.enterpilot.io` | 最新的发布版本号。每天一次，以及每天首次访问控制台时。 |
+
+两者都是尽力而为的：失败时，网关照常启动、报告就绪并处理请求。两者都不会携带任何与您的流量有关的信息；
+更新检查会发送当前运行的版本和一个匿名安装 ID（参见[检查时发送的内容](/zh/advanced/version-awareness#检查时发送的内容)）。
+没有许可证检查。控制台不会从 CDN 加载任何资源，其 Content-Security-Policy 将浏览器限制在网关自身的源内。只有指向文档的链接会指向外部。
+
+网关访问的其他一切都是您自行声明的：提供商、数据库、Redis、OTLP 采集器、MCP 上游、向量存储、护栏服务。
+
+<Note>
+  这份清单是强制保证的。仓库中的一个测试（`run/offline_egress_test.go`）会在一个拒绝所有目标的代理后面启动网关；
+  一旦默认安装尝试访问第三个主机，或离线安装尝试访问任何主机，测试就会失败。
+</Note>
+
+## 1. 带入制品
+
+请固定版本，不要同步 `latest`。
+
+<Tabs>
+  <Tab title="Docker 镜像">
+    在联网机器上：
+
+    ```bash
+    # --platform 是将要运行该镜像的主机的平台
+    docker pull --platform linux/amd64 enterpilot/gomodel:X.Y.Z
+    docker save enterpilot/gomodel:X.Y.Z -o gomodel-X.Y.Z.tar
+    ```
+
+    在隔离环境内：
+
+    ```bash
+    docker load -i gomodel-X.Y.Z.tar
+    docker tag enterpilot/gomodel:X.Y.Z registry.internal/enterpilot/gomodel:X.Y.Z
+    docker push registry.internal/enterpilot/gomodel:X.Y.Z
+    ```
+
+    镜像发布了 `linux/amd64`、`linux/arm64` 和 `linux/arm/v7` 三个平台；归档文件只包含您拉取的那一个平台。如果有一台主机能同时访问两个镜像仓库，
+    `skopeo copy --all docker://enterpilot/gomodel:X.Y.Z docker://registry.internal/enterpilot/gomodel:X.Y.Z`
+    可以一步复制所有平台。
+  </Tab>
+  <Tab title="二进制文件">
+    从[发布页面](https://github.com/ENTERPILOT/GoModel/releases)下载对应平台的归档文件和 `checksums.txt`，
+    然后在隔离环境内校验并解压：
+
+    ```bash
+    sha256sum -c --ignore-missing checksums.txt
+    tar -xzf gomodel_X.Y.Z_linux_amd64.tar.gz
+    ```
+
+    `install.sh` 和 `install.ps1` 安装脚本从 GitHub 下载，因此只能在联网机器上使用。
+  </Tab>
+  <Tab title="Helm chart">
+    chart 位于仓库的 `helm/` 目录中，没有任何依赖。在联网机器上打包，再把归档文件复制进去：
+
+    ```bash
+    helm package helm
+    ```
+
+    它会拉取两个镜像：网关，以及仅供 `helm test` 使用的 `curlimages/curl`。请同步这两个镜像，并让 chart 指向您的镜像仓库：
+
+    ```yaml
+    image:
+      repository: registry.internal/enterpilot/gomodel
+    testConnection:
+      image:
+        repository: registry.internal/curlimages/curl
+    imagePullSecrets:
+      - name: registry-credentials
+    env:
+      GOMODEL_OFFLINE: "true"
+    ```
+  </Tab>
+</Tabs>
+
+同时下载模型目录：
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/ENTERPILOT/ai-model-list/refs/heads/main/models.min.json
+```
+
+## 2. 开启离线模式
+
+```bash
+GOMODEL_OFFLINE=true
+MODEL_LIST_URL=/etc/gomodel/models.json
+```
+
+`GOMODEL_OFFLINE=true`（`config.yaml` 中的 `offline: true`）会关闭更新检查、丢弃所有 HTTP 目录 URL，并停止 `allowlist`
+模式的提供商仅为获取元数据而调用 `/models`。它在所有其他设置之后应用，因此 `config.yaml` 或环境变量中的任何内容都无法在其之下重新启用调用。
+默认值：`false`。
+
+使用 Docker：
+
+```bash
+docker run -d --name gomodel -p 8080:8080 \
+  -v gomodel_data:/app/data \
+  -v "$PWD/models.min.json":/etc/gomodel/models.json:ro \
+  -e GOMODEL_OFFLINE=true \
+  -e MODEL_LIST_URL=/etc/gomodel/models.json \
+  -e GOMODEL_MASTER_KEY=change-me \
+  -e VLLM_BASE_URL=http://vllm.internal:8000/v1 \
+  registry.internal/enterpilot/gomodel:X.Y.Z
+```
+
+如果您的模型服务器使用内部证书颁发机构，请添加 `HTTP_TLS_CA_FILE`；参见[私有 CA 与代理](/zh/guides/production#私有-ca-与代理)。
+该设置只作用于网关的 HTTP 客户端：PostgreSQL 和 MongoDB 的 CA 由各自的连接 URL 指定（`sslrootcert`、`tlsCAFile`）。
+
+## 3. 提供模型目录
+
+没有目录时，除非提供商报告价格，或您自行声明价格（在 `config.yaml` 中，或通过控制台中的价格覆盖），否则模型没有定价；此时[成本追踪](/zh/features/cost-tracking)不会记录任何成本，
+[预算](/zh/features/budgets)也无从执行。
+
+以文件路径（或 `file://` URL）给出的目录是从磁盘读取的，不会发起网络请求，因此在离线模式下仍然生效。每次缓存刷新时都会重新读取该文件
+（`CACHE_REFRESH_INTERVAL`，默认一小时）：直接替换磁盘上的文件即可更新定价，无需重启。
+
+另有两种方式：
+
+- **内部镜像站。** 在隔离环境内通过 HTTP 提供该文件，并将 `MODEL_LIST_URL` 指向它。离线模式会丢弃 HTTP 目录 URL，
+  因此不要设置 `GOMODEL_OFFLINE`，而是改为设置 `GOMODEL_VERSION_CHECK_ENABLED=false`。
+- **自行声明价格。** 在 `config.yaml` 中为您提供的模型设置 `providers.<name>.models[].metadata.pricing`，或在控制台的 **Models** 页面设置价格覆盖。
+
+## 4. 验证
+
+启动日志中有一行会说明该模式，其中 `model_catalog` 为 `local file`（未配置目录文件时为 `disabled`）：
+
+```text
+offline mode: update check, remote model catalog download, and allowlist metadata listing disabled; only configured providers and declared endpoints are contacted
+```
+
+`GET /version` 会报告更新检查已关闭：
+
+```bash
+curl -s http://localhost:8080/version
+# {"app":"GoModel","version":"X.Y.Z","update_available":false,"enabled":false}
+```
+
+如果集群只是限制出站流量而非物理隔离，可以用 NetworkPolicy 强制执行，只放行 DNS 和您自己运行的服务：
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gomodel-egress
+  namespace: gomodel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gomodel
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: models
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+```
+
+如果数据库和 Redis 位于这些命名空间之外，请为它们各加一条规则。
+
+## 升级
+
+关闭更新检查后，控制台不会提示新版本。请在联网机器上关注[发布页面](https://github.com/ENTERPILOT/GoModel/releases)，
+用新的标签重复第 1 步，并按照[升级 GoModel](/zh/guides/updating) 操作，该指南的第一步是备份数据库。
+同时更新 `models.min.json`，以获取新的模型和价格。
+
+## 其他须知
+
+- **云 SDK。** 配置了 Bedrock 提供商时，AWS SDK 可能会探测实例元数据端点（`169.254.169.254`）以获取凭据；
+  使用应用默认凭据（Application Default Credentials）的 Vertex AI 提供商则会访问 Google 的元数据服务器。未配置这些提供商的安装不受影响。
+- **GoModel Pro。** [Pro 许可证](/zh/pro/overview#许可证)是一个经过签名的令牌，验证时无需网络访问，因此在离线隔离环境中同样可用。
