@@ -59,11 +59,15 @@ func urlCredentials(value string) ([]string, bool) {
 	if !strings.ContainsAny(value, "@?#") {
 		return nil, true
 	}
-	u, err := url.Parse(replaceReferences(value, referencePlaceholder))
-	if err != nil {
-		return nil, false
-	}
+	text := replaceReferences(value, referencePlaceholder)
 	var credentials []string
+	if password, ok := schemelessPassword(text); ok && literal(password) {
+		credentials = append(credentials, password)
+	}
+	u, err := url.Parse(text)
+	if err != nil {
+		return credentials, false
+	}
 	// A username without a password is often a token ("TOKEN@host", or
 	// "TOKEN:@host").
 	if u.User != nil {
@@ -75,17 +79,106 @@ func urlCredentials(value string) ([]string, bool) {
 			credentials = append(credentials, credential)
 		}
 	}
-	// A fragment can carry a query too ("#access_token=...").
-	// Escaped, so an encoded delimiter ("%3B") stays inside its value.
-	fragment, _ := url.ParseQuery(u.EscapedFragment())
-	for _, query := range []url.Values{u.Query(), fragment} {
+	params, _ := urlParameters(u)
+	for _, query := range params {
 		for key, values := range query {
-			if credentialKey(key) {
+			if !safeQueryParameters[strings.ToLower(key)] && credentialKey(key) {
 				credentials = append(credentials, slices.DeleteFunc(values, func(v string) bool { return !literal(v) })...)
 			}
 		}
 	}
 	return credentials, true
+}
+
+// urlParameters returns the parameters of a URL's query and of its fragment,
+// which can carry a query too ("#access_token=..."). It reports false when
+// either does not parse, which drops the malformed parameters.
+func urlParameters(u *url.URL) ([]url.Values, bool) {
+	query, queryErr := url.ParseQuery(u.RawQuery)
+	// Escaped, so an encoded delimiter ("%3B") stays inside its value.
+	fragment, fragmentErr := url.ParseQuery(u.EscapedFragment())
+	return []url.Values{query, fragment}, queryErr == nil && fragmentErr == nil
+}
+
+// portSuffix matches the port ending a host ("db:5432").
+var portSuffix = regexp.MustCompile(`:\d+$`)
+
+// schemelessPassword returns the password of a connection string that names
+// user:password@address without a scheme ("app:pw@tcp(db:3306)/gomodel",
+// "app:pw@db:5432"), which url.Parse reads as a scheme and no user
+// information. The address must hold a protocol, a path, or a port, which
+// tells it from an address such as "mailto:ops@example.com".
+func schemelessPassword(value string) (string, bool) {
+	head := value
+	if end := strings.IndexAny(head, "?#"); end >= 0 {
+		head = head[:end]
+	}
+	at := strings.LastIndex(head, "@")
+	if at < 0 || strings.ContainsAny(value, " \t\n") {
+		return "", false
+	}
+	user, password, found := strings.Cut(head[:at], ":")
+	address := head[at+1:]
+	switch {
+	case !found || user == "" || password == "":
+		return "", false
+	case strings.HasPrefix(password, "//") || strings.Contains(user, "/"):
+		// A URL with a scheme, which url.Parse reads, or a path.
+		return "", false
+	case !strings.ContainsAny(address, "/(") && !portSuffix.MatchString(address):
+		return "", false
+	}
+	return password, true
+}
+
+// safeQueryParameters are the query parameters of the URLs settings hold that
+// are known to carry no credential, in lower case: API versions and the
+// connection options of the PostgreSQL, MongoDB, and Redis drivers.
+var safeQueryParameters = map[string]bool{
+	"api-version": true, "api_version": true, "version": true, "v": true,
+	// PostgreSQL
+	"sslmode": true, "connect_timeout": true, "application_name": true, "search_path": true,
+	"target_session_attrs": true, "pool_max_conns": true, "pool_min_conns": true,
+	"pool_max_conn_lifetime": true, "pool_max_conn_idle_time": true,
+	// MongoDB
+	"replicaset": true, "directconnection": true, "authsource": true, "authmechanism": true,
+	"retrywrites": true, "retryreads": true, "w": true, "tls": true, "ssl": true, "appname": true,
+	"maxpoolsize": true, "minpoolsize": true, "connecttimeoutms": true, "sockettimeoutms": true,
+	"serverselectiontimeoutms": true, "readpreference": true, "compressors": true,
+	// Redis
+	"db": true, "protocol": true, "dial_timeout": true, "read_timeout": true, "write_timeout": true,
+	"pool_size": true, "max_retries": true,
+}
+
+// urlSettingHasSecret reports whether the value of a URL setting holds a
+// secret: a credential, as urlHasLiteralCredential reports, or a query or
+// fragment parameter that is not in safeQueryParameters and not made of
+// secret references alone. A parameter can carry a credential under any name
+// ("?code=...", "?sv=...&se=..."), so in a URL setting only known ones are
+// written out. A URL whose parameters do not parse is assumed to hold one.
+func urlSettingHasSecret(value string) bool {
+	if urlHasLiteralCredential(value) {
+		return true
+	}
+	if !strings.ContainsAny(value, "?#") {
+		return false
+	}
+	u, err := url.Parse(replaceReferences(value, referencePlaceholder))
+	if err != nil {
+		return true
+	}
+	params, parsed := urlParameters(u)
+	if !parsed {
+		return true
+	}
+	for _, query := range params {
+		for key, values := range query {
+			if !safeQueryParameters[strings.ToLower(key)] && slices.ContainsFunc(values, literal) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // assignment finds name=value pairs, as in a key=value connection string
@@ -251,16 +344,83 @@ var credentialWords = map[string]bool{
 	"sslpassword": true,
 }
 
+// credentialStems mark a word as naming a credential wherever they appear in
+// it, so a name written without separators is caught too ("privatekey",
+// "clientsecret", "passphrase", "apitokens"). The shorter credentialWords
+// ("pass", "pat", "sig", "auth") match whole words only: they are part of too
+// many other words ("path", "design", "author").
+var credentialStems = []string{
+	"key", "token", "secret", "password", "passwd", "passphrase", "credential",
+	"bearer", "cookie", "signature", "license", "licence",
+}
+
+// plainWords hold a credential stem without naming a credential.
+var plainWords = map[string]bool{
+	"keyword": true, "keywords": true, "keyboard": true, "keyspace": true, "keycloak": true,
+	"keyvault": true, "monkey": true, "turkey": true, "donkey": true, "hockey": true,
+	"tokenizer": true, "tokenizers": true, "tokenize": true, "tokenized": true,
+	"tokenization": true, "detokenize": true, "maxtokens": true,
+}
+
+// modelTokenWords next to "token" or "tokens" mark it as about the tokens a
+// model reads and writes rather than a credential ("max_tokens",
+// "token_limit", "skip_special_tokens", "stop_token_ids").
+var modelTokenWords = map[string]bool{
+	"max": true, "min": true, "limit": true, "limits": true, "count": true, "budget": true,
+	"total": true, "num": true, "per": true, "usage": true, "prompt": true, "completion": true,
+	"input": true, "output": true, "reasoning": true, "thinking": true,
+	"context": true, "special": true, "ids": true,
+}
+
+// modelTokens reports whether words[i], "token" or "tokens", is about model
+// tokens: a word next to it is in modelTokenWords. Only a neighbor counts, so
+// "new_access_token" still names a credential; "new" is skipped on the left
+// ("max_new_tokens"). "cached" counts before the plural only: "cached_tokens"
+// is a count, "cached_token" a credential.
+func modelTokens(words []string, i int) bool {
+	if words[i] != "token" && words[i] != "tokens" {
+		return false
+	}
+	left := i - 1
+	if left > 0 && words[left] == "new" {
+		left--
+	}
+	if left >= 0 && words[left] == "cached" {
+		if words[i] == "tokens" {
+			return true
+		}
+		left = -1
+	}
+	return left >= 0 && modelTokenWords[words[left]] || i+1 < len(words) && modelTokenWords[words[i+1]]
+}
+
 // credentialKey reports whether a setting name names a credential: one of
-// its words is in credentialWords. Words are split at every character but
-// letters and digits, and where a lower-case letter is followed by an
-// upper-case one; a trailing number is dropped ("token2").
+// its words is in credentialWords or holds one of credentialStems, and is
+// neither in plainWords nor about model tokens.
 func credentialKey(key string) bool {
+	words := nameWords(key)
+	for i, word := range words {
+		switch {
+		case plainWords[word], modelTokens(words, i):
+		case credentialWords[word]:
+			return true
+		case slices.ContainsFunc(credentialStems, func(stem string) bool { return strings.Contains(word, stem) }):
+			return true
+		}
+	}
+	return false
+}
+
+// nameWords returns the words of a setting name in lower case. Words are
+// split at every character but letters and digits, and where a lower-case
+// letter is followed by an upper-case one; a trailing number is dropped
+// ("token2").
+func nameWords(key string) []string {
+	var words []string
 	var word []rune
-	credential := false
 	flush := func() {
-		if credentialWords[strings.TrimRightFunc(strings.ToLower(string(word)), unicode.IsDigit)] {
-			credential = true
+		if trimmed := strings.TrimRightFunc(strings.ToLower(string(word)), unicode.IsDigit); trimmed != "" {
+			words = append(words, trimmed)
 		}
 		word = word[:0]
 	}
@@ -278,7 +438,7 @@ func credentialKey(key string) bool {
 		prevLower = unicode.IsLower(r)
 	}
 	flush()
-	return credential
+	return words
 }
 
 // suggestedEnvName names the variable to set for a secret at path that no
