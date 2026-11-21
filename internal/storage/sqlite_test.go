@@ -1,9 +1,14 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io/fs"
+	"log/slog"
+	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +28,163 @@ func TestSQLitePing(t *testing.T) {
 	err = store.Close()
 	require.NoError(t, err)
 	require.Error(t, hc.Ping(context.Background()))
+}
+
+func fileMode(t *testing.T, path string) fs.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	return info.Mode().Perm()
+}
+
+// The database holds provider credentials and request content, so what
+// NewSQLite creates is private to its owner, WAL and shared-memory files
+// included.
+func TestSQLiteCreatesPrivateFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no POSIX permission bits")
+	}
+	dir := filepath.Join(t.TempDir(), "nested", "data")
+	path := filepath.Join(dir, "gomodel.db")
+
+	store, err := NewSQLite(SQLiteConfig{Path: path})
+	require.NoError(t, err)
+	defer store.Close()
+	_, err = store.DB().Exec(`CREATE TABLE test_private (id TEXT PRIMARY KEY)`)
+	require.NoError(t, err)
+
+	assert.Equal(t, fs.FileMode(0o700), fileMode(t, dir))
+	assert.Equal(t, fs.FileMode(0o700), fileMode(t, filepath.Dir(dir)))
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		assert.Equal(t, fs.FileMode(0o600), fileMode(t, name), name)
+	}
+}
+
+// An operator may share an existing directory or database with another user
+// on purpose, so their modes are left alone and a readable database is only
+// reported.
+func TestSQLiteKeepsExistingModes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no POSIX permission bits")
+	}
+	tests := []struct {
+		name        string
+		mode        fs.FileMode
+		wantWarning bool
+	}{
+		{name: "world readable", mode: 0o644, wantWarning: true},
+		{name: "group readable", mode: 0o640, wantWarning: true},
+		{name: "private", mode: 0o600},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			original := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(original) })
+
+			dir := t.TempDir()
+			require.NoError(t, os.Chmod(dir, 0o755))
+			path := filepath.Join(dir, "gomodel.db")
+			require.NoError(t, os.WriteFile(path, nil, tt.mode))
+			require.NoError(t, os.Chmod(path, tt.mode))
+
+			store, err := NewSQLite(SQLiteConfig{Path: path})
+			require.NoError(t, err)
+			defer store.Close()
+			_, err = store.DB().Exec(`CREATE TABLE test_existing (id TEXT PRIMARY KEY)`)
+			require.NoError(t, err)
+
+			assert.Equal(t, fs.FileMode(0o755), fileMode(t, dir))
+			assert.Equal(t, tt.mode, fileMode(t, path))
+			if tt.wantWarning {
+				assert.Contains(t, logs.String(), "accessible to other users")
+				assert.Contains(t, logs.String(), path)
+			} else {
+				assert.NotContains(t, logs.String(), "accessible to other users")
+			}
+		})
+	}
+}
+
+func TestSQLiteFilePath(t *testing.T) {
+	tests := []struct {
+		path       string
+		wantFile   string
+		wantOnDisk bool
+	}{
+		{path: "data/gomodel.db", wantFile: "data/gomodel.db", wantOnDisk: true},
+		{path: "file:data/gomodel.db", wantFile: "data/gomodel.db", wantOnDisk: true},
+		{path: "file:/var/lib/gomodel.db?cache=shared", wantFile: "/var/lib/gomodel.db", wantOnDisk: true},
+		{path: ":memory:"},
+		{path: "file::memory:?cache=shared"},
+		{path: "file:shared?mode=memory&cache=shared"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			file, onDisk := sqliteFilePath(tt.path)
+			assert.Equal(t, tt.wantFile, file)
+			assert.Equal(t, tt.wantOnDisk, onDisk)
+		})
+	}
+}
+
+// A file: URI names a file on disk like a plain path, and a symlink whose
+// target is missing gets a private target rather than one SQLite creates.
+func TestSQLiteCreatesPrivateFilesThroughURIsAndSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no POSIX permission bits")
+	}
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, dir string) (sqlitePath, file string)
+	}{
+		{name: "file URI", setup: func(t *testing.T, dir string) (string, string) {
+			file := filepath.Join(dir, "uri", "gomodel.db")
+			return "file:" + file, file
+		}},
+		{name: "dangling symlink", setup: func(t *testing.T, dir string) (string, string) {
+			file := filepath.Join(dir, "target.db")
+			link := filepath.Join(dir, "gomodel.db")
+			require.NoError(t, os.Symlink(file, link))
+			return link, file
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sqlitePath, file := tt.setup(t, t.TempDir())
+
+			store, err := NewSQLite(SQLiteConfig{Path: sqlitePath})
+			require.NoError(t, err)
+			defer store.Close()
+			_, err = store.DB().Exec(`CREATE TABLE test_private (id TEXT PRIMARY KEY)`)
+			require.NoError(t, err)
+
+			assert.Equal(t, fs.FileMode(0o600), fileMode(t, file))
+		})
+	}
+}
+
+// Tightening only the database file leaves a readable WAL from before the
+// upgrade exposed, so leftover companion files are reported too.
+func TestSQLiteWarnsAboutReadableCompanionFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no POSIX permission bits")
+	}
+	var logs bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	path := filepath.Join(t.TempDir(), "gomodel.db")
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	require.NoError(t, os.WriteFile(path+"-wal", nil, 0o600))
+	require.NoError(t, os.Chmod(path+"-wal", 0o644))
+
+	require.NoError(t, ensurePrivateSQLiteFile(path))
+
+	assert.Contains(t, logs.String(), "accessible to other users")
+	assert.Contains(t, logs.String(), path+"-wal")
 }
 
 func TestSQLiteConcurrentWriteSafety(t *testing.T) {
