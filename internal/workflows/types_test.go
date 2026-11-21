@@ -44,7 +44,7 @@ func TestNormalizeCreateInput_AllowsEmptyName(t *testing.T) {
 		Name:     "",
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+			Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false},
 		},
 	})
 	require.NoError(t, err)
@@ -63,7 +63,7 @@ func TestNormalizeCreateInput_RejectsReservedManagedDefaultIdentityForUserPlans(
 		Description: ManagedDefaultGlobalDescription,
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+			Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false},
 		},
 	})
 	require.Error(t, err)
@@ -80,7 +80,7 @@ func TestNormalizeCreateInput_RejectsManagedDefaultForNonGlobalScope(t *testing.
 		Name:     ManagedDefaultGlobalName,
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+			Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false},
 		},
 	})
 	require.Error(t, err)
@@ -89,10 +89,10 @@ func TestNormalizeCreateInput_RejectsManagedDefaultForNonGlobalScope(t *testing.
 
 func TestFeatureFlagsRuntimeFeatures_FailoverDefaultsToTrue(t *testing.T) {
 	features := FeatureFlags{
-		Cache:      true,
-		Audit:      true,
-		Usage:      true,
-		Guardrails: false,
+		Cache:       true,
+		RequestLogs: true,
+		Usage:       true,
+		Guardrails:  false,
 	}.runtimeFeatures()
 
 	require.True(t, features.Failover)
@@ -145,10 +145,10 @@ func TestNormalizePayload_CanonicalizesFailoverForStableWorkflowHash(t *testing.
 	implicitPayload, implicitHash, err := normalizePayload(Payload{
 		SchemaVersion: 1,
 		Features: FeatureFlags{
-			Cache:      true,
-			Audit:      true,
-			Usage:      true,
-			Guardrails: false,
+			Cache:       true,
+			RequestLogs: true,
+			Usage:       true,
+			Guardrails:  false,
 		},
 	})
 	require.NoError(t, err)
@@ -156,12 +156,12 @@ func TestNormalizePayload_CanonicalizesFailoverForStableWorkflowHash(t *testing.
 	explicitPayload, explicitHash, err := normalizePayload(Payload{
 		SchemaVersion: 1,
 		Features: FeatureFlags{
-			Cache:      true,
-			Audit:      true,
-			Usage:      true,
-			Guardrails: false,
-			Failover:   &explicitTrue,
-			Budget:     &explicitTrue,
+			Cache:       true,
+			RequestLogs: true,
+			Usage:       true,
+			Guardrails:  false,
+			Failover:    &explicitTrue,
+			Budget:      &explicitTrue,
 		},
 	})
 	require.NoError(t, err)

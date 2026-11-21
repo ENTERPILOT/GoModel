@@ -50,11 +50,11 @@ func TestManagedAuthKeyWorkflow_RequestLogAndUsageValidity_PostgreSQL(t *testing
 		"workflow_payload": workflows.Payload{
 			SchemaVersion: 1,
 			Features: workflows.FeatureFlags{
-				Cache:      false,
-				Audit:      true,
-				Usage:      true,
-				Guardrails: false,
-				Failover:   new(false),
+				Cache:       false,
+				RequestLogs: true,
+				Usage:       true,
+				Guardrails:  false,
+				Failover:    new(false),
 			},
 			Guardrails: []workflows.GuardrailStep{},
 		},
@@ -104,7 +104,7 @@ func TestManagedAuthKeyWorkflow_RequestLogAndUsageValidity_PostgreSQL(t *testing
 	require.NotNil(t, requestLogEntry.Data)
 	require.NotNil(t, requestLogEntry.Data.WorkflowFeatures)
 	assert.False(t, requestLogEntry.Data.WorkflowFeatures.Cache)
-	assert.True(t, requestLogEntry.Data.WorkflowFeatures.Audit)
+	assert.True(t, requestLogEntry.Data.WorkflowFeatures.RequestLogs)
 	assert.True(t, requestLogEntry.Data.WorkflowFeatures.Usage)
 	assert.False(t, requestLogEntry.Data.WorkflowFeatures.Guardrails)
 	assert.False(t, requestLogEntry.Data.WorkflowFeatures.Failover)
@@ -159,11 +159,11 @@ func TestGuardrailWorkflow_RewritesUpstreamRequestAndPreservesRequestLogUsage_Po
 		"workflow_payload": workflows.Payload{
 			SchemaVersion: 1,
 			Features: workflows.FeatureFlags{
-				Cache:      false,
-				Audit:      true,
-				Usage:      true,
-				Guardrails: true,
-				Failover:   new(false),
+				Cache:       false,
+				RequestLogs: true,
+				Usage:       true,
+				Guardrails:  true,
+				Failover:    new(false),
 			},
 			Guardrails: []workflows.GuardrailStep{
 				{Ref: "policy-system", Step: 10},
@@ -232,7 +232,7 @@ func TestGuardrailWorkflow_RewritesUpstreamRequestAndPreservesRequestLogUsage_Po
 	require.NotNil(t, requestLogEntry.Data)
 	require.NotNil(t, requestLogEntry.Data.WorkflowFeatures)
 	assert.False(t, requestLogEntry.Data.WorkflowFeatures.Cache)
-	assert.True(t, requestLogEntry.Data.WorkflowFeatures.Audit)
+	assert.True(t, requestLogEntry.Data.WorkflowFeatures.RequestLogs)
 	assert.True(t, requestLogEntry.Data.WorkflowFeatures.Usage)
 	assert.True(t, requestLogEntry.Data.WorkflowFeatures.Guardrails)
 	assert.False(t, requestLogEntry.Data.WorkflowFeatures.Failover)

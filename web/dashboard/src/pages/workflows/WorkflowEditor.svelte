@@ -149,10 +149,10 @@
     {/if}
     {#if runtimeConfig.requestLogsVisible()}
       <EnabledToggle
-        enabled={wf.form.features.audit}
+        enabled={wf.form.features.request_logs}
         label={m.workflows_request_logs()}
         text={m.workflows_request_logs()}
-        onclick={() => (wf.form.features.audit = !wf.form.features.audit)}
+        onclick={() => (wf.form.features.request_logs = !wf.form.features.request_logs)}
       />
     {/if}
     {#if runtimeConfig.usageVisible()}

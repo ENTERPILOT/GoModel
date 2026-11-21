@@ -436,6 +436,24 @@ function ensureBearerAuthSecurityScheme() {
   };
 }
 
+// The workflow feature snapshot of a request log entry still carries its
+// request_logs flag under the name it had through v0.2.5 as well. That alias is
+// written by a custom marshaler (internal/requestlog), which swag cannot see.
+function applyDeprecatedAuditFeatureAlias() {
+  const target = schema("requestlog.WorkflowFeaturesSnapshot");
+  if (!target.properties?.request_logs) {
+    throw new Error("missing request_logs property on schema: requestlog.WorkflowFeaturesSnapshot");
+  }
+  target.properties.audit = {
+    description: "Deprecated alias of request_logs, which was named audit through v0.2.5. Always equal to request_logs.",
+    type: "boolean",
+    deprecated: true,
+  };
+  target.properties = Object.fromEntries(
+    Object.entries(target.properties).sort(([a], [b]) => a.localeCompare(b)),
+  );
+}
+
 function ensureRequiredProperty(schemaName, propertyName) {
   const target = schema(schemaName);
   if (!target.properties?.[propertyName]) {
@@ -669,6 +687,8 @@ for (const name of [
   applyResponseInputOneOf(name);
   applyResponseConversationOneOf(name);
 }
+
+applyDeprecatedAuditFeatureAlias();
 
 const inputItemList = schema("core.ResponseInputItemListResponse");
 if (!inputItemList.properties?.data) {

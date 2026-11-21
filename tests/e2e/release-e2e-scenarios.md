@@ -2078,7 +2078,7 @@ BODY_FILE=$(mktemp "$QA_RUN_DIR/s76.body.XXXXXX")
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X POST "$AUTH_BASE_URL/admin/workflows" \
   -H "$ADMIN_AUTH_HEADER" \
   -H 'Content-Type: application/json' \
-  -d '{"scope_provider":"openai","scope_model":"gpt-4.1-mini","scope_user_path":"/team/../alpha","name":"qa-invalid-workflow-path","workflow_payload":{"schema_version":1,"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},"guardrails":[]}}'
+  -d '{"scope_provider":"openai","scope_model":"gpt-4.1-mini","scope_user_path":"/team/../alpha","name":"qa-invalid-workflow-path","workflow_payload":{"schema_version":1,"features":{"cache":true,"request_logs":true,"usage":true,"guardrails":false},"guardrails":[]}}'
 sed -n '1,24p' "$HEADERS_FILE"
 sed -n '1,24p' "$BODY_FILE"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
@@ -6990,7 +6990,7 @@ jq -n --arg mask "$MASK" --arg block "$BLOCK" --arg path "$SCOPE_PATH" --arg nam
   description: "release e2e: System One state guardrails",
   workflow_payload: {
     schema_version: 2,
-    features: {cache: false, audit: true, usage: true, guardrails: true, failover: false},
+    features: {cache: false, request_logs: true, usage: true, guardrails: true, failover: false},
     steps: [{ref: $mask, phase: "prompt", step: 10}, {ref: $block, phase: "prompt", step: 20}]
   }
 }' | curl -fsS -X POST "$GR_BASE_URL/admin/workflows" -H 'Content-Type: application/json' -d @- \
@@ -8520,7 +8520,7 @@ jq -n --arg judge "$JUDGE" --arg path "$SCOPE_PATH" --arg name "qa-judge-$S" '{
   scope_user_path: $path, name: $name, description: "release e2e: Jev judge",
   workflow_payload: {
     schema_version: 2,
-    features: {cache: false, audit: true, usage: true, guardrails: true, failover: false},
+    features: {cache: false, request_logs: true, usage: true, guardrails: true, failover: false},
     steps: [{ref: $judge, phase: "prompt", step: 10}]
   }
 }' | curl -fsS -X POST "$GR_BASE_URL/admin/workflows" -H 'Content-Type: application/json' -d @- \

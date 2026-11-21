@@ -12,6 +12,7 @@ import {
   workflowModelOptions,
   workflowPreview,
   workflowSourceFeatures,
+  workflowNormalizedFeatures,
   workflowSourceGuardrails,
   workflowActiveScopeMatch,
   workflowDisplayName,
@@ -51,7 +52,7 @@ import {
 // All feature gates on: the default when no runtime flags disable anything.
 const ALL_CAPS = {
   cache: true,
-  audit: true,
+  request_logs: true,
   usage: true,
   budget: true,
   guardrails: true,
@@ -61,7 +62,7 @@ const ALL_CAPS = {
 // Every gate off (legacy: all runtime flags explicitly "off").
 const NO_CAPS = {
   cache: false,
-  audit: false,
+  request_logs: false,
   usage: false,
   budget: false,
   guardrails: false,
@@ -109,7 +110,7 @@ test("workflowPreview mirrors the draft workflow card state from the editor form
     description: "Live preview of the edited workflow",
     features: {
       cache: true,
-      audit: false,
+      request_logs: false,
       usage: true,
       guardrails: true,
       failover: false,
@@ -131,7 +132,7 @@ test("workflowPreview mirrors the draft workflow card state from the editor form
       schema_version: 2,
       features: {
         cache: true,
-        audit: false,
+        request_logs: false,
         usage: true,
         budget: true,
         guardrails: true,
@@ -151,7 +152,7 @@ test("workflowPreview renders path-scoped draft labels using canonical scope dis
     description: "Preview should include the canonical path scope",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: false,
@@ -177,7 +178,7 @@ test("workflowPreview does not coerce blank guardrail steps into step zero", () 
     description: "Preview should not invent step zero",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: true,
       failover: false,
@@ -200,7 +201,7 @@ test("workflowChart returns the shared chart contract for workflow sources", () 
         workflow_payload: {
           features: {
             cache: true,
-            audit: true,
+            request_logs: true,
             usage: false,
             budget: true,
             guardrails: true,
@@ -280,7 +281,7 @@ test("workflowChart masks globally disabled workflow features from persisted wor
       workflow_payload: {
         features: {
           cache: true,
-          audit: true,
+          request_logs: true,
           usage: true,
           budget: true,
           guardrails: true,
@@ -330,7 +331,7 @@ test("workflowRequestLogChart returns the shared chart contract for request log 
     workflow_payload: {
       features: {
         cache: false,
-        audit: true,
+        request_logs: true,
         usage: true,
         budget: true,
         guardrails: true,
@@ -472,7 +473,7 @@ test("workflowRequestLogChart prefers request-time workflow features over curren
     workflow_payload: {
       features: {
         cache: true,
-        audit: true,
+        request_logs: true,
         usage: true,
         budget: true,
         guardrails: true,
@@ -491,7 +492,7 @@ test("workflowRequestLogChart prefers request-time workflow features over curren
       data: {
         workflow_features: {
           cache: false,
-          audit: true,
+          request_logs: true,
           usage: false,
           budget: false,
           guardrails: false,
@@ -522,7 +523,7 @@ test("workflowRequestLogChart highlights configured failover redirects and expos
     workflow_payload: {
       features: {
         cache: false,
-        audit: true,
+        request_logs: true,
         usage: true,
         budget: true,
         guardrails: false,
@@ -542,7 +543,7 @@ test("workflowRequestLogChart highlights configured failover redirects and expos
       data: {
         workflow_features: {
           cache: false,
-          audit: true,
+          request_logs: true,
           usage: true,
           budget: true,
           guardrails: false,
@@ -762,7 +763,7 @@ test("workflowRequestLogChart marks live current steps and waits for async flush
       _usage_live_state: "usage.completed",
       _usage_live_pending: true,
       _usage_flushed: false,
-      data: { workflow_features: { audit: true, usage: true } },
+      data: { workflow_features: { request_logs: true, usage: true } },
     },
     null,
     ALL_CAPS,
@@ -785,7 +786,7 @@ test("workflowRequestLogChart marks live current steps and waits for async flush
     _usage_live_state: "usage.completed",
     _usage_live_pending: true,
     _usage_flushed: false,
-    data: { workflow_features: { audit: true, usage: true } },
+    data: { workflow_features: { request_logs: true, usage: true } },
   };
   const requestLogFlushedUsageQueued = workflowRequestLogChart(
     requestLogFlushedUsageQueuedEntry,
@@ -851,7 +852,7 @@ test("buildWorkflowRequest emits provider-model payload and strips guardrails wh
     description: "Primary translated requests",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: false,
@@ -869,6 +870,7 @@ test("buildWorkflowRequest emits provider-model payload and strips guardrails wh
       schema_version: 2,
       features: {
         cache: true,
+        request_logs: true,
         audit: true,
         usage: true,
         budget: true,
@@ -888,7 +890,7 @@ test("buildWorkflowRequest disables budget when usage is disabled in the form", 
     description: "Usage disabled",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: false,
       budget: true,
       guardrails: false,
@@ -911,7 +913,7 @@ test("buildWorkflowRequest omits failover for new workflows when the control is 
     description: "Preserve hidden failover state",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: false,
@@ -923,6 +925,7 @@ test("buildWorkflowRequest omits failover for new workflows when the control is 
     buildWorkflowRequest({ form, caps: HIDDEN_FAILOVER_CAPS }).workflow_payload.features,
     {
       cache: true,
+      request_logs: true,
       audit: true,
       usage: true,
       budget: true,
@@ -939,7 +942,7 @@ test("buildWorkflowRequest preserves failover state for hydrated workflows even 
     description: "Preserve hidden failover state",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: false,
@@ -956,6 +959,7 @@ test("buildWorkflowRequest preserves failover state for hydrated workflows even 
     }).workflow_payload.features,
     {
       cache: true,
+      request_logs: true,
       audit: true,
       usage: true,
       budget: true,
@@ -973,7 +977,7 @@ test("buildWorkflowRequest preserves hidden failover for fresh save flows matchi
       workflow_payload: {
         features: {
           cache: true,
-          audit: true,
+          request_logs: true,
           usage: true,
           guardrails: false,
           failover: false,
@@ -989,7 +993,7 @@ test("buildWorkflowRequest preserves hidden failover for fresh save flows matchi
     description: "Preserve hidden failover from the active workflow",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: true,
@@ -1006,6 +1010,7 @@ test("buildWorkflowRequest preserves hidden failover for fresh save flows matchi
     }).workflow_payload.features,
     {
       cache: true,
+      request_logs: true,
       audit: true,
       usage: true,
       budget: true,
@@ -1023,7 +1028,7 @@ test("buildWorkflowRequest omits hidden failover when a hydrated workflow is ret
     description: "Retargeted hidden failover should not carry over",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: true,
@@ -1040,6 +1045,7 @@ test("buildWorkflowRequest omits hidden failover when a hydrated workflow is ret
     }).workflow_payload.features,
     {
       cache: true,
+      request_logs: true,
       audit: true,
       usage: true,
       budget: true,
@@ -1056,7 +1062,7 @@ test("buildWorkflowRequest clamps globally disabled features off even when enabl
     description: "Globally disabled features should be forced off",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: true,
       failover: true,
@@ -1073,6 +1079,7 @@ test("buildWorkflowRequest clamps globally disabled features off even when enabl
       schema_version: 2,
       features: {
         cache: false,
+        request_logs: false,
         audit: false,
         usage: false,
         budget: false,
@@ -1092,7 +1099,7 @@ test("buildWorkflowRequest preserves blank guardrail steps as invalid so validat
     description: "Primary translated requests",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: true,
       failover: true,
@@ -1116,7 +1123,7 @@ test("validateWorkflowRequest rejects negative guardrail steps and duplicate ref
     name: "Global",
     workflow_payload: {
       schema_version: 1,
-      features: { cache: true, audit: true, usage: true, guardrails: true },
+      features: { cache: true, request_logs: true, usage: true, guardrails: true },
       guardrails,
     },
   });
@@ -1149,7 +1156,7 @@ test("validateWorkflowRequest accepts slashless scope_user_path values", () => {
     name: "Scoped workflow",
     workflow_payload: {
       schema_version: 1,
-      features: { cache: true, audit: true, usage: true, guardrails: false },
+      features: { cache: true, request_logs: true, usage: true, guardrails: false },
       guardrails: [],
     },
   };
@@ -1185,7 +1192,7 @@ test("validateWorkflowRequest rejects invalid scope_user_path segments", () => {
     scope_user_path: scopeUserPath,
     workflow_payload: {
       schema_version: 1,
-      features: { cache: true, audit: true, usage: true, guardrails: false },
+      features: { cache: true, request_logs: true, usage: true, guardrails: false },
       guardrails: [],
     },
   });
@@ -1210,7 +1217,7 @@ test("validateWorkflowRequest rejects unregistered provider-model selections", (
         scope_model: "",
         workflow_payload: {
           schema_version: 1,
-          features: { cache: true, audit: true, usage: true, guardrails: false },
+          features: { cache: true, request_logs: true, usage: true, guardrails: false },
           guardrails: [],
         },
       },
@@ -1226,7 +1233,7 @@ test("validateWorkflowRequest rejects unregistered provider-model selections", (
         scope_model: "gpt-4o-mini",
         workflow_payload: {
           schema_version: 1,
-          features: { cache: true, audit: true, usage: true, guardrails: false },
+          features: { cache: true, request_logs: true, usage: true, guardrails: false },
           guardrails: [],
         },
       },
@@ -1259,7 +1266,7 @@ test("editing a cloned workflow preserves retired provider and model options", (
     description: "Cloned from an older deployment",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: true,
@@ -1307,7 +1314,7 @@ test("workflowSourceFeatures defaults failover to true when omitted", () => {
         workflow_payload: {
           features: {
             cache: true,
-            audit: false,
+            request_logs: false,
             usage: true,
             guardrails: false,
           },
@@ -1317,7 +1324,7 @@ test("workflowSourceFeatures defaults failover to true when omitted", () => {
     ),
     {
       cache: true,
-      audit: false,
+      request_logs: false,
       usage: true,
       budget: true,
       guardrails: false,
@@ -1333,7 +1340,7 @@ test("workflowSourceFeatures respects effective runtime features for persisted w
         workflow_payload: {
           features: {
             cache: true,
-            audit: true,
+            request_logs: true,
             usage: true,
             guardrails: true,
             failover: true,
@@ -1341,7 +1348,7 @@ test("workflowSourceFeatures respects effective runtime features for persisted w
         },
         effective_features: {
           cache: false,
-          audit: false,
+          request_logs: false,
           usage: true,
           budget: true,
           guardrails: false,
@@ -1352,7 +1359,7 @@ test("workflowSourceFeatures respects effective runtime features for persisted w
     ),
     {
       cache: false,
-      audit: false,
+      request_logs: false,
       usage: true,
       budget: true,
       guardrails: false,
@@ -1368,7 +1375,7 @@ test("workflowSourceFeatures masks raw features by global caps when effective fe
         workflow_payload: {
           features: {
             cache: true,
-            audit: true,
+            request_logs: true,
             usage: true,
             guardrails: true,
             failover: true,
@@ -1379,7 +1386,7 @@ test("workflowSourceFeatures masks raw features by global caps when effective fe
     ),
     {
       cache: false,
-      audit: false,
+      request_logs: false,
       usage: false,
       budget: false,
       guardrails: false,
@@ -1792,7 +1799,7 @@ const GUARDED_SOURCE = {
   scope: { scope_provider: "openai", scope_model: "gpt-5" },
   workflow_payload: {
     schema_version: 2,
-    features: { audit: true, usage: true, guardrails: true, cache: false, budget: false, failover: false },
+    features: { request_logs: true, usage: true, guardrails: true, cache: false, budget: false, failover: false },
     steps: [
       { ref: "pii-filter", phase: "prompt", step: 10 },
       { ref: "policy", phase: "prompt", step: 20 },
@@ -2189,7 +2196,7 @@ test("recorded outcomes show guardrail nodes even when the workflow version is u
       model: "gpt-5",
       status_code: 200,
       data: {
-        workflow_features: { guardrails: false, audit: true, usage: true },
+        workflow_features: { guardrails: false, request_logs: true, usage: true },
         guardrails: [
           { seq: 1, phase: "prompt", step: 10, instance: "pii-filter", action: "warn", code: "pii" },
           { seq: 2, phase: "stream", step: 5, instance: "redact", action: "allow", edited: true, replaced_events: 2 },
@@ -2210,4 +2217,64 @@ test("recorded outcomes show guardrail nodes even when the workflow version is u
   assert.deepEqual(chart.guardrailFlows.prompt.map((s) => [s.step, s.refs]), [[10, ["pii-filter"]]]);
   assert.equal(chart.guardrailFlows.stream[0].outcomes.redact.replacedEvents, 2);
   assert.equal(chart.guardrailFlows.stream[0].outcomes.redact.tone, "success");
+});
+
+// The request_logs flag was named audit through v0.2.5: stored workflows,
+// stored request log entries and replicas of that release carry audit alone.
+test("workflowNormalizedFeatures reads request_logs and falls back to audit", () => {
+  assert.equal(workflowNormalizedFeatures({ request_logs: true }).request_logs, true);
+  assert.equal(workflowNormalizedFeatures({ audit: true }).request_logs, true);
+  assert.equal(workflowNormalizedFeatures({ audit: false }).request_logs, false);
+  assert.equal(workflowNormalizedFeatures({ cache: true }).request_logs, false);
+  // Both present: request_logs wins, as on the server.
+  assert.equal(
+    workflowNormalizedFeatures({ audit: true, request_logs: false }).request_logs,
+    false,
+  );
+  assert.equal(
+    workflowNormalizedFeatures({ audit: false, request_logs: true }).request_logs,
+    true,
+  );
+  assert.equal("audit" in workflowNormalizedFeatures({ audit: true }), false);
+});
+
+test("buildWorkflowRequest sends request_logs with its audit alias for v0.2.5 replicas", () => {
+  for (const enabled of [true, false]) {
+    const form = {
+      ...defaultWorkflowForm(),
+      features: { ...defaultWorkflowForm().features, request_logs: enabled },
+    };
+    const features = buildWorkflowRequest({ form, caps: ALL_CAPS }).workflow_payload.features;
+    assert.equal(features.request_logs, enabled);
+    assert.equal(features.audit, enabled);
+  }
+});
+
+test("workflowSourceFeatures reads workflows a v0.2.5 replica stored or served", () => {
+  // Stored payload and server-side effective features, each with audit alone.
+  assert.equal(
+    workflowSourceFeatures(
+      { workflow_payload: { features: { cache: true, audit: true, usage: true } } },
+      ALL_CAPS,
+    ).request_logs,
+    true,
+  );
+  assert.equal(
+    workflowSourceFeatures(
+      {
+        workflow_payload: { features: { audit: true } },
+        effective_features: { cache: true, audit: false, usage: true },
+      },
+      ALL_CAPS,
+    ).request_logs,
+    false,
+  );
+  // The global request log switch still caps the flag under its new name.
+  assert.equal(
+    workflowSourceFeatures(
+      { workflow_payload: { features: { request_logs: true, audit: true } } },
+      { ...ALL_CAPS, request_logs: false },
+    ).request_logs,
+    false,
+  );
 });
