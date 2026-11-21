@@ -616,6 +616,7 @@ func TestAdminEndpoints_Enabled(t *testing.T) {
 
 	for _, path := range []string{"/admin/models", "/admin/providers/status", "/admin/request-logs", "/admin/request-logs/conversation?log_id=abc"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.RemoteAddr = loopbackPeer
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 
@@ -666,6 +667,7 @@ func TestAdminDashboardConfigEndpoint_ReturnsHandlerResponse(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/runtime/config", nil)
+	req.RemoteAddr = loopbackPeer
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -697,6 +699,7 @@ func TestAdminLegacyAlias_Deprecation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.RemoteAddr = loopbackPeer
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
@@ -762,6 +765,7 @@ func TestAdminUI_Disabled(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	req.RemoteAddr = loopbackPeer
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -826,43 +830,49 @@ func TestMCPOAuthCallback_SkipsAuth(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
-func TestAdminAPI_SkipsAuthWithoutMasterKey(t *testing.T) {
-	mock := &mockProvider{}
-	adminHandler := admin.NewHandler(nil, nil)
-	srv := New(mock, &Config{
+func TestAdminAPI_ManagedKeysRequireCredentialWithoutMasterKey(t *testing.T) {
+	srv := New(&mockProvider{}, &Config{
 		Authenticator:         mockAuthenticator{enabled: true, tokenToID: map[string]string{"managed-token": "key-123"}},
 		AdminEndpointsEnabled: true,
-		AdminHandler:          adminHandler,
+		AdminHandler:          admin.NewHandler(nil, nil),
 	})
 
-	adminReq := httptest.NewRequest(http.MethodGet, "/admin/models", nil)
-	adminRec := httptest.NewRecorder()
-	srv.ServeHTTP(adminRec, adminReq)
-
-	require.Equal(t, http.StatusOK, adminRec.Code, "expected admin API 200 without auth when master key is unset, got %d body=%s", adminRec.Code, adminRec.Body.String())
-
-	modelReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	modelRec := httptest.NewRecorder()
-	srv.ServeHTTP(modelRec, modelReq)
-
-	require.Equal(t, http.StatusUnauthorized, modelRec.Code, "expected model API 401 without auth when managed keys are enabled, got %d body=%s", modelRec.Code, modelRec.Body.String())
+	// Once a managed key exists, the admin API needs a credential even from
+	// this machine, like the model API.
+	for _, path := range []string{"/admin/models", "/admin/api/v1/models", "/v1/models"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.RemoteAddr = loopbackPeer
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code, "%s: %s", path, rec.Body.String())
+	}
 }
 
-func TestAdminPricingRecalculationSkipsAuthWithoutMasterKey(t *testing.T) {
+func TestAdminPricingRecalculationWithoutMasterKey(t *testing.T) {
 	tests := []struct {
 		name          string
 		authenticator BearerTokenAuthenticator
+		remoteAddr    string
+		bearer        string
+		wantStatus    int
 	}{
-		{name: "no auth configured"},
-		{name: "managed keys enabled", authenticator: mockAuthenticator{enabled: true, tokenToID: map[string]string{"managed-token": "key-123"}}},
+		{name: "no auth configured, local caller", remoteAddr: loopbackPeer, wantStatus: http.StatusOK},
+		{name: "no auth configured, remote caller", remoteAddr: "192.0.2.1:1234", wantStatus: http.StatusForbidden},
+		{name: "managed keys enabled, no credential", authenticator: mockAuthenticator{enabled: true, tokenToID: map[string]string{"managed-token": "key-123"}}, remoteAddr: loopbackPeer, wantStatus: http.StatusUnauthorized},
+		{
+			name:          "managed keys enabled, dashboard key",
+			authenticator: mockAuthenticator{enabled: true, tokenToID: map[string]string{"managed-token": "key-123"}, tokenDashboard: map[string]bool{"managed-token": true}},
+			remoteAddr:    "192.0.2.1:1234",
+			bearer:        "managed-token",
+			wantStatus:    http.StatusOK,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &mockProvider{}
 			recalculator := &pricingRecalculatorStub{}
 			adminHandler := admin.NewHandler(nil, providers.NewModelRegistry(), admin.WithUsagePricingRecalculator(recalculator))
-			srv := New(mock, &Config{
+			srv := New(&mockProvider{}, &Config{
 				Authenticator:         tt.authenticator,
 				AdminEndpointsEnabled: true,
 				AdminHandler:          adminHandler,
@@ -870,11 +880,19 @@ func TestAdminPricingRecalculationSkipsAuthWithoutMasterKey(t *testing.T) {
 
 			req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", strings.NewReader(`{"confirmation":"recalculate"}`))
 			req.Header.Set("Content-Type", "application/json")
+			req.RemoteAddr = tt.remoteAddr
+			if tt.bearer != "" {
+				req.Header.Set("Authorization", "Bearer "+tt.bearer)
+			}
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
-			require.Equal(t, http.StatusOK, rec.Code, "expected pricing recalculation 200 without auth when master key is unset, got %d body=%s", rec.Code, rec.Body.String())
-			require.Equal(t, 1, recalculator.calls)
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			wantCalls := 0
+			if tt.wantStatus == http.StatusOK {
+				wantCalls = 1
+			}
+			assert.Equal(t, wantCalls, recalculator.calls)
 		})
 	}
 }

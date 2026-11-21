@@ -78,6 +78,7 @@ type Config struct {
 	BasePath                        string                                 // URL path prefix where the app is mounted (default: /)
 	MasterKey                       string                                 // Optional: Master key for authentication
 	MasterKeyDisabled               bool                                   // Master key authentication turned off: require a credential and never open admin bootstrap
+	AdminAllowUnauthenticatedRemote bool                                   // Serve the admin API to remote callers while it has no credential to check (default: this machine only)
 	Authenticator                   BearerTokenAuthenticator               // Optional: managed API key authenticator
 	MetricsEnabled                  bool                                   // Whether to expose Prometheus metrics endpoint
 	MetricsEndpoint                 string                                 // HTTP path for metrics endpoint (default: /metrics)
@@ -305,13 +306,6 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Admin dashboard pages and static assets skip auth (/* enables prefix matching)
 	if cfg != nil && cfg.AdminUIEnabled && cfg.DashboardHandler != nil {
 		authSkipPaths = append(authSkipPaths, "/admin/dashboard", "/admin/dashboard/*", "/admin/static/*")
-	}
-	// When no bootstrap master key is configured, keep admin APIs reachable so
-	// the dashboard can recover managed-key access instead of locking itself
-	// out. A master key that was deliberately turned off is not an absent one:
-	// that deployment wants managed keys enforced, admin API included.
-	if cfg != nil && cfg.effectiveMasterKey() == "" && !cfg.MasterKeyDisabled && !hasRequestAuthenticators(cfg.RequestAuthenticators) && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
-		authSkipPaths = append(authSkipPaths, "/admin/*")
 	}
 	// The MCP OAuth callback is reached by a browser redirect from an
 	// authorization server, without the dashboard's bearer token; its
@@ -588,6 +582,14 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/batches/:id/cancel", handler.CancelBatch)
 	e.GET("/v1/batches/:id/results", handler.BatchResults)
 
+	// With no master key and no authentication extension, the admin API has
+	// no credential to check until the first managed key exists; until then
+	// it serves only this machine unless remote access was opted into.
+	adminOpen := func(next echo.HandlerFunc) echo.HandlerFunc { return next }
+	if cfg != nil && cfg.effectiveMasterKey() == "" && !cfg.MasterKeyDisabled && !hasRequestAuthenticators(cfg.RequestAuthenticators) && !cfg.AdminAllowUnauthenticatedRemote {
+		adminOpen = adminOpenLocalOnly
+	}
+
 	// Admin API routes (behind ADMIN_ENDPOINTS_ENABLED flag). Managed keys
 	// need dashboard access to pass the gate; the master key always does.
 	if cfg != nil && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
@@ -603,7 +605,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 			},
 		})
 		e.GET(admin.MCPOAuthCallbackPath, cfg.AdminHandler.MCPOAuthCallback)
-		adminGroup := e.Group("/admin", adminGate, adminGzip)
+		adminGroup := e.Group("/admin", adminOpen, adminGate, adminGzip)
 		cfg.AdminHandler.RegisterRoutes(adminGroup)
 		// Extension admin routes share the group, so they get exactly the
 		// built-in admin API's authorization. They are not mirrored onto the
@@ -615,7 +617,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		// Legacy alias under /admin/api/v1/* — accepted until adminLegacySunset
 		// to give operators a window to migrate. Responses carry Deprecation,
 		// Sunset, and Link headers per RFC 8594 / draft-ietf-httpapi-deprecation-header.
-		legacy := e.Group("/admin/api/v1", adminLegacyDeprecationMiddleware, adminGate, adminGzip)
+		legacy := e.Group("/admin/api/v1", adminLegacyDeprecationMiddleware, adminOpen, adminGate, adminGzip)
 		cfg.AdminHandler.RegisterRoutes(legacy)
 		// DashboardConfig moved within /admin from /dashboard/config to
 		// /runtime/config; preserve the historical legacy path explicitly.

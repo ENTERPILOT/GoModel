@@ -183,9 +183,9 @@ wolumen, ograniczaj dostęp i odpowiednio klasyfikuj kopie zapasowe.
   `authorization`, `api-key`, `apikey`, `secret`, `password`, `signature` lub `jwt`.
   `Idempotency-Key` i `Sec-WebSocket-Key` pozostają bez zmian.
 - **Ustaw `GOMODEL_MASTER_KEY`.** Jeśli jest pusty i nie istnieją żadne zarządzane klucze, każdy
-  request jest przepuszczany bez uwierzytelnienia, a `/admin/*` zostaje dodane do
-  listy ścieżek pomijających uwierzytelnianie jako ścieżka odzyskiwania dostępu. Gateway dostępny z internetu w
-  takim stanie oddaje każdemu pełne Admin API.
+  request jest przepuszczany bez uwierzytelnienia. `/admin/*` odpowiada wtedy tylko
+  wywołującym z maszyny gatewaya, chyba że `ADMIN_ALLOW_UNAUTHENTICATED_REMOTE=true`
+  otworzy je dla każdego adresu – wtedy każdy, kto dociera do gatewaya, dostaje pełne Admin API.
 
 ### TLS
 

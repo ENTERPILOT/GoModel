@@ -440,12 +440,8 @@ func (a *App) logStartupInfo() {
 	case managedKeysConfigured:
 		slog.Info("authentication enabled", "mode", "managed_keys", "managed_key_total", a.authKeys.Service.Total(), "managed_key_active", a.authKeys.Service.ActiveCount())
 		if !cfg.Server.MasterKeyDisabled && cfg.Admin.EndpointsEnabled {
-			// Without a master key the admin API stays open for bootstrap
-			// (see server.New), even though model endpoints now require a
-			// managed key.
-			slog.Warn("SECURITY WARNING: admin API is reachable without authentication",
-				"security_risk", "any caller that can reach this port can create API keys and change providers",
-				"recommendation", "set GOMODEL_MASTER_KEY, or set MASTER_KEY_DISABLED=true once a managed key with dashboard access exists")
+			slog.Info("admin API requires a managed key with dashboard access",
+				"recovery", "without such a key, set GOMODEL_MASTER_KEY and restart")
 		}
 	case cfg.Server.MasterKeyDisabled:
 		// Reported above; no master key means no authentication only when one
@@ -454,6 +450,18 @@ func (a *App) logStartupInfo() {
 		slog.Warn("SECURITY WARNING: GOMODEL_MASTER_KEY not set - server running in UNSAFE MODE",
 			"security_risk", "unauthenticated access allowed",
 			"recommendation", "set GOMODEL_MASTER_KEY environment variable to secure this gateway")
+		switch {
+		case !cfg.Admin.EndpointsEnabled:
+		case cfg.Admin.AllowUnauthenticatedRemote:
+			slog.Warn("SECURITY WARNING: admin API is reachable without authentication from any address",
+				"admin_api_access", "remote",
+				"security_risk", "any caller that can reach this port can create API keys and change providers",
+				"recommendation", "set GOMODEL_MASTER_KEY and unset ADMIN_ALLOW_UNAUTHENTICATED_REMOTE")
+		default:
+			slog.Warn("admin API is served without authentication to this machine only until a managed key exists",
+				"admin_api_access", "loopback_only",
+				"recommendation", "set GOMODEL_MASTER_KEY to use the dashboard from another machine or through docker run -p")
+		}
 		if cfg.MCP.Enabled && len(cfg.MCP.Servers) > 0 {
 			// Worth calling out separately: an unauthenticated /mcp hands any
 			// caller that can reach the port every aggregated tool, together

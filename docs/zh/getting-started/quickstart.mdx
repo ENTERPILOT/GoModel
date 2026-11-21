@@ -12,10 +12,15 @@ keywords: ["快速开始", "安装", "入门", "AI 网关部署", "quick start",
 <Tabs>
   <Tab title="Docker">
     ```bash
+    export GOMODEL_MASTER_KEY="$(openssl rand -hex 32)"
+    echo "$GOMODEL_MASTER_KEY"
     docker run --rm -p 8080:8080 \
+      -e GOMODEL_MASTER_KEY \
       -v gomodel_data:/app/data \
       enterpilot/gomodel
     ```
+
+    请保存该密钥：控制台会要求输入它，请求也会将它作为 API 密钥发送。
   </Tab>
   <Tab title="macOS / Linux">
     ```bash
@@ -45,14 +50,14 @@ keywords: ["快速开始", "安装", "入门", "AI 网关部署", "quick start",
 
 ### 3. 发送第一个请求
 
-针对同一个网关，您可以使用 `curl`、OpenAI SDK，或 Python 和 JavaScript 版的 Anthropic SDK：
+针对同一个网关，您可以使用 `curl`、OpenAI SDK，或 Python 和 JavaScript 版的 Anthropic SDK。如果设置了 `GOMODEL_MASTER_KEY`，请用它代替 `change-me`：
 
 <CodeGroup>
 
 ```bash curl
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer change-me" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -d '{
     "model": "gpt-4o-mini",
     "messages": [{"role": "user", "content": "Say hello in one sentence."}]
