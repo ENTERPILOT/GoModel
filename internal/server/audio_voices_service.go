@@ -52,12 +52,14 @@ func (s *audioService) ListVoices(c *echo.Context) error {
 	if model == "" {
 		return handleError(c, core.NewInvalidRequestError("model is required", nil).WithParam("model"))
 	}
-	selector, err := s.authorizedSelector(c, model, strings.TrimSpace(query.Get("provider")))
+	providerHint := strings.TrimSpace(query.Get("provider"))
+	selector, vmRoute, err := s.authorizedSelector(c, model, providerHint)
 	if err != nil {
 		return handleError(c, err)
 	}
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
+	ctx = withModelTimeouts(ctx, s.modelResolver, core.NewRequestedModelSelector(model, providerHint), selector, vmRoute)
 	c.SetRequest(c.Request().WithContext(ctx))
 	requestlog.EnrichEntry(c, selector.Model, "")
 	route := s.routeFor(selector, requestID)

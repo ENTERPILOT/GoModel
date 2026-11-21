@@ -25,7 +25,11 @@ import {
 } from "./modelIdentity.js";
 import { computeRenderStep, initialRenderStep } from "./renderBatching.js";
 import { modelAccessStateClass, splitVirtualModelViews } from "./routing.js";
-import { buildAliasTogglePayload, buildModelTogglePayload } from "./vmForm.js";
+import {
+  buildAliasTogglePayload,
+  buildModelTogglePayload,
+  timeoutPayloadFields,
+} from "./vmForm.js";
 
 class VirtualModelsStore {
   virtualModelsAvailable = $state(true);
@@ -451,6 +455,7 @@ class VirtualModelsStore {
         description: String(alias.description || "").trim(),
         enabled: alias.enabled !== false,
         ...(alias.slowdown != null ? { slowdown: Number(alias.slowdown) } : {}),
+        ...timeoutPayloadFields(alias),
         ...(alias.reasoning_effort
           ? { reasoning_effort: alias.reasoning_effort }
           : {}),

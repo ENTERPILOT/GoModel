@@ -64,7 +64,9 @@ including `500` — are returned to the caller without retrying. The following p
 retry less than the table suggests:
 
 - **Local HTTP client timeouts** return immediately without retrying. An
-  expired overall request context also prevents further attempts.
+  expired overall request context also prevents further attempts. To give one
+  model or redirect its own `HTTP_TIMEOUT` or `HTTP_RESPONSE_HEADER_TIMEOUT`,
+  see [Set upstream timeouts](/features/virtual-models#set-upstream-timeouts).
 
 - **Streaming** requests are never retried once dispatched, because partial
   data may already have been sent.

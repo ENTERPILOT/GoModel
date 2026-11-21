@@ -312,26 +312,28 @@ func (s *Service) ListViews() []View {
 	views := make([]View, 0, len(rows))
 	for _, vm := range rows {
 		view := View{
-			Source:          vm.Source,
-			Kind:            vm.Kind(),
-			Targets:         vm.Targets,
-			Strategy:        vm.Strategy,
-			StrategyPlugin:  vm.StrategyPlugin,
-			StrategyConfig:  vm.StrategyConfig,
-			SessionAffinity: vm.SessionAffinity,
-			Failover:        vm.Failover,
-			ProviderName:    vm.ProviderName,
-			Model:           vm.Model,
-			UserPaths:       vm.UserPaths,
-			Description:     vm.Description,
-			Slowdown:        vm.Slowdown,
-			ReasoningEffort: vm.ReasoningEffort,
-			Params:          vm.Params,
-			DefaultParams:   vm.DefaultParams,
-			Enabled:         vm.Enabled,
-			Managed:         vm.Managed,
-			CreatedAt:       vm.CreatedAt,
-			UpdatedAt:       vm.UpdatedAt,
+			Source:                vm.Source,
+			Kind:                  vm.Kind(),
+			Targets:               vm.Targets,
+			Strategy:              vm.Strategy,
+			StrategyPlugin:        vm.StrategyPlugin,
+			StrategyConfig:        vm.StrategyConfig,
+			SessionAffinity:       vm.SessionAffinity,
+			Failover:              vm.Failover,
+			ProviderName:          vm.ProviderName,
+			Model:                 vm.Model,
+			UserPaths:             vm.UserPaths,
+			Description:           vm.Description,
+			Slowdown:              vm.Slowdown,
+			Timeout:               vm.Timeout,
+			ResponseHeaderTimeout: vm.ResponseHeaderTimeout,
+			ReasoningEffort:       vm.ReasoningEffort,
+			Params:                vm.Params,
+			DefaultParams:         vm.DefaultParams,
+			Enabled:               vm.Enabled,
+			Managed:               vm.Managed,
+			CreatedAt:             vm.CreatedAt,
+			UpdatedAt:             vm.UpdatedAt,
 		}
 		if vm.IsRedirect() {
 			view.ResolvedModel, view.ProviderType, view.Valid = s.redirectViewResolution(vm)
@@ -564,7 +566,7 @@ func (s *Service) policyIsRedundant(policy VirtualModel, fallbackRows []VirtualM
 // policyIsNoop reports whether an otherwise empty policy changes effective
 // access compared with the snapshot that would remain without that policy.
 func policyIsNoop(policy VirtualModel, fallback snapshot) bool {
-	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" || policy.Slowdown != nil || policy.setsOverrides() {
+	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" || policy.Slowdown != nil || policy.setsTimeouts() || policy.setsOverrides() {
 		return false
 	}
 

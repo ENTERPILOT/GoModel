@@ -532,3 +532,41 @@ export function modelOverrideEditButtonLabel(subject, hasOverride) {
     ? m.models_edit_action_virtual({ subject: value })
     : m.models_edit_action({ subject: value });
 }
+
+// rowUpstreamTimeouts resolves the per-attempt upstream timeouts a row shows,
+// field by field: an alias row shows its own; a model row replaced by a
+// masking redirect shows the redirect's, since requests never reach the
+// model's own policy; any other model row shows its own policy. Null means
+// inherited.
+export function rowUpstreamTimeouts(row) {
+  const sources = row && row.is_alias
+    ? [row.alias]
+    : row && row.masking_alias
+      ? [row.masking_alias]
+      : [row && row.access && row.access.override];
+  const pick = (field) => {
+    for (const source of sources) {
+      const value = source && source[field];
+      if (value != null && value !== "") return Number(value);
+    }
+    return null;
+  };
+  return {
+    timeout: pick("timeout"),
+    response_header_timeout: pick("response_header_timeout"),
+  };
+}
+
+// upstreamTimeoutsLabel renders a row's configured timeouts, or "" if none.
+export function upstreamTimeoutsLabel(timeouts) {
+  const parts = [];
+  if (timeouts && timeouts.timeout != null) {
+    parts.push(m.models_timeout_per_attempt({ value: timeouts.timeout }));
+  }
+  if (timeouts && timeouts.response_header_timeout != null) {
+    parts.push(
+      m.models_timeout_headers({ value: timeouts.response_header_timeout }),
+    );
+  }
+  return parts.join(" · ");
+}
