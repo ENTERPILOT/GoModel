@@ -18,6 +18,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/enterpilot/gomodel/internal/authkeys"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage"
 )
 
@@ -379,6 +380,10 @@ func Load() (*LoadResult, error) {
 	cfg.Server.UserPathHeader, err = NormalizeHeaderName(cfg.Server.UserPathHeader, "X-GoModel-User-Path")
 	if err != nil {
 		return nil, fmt.Errorf("invalid server.user_path_header: %w", err)
+	}
+	cfg.Server.RequestControlHeaders, err = core.NormalizeRequestControlHeaders(cfg.Server.RequestControlHeaders)
+	if err != nil {
+		return nil, fmt.Errorf("invalid server.request_control_headers (REQUEST_CONTROL_HEADERS): %w", err)
 	}
 	cfg.Server.AuthKeyPrefix, err = authkeys.NormalizeTokenPrefix(cfg.Server.AuthKeyPrefix)
 	if err != nil {

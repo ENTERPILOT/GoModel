@@ -147,6 +147,11 @@ Durchlauf global abzuschalten; auch ein [Workflow](/de/advanced/workflows) kann
 ihn für seinen Geltungsbereich abschalten. Das gewählte Ziel wird weiterhin
 bedient, jedoch ohne Retries.
 
+Ein Client kann Failover für einen einzelnen Request mit dem Header
+`X-GoModel-Failover: off` abschalten, sobald Sie ihn in
+[`REQUEST_CONTROL_HEADERS`](/de/advanced/request-control-headers) erlauben.
+Standardmäßig wird der Header ignoriert, und er kann Failover nie einschalten.
+
 ## Die Failover-Richtlinie anpassen
 
 Die oben beschriebenen Standardwerte passen für die meisten Deployments. Drei

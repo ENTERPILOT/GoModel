@@ -49,6 +49,7 @@ GoModel 会根据常用的环境变量自动发现提供商。
 | `BODY_SIZE_LIMIT`    | 请求体大小上限（例如 `10M`、`1024K`、`500KB`），同时作用于压缩和解压后的大小 | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | 模型路由上的单次响应写入等待客户端读取的秒数；`0` 表示禁用 | `60`                   |
 | `USER_PATH_HEADER`   | 用于读写请求 `user_path` 值的 Header  | `X-GoModel-User-Path`  |
+| `REQUEST_CONTROL_HEADERS` | 客户端可以发送的[请求控制头](/zh/advanced/request-control-headers)，用于为自己的请求更改网关设置，以逗号分隔 | _（空，不允许任何请求头）_ |
 | `SERVER_TRUSTED_PROXIES` | 您自己的代理所在的网络；启用基于 Header 的客户端地址解析 | _（空）_ |
 | `SERVER_CLIENT_IP_HEADER` | 受信任代理用于传递客户端地址的 Header | `X-Forwarded-For` |
 | `SERVER_TRUSTED_HOPS` | 客户端与网关之间的代理数量；`0` 表示改为扫描整条链 | `0` |

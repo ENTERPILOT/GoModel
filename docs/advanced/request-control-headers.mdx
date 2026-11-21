@@ -1,0 +1,83 @@
+---
+title: "Request Control Headers"
+description: "Let clients change a gateway setting for one request with an HTTP header. Off by default; you choose which headers are allowed."
+icon: "toggle-right"
+keywords: ["request control headers", "per-request settings", "X-GoModel-Failover", "REQUEST_CONTROL_HEADERS", "steering headers"]
+---
+
+## Overview
+
+A request control header lets a client change one gateway setting for its own
+request, for example "serve this request without failover".
+
+Gateway settings are the operator's decision, and a control header hands part
+of that decision to every client. So they are **off by default**: GoModel
+reads a control header only after you list it.
+
+## Allow a header
+
+List the headers clients may send, separated by commas:
+
+```bash
+REQUEST_CONTROL_HEADERS=X-GoModel-Failover
+```
+
+Or in `config.yaml`:
+
+```yaml
+server:
+  request_control_headers: ["X-GoModel-Failover"]
+```
+
+The default is empty: clients steer nothing. A name GoModel does not know
+stops startup, so a typo cannot leave a header silently off.
+
+The list applies to the whole gateway, not to single API keys. Add a header
+only when every client that can authenticate may use it.
+
+## Supported headers
+
+| Header | Value | Effect |
+| --- | --- | --- |
+| `X-GoModel-Failover` | `off` | Serves the request without [failover](/features/failover): when the chosen target fails, its error is returned instead of trying the remaining targets. `on` keeps the configured behaviour. |
+
+Switches accept `on`/`off`, `true`/`false` and `1`/`0`, in any case.
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "X-GoModel-Failover: off" \
+  -d '{"model": "resilient-chat", "messages": [{"role": "user", "content": "Hi"}]}'
+```
+
+## Rules
+
+- **Not listed means ignored.** A control header you did not allow changes
+  nothing; the request is served as if the client had not sent it.
+- **Never forwarded.** Control headers stay at the gateway, listed or not.
+  They are not sent to a provider, on [passthrough](/features/passthrough-api)
+  routes either.
+- **Bad values are refused.** A listed header with a value GoModel cannot
+  read, or sent more than once, returns `400 invalid_request_error` before
+  any provider is called.
+- **Authenticated clients only.** Headers are read on model routes after
+  authentication. They do not affect API key checks, model access,
+  [budgets](/features/budgets) or [rate limits](/features/rate-limits).
+- **The client's own request only.** Calls the gateway makes while serving the
+  request, such as a guardrail's judge model, keep the configured settings.
+- **Visible in the request log.** The entry records the effective setting; a
+  request served with `X-GoModel-Failover: off` shows `failover: false` in
+  its `workflow_features`.
+
+`X-GoModel-Failover` can only turn failover off. It cannot switch on failover
+that a virtual model, a [workflow](/advanced/workflows) or
+`FAILOVER_ENABLED=false` turned off.
+
+<Note>
+  Headers GoModel has always read, such as the
+  [user path header](/features/user-path#http-header), `Cache-Control` for
+  the [response cache](/features/cache) and
+  [tagging headers](/features/labelling#tagging-headers), are not control
+  headers: they work without this setting.
+</Note>

@@ -1,0 +1,90 @@
+---
+title: "Request-Control-Header"
+description: "Lassen Sie Clients eine Gateway-Einstellung für einen einzelnen Request per HTTP-Header ändern. Standardmäßig aus; Sie legen fest, welche Header erlaubt sind."
+icon: "toggle-right"
+keywords: ["Request-Control-Header", "Einstellungen pro Request", "request control headers", "X-GoModel-Failover", "REQUEST_CONTROL_HEADERS"]
+---
+
+## Übersicht
+
+Mit einem Request-Control-Header ändert ein Client eine Gateway-Einstellung für
+seinen eigenen Request, zum Beispiel „diesen Request ohne Failover bedienen“.
+
+Über Gateway-Einstellungen entscheidet der Betreiber, und ein Control-Header
+gibt einen Teil dieser Entscheidung an jeden Client ab. Deshalb sind sie
+**standardmäßig aus**: GoModel liest einen Control-Header erst, wenn Sie ihn
+aufführen.
+
+## Einen Header erlauben
+
+Führen Sie die Header, die Clients senden dürfen, durch Kommas getrennt auf:
+
+```bash
+REQUEST_CONTROL_HEADERS=X-GoModel-Failover
+```
+
+Oder in `config.yaml`:
+
+```yaml
+server:
+  request_control_headers: ["X-GoModel-Failover"]
+```
+
+Der Standard ist leer: Clients steuern nichts. Ein Name, den GoModel nicht
+kennt, verhindert den Start, sodass ein Tippfehler einen Header nicht
+unbemerkt abgeschaltet lässt.
+
+Die Liste gilt für das gesamte Gateway, nicht für einzelne API-Keys. Nehmen Sie
+einen Header nur auf, wenn ihn jeder Client verwenden darf, der sich
+authentifizieren kann.
+
+## Unterstützte Header
+
+| Header | Wert | Wirkung |
+| --- | --- | --- |
+| `X-GoModel-Failover` | `off` | Bedient den Request ohne [Failover](/de/features/failover): Schlägt das gewählte Ziel fehl, wird dessen Fehler zurückgegeben, statt die übrigen Ziele zu versuchen. `on` behält das konfigurierte Verhalten bei. |
+
+Schalter akzeptieren `on`/`off`, `true`/`false` und `1`/`0`, unabhängig von
+Groß- und Kleinschreibung.
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "X-GoModel-Failover: off" \
+  -d '{"model": "resilient-chat", "messages": [{"role": "user", "content": "Hi"}]}'
+```
+
+## Regeln
+
+- **Nicht aufgeführt heißt ignoriert.** Ein Control-Header, den Sie nicht
+  erlaubt haben, ändert nichts; der Request wird bedient, als hätte der Client
+  ihn nicht gesendet.
+- **Wird nie weitergeleitet.** Control-Header bleiben am Gateway, ob aufgeführt
+  oder nicht. Sie werden nicht an einen Provider gesendet, auch nicht auf
+  [Passthrough](/de/features/passthrough-api)-Routen.
+- **Ungültige Werte werden abgelehnt.** Ein aufgeführter Header mit einem Wert,
+  den GoModel nicht lesen kann, oder der mehrfach gesendet wird, liefert
+  `400 invalid_request_error`, bevor ein Provider aufgerufen wird.
+- **Nur authentifizierte Clients.** Header werden auf Modell-Routen nach der
+  Authentifizierung gelesen. Sie beeinflussen weder die Prüfung von API-Keys
+  noch den Modellzugriff, [Budgets](/de/features/budgets) oder
+  [Rate-Limits](/de/features/rate-limits).
+- **Nur der eigene Request des Clients.** Aufrufe, die das Gateway beim
+  Bedienen des Requests selbst ausführt, etwa das Judge-Modell eines
+  Guardrails, behalten die konfigurierten Einstellungen.
+- **Im Request-Log sichtbar.** Der Eintrag hält die wirksame Einstellung fest;
+  ein mit `X-GoModel-Failover: off` bedienter Request zeigt `failover: false`
+  in seinen `workflow_features`.
+
+`X-GoModel-Failover` kann Failover nur abschalten. Der Header schaltet kein
+Failover ein, das ein virtuelles Modell, ein [Workflow](/de/advanced/workflows)
+oder `FAILOVER_ENABLED=false` abgeschaltet hat.
+
+<Note>
+  Header, die GoModel schon immer liest, etwa der
+  [User-Path-Header](/de/features/user-path#http-header), `Cache-Control` für
+  den [Response-Cache](/de/features/cache) und
+  [Tagging-Header](/de/features/labelling#tagging-header), sind keine
+  Control-Header: Sie funktionieren ohne diese Einstellung.
+</Note>
