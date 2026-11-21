@@ -66,7 +66,10 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 		return nil, fmt.Errorf("database is required")
 	}
 
-	collection := database.Collection("audit_logs")
+	collection, err := requestLogCollection(database)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -163,7 +166,7 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 		slog.Warn("failed to drop legacy MongoDB index", "index", legacyExecutionPlanIndex, "error", err)
 	}
 
-	_, err := collection.Indexes().CreateMany(ctx, indexes)
+	_, err = collection.Indexes().CreateMany(ctx, indexes)
 	if err != nil {
 		// Log warning but don't fail - indexes may already exist
 		slog.Warn("failed to create some MongoDB indexes", "error", err)

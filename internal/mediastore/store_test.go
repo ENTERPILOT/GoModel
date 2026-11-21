@@ -89,6 +89,23 @@ func testObject(id string, expiresAt time.Time) *Object {
 	}
 }
 
+// An object stored by v0.2.5 carries the source that release wrote.
+func TestStore_ReadsLegacyRequestLogSource(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		if _, inMemory := store.(*MemoryStore); inMemory {
+			t.Skip("a memory store holds nothing from an older release")
+		}
+		ctx := context.Background()
+		object := testObject("legacy", time.Time{})
+		object.Source = legacySourceRequestLog
+		require.NoError(t, store.Insert(ctx, object))
+
+		got, err := store.Get(ctx, "legacy")
+		require.NoError(t, err)
+		assert.Equal(t, SourceRequestLog, got.Source)
+	})
+}
+
 func TestStore_InsertGetDelete(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()

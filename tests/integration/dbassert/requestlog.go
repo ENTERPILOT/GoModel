@@ -50,7 +50,7 @@ func QueryRequestLogsByRequestID(t *testing.T, pool *pgxpool.Pool, requestID str
 	query := `
 		SELECT id, timestamp, duration_ns, requested_model, provider, workflow_version_id, cache_type, status_code,
 		       request_id, auth_key_id, auth_method, client_ip, method, path, user_path, stream, error_type, data
-		FROM audit_logs
+		FROM request_logs
 		WHERE request_id = $1
 		ORDER BY timestamp ASC
 	`
@@ -107,7 +107,7 @@ func QueryRequestLogsByRequestIDMongo(t *testing.T, db *mongo.Database, requestI
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	collection := db.Collection("audit_logs")
+	collection := db.Collection("request_logs")
 	filter := bson.M{"request_id": requestID}
 
 	cursor, err := collection.Find(ctx, filter)
@@ -134,7 +134,7 @@ func ClearRequestLogs(t *testing.T, pool *pgxpool.Pool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, err := pool.Exec(ctx, "DELETE FROM audit_logs")
+	_, err := pool.Exec(ctx, "DELETE FROM request_logs")
 	require.NoError(t, err, "failed to clear request logs")
 }
 

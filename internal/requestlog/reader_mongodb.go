@@ -90,7 +90,11 @@ func NewMongoDBReader(database *mongo.Database) (*MongoDBReader, error) {
 	if database == nil {
 		return nil, fmt.Errorf("database is required")
 	}
-	return &MongoDBReader{collection: database.Collection("audit_logs")}, nil
+	collection, err := requestLogCollection(database)
+	if err != nil {
+		return nil, err
+	}
+	return &MongoDBReader{collection: collection}, nil
 }
 
 func mongoUserPathMatchFilter(userPath string) bson.E {
