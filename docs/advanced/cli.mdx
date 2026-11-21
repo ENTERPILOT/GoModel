@@ -14,6 +14,7 @@ the examples below use the long form.
 | Flag               | Description                                              | Default |
 | ------------------ | ------------------------------------------------------- | ------- |
 | `--version`        | Print version information and exit                       | —       |
+| `--open`           | Start the gateway and open the dashboard in the default browser | —   |
 | `--health`         | Probe the local `/health` (liveness) endpoint and exit  | —       |
 | `--health-timeout` | Maximum time to wait for the `--health` probe            | `2s`    |
 | `--ready`          | Probe the local `/health/ready` (readiness) endpoint and exit | — |
@@ -27,6 +28,21 @@ Print the build version and exit:
 ```bash
 gomodel --version
 ```
+
+## Open the dashboard
+
+`--open` starts the gateway as usual and opens the admin dashboard in your
+default browser. Use it when you run GoModel on your own computer:
+
+```bash
+gomodel --open
+```
+
+The dashboard opens once, when the gateway starts listening; a configuration
+reload does not open it again. When no browser can be opened (a server or
+container without a graphical session), the gateway keeps serving and logs a
+warning with the dashboard address. When the dashboard is turned off
+(`ADMIN_UI_ENABLED=false`), it logs that `--open` was ignored.
 
 ## Health probe
 

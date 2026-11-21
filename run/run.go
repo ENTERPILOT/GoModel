@@ -406,6 +406,13 @@ func Run(ctx context.Context, opts Options) error {
 		return next, nil
 	}
 
+	// The socket is bound, so the browser's first request waits in the accept
+	// queue for the server instead of being refused. A reload does not open
+	// the dashboard again.
+	if cliOpts.Open {
+		openDashboard(withBoundPort(application.DashboardURL(), socket.bound))
+	}
+
 	if err := serveUntilShutdown(signalCtx, reload, socket, application, rebuild); err != nil {
 		slog.Error("application failed", "error", err)
 		return err

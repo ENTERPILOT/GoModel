@@ -15,6 +15,7 @@ lange Form.
 | Flag               | Beschreibung                                              | Standardwert |
 | ------------------ | ------------------------------------------------------- | ------- |
 | `--version`        | Versionsinformationen ausgeben und beenden               | —       |
+| `--open`           | Das Gateway starten und das Dashboard im Standardbrowser öffnen | —   |
 | `--health`         | Den lokalen Endpunkt `/health` (Liveness) abfragen und beenden | —       |
 | `--health-timeout` | Maximale Wartezeit für die `--health`-Abfrage            | `2s`    |
 | `--ready`          | Den lokalen Endpunkt `/health/ready` (Readiness) abfragen und beenden | — |
@@ -28,6 +29,22 @@ Build-Version ausgeben und beenden:
 ```bash
 gomodel --version
 ```
+
+## Dashboard öffnen
+
+`--open` startet das Gateway wie gewohnt und öffnet das Admin-Dashboard im
+Standardbrowser. Praktisch, wenn GoModel auf dem eigenen Rechner läuft:
+
+```bash
+gomodel --open
+```
+
+Das Dashboard wird einmal geöffnet, sobald das Gateway Verbindungen annimmt; ein
+Neuladen der Konfiguration öffnet es nicht erneut. Lässt sich kein Browser
+öffnen (Server oder Container ohne grafische Sitzung), läuft das Gateway weiter
+und protokolliert eine Warnung mit der Dashboard-Adresse. Ist das Dashboard
+abgeschaltet (`ADMIN_UI_ENABLED=false`), protokolliert es, dass `--open`
+ignoriert wurde.
 
 ## Health-Abfrage
 
