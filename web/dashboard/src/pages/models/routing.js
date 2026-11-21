@@ -4,7 +4,9 @@
 
 import * as m from "../../lib/paraglide/messages.js";
 
-import { normalizedAliasName } from "./modelIdentity.js";
+import { normalizedAliasName, qualifyTarget } from "./modelIdentity.js";
+
+export { qualifyTarget };
 
 // paramsObject returns a view's `params`/`default_params` map, or an empty
 // object when the field is absent or not a JSON object.
@@ -12,25 +14,6 @@ export function paramsObject(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
-}
-
-// qualifyTarget renders a {provider, model} target as a single selector. The
-// model name may itself contain slashes (e.g. provider "groq" with model
-// "openai/gpt-oss-120b"), so only skip re-qualifying when the model already
-// carries this provider's prefix — never on the mere presence of a slash.
-export function qualifyTarget(target) {
-  if (!target) {
-    return "";
-  }
-  const provider = String(target.provider || "").trim();
-  const model = String(target.model || "").trim();
-  if (!provider || !model) {
-    return model;
-  }
-  if (model === provider || model.startsWith(provider + "/")) {
-    return model;
-  }
-  return provider + "/" + model;
 }
 
 function parseWeight(value) {

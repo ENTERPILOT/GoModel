@@ -8,6 +8,7 @@ import {
   buildPlaygroundRequest,
   clampJsonPanelWidth,
   createStreamAccumulator,
+  defaultPlaygroundModel,
   defaultUserPathForModel,
   effectiveUserPathHeaderName,
   extractResponseText,
@@ -18,7 +19,9 @@ import {
   playgroundModelOptions,
   playgroundUserPathHeader,
   playgroundUserPathOptions,
+  playgroundVirtualModelOptions,
   sendableMessages,
+  syncedUserPath,
   streamErrorMessage,
 } from "../src/pages/playground/playgroundLogic.js";
 
@@ -311,6 +314,64 @@ test("playgroundModelOptions strips a provider prefix that repeats the provider"
   ]);
 });
 
+test("playgroundVirtualModelOptions lists enabled virtual models with an available target (#1533)", () => {
+  const inventory = [
+    { selector: "openai/gpt-4o", provider_name: "openai", model: { id: "gpt-4o", metadata: { modes: ["chat"] } } },
+  ];
+  const options = playgroundVirtualModelOptions(
+    [
+      { name: "test-alias", targets: [{ provider: "openai", model: "gpt-4o" }], enabled: true, valid: true },
+      { name: " smart ", targets: [{ provider: "openai", model: "gpt-4o" }], enabled: true, valid: true },
+      { name: "test-alias", targets: [{ provider: "openai", model: "gpt-4o" }], enabled: true, valid: true },
+      { name: "off", targets: [{ provider: "openai", model: "gpt-4o" }], enabled: false, valid: true },
+      { name: "broken", targets: [{ provider: "gone", model: "x" }], enabled: true, valid: false },
+      { name: "", targets: [], enabled: true, valid: true },
+      null,
+    ],
+    inventory,
+  );
+  assert.deepEqual(options, [
+    { id: "smart", label: "smart", provider: "", virtual: true },
+    { id: "test-alias", label: "test-alias", provider: "", virtual: true },
+  ]);
+  assert.deepEqual(playgroundVirtualModelOptions(undefined, inventory), []);
+  assert.deepEqual(playgroundVirtualModelOptions("nope", undefined), []);
+});
+
+test("playgroundVirtualModelOptions drops a virtual model only when every target advertises other modes", () => {
+  const inventory = [
+    { selector: "openai/gpt-4o", provider_name: "openai", model: { id: "gpt-4o", metadata: { modes: ["chat"] } } },
+    { selector: "openai/gpt-image-1", provider_name: "openai", model: { id: "gpt-image-1", metadata: { modes: ["image_generation"] } } },
+    { selector: "groq/openai/gpt-oss", provider_name: "groq", model: { id: "openai/gpt-oss", metadata: { modes: ["chat"] } } },
+    { selector: "ollama/local", provider_name: "ollama", model: { id: "local" } },
+  ];
+  const virtualModel = (name, ...targets) => ({ name, targets, enabled: true, valid: true });
+  const virtualModels = [
+    virtualModel("chat-only", { provider: "openai", model: "gpt-4o" }),
+    virtualModel("image-only", { provider: "openai", model: "gpt-image-1" }),
+    virtualModel("mixed", { provider: "openai", model: "gpt-image-1" }, { provider: "openai", model: "gpt-4o" }),
+    virtualModel("nested-id", { provider: "groq", model: "openai/gpt-oss" }),
+    virtualModel("no-metadata", { provider: "ollama", model: "local" }),
+    virtualModel("chained", { provider: "", model: "chat-only" }),
+    virtualModel("no-targets"),
+  ];
+  const ids = (modes) => playgroundVirtualModelOptions(virtualModels, inventory, modes).map((option) => option.id);
+  assert.deepEqual(ids(undefined), ["chained", "chat-only", "mixed", "nested-id", "no-metadata", "no-targets"]);
+  assert.deepEqual(ids(new Set(["image_generation"])), ["chained", "image-only", "mixed", "no-metadata", "no-targets"]);
+});
+
+test("defaultPlaygroundModel starts on the first inventory model, not a virtual one", () => {
+  const virtual = { id: "smart", label: "smart", provider: "", virtual: true };
+  const concrete = { id: "openai/gpt-4o", label: "gpt-4o", provider: "openai" };
+  assert.equal(defaultPlaygroundModel([virtual, concrete]), "openai/gpt-4o");
+  assert.equal(defaultPlaygroundModel([virtual, concrete], true), "openai/gpt-4o");
+  // Only virtual models: wait while the inventory is still loading.
+  assert.equal(defaultPlaygroundModel([virtual], true), "");
+  assert.equal(defaultPlaygroundModel([virtual]), "smart");
+  assert.equal(defaultPlaygroundModel([]), "");
+  assert.equal(defaultPlaygroundModel(undefined), "");
+});
+
 test("playgroundUserPathOptions returns the user_paths of the selected model as {value,label}", () => {
   const inventory = [
     { selector: "gpt-4o", provider_name: "openai", model: { id: "gpt-4o" } },
@@ -351,6 +412,48 @@ test("playgroundUserPathOptions skips non-string user_paths entries without thro
     { value: "/team/alpha", label: "/team/alpha" },
     { value: "/team/beta", label: "/team/beta" },
   ]);
+});
+
+test("playgroundUserPathOptions reads the user_paths of a selected virtual model", () => {
+  const restricted = (id) => ({ selector: "openai/" + id, model: { id }, access: { user_paths: ["/team/model"] } });
+  const inventory = [restricted("gpt-4o"), restricted("gpt-5"), restricted("gpt-5-mini"), restricted("o3")];
+  const virtualModels = [
+    { name: "team-alias", enabled: true, valid: true, user_paths: ["/team/alpha", "/team/beta"] },
+    { name: "open-alias", enabled: true, valid: true, user_paths: [] },
+    { name: "openai/gpt-4o", enabled: true, valid: true, user_paths: ["/team/redirect"] },
+    { name: "openai/gpt-5", enabled: false, valid: true, user_paths: ["/team/redirect"] },
+    { name: "openai/gpt-5-mini", enabled: true, valid: false, user_paths: ["/team/redirect"] },
+    { name: "openai/o3", enabled: true, valid: true, user_paths: [] },
+  ];
+  const values = (selector) =>
+    playgroundUserPathOptions(inventory, selector, virtualModels).map((option) => option.value);
+  assert.deepEqual(values(" team-alias "), ["/team/alpha", "/team/beta"]);
+  assert.deepEqual(values("open-alias"), []);
+  // A virtual model named like an inventory model answers the request, so its
+  // paths apply, also when it has none.
+  assert.deepEqual(values("openai/gpt-4o"), ["/team/redirect"]);
+  assert.deepEqual(values("openai/o3"), []);
+  // Disabled or without an available target, it does not answer: the gateway
+  // falls through to the inventory model.
+  assert.deepEqual(values("openai/gpt-5"), ["/team/model"]);
+  assert.deepEqual(values("openai/gpt-5-mini"), ["/team/model"]);
+  assert.deepEqual(playgroundUserPathOptions(inventory, "team-alias"), []);
+  assert.deepEqual(playgroundUserPathOptions(inventory, "team-alias", "nope"), []);
+  assert.equal(defaultUserPathForModel(inventory, "team-alias", virtualModels), "/team/alpha");
+});
+
+test("syncedUserPath follows the model default until the user enters a path", () => {
+  // Nothing chosen yet: take the default.
+  assert.equal(syncedUserPath("", false, "/team/model"), "/team/model");
+  // A prefilled path (the inventory arrived first) follows the new default.
+  assert.equal(syncedUserPath("/team/model", false, "/team/redirect"), "/team/redirect");
+  assert.equal(syncedUserPath("/team/model", false, ""), "");
+  // An entered path stays, also when it equals an earlier default.
+  assert.equal(syncedUserPath("/team/mine", true, "/team/redirect"), "/team/mine");
+  assert.equal(syncedUserPath("/team/model", true, "/team/redirect"), "/team/model");
+  // Clearing the field brings the default back.
+  assert.equal(syncedUserPath("", true, "/team/model"), "/team/model");
+  assert.equal(syncedUserPath(undefined, undefined, undefined), "");
 });
 
 test("defaultUserPathForModel returns the first allowed path or empty", () => {

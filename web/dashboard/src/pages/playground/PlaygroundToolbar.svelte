@@ -18,11 +18,13 @@
     modelOptions.map((option) => ({
       value: option.id,
       label: option.label,
-      description: option.provider,
+      description: option.virtual ? m.models_virtual_model() : option.provider,
     })),
   );
 
-  const userPathOptions = $derived(playgroundUserPathOptions(modelsStore.models, store.model));
+  const userPathOptions = $derived(
+    playgroundUserPathOptions(modelsStore.models, store.model, store.virtualModels),
+  );
 
   const modeOptions = $derived([
     { value: "chat", label: m.playground_mode_chat() },
