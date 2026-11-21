@@ -202,6 +202,18 @@ test("payload preserves untouched masked API key positions on edit", () => {
   assert.equal(body.name, "my-openai");
 });
 
+test("payload keeps each remaining stored key's mask after a middle key is removed", () => {
+  const form = providerCredentialRowToForm({
+    name: "my-openai",
+    type: "openai",
+    api_keys: ["***********#1", "***********#2", "***********#3"],
+  });
+  form.api_keys.splice(1, 1);
+
+  const body = buildProviderCredentialPayload(form, OPENAI_SCHEMA);
+  assert.deepEqual(body.api_keys, ["***********#1", "***********#3"]);
+});
+
 test("service_account_json is sent verbatim while other fields are trimmed", () => {
   const form = {
     ...defaultProviderCredentialForm(),
