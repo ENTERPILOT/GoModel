@@ -134,6 +134,14 @@ resources:
   limits:
     memory: 512Mi
 
+# -- Go soft memory limit (GOMEMLIMIT), for example "400MiB". Empty sets it to
+# resources.limits.memory, so the garbage collector works harder near the limit,
+# reducing the risk of the pod being OOM-killed. Lower it
+# when memory outside the Go heap (SQLite, many large concurrent requests) is
+# significant; "off" disables it. Ignored when GOMEMLIMIT is set in env,
+# secretEnv, or extraEnv.
+goMemLimit: ""
+
 autoscaling:
   enabled: false
   minReplicas: 2
