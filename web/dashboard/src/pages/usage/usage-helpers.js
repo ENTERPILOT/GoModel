@@ -1,4 +1,4 @@
-// Usage page state shapes: empty results for the summaries, the request log
+// Usage page state shapes: empty results for the summaries, the usage log
 // and the session breakdown, and the short session id display.
 // Kept free of Svelte/DOM dependencies so node:test can exercise it.
 

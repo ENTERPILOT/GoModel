@@ -895,6 +895,10 @@ http://localhost:8080/admin/dashboard
 
 持久化的请求日志表和用量表仍然是可信数据源。如果浏览器的游标超出了重放缓冲区，流会发送重置事件，控制台随后通过常规 REST 端点重新加载数据。
 
+请求日志事件的名称为 `request_log.started`、`request_log.updated`、`request_log.stream`、`request_log.completed`、`request_log.failed`、`request_log.flushed` 和 `request_log.removed`，用量事件的名称为 `usage.*`。查询参数 `types` 用于选择流接收的事件种类：`types=request_log,usage`。
+
+在请求日志重命名之前，这些事件名为 `audit.*`。这些旧名称已弃用，但仍会继续提供。在 `types` 中列出 `request_log` 的流会收到新名称。只列出旧别名 `audit` 或未传 `types` 的流仍会收到 `audit.*`（包括 SSE 事件名、`type` 字段以及负载中的 `_live_state`），直到这些已弃用的名称被移除；目前尚未确定移除日期。传入 `types=request_log,usage` 即可改用新名称。
+
 ## 禁用管理功能
 
 禁用所有管理功能：

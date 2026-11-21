@@ -126,7 +126,7 @@
 
 <style>
   /* Page-level filter bar under the Usage Analytics header. Every widget on the
-     page (cards, charts, request log) follows these filters. */
+     page (cards, charts, usage log) follows these filters. */
   .usage-page-filters {
     display: flex;
     flex-wrap: wrap;

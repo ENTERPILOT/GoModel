@@ -765,7 +765,7 @@ export function workflowAsyncNodeClass(visible, highlightPresent, current) {
 function workflowRequestLogFlushed(entry, fallback) {
   if (!entry || !entry._live) return !!fallback;
   const state = String(entry._live_state || "").trim();
-  return !!entry._request_log_flushed || state === "audit.flushed" || state === "audit.detail";
+  return !!entry._request_log_flushed || state === "request_log.flushed" || state === "request_log.detail";
 }
 
 function workflowUsageFlushed(entry, fallback) {
@@ -786,7 +786,7 @@ function workflowLiveUsagePending(entry) {
 function workflowLiveRequestLogPending(entry, runtime) {
   if (!entry || !entry._live || workflowRequestLogFlushed(entry, false)) return false;
   const state = String(entry._live_state || "").trim();
-  return state === "audit.completed" || !!(runtime && Number.isFinite(runtime.statusCode));
+  return state === "request_log.completed" || !!(runtime && Number.isFinite(runtime.statusCode));
 }
 
 function workflowLiveCurrentStep(entry, runtime, features) {
