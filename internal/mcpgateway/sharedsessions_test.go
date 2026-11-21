@@ -2,6 +2,7 @@ package mcpgateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -252,6 +253,76 @@ func TestSharedSessionStaysBoundToItsPrincipal(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(owner, sessionID)))
 		assert.Equal(t, http.StatusOK, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(owner, sessionID)))
 	})
+}
+
+// An extension identity's session is bound to its principal on a replica that
+// did not open it too.
+func TestSharedSessionStaysBoundToItsExtensionPrincipal(t *testing.T) {
+	runSharedStoreSuite(t, func(t *testing.T, store ext.SharedStore) {
+		servers := alphaServers(t)
+		a := newReplica(t, store, Options{ConfigServers: servers}, nil)
+		b := newReplica(t, store, Options{ConfigServers: servers}, nil)
+		owner := map[string]string{"X-Test-Principal-ID": "alice", core.UserPathHeader: "/team"}
+		sessionID := initializeRawSession(t, a.url+"/mcp", owner)
+
+		foreign := map[string]map[string]string{
+			"another principal": {"X-Test-Principal-ID": "bob", core.UserPathHeader: "/team"},
+			"no principal":      {core.UserPathHeader: "/team"},
+			"auth key":          {"X-Test-Auth-Key-ID": "key-a", core.UserPathHeader: "/team"},
+		}
+		for name, headers := range foreign {
+			assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(headers, sessionID)), name)
+			assert.Equal(t, http.StatusNotFound, rawMCPDelete(t, b.url+"/mcp", withSession(headers, sessionID)), name)
+		}
+		_, resumed := b.binding(sessionID)
+		assert.False(t, resumed, "a rejected request resumes nothing")
+
+		assert.Equal(t, http.StatusOK, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(owner, sessionID)))
+		binding, ok := b.binding(sessionID)
+		require.True(t, ok)
+		assert.Equal(t, "alice", binding.principalID)
+		assert.Equal(t, http.StatusOK, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(owner, sessionID)))
+	})
+}
+
+// A record stored by a replica that predates the principal binding names no
+// principal. A key-authenticated session is stored exactly as before and
+// carries on; an extension identity's request is answered as an unknown
+// session, so its client initializes a new one.
+func TestSharedSessionRecordWithoutPrincipal(t *testing.T) {
+	store := newMemorySharedStore(time.Now)
+	servers := alphaServers(t)
+	a := newReplica(t, store, Options{ConfigServers: servers}, nil)
+	b := newReplica(t, store, Options{ConfigServers: servers}, nil)
+	ctx := context.Background()
+
+	record := func(sessionID string) map[string]json.RawMessage {
+		raw, found, err := store.Get(ctx, sharedSessionNamespace, sessionKey(sessionID))
+		require.NoError(t, err)
+		require.True(t, found)
+		var fields map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(raw, &fields))
+		return fields
+	}
+
+	key := map[string]string{"X-Test-Auth-Key-ID": "key-a", core.UserPathHeader: "/team"}
+	keySession := initializeRawSession(t, a.url+"/mcp", key)
+	assert.NotContains(t, record(keySession), "principal_id")
+	assert.Equal(t, http.StatusOK, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(key, keySession)))
+
+	principal := map[string]string{"X-Test-Principal-ID": "alice", core.UserPathHeader: "/team"}
+	principalSession := initializeRawSession(t, a.url+"/mcp", principal)
+	fields := record(principalSession)
+	assert.JSONEq(t, `"alice"`, string(fields["principal_id"]))
+	delete(fields, "principal_id")
+	older, err := json.Marshal(fields)
+	require.NoError(t, err)
+	require.NoError(t, store.Put(ctx, sharedSessionNamespace, sessionKey(principalSession), older, time.Now().Add(time.Hour)))
+
+	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(principal, principalSession)))
+	_, resumed := b.binding(principalSession)
+	assert.False(t, resumed, "a rejected request resumes nothing")
+	assert.NotEmpty(t, initializeRawSession(t, b.url+"/mcp", principal), "the client starts a new session")
 }
 
 // A DELETE on any replica ends the session on every replica: the one hosting
