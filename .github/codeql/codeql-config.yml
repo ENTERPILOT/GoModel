@@ -1,0 +1,16 @@
+name: GoModel CodeQL config
+
+query-filters:
+  # go/log-injection reports request-derived values that reach a log call. It
+  # is a false positive here: those values are always passed as slog
+  # attributes, never built into the message, and both handlers in
+  # run/logging.go (slog's JSON handler and tint) quote attribute values, so a
+  # line break in one cannot start a forged log line.
+  # TestNewLogHandlerEscapesAttrValues in run/logging_test.go pins that.
+  #
+  # Remove this exclusion if either stops being true: a handler (or a wrapper
+  # registered through ext.WrapLogHandler) that writes attribute values
+  # unquoted, or request input formatted into a log message. tint writes the
+  # message as is.
+  - exclude:
+      id: go/log-injection
