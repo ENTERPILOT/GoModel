@@ -68,6 +68,19 @@
         "annotations": { "type": "object" }
       }
     },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "ingress": {
+          "type": "object",
+          "properties": {
+            "from": { "type": "array", "items": { "type": "object" } }
+          }
+        },
+        "egress": { "type": "array", "items": { "type": "object" } }
+      }
+    },
     "ingress": {
       "type": "object",
       "properties": {
