@@ -1,0 +1,129 @@
+---
+title: "Microsoft 365 Copilot"
+description: "Ask Microsoft 365 Copilot through the OpenAI chat API, grounded in a user's Microsoft 365 data."
+icon: "microsoft"
+keywords: ["Microsoft 365 Copilot", "Work IQ", "Copilot Chat API", "Entra ID", "provider setup"]
+---
+
+The `m365-copilot` provider sends chat requests to Microsoft 365 Copilot
+through the [Work IQ REST API](https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/rest/overview).
+Copilot is an assistant, not a model endpoint: it answers as one signed-in
+user and grounds every answer in that user's email, meetings, files, and Teams
+chats, plus the web unless a request turns web grounding off.
+
+Use it to put Copilot answers behind the same gateway, keys, and audit logs as
+your other models. It is not a general-purpose LLM: there is no model choice,
+no tool calling, and no JSON mode.
+
+## Configure
+
+The credential is a delegated Microsoft Entra ID access token for the user
+Copilot answers for, with the scope
+`api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`:
+
+```bash
+M365_COPILOT_API_KEY=eyJ0eXAi...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  m365-copilot:
+    type: m365-copilot
+    api_key: "${M365_COPILOT_API_KEY}"
+```
+
+GoModel sends the token as-is, with no exchange or refresh step. Entra ID
+access tokens expire after about an hour; when it expires, requests fail with
+the upstream `401` until you set a new token.
+
+### Requirements
+
+- An administrator has [enabled Work IQ](https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/enable-work-iq)
+  for the organization.
+- A Microsoft Entra app registration with the delegated `WorkIQAgent.Ask`
+  permission and admin consent. Application (app-only) tokens are not
+  supported, and neither are personal Microsoft accounts.
+- The user signs in through their home tenant, so the token's issuer matches
+  it.
+- A usage-based Copilot Credits billing plan: usage is billed in Copilot
+  Credits, independent of Microsoft 365 Copilot licences.
+
+### Preview Microsoft Graph endpoint
+
+The same Chat API is also in preview on Microsoft Graph, which needs a
+Microsoft 365 Copilot licence and a Graph token with its permissions instead.
+Microsoft does not support it for production use:
+
+```bash
+M365_COPILOT_BASE_URL=https://graph.microsoft.com/beta/copilot
+```
+
+## How requests are mapped
+
+Each request opens a new Copilot conversation and sends one prompt:
+
+| OpenAI request | Sent to Copilot as |
+| -------------- | ------------------ |
+| Last message (must be `user`) | The prompt |
+| Earlier `system`, `developer`, `user`, and `assistant` messages | `additionalContext`, labelled by role (`developer` as system instructions) |
+| `stream: true` | `chatOverStream`, forwarded as chat completion chunks |
+| `/v1/responses` | Translated to a chat request and back |
+
+Earlier messages are extra grounding, not real conversation turns, so Copilot
+may weigh them differently from a chat model.
+
+These fields fail with `400` instead of being ignored: `tools` (unless
+`tool_choice` is `none`), tool calls and tool results in the history, image,
+audio, and file content parts, `n` above 1, `modalities` other than `text`,
+and a `response_format` other than `text`. Sampling and length settings such
+as `temperature` and `max_tokens` are accepted and dropped, because Copilot
+exposes none of them.
+
+Two Chat API fields pass through as extra request fields:
+
+```json
+{
+  "model": "m365-copilot",
+  "messages": [{"role": "user", "content": "Summarize this document."}],
+  "locationHint": {"timeZone": "Europe/Warsaw"},
+  "contextualResources": {
+    "files": [{"uri": "https://contoso.sharepoint.com/sites/Specs/Plan.docx"}],
+    "webContext": {"isWebEnabled": false}
+  }
+}
+```
+
+`locationHint` defaults to the gateway's time zone (`TZ`), or `UTC` when it has
+no name. Set it per request when users are elsewhere, since Copilot uses it to
+read "tomorrow" or "9 AM".
+
+When Copilot's responsible-AI checks end the conversation, the reply has
+`finish_reason: "content_filter"`.
+
+The reply is Copilot's text as-is, including its citation markers such as
+`[^1^]`. The sources behind them (`attributions`) and adaptive cards are not
+forwarded.
+
+A stream fails with an error chunk if Copilot rewrites text it has already
+streamed and does not extend it again; send the request without streaming to
+get the final answer. Prompts are not retried, because a retry would add a
+second turn.
+
+## Models
+
+By default the provider lists one model, `m365-copilot`. Copilot has no model
+choice, so the name only routes a request here. `M365_COPILOT_MODELS` replaces
+that list, for example `M365_COPILOT_MODELS=copilot` serves `copilot` instead
+(see [Models modes](/advanced/config-yaml#models-modes)).
+
+Embeddings, files, batches, and passthrough are not available.
+
+## Cost and usage
+
+Copilot reports no token counts, so usage is recorded as zero tokens and
+[cost tracking](/features/cost-tracking) reports zero. Track Copilot Credits in
+the Microsoft 365 admin center.
+
+GoModel does not delete the conversations it opens.

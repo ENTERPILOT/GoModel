@@ -38,6 +38,8 @@ var knownUncovered = []string{
 	"cohere",
 	"elevenlabs",
 	"jev",
+	// Conversation-based Work IQ API, not OpenAI-compatible; no live tenant to record fixtures.
+	"m365copilot",
 	"vertex",
 }
 

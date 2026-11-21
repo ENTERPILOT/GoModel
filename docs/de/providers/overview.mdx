@@ -56,6 +56,7 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | ChatGPT-Abonnement | `CHATGPT_API_KEY` (Anmelde-Token von Codex) | `gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT-Abonnement](/de/providers/chatgpt) |
 | GitHub Copilot | `GITHUB_COPILOT_API_KEY` (GitHub-OAuth-Token) | `claude-sonnet-5.5` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [GitHub Copilot](/de/providers/github-copilot) |
+| Microsoft 365 Copilot | `M365_COPILOT_API_KEY` (Entra-ID-Benutzertoken) | `m365-copilot` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Microsoft 365 Copilot](/de/providers/m365-copilot) |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/de/providers/anthropic) |
 | Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/de/providers/cohere) |
 | Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [Google Gemini](/de/providers/gemini) |
@@ -208,6 +209,12 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   auf ein GitHub-OAuth-Token des Kontos, etwa aus `gh auth token`; welche Modelle es aufrufen kann,
   hängt vom Copilot-Plan ab. Die gemeldeten Kosten sind eine Schätzung, die das enthaltene
   Kontingent des Plans nicht berücksichtigt.
+- **Microsoft 365 Copilot** – der Copilot-Assistent über die Work IQ REST API, gestützt auf die
+  Microsoft-365-Daten eines Benutzers und das Web; abgerechnet in Copilot Credits, die GoModel
+  nicht bepreisen kann. Setzen Sie `M365_COPILOT_API_KEY` auf ein delegiertes Entra-ID-Token
+  (Scope `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`); es läuft nach etwa einer Stunde ab
+  und wird nicht erneuert. Nur Text-Chat: Tools (außer bei
+  `tool_choice: none`), Tool Calls, Bilder, Audio, Dateien, `n > 1` und JSON-Ausgabe werden abgelehnt.
 - **Kimi Code** – keine Preise pro Token; das Kontingent wird wöchentlich erneuert und ist zusätzlich
   durch ein rollierendes 5-Stunden-Fenster begrenzt. Die Kostenerfassung meldet für Kimi Code null,
   daher kann `cost`-Load-Balancing es nicht bepreisen; bevorzugen Sie konservative
@@ -345,6 +352,8 @@ Bei diesen Providern stoßen die meisten Benutzer auf Schwierigkeiten:
   der genutzt wird, um GoModel zwischen Codex und einen ChatGPT-Plan zu setzen.
 - **GitHub Copilot** – ein Token beschaffen, Endpunkte für Business und Enterprise und das Routing
   pro Modell zwischen Chat Completions und Responses.
+- **Microsoft 365 Copilot** – Voraussetzungen für Work IQ, das Entra-ID-Token und wie ein
+  Chat-Request auf einen Copilot-Prompt abgebildet wird.
 
 <Tip>
   Jede Provider-Seite zeigt drei Startvarianten in einer CodeGroup: Docker mit `--env-file .env`

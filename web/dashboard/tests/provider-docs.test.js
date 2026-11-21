@@ -47,6 +47,7 @@ test("providerDocsUrl links every documented provider to its own page", () => {
     "kimicode",
     "llamacpp",
     "llmd",
+    "m365-copilot",
     "minimax",
     "mistral",
     "opencode-go",
