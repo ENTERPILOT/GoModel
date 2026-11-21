@@ -322,11 +322,14 @@ jobs:
         if: steps.changes.outputs.docs == 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '22'
+          node-version: '22.23.2'
 
+      # mint is pinned and installed without npm lifecycle scripts, which
+      # validation does not need. Bump the version by hand: Dependabot does
+      # not track it.
       - name: Validate docs.json
         if: steps.changes.outputs.docs == 'true'
-        run: npx mint validate
+        run: npx --yes --ignore-scripts mint@4.3.8 validate
         working-directory: docs
 
   # Compiling the binary doesn't depend on tests passing, so this runs in
