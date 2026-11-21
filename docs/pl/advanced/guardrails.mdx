@@ -149,7 +149,8 @@ Każda sekwencyjna grupa otrzymuje wynik poprzedniej grupy. Guardrails, które
 **edytują treść** (`system_prompt`, `llm_based_altering`,
 `string_replace`, `presidio`), nie mogą współdzielić wartości order z innym
 guardrailem edytującym; tylko jeden edytor na order i dowolna liczba
-nieedytujących sprawdzeń (`llm_judge`, `header_edit`) obok niego. Gdy kilka
+nieedytujących sprawdzeń (`llm_judge`, `inference_hook`,
+`header_edit`) obok niego. Gdy kilka
 guardrails o tym samym order podejmuje różne decyzje, wygrywa najostrzejsza:
 `block` > `respond` > `warn` > `allow`.
 
@@ -208,7 +209,7 @@ są wyłączone, endpointy guardrails i strona w dashboardzie są niedostępne.
 
 ## Typy guardrails
 
-GoModel dostarcza sześć typów. Każdy jest wbudowanym pluginem; tabele
+GoModel dostarcza osiem typów. Każdy jest wbudowanym pluginem; tabele
 wymieniają jego klucze konfiguracji tak, jak występują pod `config:` i w
 formularzu dashboardu.
 
@@ -798,6 +799,120 @@ uruchomionej instancji, więc nadaj im ten sam format.
     entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
     restore: true
     restore_tools_exclude: ["web_search"]
+```
+
+### `inference_hook`
+
+Pyta serwer bezpieczeństwa AI o werdykt allow albo deny, używając protokołu
+[Inference hooks](https://platform.claude.com/docs/en/manage-claude/inference-hooks)
+firmy Anthropic. Anthropic uruchamia te hooki tylko dla aplikacji Claude
+Enterprise, nie dla ruchu przez API, Amazon Bedrock ani Google Cloud. Z tym
+guardrailem to GoModel jest stroną wywołującą, więc serwer zbudowany pod ten
+protokół (własny albo dostawcy zabezpieczeń) może kontrolować requesty do
+dowolnego providera.
+
+GoModel wysyła podpisany `POST` i czeka na `{"action": "allow"}` albo
+`{"action": "deny", "deny_reason": "..."}`:
+
+| Faza | Ramka | Wysyłana |
+| --- | --- | --- |
+| prompt | `prompt`: dotychczasowa rozmowa | Raz na request, przed wywołaniem providera. Próba failover nie wysyła jej ponownie. |
+| response, stream | `tool_call`: wiadomość asystenta i jej wywołania narzędzi | Tylko gdy odpowiedź wywołuje narzędzia, zanim klient zdąży je uruchomić. |
+
+**Fazy:** prompt, response, stream (buforowany). **Edytuje treść:** nie;
+protokół nie pozwala przepisać promptu.
+
+W fazie stream cały stream jest buforowany do czasu werdyktu, więc żadne
+wywołanie narzędzia nie dociera wcześniej do klienta. Odpowiedź z kilkoma
+choices wysyła jedną ramkę na każdy choice wywołujący narzędzia, a deny dla
+któregokolwiek z nich odrzuca całą odpowiedź.
+
+#### Ustawienia
+
+| Klucz | Wymagane | Wartość domyślna | Opis |
+| --- | -------- | ------- | ----------- |
+| `endpoint_url` | Tak | | URL serwera bezpieczeństwa. Cały URL jest endpointem; przekierowania nie są śledzone. Używaj `https://`, chyba że serwer działa na localhost albo w sieci, której powierzasz rozmowę. |
+| `signing_secret` | Tak | | Sekret [Standard Webhooks](https://www.standardwebhooks.com/), którym podpisywany jest każdy request: base64, z prefiksem `whsec_` lub bez. Ustaw tę samą wartość na serwerze. |
+| `auth_header` | Nie | `Authorization` | Nazwa statycznego nagłówka, który przenosi `auth_value`. |
+| `auth_value` | Nie | | Wartość nagłówka uwierzytelniającego, wysyłana bez zmian (`Bearer <token>`), dla serwera, który dodatkowo uwierzytelnia wywołujących. Wymaga URL-a `https://`, chyba że serwer działa na localhost. |
+| `tenant_id` | Nie | `null` | `tenant_id` każdej ramki, dla serwera obsługującego wiele organizacji. |
+| `roles` | Nie | `["system", "user", "assistant", "tool"]` | Wiadomości promptu wysyłane w fazie prompt. `system` obejmuje też wiadomości developerskie; usuń go, aby wysyłać to, co wysyła Anthropic, zobacz [Co jest wysyłane](#co-jest-wysyłane). Wiadomość z każdą inną rolą jest zawsze wysyłana. |
+| `action` | Nie | `block` | Przy werdykcie deny: `block` odrzuca, `respond` odpowiada wiadomością asystenta, `warn` kontynuuje i zapisuje werdykt. Użyj `warn` jako trybu shadow, aby wypróbować politykę na prawdziwym ruchu. |
+| `message` | Nie | `This request was blocked by policy` | Używany, gdy werdykt nie zawiera `deny_reason`. W przeciwnym razie klient widzi `deny_reason` serwera (najwyżej 500 znaków). |
+| `block_status` | Nie | domyślny dla fazy | Jeden kod statusu HTTP od 400 do 599 dla `block`, na przykład `403`. |
+| `verdict_timeout_ms` | Nie | `5000` | Ile może trwać jeden werdykt, łącznie z nawiązaniem połączenia (od 1 do 60000). `timeout_ms` reguły nadal obowiązuje, gdy jest niższy. |
+
+Sekret do podpisywania wygenerujesz poleceniem `echo "whsec_$(openssl rand -base64 32)"`.
+
+#### Awarie i timeouty
+
+Werdykt to HTTP 200 z `action` równym `allow` albo `deny`. Wszystko inne jest
+awarią, nigdy odmową: timeout, błąd połączenia, każdy inny status (także
+przekierowanie) albo body, którego nie da się odczytać lub które jest większe
+niż 64 KiB. O skutku awarii decyduje `fail_mode` reguły:
+
+- `closed` (domyślnie): request jest odrzucany z HTTP 500 `plugin_failure`.
+  W fazie prompt provider nigdy nie dostaje requestu; w fazach response i
+  stream klient nigdy nie dostaje odpowiedzi.
+- `open`: request jest kontynuowany bez werdyktu, a awaria trafia do logu
+  requestów. Wybierz to tylko wtedy, gdy dostępność jest ważniejsza niż
+  inspekcja.
+
+GoModel wysyła też test połączenia z protokołu (ramkę `prompt` z
+`source.application` równym `config-test`, która niesie jedną stałą wiadomość
+testową zamiast treści z requestu) przy budowaniu guardraila i przy każdym odświeżeniu guardraili, domyślnie co minutę. Bez
+poprawnego werdyktu, allow albo deny, guardrail jest oznaczany w dashboardzie
+jako zdegradowany. Nieudane requesty nie są ponawiane.
+
+#### Co jest wysyłane
+
+Każdy request niesie `Content-Type: application/json`,
+`User-Agent: gomodel-inference-hook/1`, nagłówek uwierzytelniający oraz
+nagłówki `webhook-id`, `webhook-timestamp` i `webhook-signature`, które serwer
+weryfikuje tak, jak [opisuje to Anthropic](https://platform.claude.com/docs/en/manage-claude/inference-hooks-endpoint#verify-the-signature).
+Body ma kształt ramki z protokołu, z tymi wartościami:
+
+| Pole | Wartość |
+| --- | --- |
+| `request_id` | Nowy dla każdej ramki; równy `webhook-id` i zapisywany w logu requestów jako `hook_request_id`, obok `reference_id` z werdyktu. |
+| `actor` | `{"type": "user", "id": <ID klucza API>}`; nigdy sam klucz. |
+| `source.application` | `gomodel` |
+| `model`, `session_id` | Rozwiązany model providera i wykryta sesja albo `null`. |
+| `metadata` | `gomodel_request_id`, `gomodel_user_path`, `gomodel_provider`. |
+| `messages` | Tekst, wywołania narzędzi i wyniki narzędzi. Każda część z obrazem, dźwiękiem lub plikiem staje się blokiem `attachment` bez treści: jej bajty nigdy nie są wysyłane, podobnie jak definicje narzędzi i pozostałe parametry requestu. Treść, której GoModel nie modeluje, na przykład element reasoning z `/v1/responses`, jest wysyłana jako `attachment` z jej JSON-em w polu `text`. |
+
+GoModel nie wyciąga tekstu z plików. Serwer, który nie może przepuścić pliku
+ani obrazu bez przeczytania, może odrzucać każdy `attachment`, którego `text`
+ma wartość `null`.
+
+Dwie rzeczy różnią się od ramek wysyłanych przez Anthropic:
+
+- **Wiadomości systemowe i developerskie są wysyłane**, w roli `user`. Przez
+  gateway pisze je wywołujący, więc ich pominięcie pozwoliłoby mu przemycić
+  treść obok hooka. Usuń `system` z `roles`, jeśli polityka Twojego serwera
+  nie może ich widzieć.
+- **Reasoning odtwarzany przez wywołującego** w turach asystenta jest z tego
+  samego powodu wysyłany jako tekst. Własny reasoning modelu w ramce
+  `tool_call` nie jest.
+
+#### Przykład
+
+```yaml
+- name: "dlp"
+  type: "inference_hook"
+  order: 0
+  config:
+    endpoint_url: "https://security.example.com/hooks/verdict"
+    signing_secret: "${env:INFERENCE_HOOK_SECRET}"
+
+# Sprawdzaj też wywołania narzędzi, zanim klient je uruchomi.
+- name: "dlp-tools"
+  type: "inference_hook"
+  phase: "response"
+  order: 0
+  config:
+    endpoint_url: "https://security.example.com/hooks/verdict"
+    signing_secret: "${env:INFERENCE_HOOK_SECRET}"
 ```
 
 ## Przykłady

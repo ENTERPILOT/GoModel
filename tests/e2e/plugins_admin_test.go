@@ -30,9 +30,10 @@ func TestPlugins_AdminSurface_E2E(t *testing.T) {
 			assert.Equal(t, "ok", p.Health, p.Name)
 			assert.NotEmpty(t, p.Kinds, "%s should list its hook kinds", p.Name)
 		}
-		for _, name := range []string{"system_prompt", "llm_based_altering", "string_replace", "tag_replace", "header_edit", "llm_judge"} {
+		for _, name := range []string{"system_prompt", "llm_based_altering", "string_replace", "tag_replace", "header_edit", "llm_judge", "inference_hook"} {
 			assert.Contains(t, byName, name)
 		}
+		assert.ElementsMatch(t, []string{"prompt", "response", "stream"}, byName["inference_hook"])
 		assert.ElementsMatch(t, []string{"prompt", "response", "stream"}, byName["string_replace"])
 		assert.ElementsMatch(t, []string{"prompt", "response"}, byName["header_edit"])
 		assert.ElementsMatch(t, []string{"prompt"}, byName["tag_replace"])
@@ -57,9 +58,10 @@ func TestPlugins_AdminSurface_E2E(t *testing.T) {
 			fields[typ.Type] = len(typ.Fields)
 			assert.Equal(t, "builtin", typ.Source, typ.Type)
 		}
-		for _, name := range []string{"string_replace", "header_edit", "llm_judge"} {
+		for _, name := range []string{"string_replace", "header_edit", "llm_judge", "inference_hook"} {
 			assert.Positive(t, fields[name], "%s should expose its config schema", name)
 		}
+		assert.ElementsMatch(t, []string{"prompt", "response", "stream"}, phases["inference_hook"])
 		assert.ElementsMatch(t, []string{"prompt", "response", "stream"}, phases["string_replace"])
 		assert.ElementsMatch(t, []string{"prompt", "response"}, phases["header_edit"])
 		assert.ElementsMatch(t, []string{"prompt", "response", "stream"}, phases["llm_judge"])
