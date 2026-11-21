@@ -1,7 +1,8 @@
 <script>
-  // Overview page: live token throughput, usage summary over the shared
-  // reporting window, cache meter, usage chart, activity calendar, request
-  // status/latency charts, and the providers overview grid.
+  // Overview page: live token throughput, the first-run checklist, usage
+  // summary over the shared reporting window, cache meter, usage chart,
+  // activity calendar, request status/latency charts, and the providers
+  // overview grid.
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
   import { untrack } from "svelte";
   import { router } from "$lib/stores/router.svelte.js";
@@ -16,6 +17,7 @@
   import ContributionCalendar from "./ContributionCalendar.svelte";
   import RequestStatsCharts from "./RequestStatsCharts.svelte";
   import ProviderStatusSection from "./ProviderStatusSection.svelte";
+  import GettingStarted from "./GettingStarted.svelte";
   import {
     providerStatusState,
     requestStatsState,
@@ -33,6 +35,10 @@
   const scoped = $derived(access.scoped);
 
   function loadPage() {
+    // The checklist judges this visit (and this key) by its own answers, not
+    // by what the previous one left in the shared state.
+    providerStatusState.loadSucceeded = false;
+    calendarState.loadSucceeded = false;
     usageData.fetchUsage();
     requestStatsState.fetch();
     calendarState.fetch();
@@ -90,6 +96,9 @@
 
   <AuthBanner />
 
+  {#if !scoped}
+    <GettingStarted />
+  {/if}
   <SummaryCards />
   {#if !scoped}
     <CacheMeter />

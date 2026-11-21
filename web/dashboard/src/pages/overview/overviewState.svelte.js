@@ -8,6 +8,7 @@ import { dateRange } from "$lib/stores/dateRange.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import {
   emptyProviderStatus,
+  isProviderStatusPayload,
   providerStatusNeedsPolling,
   providerCardExpanded,
   loadProviderPreferences,
@@ -22,6 +23,10 @@ class ProviderStatusState {
   status = $state(emptyProviderStatus());
   loading = $state(false);
   loadedOnce = $state(false);
+  // True while `status` is what the gateway answered on this visit, false
+  // after a failed or unreadable load: an empty provider list is then
+  // unknown, not "none". The page clears it before each load.
+  loadSucceeded = $state(false);
   detailsExpanded = $state(false);
   cardOverrides = $state({});
   #controller = null;
@@ -78,6 +83,7 @@ class ProviderStatusState {
       if (result.stale || controller.signal.aborted) return;
       if (!result.ok) {
         this.status = emptyProviderStatus();
+        this.loadSucceeded = false;
         this.#clearPoll();
         return;
       }
@@ -85,6 +91,7 @@ class ProviderStatusState {
         result.data && typeof result.data === "object"
           ? result.data
           : emptyProviderStatus();
+      const answered = isProviderStatusPayload(result.data);
       if (!payload.summary) {
         payload.summary = emptyProviderStatus().summary;
       }
@@ -92,11 +99,13 @@ class ProviderStatusState {
         payload.providers = [];
       }
       this.status = payload;
+      this.loadSucceeded = answered;
       this.#schedulePoll();
     } catch (e) {
       if (isAbortError(e)) return;
       console.error("Failed to fetch provider status:", e);
       this.status = emptyProviderStatus();
+      this.loadSucceeded = false;
       this.#clearPoll();
     } finally {
       if (this.#controller === controller) {
@@ -208,6 +217,9 @@ class CalendarState {
   data = $state([]);
   mode = $state("tokens");
   loading = $state(false);
+  // True while `data` is what the gateway answered on this visit; see
+  // ProviderStatusState.loadSucceeded.
+  loadSucceeded = $state(false);
   #controller = null;
 
   async fetch() {
@@ -223,13 +235,16 @@ class CalendarState {
       if (result.stale || controller.signal.aborted) return;
       if (!result.ok) {
         this.data = [];
+        this.loadSucceeded = false;
         return;
       }
       this.data = Array.isArray(result.data) ? result.data : [];
+      this.loadSucceeded = Array.isArray(result.data);
     } catch (e) {
       if (isAbortError(e)) return;
       console.error("Failed to fetch calendar data:", e);
       this.data = [];
+      this.loadSucceeded = false;
     } finally {
       if (this.#controller === controller) {
         this.#controller = null;
