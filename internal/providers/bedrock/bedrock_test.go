@@ -679,6 +679,111 @@ mfa_serial = arn:aws:iam::123456789012:mfa/example
 	assertBothClientsAuth(t, withKey, capture, "Bearer ABSK-configured")
 }
 
+// authRecorder answers every Bedrock request with authEchoBody and records
+// where it went and how it was authenticated, so a test can name an AWS host
+// without reaching it.
+type authRecorder struct {
+	hosts []string
+	auth  []string
+}
+
+func (r *authRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.hosts = append(r.hosts, req.URL.Host)
+	r.auth = append(r.auth, req.Header.Get("Authorization"))
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(authEchoBody)),
+		Request:    req,
+	}, nil
+}
+
+// TestNew_HostCredentialDestination pins where the host's AWS credentials may
+// go. A provider declared in config.yaml or the environment keeps sending
+// them wherever the operator points it. One saved through the admin API sends
+// them to AWS's own Bedrock endpoints only: against any other base URL it
+// needs an API key of its own.
+func TestNew_HostCredentialDestination(t *testing.T) {
+	const custom = "https://bedrock-proxy.example.com"
+	const sigV4 = "AWS4-HMAC-SHA256"
+	customHosts := []string{"bedrock-proxy.example.com", "bedrock-proxy.example.com"}
+	tests := []struct {
+		name      string
+		managed   bool
+		baseURL   string
+		ownKey    string
+		envToken  string
+		wantHosts []string // control plane, then runtime; empty: the provider refuses every request
+		want      string
+	}{
+		{name: "declared, env token, custom endpoint", baseURL: custom, envToken: "ABSK-env", wantHosts: customHosts, want: "Bearer ABSK-env"},
+		{name: "declared, SigV4, custom endpoint", baseURL: custom, wantHosts: customHosts, want: sigV4},
+		{name: "managed, env token, custom endpoint", managed: true, baseURL: custom, envToken: "ABSK-env"},
+		{name: "managed, SigV4, custom endpoint", managed: true, baseURL: custom},
+		{name: "managed, own key, custom endpoint", managed: true, baseURL: custom, ownKey: "ABSK-own", envToken: "ABSK-env", wantHosts: customHosts, want: "Bearer ABSK-own"},
+		{name: "managed, env token, AWS lookalike host", managed: true, baseURL: "https://bedrock-runtime.us-east-1.amazonaws.com.example.com", envToken: "ABSK-env"},
+		{name: "managed, env token, another AWS service", managed: true, baseURL: "https://abc123.execute-api.us-east-1.amazonaws.com", envToken: "ABSK-env"},
+		{name: "managed, env token, AWS endpoint on another port", managed: true, baseURL: "https://bedrock-runtime.us-east-1.amazonaws.com:8443", envToken: "ABSK-env"},
+		{name: "managed, SigV4, AWS endpoint over http", managed: true, baseURL: "http://bedrock-runtime.us-east-1.amazonaws.com"},
+		{name: "managed, env token, not a region", managed: true, baseURL: "s3", envToken: "ABSK-env"},
+		{
+			name: "managed, env token, default endpoint", managed: true, envToken: "ABSK-env",
+			wantHosts: []string{"bedrock.us-east-1.amazonaws.com", "bedrock-runtime.us-east-1.amazonaws.com"}, want: "Bearer ABSK-env",
+		},
+		{
+			name: "managed, SigV4, region", managed: true, baseURL: "eu-west-1",
+			wantHosts: []string{"bedrock.eu-west-1.amazonaws.com", "bedrock-runtime.eu-west-1.amazonaws.com"}, want: sigV4,
+		},
+		{
+			name: "managed, env token, AWS endpoint", managed: true, baseURL: "https://bedrock-runtime.eu-west-1.amazonaws.com", envToken: "ABSK-env",
+			wantHosts: []string{"bedrock.eu-west-1.amazonaws.com", "bedrock-runtime.eu-west-1.amazonaws.com"}, want: "Bearer ABSK-env",
+		},
+		{
+			name: "managed, SigV4, China endpoint", managed: true, baseURL: "https://bedrock-runtime.cn-north-1.amazonaws.com.cn",
+			wantHosts: []string{"bedrock.cn-north-1.amazonaws.com.cn", "bedrock-runtime.cn-north-1.amazonaws.com.cn"}, want: sigV4,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AWS_BEARER_TOKEN_BEDROCK", tt.envToken)
+			t.Setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
+			t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+			t.Setenv("AWS_SESSION_TOKEN", "")
+			t.Setenv("AWS_PROFILE", "")
+			t.Setenv("AWS_REGION", "us-east-1")
+			t.Setenv("AWS_CONFIG_FILE", "/dev/null")
+			t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null")
+
+			recorder := &authRecorder{}
+			opts := providers.ProviderOptions{HTTPClient: &http.Client{Transport: recorder}}
+			if tt.ownKey != "" {
+				opts.Keys = providers.NewKeyring(tt.ownKey)
+			}
+			p := New(providers.ProviderConfig{Managed: tt.managed, BaseURL: tt.baseURL}, opts).(*Provider)
+			_, listErr := p.ListModels(context.Background())
+			_, chatErr := p.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:    "amazon.nova-micro-v1:0",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+			})
+
+			if len(tt.wantHosts) == 0 {
+				require.Error(t, listErr)
+				require.Error(t, chatErr)
+				assert.Contains(t, chatErr.Error(), "only sent to AWS's Bedrock endpoints")
+				assert.Empty(t, recorder.hosts, "a refused provider must not send requests")
+				return
+			}
+			require.NoError(t, listErr)
+			require.NoError(t, chatErr)
+			assert.Equal(t, tt.wantHosts, recorder.hosts)
+			require.Len(t, recorder.auth, 2)
+			for _, auth := range recorder.auth {
+				assert.True(t, strings.HasPrefix(auth, tt.want), "Authorization = %q", auth)
+			}
+		})
+	}
+}
+
 func TestRegistration(t *testing.T) {
 	assert.Equal(t, providerName, Registration.Type)
 	assert.True(t, Registration.Discovery.AllowAPIKeyless)

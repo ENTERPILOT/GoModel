@@ -43,6 +43,14 @@ Ein konfigurierter Key hat Vorrang vor AWS-Zugangsdaten und vor
 **API-Schlüssel** ein. Leer gelassen, nutzt das Gateway `AWS_BEARER_TOKEN_BEDROCK`
 seines Hosts, falls gesetzt, und sonst die AWS-Credential-Chain des Hosts.
 
+Ein im Dashboard gespeicherter Provider nutzt diese Zugangsdaten des Hosts nur
+für eine AWS-Region oder einen von AWS gehosteten Bedrock-Endpunkt über HTTPS
+auf dem Standardport, etwa `bedrock-runtime.{region}.amazonaws.com` oder dessen
+VPC-Endpunkt-Namen `vpce-{id}.bedrock-runtime.{region}.vpce.amazonaws.com`.
+Speichern Sie für jede andere Base URL, etwa einen Proxy, einen API-Key mit dem
+Provider. Für Provider, die in `config.yaml` oder über
+Umgebungsvariablen deklariert sind, gilt diese Einschränkung nicht.
+
 ## GoModel starten
 
 <CodeGroup>

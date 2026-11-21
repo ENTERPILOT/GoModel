@@ -76,6 +76,13 @@ providers:
     api_key: "${BEDROCK_MANTLE_API_KEY}"
 ```
 
+Ein im Dashboard gespeicherter Provider nutzt `AWS_BEARER_TOKEN_BEDROCK` oder die
+AWS-Zugangsdaten des Hosts nur für eine AWS-Region oder einen von AWS gehosteten
+Bedrock-Endpunkt über HTTPS auf dem Standardport, etwa
+`bedrock-mantle.{region}.api.aws`. Speichern Sie für jede andere Base URL, etwa
+einen Proxy, einen API-Key mit dem Provider. Für Provider, die in
+`config.yaml` oder über Umgebungsvariablen deklariert sind, gilt diese Einschränkung nicht.
+
 ## GPT-5.6 aufrufen
 
 <CodeGroup>
