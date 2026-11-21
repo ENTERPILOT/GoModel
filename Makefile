@@ -204,6 +204,7 @@ fuzz:
 	go test -run='^$$' -fuzz='^FuzzRequestDecompression$$' -fuzztime=$(FUZZTIME) ./internal/server
 	go test -run='^$$' -fuzz='^FuzzRewriteBatchSource$$' -fuzztime=$(FUZZTIME) ./internal/core
 	go test -run='^$$' -fuzz='^FuzzUnknownJSONFieldsRoundTrip$$' -fuzztime=$(FUZZTIME) ./internal/core
+	go test -run='^$$' -fuzz='^FuzzUsageUnmarshalJSON$$' -fuzztime=$(FUZZTIME) ./internal/core
 
 # Record API responses for contract tests
 # Usage: OPENAI_API_KEY=sk-xxx make record-api
