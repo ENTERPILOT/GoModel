@@ -551,6 +551,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/audio/translations", handler.AudioTranslations)
 	e.POST("/v1/images/generations", handler.ImageGenerations)
 	e.POST("/v1/images/edits", handler.ImageEdits)
+	e.POST("/v1/moderations", handler.Moderations)
 	// System One decisions (Jev / Kev, Microsoft-Decision-1). The handler
 	// answers 404 until a jev, openrouter, or azure provider is configured.
 	e.POST("/v1/systemone", handler.SystemOne)

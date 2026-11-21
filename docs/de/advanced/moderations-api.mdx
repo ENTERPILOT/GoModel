@@ -1,0 +1,93 @@
+---
+title: "Moderations API"
+description: "Text und Bilder über GoModel mit OpenAIs Moderations-Endpunkt klassifizieren, beantwortet von OpenAI oder Mistral, mit denselben Zugriffsregeln, Budgets und derselben Nutzungserfassung wie Chat."
+icon: "shield-alert"
+keywords: ["Moderations API", "Moderation", "moderation", "Inhaltsmoderation", "omni-moderation-latest", "mistral-moderation-latest", "Klassifizierung"]
+---
+
+`POST /v1/moderations` bedient [OpenAIs Moderations-Endpunkt](https://platform.openai.com/docs/api-reference/moderations):
+Er meldet pro Kategorie, ob Text oder Bilder schädlich sind. Clients und SDKs,
+die OpenAIs Moderations bereits aufrufen, funktionieren unverändert mit GoModel.
+
+Requests werden **nach Modell** über dieselbe Registry wie Chat geroutet.
+Daher gelten Modell-Selektoren, `provider`-Hinweise, virtuelle Modelle,
+Modellzugriff pro Key, [Budgets](/de/features/budgets),
+[Rate-Limits](/de/features/rate-limits), das Request-Log und die
+Nutzungserfassung.
+
+| Provider | Modelle | Eingabe |
+| --- | --- | --- |
+| `openai` | `omni-moderation-latest` (Standard), `omni-moderation-2024-09-26` | Text und Bilder, unverändert weitergeleitet |
+| `mistral` | `mistral-moderation-latest` | Nur Text, in OpenAIs Antwortformat übersetzt |
+
+Andere Provider haben keinen Moderations-Endpunkt. Ein Request für eines ihrer
+Modelle erhält einen `400` `invalid_request_error`, der meldet, dass das Modell
+keine Moderations unterstützt.
+
+## Request
+
+`model` ist optional und standardmäßig `omni-moderation-latest`, wie bei
+OpenAI. Setzen Sie es, wenn Ihr Moderationsmodell anderswo liegt, zum Beispiel
+`mistral/mistral-moderation-latest`.
+
+```bash
+curl -s http://localhost:8080/v1/moderations \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input": ["Have a nice day", "I will hurt you"]}'
+```
+
+`input` akzeptiert:
+
+- einen String: ein Ergebnis;
+- ein Array von Strings: ein Ergebnis pro String;
+- ein Array aus `text`- und `image_url`-Teilen: ein Ergebnis für die
+  kombinierte Eingabe. Bilder erfordern ein OpenAI-Omni-Modell.
+
+```json
+{
+  "model": "omni-moderation-latest",
+  "input": [
+    {"type": "text", "text": "Is this picture OK?"},
+    {"type": "image_url", "image_url": {"url": "https://example.com/photo.png"}}
+  ]
+}
+```
+
+## Antwort
+
+Die Antwort behält OpenAIs Format, ergänzt um den `provider`, der sie
+bedient hat:
+
+```json
+{
+  "id": "modr-0d3b",
+  "model": "omni-moderation-latest",
+  "provider": "openai",
+  "results": [
+    {
+      "flagged": true,
+      "categories": {"violence": true, "harassment": false, "...": false},
+      "category_scores": {"violence": 0.93, "harassment": 0.02, "...": 0.0},
+      "category_applied_input_types": {"violence": ["text"], "harassment": ["text"], "...": ["text"]}
+    }
+  ]
+}
+```
+
+Mistral-Ergebnisse behalten Mistrals Kategorienamen (`violence_and_threats`,
+`hate_and_discrimination`, `pii`, ...). GoModel setzt `flagged` auf true, sobald
+eine Kategorie zutrifft, und nennt `text` als Eingabetyp jeder Kategorie.
+
+## Modelle und Nutzung
+
+Moderationsmodelle erscheinen in `GET /v1/models` mit dem Modus `moderation`
+und der Kategorie `utility`. Sie werden nur für Provider gelistet, die sie
+bedienen können.
+
+Jeder Aufruf erzeugt einen Nutzungseintrag für `/v1/moderations` mit der Zahl
+der klassifizierten Eingaben. Keiner der Provider meldet hier Token-Nutzung:
+OpenAI-Moderation ist kostenlos, und ein Modell mit Token-Preis wird als nicht
+berechnet markiert, statt $0 anzuzeigen.
+
+Guardrails laufen auf diesem Endpunkt nicht.

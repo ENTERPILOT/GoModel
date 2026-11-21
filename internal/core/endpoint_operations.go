@@ -24,6 +24,7 @@ var operationPaths = map[Operation]OperationPaths{
 	OperationAudioTranslations:   {Exact: []string{"/v1/audio/translations"}},
 	OperationImageGenerations:    {Exact: []string{"/v1/images/generations"}},
 	OperationImageEdits:          {Exact: []string{"/v1/images/edits"}},
+	OperationModerations:         {Exact: []string{"/v1/moderations"}},
 	OperationRealtime: {Exact: []string{
 		"/v1/realtime", "/v1/realtime/calls", "/v1/realtime/client_secrets",
 		"/v1/realtime/translations", "/v1/realtime/translations/calls", "/v1/realtime/translations/client_secrets",

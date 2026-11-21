@@ -34,6 +34,7 @@ func TestDescribeEndpointPath(t *testing.T) {
 		{path: "/v1/audio/translations", managed: false, dialect: "openai_compat", operation: OperationAudioTranslations, bodyMode: BodyModeMultipart, interaction: true},
 		{path: "/v1/images/generations", managed: false, dialect: "openai_compat", operation: OperationImageGenerations, bodyMode: BodyModeJSON, interaction: true},
 		{path: "/v1/images/edits", managed: false, dialect: "openai_compat", operation: OperationImageEdits, bodyMode: BodyModeMultipart, interaction: true},
+		{path: "/v1/moderations", managed: false, dialect: "openai_compat", operation: OperationModerations, bodyMode: BodyModeJSON, interaction: true},
 		{path: "/v1/realtime", managed: false, dialect: "openai_compat", operation: OperationRealtime, bodyMode: BodyModeNone, interaction: true},
 		{path: "/v1/realtime/calls", managed: false, dialect: "openai_compat", operation: OperationRealtime, bodyMode: BodyModeNone, interaction: true},
 		{path: "/v1/realtime/client_secrets", managed: false, dialect: "openai_compat", operation: OperationRealtime, bodyMode: BodyModeNone, interaction: true},

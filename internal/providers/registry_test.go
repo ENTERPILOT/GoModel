@@ -2479,3 +2479,40 @@ func TestModelRegistryAcceptsUnlistedModel(t *testing.T) {
 		assert.Equal(t, tt.want, registry.AcceptsUnlistedModel(tt.model), tt.model)
 	}
 }
+
+// moderationRegistryMockProvider extends the mock with moderation support.
+type moderationRegistryMockProvider struct {
+	registryMockProvider
+}
+
+func (m *moderationRegistryMockProvider) CreateModeration(_ context.Context, _ *core.ModerationRequest) (*core.ModerationResponse, error) {
+	return nil, nil
+}
+
+func TestListPublicModels_HidesModerationModelsFromProvidersWithoutModerationSupport(t *testing.T) {
+	inventory := func() *core.ModelsResponse {
+		return &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "omni-moderation-latest", Object: "model", Metadata: &core.ModelMetadata{Modes: []string{"moderation"}}},
+				{ID: "bare-model", Object: "model"},
+			},
+		}
+	}
+
+	registry := NewModelRegistry()
+	without := &registryMockProvider{modelsResponse: inventory()}
+	with := &moderationRegistryMockProvider{registryMockProvider{modelsResponse: inventory()}}
+	registry.RegisterProviderWithNameAndType(without, "openrouter", "openrouter")
+	registry.RegisterProviderWithNameAndType(with, "openai", "openai")
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+
+	got := make(map[string]bool)
+	for _, model := range registry.ListPublicModels() {
+		got[model.ID] = true
+	}
+	assert.True(t, got["openai/omni-moderation-latest"])
+	assert.True(t, got["openrouter/bare-model"])
+	assert.False(t, got["openrouter/omni-moderation-latest"], "moderation model should be hidden (provider has no moderation support)")
+}

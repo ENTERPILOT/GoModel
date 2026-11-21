@@ -194,6 +194,10 @@ func stampProvider[T any](resp T, providerType string) T {
 		if typed != nil {
 			typed.Provider = providerType
 		}
+	case *core.ModerationResponse:
+		if typed != nil {
+			typed.Provider = providerType
+		}
 	}
 	return resp
 }
