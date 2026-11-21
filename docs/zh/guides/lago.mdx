@@ -1,0 +1,129 @@
+---
+title: "GoModel 与 Lago"
+description: "使用 Lago 为客户的 LLM 用量计费：GoModel 将每个可计费请求作为 Token 用量事件发送到 Lago 的事件 API，并把用户路径映射到 Lago 订阅。"
+icon: "banknote"
+keywords: ["Lago", "getlago", "按用量计费", "usage-based billing", "计量", "metering", "开票", "Token 计费", "billable metrics", "订阅", "配置指南", "setup guide"]
+---
+
+## 概览
+
+[Lago](https://getlago.com) 是一个开源的按用量计费系统。启用 Lago 导出后，GoModel 会将每个可计费请求的 Token 用量作为用量事件发送到 Lago，由 Lago 定价并开具账单。网关的所有客户端都会被覆盖，无需改动应用代码。
+
+`App -> GoModel -> OpenAI/Anthropic/Gemini/...`，并且对已映射客户的每个请求执行 `GoModel -> Lago`。
+
+导出默认关闭，且绝不会延迟请求或导致请求失败：事件由后台队列发送。
+
+## 1. 配置 Lago
+
+为每种要收费的 Token 类型创建一个**计费指标（billable metric）**。GoModel 使用 Lago 自家 LLM SDK 的默认 code：
+
+| Code | 统计内容 | 聚合方式 | 字段 |
+| --- | --- | --- | --- |
+| `llm_input_tokens` | 未从提供商提示词缓存读取的提示词 Token | `sum_agg` | `value` |
+| `llm_output_tokens` | 补全 Token，包含推理 Token | `sum_agg` | `value` |
+| `llm_cached_input_tokens` | 从提供商提示词缓存读取的提示词 Token | `sum_agg` | `value` |
+| `llm_cache_creation_tokens` | 写入提供商提示词缓存的提示词 Token | `sum_agg` | `value` |
+
+这四个计数互不重叠，因此它们的总和就是请求的总量。Lago 会忽略 code 不匹配任何计费指标的事件：只需创建你要计费的指标。
+
+然后在套餐（plan）中为每个指标添加一项收费（charge），并为每位客户创建该套餐的订阅。订阅的 **External ID** 就是 GoModel 作为 `external_subscription_id` 发送的值。
+
+## 2. 将客户映射到订阅
+
+一位客户对应一棵[用户路径](/zh/features/user-path)子树。将每位客户映射到其 Lago 订阅：
+
+```yaml
+lago:
+  subscriptions:
+    /customers/acme: sub_acme
+    /customers/globex: sub_globex
+```
+
+覆盖请求用户路径的最深一条已配置路径生效：`/customers/acme` 覆盖 `/customers/acme/app`，但不覆盖 `/customers/acmecorp`。没有任何路径覆盖的请求**不会发送到 Lago**；不存在默认订阅，`/` 作为键会被拒绝。
+
+<Warning>
+  请将每位客户的 API 密钥绑定到其用户路径（**API Keys -> Create API Key -> User Path**）。未绑定用户路径的密钥允许客户端通过 `X-GoModel-User-Path` 请求头自行选择路径，也就选择了被计费的订阅。
+</Warning>
+
+## 3. 启用导出
+
+<CodeGroup>
+
+```bash 环境变量
+LAGO_ENABLED=true
+LAGO_API_KEY=<你的 Lago API 密钥>
+LAGO_SUBSCRIPTIONS=/customers/acme=sub_acme,/customers/globex=sub_globex
+```
+
+```yaml config.yaml
+lago:
+  enabled: true
+  api_key: "${LAGO_API_KEY}"
+  subscriptions:
+    /customers/acme: sub_acme
+    /customers/globex: sub_globex
+```
+
+</CodeGroup>
+
+| 变量 | `config.yaml` | 默认值 | 何时修改 |
+| --- | --- | --- | --- |
+| `LAGO_ENABLED` | `lago.enabled` | `false` | 你在 Lago 中为用量计费。需要 `USAGE_ENABLED=true`（默认值） |
+| `LAGO_API_URL` | `lago.api_url` | `https://api.getlago.com/api/v1` | 你使用 Lago 的欧盟集群（`https://api.eu.getlago.com/api/v1`）或自托管实例（`https://<host>/api/v1`） |
+| `LAGO_API_KEY` | `lago.api_key` | 无 | 始终需要：启用导出时必填。它可以是[密钥引用](/zh/advanced/secret-references)，绝不会写入日志，并会被 `gomodel config export` 遮蔽 |
+| `LAGO_SUBSCRIPTIONS` | `lago.subscriptions` | 无 | 始终需要：至少要有一条映射。该变量是以逗号分隔的 `user_path=external_subscription_id` 列表，会覆盖合并到 `config.yaml` 的条目之上 |
+| `LAGO_BUFFER_SIZE` | `lago.buffer_size` | `10000` | `gomodel_lago_events_dropped_total{reason="buffer_full"}` 持续增长。它是 Lago 响应缓慢或不可达时可以等待发送的请求数 |
+
+启用导出但缺少 API 密钥或订阅时，启动会失败。
+
+## 发送的内容
+
+每种计数为正的 Token 类型对应一个事件，以每批最多 100 个的方式发送到 [`POST /events/batch`](https://getlago.com/docs/api-reference/events/batch)。未满的批次每 5 秒发送一次；当 Lago 响应缓慢或某个批次正在重试时，后续事件会在其后等待：
+
+```json
+{
+  "transaction_id": "0b7c1e6e-4c1f-4f6b-9d4e-1f2a3b4c5d6e_tok_input",
+  "external_subscription_id": "sub_acme",
+  "code": "llm_input_tokens",
+  "timestamp": 1800000000,
+  "properties": {
+    "value": 1200,
+    "model": "gpt-4o-mini",
+    "provider": "openai",
+    "provider_name": "openai-eu",
+    "user_path": "/customers/acme/app"
+  }
+}
+```
+
+`model`、`provider`（提供商类型）、`provider_name`（已配置的提供商）和 `user_path` 供 Lago 的收费过滤器和分组使用：可以用它们为不同模型设置不同价格，或将某个模型排除在账单之外。
+
+以下内容不会发送：
+
+- 用户路径没有对应订阅的请求。
+- 由配置了 [`billable: false`](/zh/features/cost-tracking#加价与计费成本) 的提供商处理的请求，例如客户自带的 API 密钥。
+- 由 GoModel [响应缓存](/zh/features/cache)返回的响应：它们没有消耗提供商 Token。
+- 不报告 Token 的请求，例如 MCP 工具调用。
+
+GoModel 发送的是 Token 计数，而不是价格。[加价](/zh/features/cost-tracking#加价与计费成本)和 GoModel 记录的 `billed_cost` 仍保留在 GoModel 自己的用量视图中；通过 Lago 计费的客户，其价格请在 Lago 中设置。
+
+## 投递
+
+- **重试。** 当 Lago 不可达、返回服务器错误、限流或拒绝 API 密钥时，GoModel 会保留该批次并再次发送。先等待 1 秒，每次失败后等待时间翻倍，最长 60 秒。
+- **不会重复计费。** `transaction_id` 由用量记录的 ID 派生，每次尝试都相同。Lago 已持有的事件视为已投递。
+- **被拒绝的事件。** Lago 将一个批次作为整体进行校验。GoModel 会丢弃 Lago 指出的无效事件，记录 Lago 的响应，并重新发送其余事件。
+- **内存有界。** Lago 不可用期间，最多有 `LAGO_BUFFER_SIZE` 个请求等待。之后的请求会被丢弃、记录日志并计数。
+- **关闭。** GoModel 会最后尝试一次发送缓冲区中的内容，最长 10 秒。缓冲区位于内存中：届时仍未投递的事件，或崩溃进程中持有的事件，将会丢失。
+
+每个网关副本发送各自的请求。请关注这两个计数器（参见 [Prometheus 指标](/zh/guides/prometheus-metrics)）：
+
+| 指标 | 含义 |
+| --- | --- |
+| `gomodel_lago_events_sent_total` | Lago 已持有的事件 |
+| `gomodel_lago_events_dropped_total{reason}` | Lago 未保存的事件：`buffer_full`、`rejected`（被 Lago 拒绝）或 `shutdown`。它们的用量不会出现在账单中 |
+
+```promql
+sum(increase(gomodel_lago_events_dropped_total[5m])) by (reason) > 0
+```
+
+用量本身仍存储在 GoModel 中，因此可以通过[用量 API](/zh/advanced/usage-api) 对账补齐缺口。

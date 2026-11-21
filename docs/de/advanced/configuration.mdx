@@ -479,6 +479,18 @@ gespeicherte Logs sichtbar sind.
 | `USAGE_FLUSH_INTERVAL`         | Schreibintervall in Sekunden                      | `5`     |
 | `USAGE_RETENTION_DAYS`         | Automatisches Löschen nach N Tagen (0 = nie)         | `90`    |
 
+#### Lago
+
+Rechnet Token-Nutzung in [Lago](/de/guides/lago) ab. Standardmäßig deaktiviert.
+
+| Variable             | Beschreibung                                                                                                   | Standardwert                     |
+| -------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| `LAGO_ENABLED`       | Sendet die Token-Nutzung abrechenbarer, nicht gecachter Requests zugeordneter Kunden an Lago; benötigt `USAGE_ENABLED=true` | `false`                          |
+| `LAGO_API_URL`       | Basis-URL der Lago-API; für den EU-Cluster oder eine selbst gehostete Instanz ändern                            | `https://api.getlago.com/api/v1` |
+| `LAGO_API_KEY`       | Lago-API-Key; erforderlich, wenn aktiviert                                                                      | keiner                           |
+| `LAGO_SUBSCRIPTIONS` | Kommagetrennte Liste `user_path=external_subscription_id`; erforderlich, wenn aktiviert; Requests, die kein konfigurierter Pfad abdeckt, werden nicht gesendet | keine                            |
+| `LAGO_BUFFER_SIZE`   | Requests, die warten dürfen, solange Lago langsam oder nicht erreichbar ist; spätere werden verworfen und gezählt | `10000`                          |
+
 #### Budgets
 
 Budgets verwenden die erfassten Nutzungs- und Kostendatensätze. Ist die

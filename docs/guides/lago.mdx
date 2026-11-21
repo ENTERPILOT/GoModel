@@ -1,0 +1,166 @@
+---
+title: "GoModel & Lago"
+description: "Bill customers for LLM usage with Lago: GoModel sends each billable request as token usage events to Lago's events API, mapped from user paths to Lago subscriptions."
+icon: "banknote"
+keywords: ["Lago", "getlago", "usage-based billing", "metering", "invoicing", "token billing", "billable metrics", "subscriptions", "setup guide"]
+---
+
+## Overview
+
+[Lago](https://getlago.com) is an open-source usage-based billing system. With
+the Lago export on, GoModel sends the token usage of every billable request to
+Lago as usage events, and Lago prices and invoices it. Every client of the
+gateway is covered without touching application code.
+
+`App -> GoModel -> OpenAI/Anthropic/Gemini/...`, and `GoModel -> Lago` for
+each request of a mapped customer.
+
+The export is off by default and never delays or fails a request: events are
+sent from a background queue.
+
+## 1. Set up Lago
+
+Create one **billable metric** per token kind you charge for. GoModel uses the
+default codes of Lago's own LLM SDKs:
+
+| Code | Counts | Aggregation | Field |
+| --- | --- | --- | --- |
+| `llm_input_tokens` | Prompt tokens that were not read from the provider's prompt cache | `sum_agg` | `value` |
+| `llm_output_tokens` | Completion tokens, reasoning included | `sum_agg` | `value` |
+| `llm_cached_input_tokens` | Prompt tokens read from the provider's prompt cache | `sum_agg` | `value` |
+| `llm_cache_creation_tokens` | Prompt tokens written to the provider's prompt cache | `sum_agg` | `value` |
+
+The four counts never overlap, so their sum is the request's total. Lago
+ignores events whose code matches no billable metric: create only the metrics
+you bill.
+
+Then add a charge per metric to a plan, and give each customer a subscription
+to it. The subscription's **external ID** is what GoModel sends as
+`external_subscription_id`.
+
+## 2. Map customers to subscriptions
+
+A customer is a [user path](/features/user-path) subtree. Map each one to its
+Lago subscription:
+
+```yaml
+lago:
+  subscriptions:
+    /customers/acme: sub_acme
+    /customers/globex: sub_globex
+```
+
+The deepest configured path covering the request's user path wins: `/customers/acme`
+covers `/customers/acme/app`, not `/customers/acmecorp`. A request no path
+covers is **not sent to Lago**; there is no default subscription, and `/` is
+rejected as a key.
+
+<Warning>
+  Bind each customer's API key to its user path
+  (**API Keys -> Create API Key -> User Path**). A key without one lets the
+  client choose the path with the `X-GoModel-User-Path` header, and with it
+  the subscription that is billed.
+</Warning>
+
+## 3. Enable the export
+
+<CodeGroup>
+
+```bash Environment
+LAGO_ENABLED=true
+LAGO_API_KEY=<your Lago API key>
+LAGO_SUBSCRIPTIONS=/customers/acme=sub_acme,/customers/globex=sub_globex
+```
+
+```yaml config.yaml
+lago:
+  enabled: true
+  api_key: "${LAGO_API_KEY}"
+  subscriptions:
+    /customers/acme: sub_acme
+    /customers/globex: sub_globex
+```
+
+</CodeGroup>
+
+| Variable | `config.yaml` | Default | Change it when |
+| --- | --- | --- | --- |
+| `LAGO_ENABLED` | `lago.enabled` | `false` | You bill usage in Lago. Needs `USAGE_ENABLED=true` (the default) |
+| `LAGO_API_URL` | `lago.api_url` | `https://api.getlago.com/api/v1` | You use Lago's EU cluster (`https://api.eu.getlago.com/api/v1`) or a self-hosted instance (`https://<host>/api/v1`) |
+| `LAGO_API_KEY` | `lago.api_key` | none | Always: required when the export is on. It can be a [secret reference](/advanced/secret-references), is never logged, and is masked by `gomodel config export` |
+| `LAGO_SUBSCRIPTIONS` | `lago.subscriptions` | none | Always: at least one mapping is required. The variable is a comma-separated `user_path=external_subscription_id` list, merged over the `config.yaml` entries |
+| `LAGO_BUFFER_SIZE` | `lago.buffer_size` | `10000` | `gomodel_lago_events_dropped_total{reason="buffer_full"}` grows. It is the number of requests that may wait while Lago is slow or unreachable |
+
+Startup fails when the export is on without an API key or a subscription.
+
+## What is sent
+
+One event per token kind with a positive count, sent to
+[`POST /events/batch`](https://getlago.com/docs/api-reference/events/batch)
+in batches of up to 100. A partial batch is flushed every 5 seconds; while
+Lago is slow or a batch is being retried, later events wait behind it:
+
+```json
+{
+  "transaction_id": "0b7c1e6e-4c1f-4f6b-9d4e-1f2a3b4c5d6e_tok_input",
+  "external_subscription_id": "sub_acme",
+  "code": "llm_input_tokens",
+  "timestamp": 1800000000,
+  "properties": {
+    "value": 1200,
+    "model": "gpt-4o-mini",
+    "provider": "openai",
+    "provider_name": "openai-eu",
+    "user_path": "/customers/acme/app"
+  }
+}
+```
+
+`model`, `provider` (the provider type), `provider_name` (the configured
+provider) and `user_path` are there for Lago's charge filters and grouping:
+use them to price models differently, or to leave a model out of the bill.
+
+Not sent:
+
+- Requests whose user path has no subscription.
+- Requests served by a provider configured with
+  [`billable: false`](/features/cost-tracking#markups-and-billed-cost), such as a
+  customer's own API key.
+- Responses served from GoModel's [response cache](/features/cache): they
+  used no provider tokens.
+- Requests that report no tokens, such as MCP tool calls.
+
+GoModel sends token counts, not prices. [Markups](/features/cost-tracking#markups-and-billed-cost)
+and any `billed_cost` GoModel records stay in GoModel's own usage views; set the prices of a
+Lago-billed customer in Lago.
+
+## Delivery
+
+- **Retries.** When Lago is unreachable, answers with a server error, throttles,
+  or refuses the API key, GoModel keeps the batch and sends it again, waiting
+  1 second and then twice as long after each failure, up to 60 seconds.
+- **No double billing.** `transaction_id` is derived from the usage row's ID
+  and is the same on every attempt. An event Lago already holds is counted as
+  delivered.
+- **Rejected events.** Lago validates a batch as a whole. GoModel drops the
+  events Lago names as invalid, logs Lago's answer, and sends the rest again.
+- **Bounded memory.** Up to `LAGO_BUFFER_SIZE` requests wait while Lago is
+  unavailable. Later ones are dropped, logged, and counted.
+- **Shutdown.** GoModel makes one last attempt to send what is buffered, for
+  up to 10 seconds. The buffer is in memory: events still undelivered then, or
+  held by a process that crashes, are lost.
+
+Each gateway replica sends its own requests. Watch the two counters (see
+[Prometheus metrics](/guides/prometheus-metrics)):
+
+| Metric | Meaning |
+| --- | --- |
+| `gomodel_lago_events_sent_total` | Events Lago holds |
+| `gomodel_lago_events_dropped_total{reason}` | Events Lago does not hold: `buffer_full`, `rejected` (Lago refused them), or `shutdown`. Their usage is missing from the invoice |
+
+```promql
+sum(increase(gomodel_lago_events_dropped_total[5m])) by (reason) > 0
+```
+
+The usage itself is still stored in GoModel, so a gap can be reconciled from
+the [usage API](/advanced/usage-api).
