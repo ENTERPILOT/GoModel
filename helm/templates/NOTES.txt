@@ -20,6 +20,12 @@ Dashboard: {{ include "gomodel.pathWithBasePath" (dict "root" . "path" "/admin/d
 WARNING: GOMODEL_MASTER_KEY is not set. The gateway accepts unauthenticated
 requests. Set secretEnv.GOMODEL_MASTER_KEY or load it with extraEnvFrom.
 {{- end }}
+{{- if and .Values.metrics.enabled (or .Values.ingress.enabled .Values.httpRoute.enabled) (ne (toString (.Values.env.METRICS_REQUIRE_AUTH | default "")) "true") }}
+
+WARNING: the ingress/HTTPRoute serves {{ include "gomodel.pathWithBasePath" (dict "root" . "path" (.Values.env.METRICS_ENDPOINT | default "/metrics")) }} without authentication.
+Set env.METRICS_REQUIRE_AUTH: "true" (and metrics.serviceMonitor.bearerTokenSecret),
+exclude the path at the ingress, or set metrics.enabled false.
+{{- end }}
 {{- if and (eq .Values.storage.type "sqlite") (not .Values.persistence.enabled) }}
 
 WARNING: SQLite data is on an emptyDir volume. Request logs, usage, budgets and

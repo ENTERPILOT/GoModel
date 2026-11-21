@@ -143,6 +143,7 @@ func (b *bootstrap) initServerConfig() error {
 		Authenticator:                   app.authKeys.Service,
 		MetricsEnabled:                  appCfg.Metrics.Enabled,
 		MetricsEndpoint:                 appCfg.Metrics.Endpoint,
+		MetricsRequireAuth:              appCfg.Metrics.RequireAuth,
 		BodySizeLimit:                   appCfg.Server.BodySizeLimit,
 		StreamStallTimeout:              time.Duration(appCfg.Server.StreamStallTimeout) * time.Second,
 		PprofEnabled:                    appCfg.Server.PprofEnabled,

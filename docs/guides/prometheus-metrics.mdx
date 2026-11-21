@@ -91,6 +91,7 @@ METRICS_ENDPOINT=/internal/prometheus
 | -------------------------------- | ---------- | -------------------------------------------------------------- |
 | `METRICS_ENABLED`                | `false`    | Enable/disable metrics collection                              |
 | `METRICS_ENDPOINT`               | `/metrics` | HTTP path for metrics endpoint                                 |
+| `METRICS_REQUIRE_AUTH`           | `false`    | Require a bearer credential on the metrics endpoint            |
 | `METRICS_CALLER_USER_PATH`       | `false`    | Add the user path to the [caller metrics](#caller-dimensions)  |
 | `METRICS_CALLER_USER_PATH_DEPTH` | `2`        | Leading user path segments to keep                             |
 | `METRICS_CALLER_AUTH_KEY`        | `false`    | Add the managed API key's name                                 |
@@ -268,10 +269,31 @@ try {
 
 ### Exposing the Metrics Endpoint
 
-The `/metrics` endpoint is protected by master key authentication when a master
-key is configured, just like other HTTP endpoints. If no master key is
-configured, the endpoint is accessible without authentication, which allows
-Prometheus to scrape metrics without credentials.
+By default the metrics endpoint skips authentication, even when a master key
+or managed API keys are configured, so Prometheus can scrape it without a
+credential. Anyone who can reach the gateway can then read it, including through
+an ingress that routes `/` to GoModel.
+
+Set `METRICS_REQUIRE_AUTH=true` (`metrics.require_auth: true`) to keep it behind
+the gateway's normal bearer authentication: the master key or any managed API
+key is accepted. Prefer a dedicated managed key for Prometheus over the master
+key. It has no effect when the gateway runs without authentication.
+
+```yaml
+scrape_configs:
+  - job_name: "gomodel"
+    static_configs:
+      - targets: ["gomodel:8080"]
+    metrics_path: "/metrics"
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/gomodel-token
+```
+
+With the Prometheus Operator, set the same credential on the ServiceMonitor
+endpoint (`authorization.credentials` referencing a Secret key); the Helm chart
+does this with `metrics.serviceMonitor.bearerTokenSecret`. The Secret must be in
+the ServiceMonitor's namespace.
 
 If you need to protect the metrics endpoint further:
 

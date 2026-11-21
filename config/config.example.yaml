@@ -396,6 +396,7 @@ rate_limits:
 metrics:
   enabled: false
   endpoint: "/metrics"
+  require_auth: false # env: METRICS_REQUIRE_AUTH; true keeps the endpoint behind bearer auth (master key or a managed key); give Prometheus an authorization credential. No effect when the gateway has no authentication configured
   # Who made the request, on the token and cost metrics (Prometheus and
   # OpenTelemetry alike) and on the Prometheus per-caller request counter. All
   # off by default: each dimension multiplies the exported series by its
