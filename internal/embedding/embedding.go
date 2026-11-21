@@ -28,8 +28,8 @@ type Embedder interface {
 // NewEmbedder returns an Embedder that calls POST …/v1/embeddings (OpenAI-compatible)
 // for the named provider. cfg.Provider must be a non-empty key in resolvedProviders
 // (the env-merged, credential-filtered map from providers.Init). That entry's
-// api_key and base_url are reused; base_url must be non-empty (discovery defaults
-// fill it when only an API key is set).
+// api_key, base_url and headers are reused; base_url must be non-empty (discovery
+// defaults fill it when only an API key is set).
 func NewEmbedder(cfg config.EmbedderConfig, resolvedProviders map[string]config.RawProviderConfig) (Embedder, error) {
 	p := strings.TrimSpace(cfg.Provider)
 	if p == "" {
@@ -68,6 +68,7 @@ func NewEmbedder(cfg config.EmbedderConfig, resolvedProviders map[string]config.
 			append([]string{raw.APIKey}, raw.APIKeys...)...,
 		),
 		model:      model,
+		headers:    raw.Headers,
 		httpClient: httpclient.NewClientWithTimeout(defaultTimeout),
 	}, nil
 }
@@ -109,7 +110,11 @@ type apiEmbedder struct {
 	endpointURL string
 	keys        *providers.Keyring
 	model       string
-	httpClient  *http.Client
+	// headers are the provider's configured static headers, sent last like
+	// the provider's own client sends them: behind the same proxy the
+	// embedder needs the same token. Values may be secrets.
+	headers    map[string]string
+	httpClient *http.Client
 }
 
 type embeddingRequest struct {
@@ -138,6 +143,9 @@ func (e *apiEmbedder) Embed(ctx context.Context, text string) ([]float32, error)
 	req.Header.Set("Content-Type", "application/json")
 	if apiKey := e.keys.NextForContext(req.Context()); apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	for name, value := range e.headers {
+		req.Header.Set(name, value)
 	}
 	resp, err := e.httpClient.Do(req)
 	if err != nil {

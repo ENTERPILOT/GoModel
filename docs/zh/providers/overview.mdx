@@ -16,6 +16,8 @@ GoModel 通过一个网关将兼容 OpenAI 的请求路由到众多 AI 提供商
 
 每个提供商还带有一个 `billable` 设置，默认开启。对于成本不由调用方向您支付的提供商（例如客户自己的 API 密钥被注册为一个独立的提供商实例），请将其关闭：用量仍会被追踪和定价，但用户路径和标签预算既不会拦截它，也不会计入它，并且在开启[加价](/zh/features/cost-tracking#加价与计费成本)时按零计费。可以通过 `config.yaml` 中的 `providers.<name>.billable: false`、环境变量 `<PROVIDER>[_SUFFIX]_BILLABLE=false`、控制台表单高级字段下的 **Billable** 复选框，或 `PUT /admin/provider-credentials` 上的 `"billable": false` 来设置。如果 `<PROVIDER>_BILLABLE` 的值非空且不是布尔值（例如 `true`、`false`、`1`、`0`、`t`、`F` 或 `TRUE`），网关会拒绝启动，因此拼写错误绝不会让提供商意外保持计费；空值会被忽略。参见[预算](/zh/features/budgets#非计费提供商)。
 
+如需在发往某个提供商的每个请求中附带固定请求头（例如边缘代理令牌），参见 [Provider 请求头](/zh/providers/static-headers)。
+
 ## 支持的提供商
 
 示例模型标识符仅作说明，可能会发生变化；当前可用的模型请查阅各提供商的模型目录。功能列反映的是网关的 API 支持情况，而不是上游提供商提供的每个模型的具体能力。

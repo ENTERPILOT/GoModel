@@ -32,6 +32,8 @@ var Registration = providers.Registration{
 	Discovery: providers.DiscoveryConfig{
 		RequireBaseURL:  true,
 		AllowAPIKeyless: true,
+		// Set per request from inference_objective and the user path.
+		ReservedHeaders: []string{canonicalObjectiveHeader, legacyObjectiveHeader, canonicalFairnessHeader, legacyFairnessHeader},
 	},
 }
 
@@ -79,6 +81,7 @@ func newProvider(apiKey, baseURL string, controls ControlConfig, opts providers.
 		BaseURL:        providers.PassthroughBaseURL(baseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
+		Headers:        opts.Headers,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
 	p.compatible = openai.NewCompatibleProvider(apiKey, opts, compatibleCfg)

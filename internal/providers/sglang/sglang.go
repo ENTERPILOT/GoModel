@@ -64,6 +64,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			BaseURL:        providers.PassthroughBaseURL(baseURL),
 			Retry:          opts.Resilience.Retry,
 			Hooks:          opts.Hooks,
+			Headers:        opts.Headers,
 			CircuitBreaker: opts.Resilience.CircuitBreaker,
 		}, func(req *http.Request) {
 			setHeaders(req, keys.NextForContext(req.Context()))

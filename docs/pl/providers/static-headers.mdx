@@ -1,0 +1,118 @@
+---
+title: "Nagłówki providera"
+description: "Wysyłaj stałe nagłówki, na przykład token proxy brzegowego albo identyfikator tenanta, w każdym żądaniu do jednego providera."
+icon: "heading"
+keywords: ["nagłówki", "headers", "nagłówki providera", "provider headers", "proxy brzegowe", "edge proxy", "bramka API", "API gateway", "cf-aig-authorization", "Ocp-Apim-Subscription-Key", "OpenAI-Organization", "reverse proxy"]
+---
+
+Ustaw `headers` na providerze, gdy każde wywołanie tego providera potrzebuje
+stałego nagłówka, którego GoModel sam nie wysyła:
+
+- Provider osiągalny przez uwierzytelniające proxy lub bramkę API, na przykład
+  Cloudflare AI Gateway (`cf-aig-authorization`), Azure API Management
+  (`Ocp-Apim-Subscription-Key`) albo własny `X-Edge-Auth`.
+- Samodzielnie hostowany runtime (vLLM, Ollama, llama.cpp) za reverse proxy,
+  które wymaga własnego tokenu.
+- Stałe nagłówki routingu lub atrybucji, takie jak `OpenAI-Organization`,
+  `OpenAI-Project` czy `X-Tenant`.
+
+Domyślnie nie ma żadnych nagłówków. Dla providerów bez tego ustawienia nic się
+nie zmienia.
+
+## Konfiguracja
+
+W `config.yaml` wartości przyjmują
+[referencje do sekretów](/pl/advanced/secret-references); nazwy nie:
+
+```yaml
+providers:
+  gemini:
+    type: gemini
+    api_key: "${env:GEMINI_API_KEY}"
+    base_url: https://edge.example.com/gemini/v1beta
+    headers:
+      X-Edge-Auth: "${file:/run/secrets/edge-token}"
+      X-Tenant: acme
+```
+
+Providery konfigurowane wyłącznie zmiennymi środowiskowymi używają
+`<PROVIDER>[_SUFFIX]_HEADERS` z obiektem JSON. Referencje w wartościach są
+rozwiązywane; pisz `${env:NAME}`, bo samo `${NAME}` nie jest tam rozwijane i
+zatrzymuje uruchamianie:
+
+```bash
+GEMINI_API_KEY=...
+GEMINI_HEADERS='{"X-Edge-Auth":"${file:/run/secrets/edge-token}","X-Tenant":"acme"}'
+```
+
+Zmienna zastępuje całą mapę `headers` providera zadeklarowanego w
+`config.yaml`; nigdy jej nie scala. `GEMINI_HEADERS='{}'` ją czyści.
+
+<Note>
+  Nagłówki można ustawić w `config.yaml` i w zmiennych środowiskowych.
+  Providery zarządzane z dashboardu jeszcze ich nie obsługują.
+</Note>
+
+## Dokąd trafiają
+
+Nagłówki trafiają do każdego żądania, które provider wysyła do swojego API:
+inferencji, streamingu, wykrywania modeli, embeddingów, audio, plików, batchy,
+passthrough (`/p/<provider>/...`) i połączeń realtime. Embedder cache
+semantycznego też je wysyła, gdy korzysta z tego providera.
+
+Nigdy nie trafiają do:
+
+- Innego providera, także do następnego w łańcuchu failoveru.
+- Endpointów tokenów OAuth i tożsamości, na przykład endpointu tokenów Google,
+  w którym wymieniane są poświadczenia Vertex, ani wymiany tokenów workload
+  identity.
+- Serwerów MCP.
+
+## Pierwszeństwo
+
+Skonfigurowane nagłówki są ustawiane **na końcu** i zastępują każdą wartość o
+tej samej nazwie. Nie nadpisze ich ani klient passthrough, ani nagłówek
+[pluginu](/pl/advanced/plugins).
+
+Ponieważ wygrywają, GoModel odrzuca nazwy, które zepsułyby uwierzytelnianie,
+transport lub protokół providera. Odrzucona nazwa zatrzymuje uruchamianie z
+błędem, który podaje nagłówek, nigdy jego wartość.
+
+| Odrzucane | Nazwy | Powód |
+| --- | --- | --- |
+| Wszystkie providery | `Authorization`, `X-Api-Key`, `Api-Key`, `X-Goog-Api-Key`, `Xi-Api-Key`, `Cookie` i pozostałe nagłówki poświadczeń | Poświadczenie providera pochodzi z `api_key` lub `api_keys`, więc rotacja kluczy dalej działa. |
+| Wszystkie providery | `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Te`, `Trailer`, `Upgrade`, `Expect`, `Proxy-*`, `Content-Type`, `Content-Encoding`, `Accept-Encoding`, `Idempotency-Key` | Należą do klienta HTTP lub bramki. |
+| `anthropic` | `anthropic-version`, `anthropic-beta` | Ustawiane przez GoModel; `anthropic-beta` niesie też flagę OAuth. |
+| `gemini` | `x-goog-user-project` | Ustawiany z poświadczeń Google. |
+| `vertex` | `x-goog-user-project`, `anthropic-version` | Ustawiane z poświadczeń Google i przez adapter Anthropic. |
+| `openrouter` | `X-Session-Id` | Ustawiany dla każdego żądania z wykrytej sesji. |
+| `llmd` | `x-llm-d-inference-objective`, `x-llm-d-inference-fairness-id`, `x-gateway-inference-objective`, `x-gateway-inference-fairness-id` | Ustawiane z `inference_objective` i ścieżki użytkownika. |
+
+Klucze bramek brzegowych są wyjątkiem od reguły poświadczeń, bo uwierzytelniają
+GoModel wobec proxy, a nie wobec providera: `cf-aig-authorization`,
+`Ocp-Apim-Subscription-Key`, `Helicone-Auth` i `X-Portkey-Api-Key` są
+dozwolone.
+
+Te typy providerów w ogóle odrzucają `headers`: `bedrock` i `bedrock-mantle`
+(żądania idą przez AWS SDK i są podpisywane SigV4, o ile nie ustawiono klucza
+API Bedrock, więc proxy, które usuwa własny nagłówek, psuje podpis) oraz klienci subskrypcyjni `chatgpt`, `github-copilot`, `kimicode` i
+`opencode_go`.
+
+Nazwy muszą być poprawnymi nazwami nagłówków HTTP i unikalne bez względu na
+wielkość liter. Wartości nie mogą być puste ani zawierać znaków nowej linii lub
+NUL. Provider przyjmuje najwyżej 32 nagłówki i 8 KiB nazw oraz wartości.
+
+## Sekrety
+
+- Wartości nagłówków są traktowane jak sekrety niezależnie od nazwy. Nigdy nie
+  pojawiają się w logach, błędach, API administracyjnym ani wpisach audytu.
+- [Eksport konfiguracji](/advanced/config-yaml#exporting-the-effective-configuration) (po angielsku)
+  zachowuje wartość będącą referencją do sekretu, a każdą inną zapisuje jako
+  referencję `${env:...}` do ustawienia.
+- Nierozwiązywalna referencja zatrzymuje uruchamianie albo powoduje nieudany
+  [reload](/pl/advanced/cli#przeładowanie-konfiguracji), który zachowuje
+  działającą konfigurację, z błędem podającym pole, na przykład
+  `providers.gemini.headers.X-Edge-Auth`.
+- Aby przejąć zrotowaną wartość, zrób reload. Menedżer sekretów, który zgłasza
+  zmiany, sam wywołuje reload, tak jak przy zmienionym `proxy_url`; zobacz
+  [Rotacja](/pl/advanced/secret-references#rotacja).

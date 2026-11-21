@@ -15,6 +15,7 @@ var credentialEnvFields = map[providerEnvField]bool{
 	providerEnvFieldAPIKey:                   true,
 	providerEnvFieldBaseURL:                  true,
 	providerEnvFieldProxyURL:                 true,
+	providerEnvFieldHeaders:                  true,
 	providerEnvFieldServiceAccountFile:       true,
 	providerEnvFieldServiceAccountJSON:       true,
 	providerEnvFieldServiceAccountJSONBase64: true,

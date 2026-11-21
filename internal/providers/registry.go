@@ -103,6 +103,11 @@ type ModelRegistry struct {
 	// false; every other provider is billable. Keyed by provider instance
 	// name, cleared on unregister.
 	nonBillableProviders map[string]struct{}
+	// providerHeaders holds the operator's static headers of the provider
+	// instances configured with any (providers.<name>.headers). Keyed by
+	// instance, not by name, so they can never reach another provider later
+	// registered under the same name. Values may be secrets.
+	providerHeaders map[core.Provider]map[string]string
 
 	// Cached sorted slices, rebuilt lazily after models change.
 	// nil means cache needs rebuilding. Protected by mu.
@@ -353,6 +358,7 @@ func (r *ModelRegistry) UnregisterProvider(providerName string) {
 		}
 		delete(r.providerTypes, p)
 		delete(r.providerNames, p)
+		delete(r.providerHeaders, p)
 	}
 	r.providers = kept
 
