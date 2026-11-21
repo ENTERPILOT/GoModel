@@ -561,6 +561,7 @@
   "overview_total_requests": "Total Requests",
   "overview_cache_hits": "Cache Hits",
   "overview_estimated_cost": "Estimated Cost",
+  "overview_usage_chart_label": "Token usage and estimated cost over time",
   "overview_local_cache": "Local Cache",
   "overview_prompt_cache_rate": "Prompt Cache Rate",
   "overview_prompt_cache_rate_help": "Share of input tokens served from the provider prompt cache over the selected period",
