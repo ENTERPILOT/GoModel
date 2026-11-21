@@ -79,7 +79,8 @@ step names an instance (`ref`), the phase it runs in, and its position:
     { "ref": "policy-judge", "phase": "prompt",   "step": 10 },
     { "ref": "safety-prompt","phase": "prompt",   "step": 20 },
     { "ref": "mask-keys",    "phase": "response", "step": 10 },
-    { "ref": "mask-keys",    "phase": "stream",   "step": 10 }
+    { "ref": "mask-keys",    "phase": "stream",   "step": 10 },
+    { "ref": "answer-judge", "phase": "response", "step": 20, "on_request": true }
   ]
 }
 ```
@@ -91,6 +92,11 @@ step names an instance (`ref`), the phase it runs in, and its position:
   equal `step` values run in parallel. At most one content-editing instance
   may share a `step`.
 - The same `ref` may appear once per phase.
+- `on_request: true` (default `false`) runs the step only for requests that
+  name the instance in their `guardrails` body field. Steps without it run on
+  every request and a request cannot turn them off. On-request steps are
+  validated together with the others, so they follow the same one-editor-per-step
+  rule. See [Select Guardrails per Request](/advanced/guardrails#select-guardrails-per-request).
 - `features.guardrails: false` disables every step of the workflow.
 
 Version 1 payloads (`"schema_version": 1` with `"guardrails": [{"ref", "step"}]`)
@@ -102,6 +108,8 @@ hash of each compiled chain as `chain_hashes` (`{"prompt": "...", "response": ".
 The compiled chain identity is part of both response cache keys, so changing a
 guardrail in any phase invalidates cached answers produced under the old rules,
 and two workflows with different chains never share cached answers.
+`chain_hashes` covers the steps that run on every request; a request that adds
+on-request steps is cached under the hash of the chain it ran.
 
 ## Examples
 

@@ -2211,3 +2211,41 @@ test("recorded outcomes show guardrail nodes even when the workflow version is u
   assert.equal(chart.guardrailFlows.stream[0].outcomes.redact.replacedEvents, 2);
   assert.equal(chart.guardrailFlows.stream[0].outcomes.redact.tone, "success");
 });
+
+test("workflow steps carry on_request only when it is set", () => {
+  const stored = {
+    workflow_payload: {
+      schema_version: 2,
+      steps: [
+        { ref: "policy-system", phase: "prompt", step: 10 },
+        { ref: "policy-judge", phase: "response", step: 20, on_request: true },
+      ],
+    },
+  };
+
+  assert.deepEqual(workflowSourceGuardrails(stored), [
+    { ref: "policy-system", phase: "prompt", step: 10 },
+    { ref: "policy-judge", phase: "response", step: 20, on_request: true },
+  ]);
+
+  const form = {
+    scope_provider: "",
+    scope_model: "",
+    name: "global",
+    description: "",
+    features: { cache: true, audit: true, usage: true, guardrails: true, failover: true },
+    guardrails: [
+      { ref: "policy-system", phase: "prompt", step: 10, on_request: false },
+      { ref: "policy-judge", phase: "response", step: 20, on_request: true },
+    ],
+  };
+
+  assert.deepEqual(buildWorkflowRequest({ form, caps: ALL_CAPS }).workflow_payload.steps, [
+    { ref: "policy-system", phase: "prompt", step: 10 },
+    { ref: "policy-judge", phase: "response", step: 20, on_request: true },
+  ]);
+  assert.deepEqual(workflowPreview(form, ALL_CAPS).workflow_payload.steps, [
+    { ref: "policy-system", phase: "prompt", step: 10 },
+    { ref: "policy-judge", phase: "response", step: 20, on_request: true },
+  ]);
+});

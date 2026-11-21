@@ -11393,6 +11393,13 @@ const docTemplate = `{
                 "cache_control": {
                     "type": "object"
                 },
+                "guardrails": {
+                    "description": "Guardrails names guardrails to run for this request in addition to the\nones its workflow always runs. It is a gateway field: POST /v1/messages\nreads it and it is never sent to a provider. Kept raw so the shared\ningress check validates it.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "max_tokens": {
                     "type": "integer"
                 },
@@ -14146,6 +14153,13 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/requestlog.RequestRevisionSnapshot"
+                    }
+                },
+                "requested_guardrails": {
+                    "description": "RequestedGuardrails lists the guardrails the client added through the\nrequest's guardrails field, on top of the steps its workflow always\nruns. Their outcomes are in Guardrails with the others.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
                     }
                 },
                 "response_body": {},

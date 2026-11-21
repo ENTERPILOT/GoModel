@@ -184,3 +184,46 @@ func TestChainsCacheHash(t *testing.T) {
 	require.Empty(t, (&Chains{}).CacheHash())
 	require.Empty(t, (*Chains)(nil).CacheHash())
 }
+
+func TestChainsFilter(t *testing.T) {
+	fixed := newTestInstance(&fakePlugin{name: "fixed"}, InstanceSpec{})
+	offered := newTestInstance(&fakePlugin{name: "offered", mutates: true}, InstanceSpec{})
+	scan := newTestInstance(&fakePlugin{name: "scan"}, InstanceSpec{})
+	prompt, err := BuildChain(pluginapi.KindPrompt, []Ref{{fixed, 10}, {offered, 20}})
+	require.NoError(t, err)
+	response, err := BuildChain(pluginapi.KindResponse, []Ref{{offered, 10}, {scan, 10}})
+	require.NoError(t, err)
+	all := &Chains{Prompt: prompt, Response: response}
+
+	names := func(chain *Chain) []string {
+		out := []string{}
+		for _, inst := range chain.Instances() {
+			out = append(out, inst.Name)
+		}
+		return out
+	}
+
+	// Leaving a member out of one phase keeps it in the others and keeps
+	// every remaining member at its step.
+	filtered, err := all.Filter(func(phase pluginapi.Kind, instance string) bool {
+		return phase != pluginapi.KindPrompt || instance != "offered"
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"fixed"}, names(filtered.Prompt))
+	require.Equal(t, 10, filtered.Prompt.Steps[0].Order)
+	require.Equal(t, []string{"offered", "scan"}, names(filtered.Response))
+	require.Nil(t, filtered.Stream)
+	require.NotEqual(t, all.Prompt.Hash, filtered.Prompt.Hash, "a chain without a member is a different chain")
+	require.Equal(t, all.Response.Hash, filtered.Response.Hash)
+	require.NotEqual(t, all.CacheHash(), filtered.CacheHash())
+
+	// A phase left without members has no chain.
+	none, err := all.Filter(func(pluginapi.Kind, string) bool { return false })
+	require.NoError(t, err)
+	require.True(t, none.Empty())
+
+	var missing *Chains
+	filtered, err = missing.Filter(func(pluginapi.Kind, string) bool { return true })
+	require.NoError(t, err)
+	require.Nil(t, filtered)
+}

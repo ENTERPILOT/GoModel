@@ -81,7 +81,8 @@ ihre Position:
     { "ref": "policy-judge", "phase": "prompt",   "step": 10 },
     { "ref": "safety-prompt","phase": "prompt",   "step": 20 },
     { "ref": "mask-keys",    "phase": "response", "step": 10 },
-    { "ref": "mask-keys",    "phase": "stream",   "step": 10 }
+    { "ref": "mask-keys",    "phase": "stream",   "step": 10 },
+    { "ref": "answer-judge", "phase": "response", "step": 20, "on_request": true }
   ]
 }
 ```
@@ -93,6 +94,12 @@ ihre Position:
   (eine nicht negative Ganzzahl); gleiche `step`-Werte laufen parallel. Höchstens
   eine inhaltsverändernde Instanz darf sich einen `step` teilen.
 - Dieselbe `ref` darf einmal pro Phase vorkommen.
+- `on_request: true` (Standard: `false`) führt den Step nur für Requests aus,
+  die die Instanz im Body-Feld `guardrails` nennen. Steps ohne diese Angabe
+  laufen bei jedem Request, und ein Request kann sie nicht abschalten.
+  On-Request-Steps werden zusammen mit den übrigen validiert und folgen
+  derselben Regel von höchstens einer inhaltsverändernden Instanz pro Step.
+  Siehe [Guardrails pro Request](/de/advanced/guardrails#guardrails-pro-request).
 - `features.guardrails: false` deaktiviert jeden Step des Workflows.
 
 Payloads der Version 1 (`"schema_version": 1` mit `"guardrails": [{"ref", "step"}]`)
@@ -106,6 +113,9 @@ Die Identität der kompilierten Kette ist Teil beider Response-Cache-Keys. Eine
 Änderung an einem Guardrail in einer beliebigen Phase macht daher gecachte
 Antworten ungültig, die unter den alten Regeln entstanden sind, und zwei
 Workflows mit unterschiedlichen Ketten teilen sich nie gecachte Antworten.
+`chain_hashes` umfasst die Steps, die bei jedem Request laufen; ein Request,
+der On-Request-Steps hinzufügt, wird unter dem Hash der Kette gecacht, die für
+ihn gelaufen ist.
 
 ## Beispiele
 

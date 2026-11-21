@@ -26,8 +26,28 @@ type CompiledWorkflow struct {
 	Version Version
 	Policy  *core.ResolvedWorkflowPolicy
 	// Chains holds the compiled plugin chain of every phase; nil when the
-	// workflow runs no guardrails.
+	// workflow runs no guardrails. On-request steps are not part of it.
 	Chains *plugins.Chains
+	// Offered holds the chains of every step, the on-request ones included;
+	// nil when the workflow has no on-request step. A request that names
+	// guardrails runs a subset of it (see SelectRequestGuardrails).
+	Offered *plugins.Chains
+	// onRequest marks the steps of Offered that run only when a request
+	// names their guardrail, and offered the guardrails that have one.
+	onRequest map[offeredStep]bool
+	offered   map[string]bool
+}
+
+// acquire holds the instances of every step while the workflow is live.
+func (c *CompiledWorkflow) acquire() {
+	c.Chains.Acquire()
+	c.Offered.Acquire()
+}
+
+// release drops the holds taken by acquire.
+func (c *CompiledWorkflow) release() {
+	c.Chains.Release()
+	c.Offered.Release()
 }
 
 // Compiler turns one persisted workflow version into its runtime projection.
@@ -160,13 +180,13 @@ func (s *Service) install(next snapshot) {
 	incoming := compiledSet(next)
 	for compiled := range incoming {
 		if !previous[compiled] {
-			compiled.Chains.Acquire()
+			compiled.acquire()
 		}
 	}
 	s.current.Store(next)
 	for compiled := range previous {
 		if !incoming[compiled] {
-			compiled.Chains.Release()
+			compiled.release()
 		}
 	}
 }
@@ -392,16 +412,25 @@ func (s *Service) ChainsForWorkflow(workflow *core.Workflow) *plugins.Chains {
 	if s == nil || workflow == nil || workflow.Policy == nil || !workflow.GuardrailsEnabled() {
 		return nil
 	}
-	versionID := strings.TrimSpace(workflow.Policy.VersionID)
-	if versionID == "" {
-		return nil
-	}
-	current := s.snapshot()
-	compiled := current.byVersionID[versionID]
+	compiled := s.compiledForWorkflow(workflow)
 	if compiled == nil {
 		return nil
 	}
-	return compiled.Chains
+	if len(workflow.RequestGuardrails) == 0 {
+		return compiled.Chains
+	}
+	// A request that added guardrails runs the workflow's fixed steps plus
+	// the on-request steps it named. Like the fixed chains, they are resolved
+	// from the live workflow in every phase, so a guardrail edited while the
+	// request is in flight runs as its current instance.
+	chains, _, err := compiled.requestChains(workflow.RequestGuardrails)
+	if err != nil {
+		// The names came from the request, so they stay out of the log.
+		slog.Warn("request guardrails are no longer offered by the workflow; running its fixed steps",
+			"version_id", compiled.Version.ID, "requested", len(workflow.RequestGuardrails))
+		return compiled.Chains
+	}
+	return chains
 }
 
 // StartBackgroundRefresh periodically reloads active workflows until stopped.
@@ -612,8 +641,11 @@ func compiledWorkflowForVersion(compiled *CompiledWorkflow, version Version) *Co
 		return nil
 	}
 	next := &CompiledWorkflow{
-		Version: version,
-		Chains:  compiled.Chains,
+		Version:   version,
+		Chains:    compiled.Chains,
+		Offered:   compiled.Offered,
+		onRequest: compiled.onRequest,
+		offered:   compiled.offered,
 	}
 	if compiled.Policy != nil {
 		policy := *compiled.Policy

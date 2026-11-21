@@ -117,6 +117,11 @@ Dashboard färbt das Workflow-Diagramm eines Request-Log-Eintrags anhand dieser 
 „Guardrails“ listet die Ergebnisse auf. Die Liste ist die Spur der Entscheidungen; die
 nachfolgend beschriebenen Request-Revisionen sind die Spur der Bodys.
 
+Hat der Client über das
+[Feld `guardrails`](/de/advanced/guardrails#guardrails-pro-request) des Requests
+Guardrails hinzugefügt, führt der Eintrag ihre Namen unter
+`data.requested_guardrails`.
+
 Entscheidungen der Phase `prompt` werden außerdem an die Revisionskette des Requests angehängt
 (dieselbe Stelle, an der Request-Umschreibungen festgehalten werden), ein Eintrag pro Instanz in
 Step-Reihenfolge. Eine Instanz, die den Prompt bearbeitet hat, ist eine geänderte Revision, die den

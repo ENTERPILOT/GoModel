@@ -1205,6 +1205,8 @@
   "workflows_edit_guardrail_action": "Edit Guardrail {name}",
   "workflows_guardrail_reference": "Guardrail reference",
   "workflows_step": "Step",
+  "workflows_on_request": "On request",
+  "workflows_on_request_help": "A step marked \"On request\" runs only for requests that name its guardrail in the \"guardrails\" body field; every other step runs on every request and cannot be turned off by the client.",
   "workflows_remove": "Remove",
   "workflows_no_phase_steps": "No {phase} guardrails configured yet.",
   "rate_limits_edit_title": "Edit Rate Limit",

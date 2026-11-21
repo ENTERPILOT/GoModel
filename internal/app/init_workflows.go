@@ -326,9 +326,10 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 				phase = workflows.PhasePrompt
 			}
 			payload.Steps = append(payload.Steps, workflows.Step{
-				Ref:   name,
-				Phase: phase,
-				Step:  rule.Order,
+				Ref:       name,
+				Phase:     phase,
+				Step:      rule.Order,
+				OnRequest: rule.OnRequest,
 			})
 		}
 	}

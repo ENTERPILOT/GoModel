@@ -65,11 +65,20 @@ export function defaultWorkflowGuardrailStep(step, phase) {
     ref: "",
     phase: normalizeWorkflowPhase(phase),
     step: Number.isFinite(step) ? step : 10,
+    on_request: false,
   };
 }
 
+// workflowStepOnRequest is the `on_request` member of a step as the admin API
+// stores it: present only when set, so a step that runs on every request
+// keeps the {ref, phase, step} shape.
+function workflowStepOnRequest(step) {
+  return step && step.on_request ? { on_request: true } : {};
+}
+
 // workflowPayloadSteps reads a payload's steps in the v2 shape
-// ({ref, phase, step}). Legacy `guardrails` entries (stored v1 versions, and
+// ({ref, phase, step}, plus on_request when the step runs only for requests
+// that name its guardrail). Legacy `guardrails` entries (stored v1 versions, and
 // the editor form, which keeps its rows under the same key) are read too; a
 // step without a phase is a prompt step. Raw step numbers are passed through
 // so callers decide how strictly to validate.
@@ -86,6 +95,7 @@ export function workflowPayloadSteps(payload) {
     ref: String((step && step.ref) || "").trim(),
     phase: normalizeWorkflowPhase(step && step.phase),
     step: step && step.step,
+    ...workflowStepOnRequest(step),
   }));
 }
 
@@ -235,6 +245,7 @@ export function workflowSourceGuardrails(source) {
       ref: step.ref,
       phase: step.phase,
       step: parseWorkflowGuardrailStep(step.step),
+      ...workflowStepOnRequest(step),
     }))
     .filter((step) => Number.isInteger(step.step) && step.step >= 0);
 }
@@ -558,6 +569,7 @@ export function buildWorkflowRequest({
           ref: String((step && step.ref) || "").trim(),
           phase: normalizeWorkflowPhase(step && step.phase),
           step: parseWorkflowGuardrailStep(step && step.step),
+          ...workflowStepOnRequest(step),
         }),
       )
     : [];

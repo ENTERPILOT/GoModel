@@ -37,31 +37,40 @@ func (c *compiler) Compile(version Version) (*CompiledWorkflow, error) {
 		Features:      features,
 	}
 
-	var chains *plugins.Chains
+	compiled := &CompiledWorkflow{Version: version, Policy: policy}
 	if policy.Features.Guardrails {
 		steps := version.Payload.EffectiveSteps()
-		refs := make([]guardrails.StepReference, 0, len(steps))
+		all := make([]guardrails.StepReference, 0, len(steps))
+		fixed := make([]guardrails.StepReference, 0, len(steps))
 		for _, step := range steps {
-			refs = append(refs, guardrails.StepReference{
+			ref := guardrails.StepReference{
 				Ref:   step.Ref,
 				Phase: pluginapi.Kind(step.Phase),
 				Step:  step.Step,
-			})
+			}
+			all = append(all, ref)
+			if step.OnRequest {
+				compiled.offer(step)
+				continue
+			}
+			fixed = append(fixed, ref)
 		}
 		var err error
-		chains, err = c.compileGuardrails(refs)
-		if err != nil {
+		if compiled.Chains, err = c.compileGuardrails(fixed); err != nil {
 			return nil, err
 		}
-		policy.GuardrailsHash = chains.CacheHash()
-		policy.ChainHashes = chains.Hashes()
+		if len(fixed) < len(all) {
+			// The on-request steps compile together with the fixed ones, so
+			// every selection a request can make is a valid chain.
+			if compiled.Offered, err = c.compileGuardrails(all); err != nil {
+				return nil, err
+			}
+		}
+		policy.GuardrailsHash = compiled.Chains.CacheHash()
+		policy.ChainHashes = compiled.Chains.Hashes()
 	}
 
-	return &CompiledWorkflow{
-		Version: version,
-		Policy:  policy,
-		Chains:  chains,
-	}, nil
+	return compiled, nil
 }
 
 func (c *compiler) compileGuardrails(steps []guardrails.StepReference) (*plugins.Chains, error) {

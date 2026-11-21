@@ -121,6 +121,10 @@ colors the workflow chart of a request log entry from this list, and its
 "Guardrails" tab lists the outcomes. The list is the decision trail; the
 request revisions below are the body trail.
 
+When the client added guardrails through the request's
+[`guardrails` field](/advanced/guardrails#select-guardrails-per-request), the
+entry lists their names under `data.requested_guardrails`.
+
 Prompt-phase decisions are also appended to the request's revision chain (the same
 place request rewrites are recorded), one entry per instance in step order.
 An instance that edited the prompt is a changed revision carrying the request

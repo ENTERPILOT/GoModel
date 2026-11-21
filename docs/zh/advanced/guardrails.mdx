@@ -136,6 +136,7 @@ guardrails:
       user_path: "/team/privacy" # 可选，内部辅助调用的基础路径
       phase: "prompt"            # prompt（默认）| response | stream
       order: 0                   # 阶段内的步骤
+      on_request: false          # true = 仅在请求指定它时运行
       fail_mode: "closed"        # closed（默认）| open
       timeout_ms: 0              # 单次调用超时；0 = 无（默认）
       config:                    # 插件设置，按插件的 schema 校验
@@ -166,9 +167,55 @@ export GUARDRAILS_ENABLED=true
 | `user_path` | 否 | 可选，内部辅助请求的基础用户路径。 |
 | `phase` | 否 | `prompt`、`response` 或 `stream`。默认 `prompt`。 |
 | `order` | 否 | 阶段内的执行顺序。默认 `0`。值相同 = 并行，值不同 = 顺序执行。 |
+| `on_request` | 否 | `true` 表示仅当请求在 `guardrails` 字段中指定该护栏时才运行。默认 `false`：对每个请求都运行。参见 [按请求选择护栏](/zh/advanced/guardrails#按请求选择护栏)。 |
 | `config` | 否 | 插件设置。键、默认值和校验规则由插件提供（`GET /admin/guardrails/types`）。 |
 | `fail_mode` | 否 | `closed`：护栏出错或超时时以 HTTP 500 拒绝请求；`open`：跳过该护栏继续处理。默认 `closed`。 |
 | `timeout_ms` | 否 | 护栏每次调用的时间上限，到期即强制执行。默认 `0`（无）。编辑内容的护栏如果超时，即使设置了 `fail_mode: open`，请求也会失败；参见 [失败模式与超时](/zh/advanced/plugins#失败模式与超时)。 |
+
+## 按请求选择护栏
+
+护栏会对其工作流匹配的每个请求运行。如果只想在客户端要求时运行，请将其标记为 `on_request`：
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "safety-prompt" # 对每个请求运行
+      type: "system_prompt"
+      order: 0
+      system_prompt:
+        content: "Always respond safely and respectfully."
+
+    - name: "pii" # 仅在请求指定它时运行
+      type: "presidio"
+      order: 1
+      on_request: true
+```
+
+随后客户端在请求体的 `guardrails` 字段中指定它：
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "Write to jane@example.com"}],
+    "guardrails": ["pii"]
+  }'
+```
+
+该字段与工作流的配合方式：
+
+- **只能添加。** 请求可以添加其匹配的工作流中按请求启用的步骤。其他步骤无论请求发送什么都会运行；请求中的任何内容都无法关闭护栏。
+- **由工作流决定可选范围。** `on_request` 是[工作流步骤](/zh/advanced/workflows#护栏步骤)的属性，因此作用域限定到用户路径、提供商或模型的工作流，只会向它匹配的请求提供其护栏。在控制台中，勾选步骤上的 **按请求启用**。`config.yaml` 中的规则为默认工作流设置该属性。
+- **阶段和顺序来自步骤。** 如果某个名称在多个阶段（例如 prompt 和 response）都有按请求启用的步骤，则会全部添加。
+- **无法运行的名称会报错。** 匹配的工作流未提供的护栏会在任何提供商调用之前返回 `400 invalid_request_error`，并带有 `param: "guardrails"` 和代码 `guardrail_not_available`。未知名称与仅存在于别处的护栏返回相同的结果，因此响应不会泄露配置了哪些护栏。关闭 `GUARDRAILS_ENABLED` 时，所有名称都会被拒绝。
+- **本来就会运行的护栏会被接受。** 指定一个对每个请求都运行的步骤不会改变任何行为。
+
+该字段在 `/v1/chat/completions`、`/v1/responses`（及其 `input_tokens` 和 `compact` 路由）和 `/v1/messages` 上读取，并在请求发送给提供商之前移除。它必须是名称数组；`[]` 和 `null` 表示不指定任何护栏。其他端点（包括 `/v1/batches` 的条目）不读取该字段。
+
+[响应缓存](/zh/features/cache) 以实际运行的链作为键的一部分，因此添加了护栏的请求永远不会与未添加的请求共享缓存条目。请求日志条目在 `data.requested_guardrails` 下列出添加的名称；它们的结果与其他结果一起记录在 `data.guardrails` 中。指定了护栏的 `/v1/messages/count_tokens` 请求会在本地估算，因此提示词不会未经检查就发送给提供商。
 
 ## 护栏类型
 

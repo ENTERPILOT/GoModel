@@ -1097,6 +1097,8 @@
   "workflows_edit_guardrail_action": "编辑护栏 {name}",
   "workflows_guardrail_reference": "护栏引用",
   "workflows_step": "步骤",
+  "workflows_on_request": "按请求启用",
+  "workflows_on_request_help": "标记为“按请求启用”的步骤仅在请求正文的 \"guardrails\" 字段中指定其护栏时运行；其他步骤对每个请求都运行，客户端无法关闭。",
   "workflows_remove": "移除",
   "workflows_no_phase_steps": "尚未配置任何{phase}护栏。",
   "rate_limits_edit_title": "编辑限流规则",

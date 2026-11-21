@@ -484,6 +484,8 @@ guardrails:
     # different orders run sequentially. `config` is validated against the
     # plugin's schema (GET /admin/guardrails/types). `fail_mode` (closed |
     # open, default closed) and `timeout_ms` (default 0 = none) bound failures.
+    # `on_request: true` (default false) runs the instance only for requests
+    # that name it in their "guardrails" body field.
 
     - name: "safety-prompt"
       type: "system_prompt"
@@ -502,6 +504,15 @@ guardrails:
     #     mode: "regex"                 # literal (default) | regex
     #     rules: |                      # one "find => replace" per line (a YAML list also works)
     #       sk-[A-Za-z0-9]{20,} => [redacted]
+
+    # Example: a judge that runs only when the request asks for it with
+    # "guardrails": ["policy-judge"].
+    # - name: "policy-judge"
+    #   type: "llm_judge"
+    #   order: 5
+    #   on_request: true
+    #   config:
+    #     model: "openai/gpt-4o-mini"
 
     # Example: anonymize personal data with a Presidio analyzer sidecar
     # (docker run -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer).

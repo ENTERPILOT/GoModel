@@ -170,6 +170,11 @@ type Workflow struct {
 	// It lives here rather than in the context so a request that runs no
 	// plugin allocates nothing.
 	PluginState any
+	// RequestGuardrails lists the guardrails the request added through its
+	// guardrails field: the names it sent that the matched workflow offers on
+	// request. The workflow service sets it together with the policy hashes
+	// of the resulting chains. Empty when the request added none.
+	RequestGuardrails []string
 }
 
 // RequestedQualifiedModel returns the requested model selector when present.

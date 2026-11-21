@@ -39,6 +39,9 @@ type translatedPrepareSpec[Req any, Prepared any] struct {
 	resolve         func(*InferenceOrchestrator) func(context.Context, Req, *core.Workflow) (context.Context, Req, error)
 	patch           func(*InferenceOrchestrator) func(context.Context, Req) (Req, error)
 	valid           func(Req) bool
+	// guardrails takes the guardrails the request names out of it, so the
+	// field never reaches a provider.
+	guardrails func(Req) ([]string, error)
 	// overrides applies the primary attempt's forced reasoning effort and
 	// request parameters, so the prepared request (and the response cache key
 	// built from it) carries what is actually sent upstream. The client's
@@ -52,6 +55,7 @@ var chatPrepareSpec = translatedPrepareSpec[*core.ChatRequest, *PreparedChatRequ
 	requiredMessage: "chat request is required",
 	patchNilMessage: "patched chat request is required",
 	selector:        chatRequestSelector,
+	guardrails:      TakeChatRequestGuardrails,
 	patch:           chatRequestPatch,
 	valid:           validChatRequest,
 	overrides:       ChatRequestWithOverrides,
@@ -64,6 +68,7 @@ var responsesPrepareSpec = translatedPrepareSpec[*core.ResponsesRequest, *Prepar
 	requiredMessage: "responses request is required",
 	patchNilMessage: "patched responses request is required",
 	selector:        responsesRequestSelector,
+	guardrails:      TakeResponsesRequestGuardrails,
 	resolve:         responsesHistoryResolve,
 	patch:           responsesRequestPatch,
 	valid:           validResponsesRequest,
@@ -84,13 +89,17 @@ func prepareTranslated[Req any, Prepared any](
 	if !spec.valid(req) {
 		return zero, core.NewInvalidRequestError(spec.requiredMessage, nil)
 	}
+	requested, err := spec.guardrails(req)
+	if err != nil {
+		return zero, err
+	}
 	ctx = WithAttemptRecorder(ctx)
 	model, provider := spec.selector(req)
 	var resolve func(context.Context, Req, *core.Workflow) (context.Context, Req, error)
 	if spec.resolve != nil {
 		resolve = spec.resolve(o)
 	}
-	ctx, req, workflow, err := prepareTranslatedRequest(o, ctx, req, meta, model, provider, resolve, spec.patch(o), spec.valid, spec.patchNilMessage)
+	ctx, req, workflow, err := prepareTranslatedRequest(o, ctx, req, meta, model, provider, requested, resolve, spec.patch(o), spec.valid, spec.patchNilMessage)
 	if err != nil {
 		if workflow != nil {
 			// A patch-phase error (a guardrail block or short-circuit) still
@@ -118,6 +127,7 @@ func prepareTranslatedRequest[Req any](
 	meta RequestMeta,
 	model,
 	provider *string,
+	requestedGuardrails []string,
 	resolve func(context.Context, Req, *core.Workflow) (context.Context, Req, error),
 	patch func(context.Context, Req) (Req, error),
 	valid func(Req) bool,
@@ -130,6 +140,10 @@ func prepareTranslatedRequest[Req any](
 		return ctx, zero, nil, err
 	}
 	ctx = core.WithWorkflow(ctx, workflow)
+	if err := SelectRequestGuardrails(o.workflowPolicyResolver, workflow, requestedGuardrails); err != nil {
+		var zero Req
+		return ctx, zero, workflow, err
+	}
 	if resolve != nil {
 		ctx, req, err = resolve(ctx, req, workflow)
 		if err != nil {

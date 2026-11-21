@@ -163,6 +163,7 @@ class WorkflowsStore {
         ref: String((step && step.ref) || ""),
         phase: normalizeWorkflowPhase(step && step.phase),
         step: Number.isFinite(step && step.step) ? step.step : 10,
+        on_request: !!(step && step.on_request),
       })),
     };
   }

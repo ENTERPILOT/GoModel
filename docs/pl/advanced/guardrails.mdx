@@ -167,6 +167,7 @@ guardrails:
       user_path: "/team/privacy" # Opcjonalna ścieżka bazowa dla wewnętrznych wywołań pomocniczych
       phase: "prompt"            # prompt (domyślnie) | response | stream
       order: 0                   # Krok w obrębie fazy
+      on_request: false          # true = działa tylko dla requestów, które go wskażą
       fail_mode: "closed"        # closed (domyślnie) | open
       timeout_ms: 0              # Timeout na wywołanie; 0 = brak (domyślnie)
       config:                    # Ustawienia pluginu, walidowane względem schematu pluginu
@@ -202,9 +203,79 @@ są wyłączone, endpointy guardrails i strona w dashboardzie są niedostępne.
 | `user_path` | Nie | Opcjonalna bazowa ścieżka użytkownika dla wewnętrznych requestów pomocniczych. |
 | `phase` | Nie | `prompt`, `response` lub `stream`. Domyślnie `prompt`. |
 | `order` | Nie | Kolejność wykonywania w obrębie fazy. Domyślnie `0`. Ta sama wartość = równolegle, różne = sekwencyjnie. |
+| `on_request` | Nie | `true` uruchamia guardrail tylko dla requestów, które wskażą go w polu `guardrails`. Domyślnie `false`: działa przy każdym requeście. Zobacz [Guardrails na poziomie requestu](/pl/advanced/guardrails#guardrails-na-poziomie-requestu). |
 | `config` | Nie | Ustawienia pluginu. Klucze, wartości domyślne i walidacja pochodzą z pluginu (`GET /admin/guardrails/types`). |
 | `fail_mode` | Nie | `closed` odrzuca request z HTTP 500, gdy guardrail zwróci błąd lub przekroczy timeout; `open` kontynuuje bez niego. Domyślnie `closed`. |
 | `timeout_ms` | Nie | Górny limit czasu każdego wywołania guardraila, egzekwowany w terminie. Domyślnie `0` (brak). Guardrail edytujący treść, który przekroczy timeout, powoduje błąd requestu nawet przy `fail_mode: open`; zobacz [Tryby błędów i timeouty](/pl/advanced/plugins#tryby-błędów-i-timeouty). |
+
+## Guardrails na poziomie requestu
+
+Guardrail działa przy każdym requeście, do którego pasuje jego workflow. Aby
+działał tylko wtedy, gdy klient o to poprosi, oznacz go `on_request`:
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "safety-prompt" # działa przy każdym requeście
+      type: "system_prompt"
+      order: 0
+      system_prompt:
+        content: "Always respond safely and respectfully."
+
+    - name: "pii" # działa tylko dla requestów, które go wskażą
+      type: "presidio"
+      order: 1
+      on_request: true
+```
+
+Klient wskazuje go następnie w polu `guardrails` w treści requestu:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "Write to jane@example.com"}],
+    "guardrails": ["pii"]
+  }'
+```
+
+Jak pole łączy się z workflow:
+
+- **Tylko dodaje.** Request może dodać kroki „na żądanie” workflow, do którego
+  pasuje. Każdy inny krok działa niezależnie od tego, co wyśle request; nic w
+  requeście nie wyłącza guardraila.
+- **O ofercie decyduje workflow.** `on_request` to właściwość
+  [kroku workflow](/pl/advanced/workflows#kroki-guardrails), więc workflow
+  ograniczony do ścieżki użytkownika, providera lub modelu oferuje swoje
+  guardrails tylko requestom, do których pasuje. W dashboardzie zaznacz przy
+  kroku **Na żądanie**. Reguła w `config.yaml` ustawia to dla domyślnego
+  workflow.
+- **Faza i kolejność pochodzą z kroku.** Nazwa z krokami „na żądanie” w kilku
+  fazach, na przykład prompt i response, dodaje je wszystkie.
+- **Nazwa, która nie może zadziałać, jest błędem.** Guardrail, którego
+  dopasowany workflow nie oferuje, kończy się odpowiedzią
+  `400 invalid_request_error` z `param: "guardrails"` i kodem
+  `guardrail_not_available`, przed jakimkolwiek wywołaniem providera. Nieznana
+  nazwa i guardrail istniejący gdzie indziej wyglądają tak samo, więc odpowiedź
+  nie zdradza, które guardrails są skonfigurowane. Gdy `GUARDRAILS_ENABLED`
+  jest wyłączone, każda nazwa jest odrzucana.
+- **Guardrail, który i tak działa, jest akceptowany.** Wskazanie kroku, który
+  działa przy każdym requeście, niczego nie zmienia.
+
+Pole jest odczytywane na `/v1/chat/completions`, `/v1/responses` (wraz z trasami
+`input_tokens` i `compact`) oraz `/v1/messages` i usuwane, zanim request trafi
+do providera. Musi być tablicą nazw; `[]` i `null` nie wskazują żadnej. Inne
+endpointy, w tym elementy `/v1/batches`, go nie odczytują.
+
+[Cache odpowiedzi](/pl/features/cache) używa w kluczu łańcucha, który
+faktycznie działa, więc request dodający guardrail nigdy nie współdzieli wpisu
+z requestem bez niego. Wpis logu requestów zawiera dodane nazwy w
+`data.requested_guardrails`; ich wyniki są w `data.guardrails` razem z
+pozostałymi. Request do `/v1/messages/count_tokens`, który wskazuje guardrails,
+jest szacowany lokalnie, aby prompt nie trafił do providera bez sprawdzenia.
 
 ## Typy guardrails
 

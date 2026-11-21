@@ -1185,6 +1185,8 @@
   "workflows_edit_guardrail_action": "Edytuj Guardrail {name}",
   "workflows_guardrail_reference": "Referencja Guardrail",
   "workflows_step": "Krok",
+  "workflows_on_request": "Na żądanie",
+  "workflows_on_request_help": "Krok oznaczony \"Na żądanie\" działa tylko dla żądań, które podają jego guardrail w polu \"guardrails\" w treści żądania; pozostałe kroki działają przy każdym żądaniu i klient nie może ich wyłączyć.",
   "workflows_remove": "Usuń",
   "workflows_no_phase_steps": "Nie skonfigurowano jeszcze Guardrails fazy {phase}.",
   "rate_limits_edit_title": "Edytuj Rate Limit",

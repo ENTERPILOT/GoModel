@@ -53,9 +53,10 @@ type pluginFixture struct {
 
 // workflowStep is one v2 workflow step as POST /admin/workflows takes it.
 type workflowStep struct {
-	Ref   string `json:"ref"`
-	Phase string `json:"phase"`
-	Step  int    `json:"step"`
+	Ref       string `json:"ref"`
+	Phase     string `json:"phase"`
+	Step      int    `json:"step"`
+	OnRequest bool   `json:"on_request,omitempty"`
 }
 
 // errorEnvelope decodes the OpenAI error envelope with its optional code.

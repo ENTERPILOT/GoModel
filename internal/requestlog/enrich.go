@@ -2,6 +2,7 @@ package requestlog
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -533,6 +534,9 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 			Guardrails: workflow.Policy.Features.Guardrails,
 			Failover:   workflow.Policy.Features.Failover,
 		}
+	}
+	if len(workflow.RequestGuardrails) > 0 {
+		ensureLogData(entry).RequestedGuardrails = slices.Clone(workflow.RequestGuardrails)
 	}
 }
 

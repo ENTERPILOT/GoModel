@@ -67,6 +67,14 @@ type WorkflowPolicyResolver interface {
 	Match(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)
 }
 
+// RequestGuardrailSelector is an optional WorkflowPolicyResolver capability:
+// it adds the guardrails a request named in its guardrails field to the
+// request's workflow, or fails when the matched workflow does not offer one
+// of them.
+type RequestGuardrailSelector interface {
+	SelectRequestGuardrails(workflow *core.Workflow, names []string) error
+}
+
 // TranslatedRequestPatcher applies request-level transforms for translated
 // routes after workflow resolution has resolved the concrete execution selector.
 type TranslatedRequestPatcher interface {

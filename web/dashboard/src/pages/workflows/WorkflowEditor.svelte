@@ -206,7 +206,7 @@
           <h4>{m.workflows_guardrail_steps()}</h4>
         {/snippet}
         {#snippet help()}
-          {m.workflows_phase_help()} {m.workflows_steps_help()}
+          {m.workflows_phase_help()} {m.workflows_steps_help()} {m.workflows_on_request_help()}
         {/snippet}
       </InlineHelpSection>
 
@@ -296,6 +296,14 @@
                         aria-invalid={issues && issues.step ? "true" : undefined}
                       />
                     </div>
+                    <label class="workflow-guardrail-on-request" title={m.workflows_on_request_help()}>
+                      <input
+                        type="checkbox"
+                        bind:checked={step.on_request}
+                        aria-label={`${phaseName} ${m.workflows_on_request()} ${index + 1}`}
+                      />
+                      <span>{m.workflows_on_request()}</span>
+                    </label>
                     <button type="button" class="table-action-btn table-action-btn-danger" onclick={() => wf.removeGuardrailStep(index)}>{m.workflows_remove()}</button>
                   </div>
                 {/if}
@@ -402,6 +410,17 @@
 
   .workflow-guardrail-step-field {
     flex: 0 0 120px;
+  }
+
+  .workflow-guardrail-on-request {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    cursor: pointer;
   }
 
   .workflow-input,
