@@ -136,7 +136,7 @@ Verfügbar, wenn ein Provider vom Typ `jev` oder `openrouter` konfiguriert ist; 
 | ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `/v1/usage` | GET    | Self-Service-Status zu Nutzung, Budget und Rate-Limit für den effektiven User Path des Aufrufers – siehe [Usage API](/de/advanced/usage-api) |
 | `/v1/auth/verify` | GET | Meldet, ob der API-Key im Request gültig ist (wenn `AUTH_VERIFY_ENABLED`) |
-| `/v1/audio/voices` | GET | Listet die Stimmen, die ein Text-to-Speech-Modell anbietet (`?model=`) — siehe [Stimmen abfragen](#stimmen-abfragen) |
+| `/v1/audio/voices` | GET | Listet die Stimmen, die ein Text-to-Speech-Modell anbietet (`?model=`), oder ohne `model` die eigenen Stimmen des OpenAI-Kontos — siehe [Stimmen abfragen](#stimmen-abfragen) |
 
 ### Stimmen abfragen
 
@@ -172,7 +172,7 @@ Request-Rate-Limits wie bei `/v1/audio/speech`.
 
 Ein Provider ohne Stimmenliste — auch gehostete OpenAI-kompatible APIs, deren `/audio/voices` mit 404 oder 405 antwortet — liefert `400`
 `invalid_request_error` (`model "…" does not support listing voices`). Ein
-fehlendes `model` ergibt ebenfalls `400`, ein unbekanntes Modell `404`.
+unbekanntes Modell ergibt `404`.
 
 <Note>
   Die OpenAI-TTS-Engine von Open WebUI ruft `{base_url}/audio/voices` ohne
@@ -180,6 +180,38 @@ fehlendes `model` ergibt ebenfalls `400`, ein unbekanntes Modell `404`.
   eingebaute OpenAI-Stimmenliste zurück. Tragen Sie die Voice-ID stattdessen in
   den Einstellungen ein.
 </Note>
+
+#### OpenAIs eigene Stimmenliste
+
+Ohne `model` antwortet der Endpunkt wie OpenAIs eigenes `GET /v1/audio/voices`:
+eine Seite der eigenen Stimmen (Custom Voices) des OpenAI-Kontos, im Format von
+OpenAI.
+
+```bash
+curl "http://localhost:8080/v1/audio/voices?limit=20" \
+  -H "Authorization: Bearer $GOMODEL_API_KEY"
+```
+
+```json
+{
+  "object": "list",
+  "data": [{ "id": "voice_1234", "object": "audio.voice", "name": "Narrator", "created_at": 1734220800, "type": "audio_sample" }],
+  "first_id": "voice_1234",
+  "last_id": "voice_1234",
+  "has_more": false
+}
+```
+
+- `limit` und `after` werden an OpenAI weitergereicht und dort geprüft.
+- Die Liste stammt vom `openai`-Provider, der auf OpenAIs eigene API zeigt.
+  Mit `provider=<name>` wählen Sie einen aus, wenn mehrere konfiguriert sind.
+- Die Anfrage nennt kein Modell, daher muss der API-Key den gesamten Provider
+  nutzen dürfen, wie bei einem Passthrough-Aufruf ohne Modell.
+- Sie enthält auch per Prompt erzeugte Stimmen, die `/v1/audio/speech` nicht
+  annimmt. `?model=` listet nur die Stimmen, die ein Speech-Modell nutzen kann.
+- Ohne einen solchen Provider liefert eine Anfrage ohne `model` `400`:
+  `model is required`, oder `provider "…" does not support listing custom voices`,
+  wenn `provider` gesetzt ist.
 
 ### Key-Verifizierung
 

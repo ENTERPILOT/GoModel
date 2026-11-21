@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -106,6 +107,37 @@ func (r *Router) ListVoices(ctx context.Context, req *core.AudioVoicesRequest) (
 		},
 	)
 	return resp, err
+}
+
+// ListCustomVoices routes OpenAI's own voice list to the provider instance
+// named providerName. Like ListVoices it is a control-plane read and runs
+// outside the provider's circuit breaker.
+func (r *Router) ListCustomVoices(ctx context.Context, providerName string, params core.AudioCustomVoicesParams) (*core.AudioCustomVoicesResponse, error) {
+	if err := r.ensureProviderInventoryReady(); err != nil {
+		return nil, err
+	}
+	providerName = strings.TrimSpace(providerName)
+	lister, ok := r.providerByNameRegistry(providerName).(core.AudioCustomVoicesProvider)
+	if !ok || !lister.ServesCustomVoices() {
+		return nil, core.NewAudioCustomVoicesUnsupportedError(providerName)
+	}
+	return lister.ListCustomVoices(llmclient.WithoutCircuitBreaker(ctx), params)
+}
+
+// AudioCustomVoiceProviders returns the configured provider instances that
+// serve OpenAI's own voice list, in registration order. It asks each instance,
+// not its type: a self-hosted server registered as type openai does not.
+func (r *Router) AudioCustomVoiceProviders() []string {
+	if r.caps.nameLister == nil {
+		return nil
+	}
+	var names []string
+	for _, name := range r.caps.nameLister.ProviderNames() {
+		if lister, ok := r.providerByNameRegistry(name).(core.AudioCustomVoicesProvider); ok && lister.ServesCustomVoices() {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // CreateImage routes an image generation request to the provider that owns the

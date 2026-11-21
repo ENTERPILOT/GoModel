@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -136,4 +137,100 @@ func TestRouterListVoices_Errors(t *testing.T) {
 			assert.Contains(t, gatewayErr.Message, tt.wantMsg)
 		})
 	}
+}
+
+type mockCustomVoicesProvider struct {
+	*mockProvider
+	notServing bool
+	resp       *core.AudioCustomVoicesResponse
+	lastParams *core.AudioCustomVoicesParams
+	// call, when set, runs with the context the router dispatched with.
+	call func(ctx context.Context) error
+}
+
+func (m *mockCustomVoicesProvider) ServesCustomVoices() bool { return !m.notServing }
+
+func (m *mockCustomVoicesProvider) ListCustomVoices(ctx context.Context, params core.AudioCustomVoicesParams) (*core.AudioCustomVoicesResponse, error) {
+	m.lastParams = &params
+	if m.call != nil {
+		if err := m.call(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return m.resp, m.err
+}
+
+// A self-hosted server registered as type openai ahead of OpenAI itself must
+// not take the list: instances are asked, not provider types.
+func TestRouterListCustomVoices(t *testing.T) {
+	selfHosted := &mockCustomVoicesProvider{mockProvider: &mockProvider{name: "kokoro"}, notServing: true}
+	openAI := &mockCustomVoicesProvider{
+		mockProvider: &mockProvider{name: "openai"},
+		resp:         &core.AudioCustomVoicesResponse{Object: "list", Data: []core.AudioCustomVoice{{ID: "voice_1", Name: "Narrator"}}},
+	}
+	router, err := NewRouter(newTestRegistryWithModels(
+		registryModelEntry{provider: selfHosted, providerName: "kokoro-local", providerType: "openai", modelID: "kokoro"},
+		registryModelEntry{provider: openAI, providerName: "openai-main", providerType: "openai", modelID: "tts-1"},
+		registryModelEntry{provider: &mockProvider{name: "groq"}, providerName: "groq", providerType: "groq", modelID: "whisper"},
+	))
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"openai-main"}, router.AudioCustomVoiceProviders())
+
+	params := core.AudioCustomVoicesParams{Limit: "5", After: "voice_0"}
+	for _, provider := range []string{"openai-main", " openai-main "} {
+		openAI.lastParams = nil
+		resp, err := router.ListCustomVoices(context.Background(), provider, params)
+		require.NoError(t, err)
+		assert.Same(t, openAI.resp, resp)
+		assert.Equal(t, &params, openAI.lastParams)
+	}
+
+	for _, provider := range []string{"kokoro-local", "groq", "missing", ""} {
+		_, err := router.ListCustomVoices(context.Background(), provider, params)
+		require.ErrorIs(t, err, core.ErrAudioCustomVoicesUnsupported, "provider %q", provider)
+	}
+	assert.Nil(t, selfHosted.lastParams)
+}
+
+// OpenAI's own voice list is a control-plane read like the per-model listing,
+// so its failures must not open the breaker inference shares with it.
+// The upstream is a plain httptest server for the import-cycle reason above.
+func TestRouterListCustomVoices_BypassesCircuitBreaker(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(server.Close)
+	cfg := llmclient.DefaultConfig("openai", server.URL)
+	cfg.Retry.MaxRetries = 0
+	cfg.CircuitBreaker.FailureThreshold = 1
+	cfg.CircuitBreaker.Timeout = time.Hour
+	client := llmclient.New(cfg, nil)
+	request := llmclient.Request{Method: http.MethodGet, Endpoint: "/audio/voices"}
+
+	lister := &mockCustomVoicesProvider{
+		mockProvider: &mockProvider{name: "openai"},
+		call: func(ctx context.Context) error {
+			_, err := client.DoRaw(ctx, request)
+			return err
+		},
+	}
+	router, err := NewRouter(newTestRegistryWithModels(
+		registryModelEntry{provider: lister, providerName: "openai", providerType: "openai", modelID: "tts-1"},
+	))
+	require.NoError(t, err)
+
+	for range 3 {
+		_, err = router.ListCustomVoices(context.Background(), "openai", core.AudioCustomVoicesParams{})
+		require.Error(t, err)
+	}
+	require.Equal(t, int32(3), hits.Load(), "each listing failed at the upstream")
+
+	_, err = client.DoRaw(context.Background(), request)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, llmclient.ErrCircuitOpen)
+	assert.Equal(t, int32(4), hits.Load(), "the breaker let the inference call through")
 }

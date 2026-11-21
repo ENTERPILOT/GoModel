@@ -375,6 +375,50 @@ function applyRetrieveModelDialects() {
   }
 }
 
+// applyVoiceListShapes documents the second shape of GET /v1/audio/voices: a
+// request without model is answered with OpenAI's own voice list instead of
+// the per-model list. swag models one schema per status code, so the
+// alternative is spelled here.
+function applyVoiceListShapes() {
+  const schemas = spec.components?.schemas;
+  if (!schemas) {
+    throw new Error("missing OpenAPI components.schemas");
+  }
+  schemas["core.AudioCustomVoice"] = {
+    description: "One custom voice in OpenAI's own voice list.",
+    type: "object",
+    required: ["created_at", "id", "name", "object"],
+    properties: {
+      id: { type: "string", example: "voice_1234" },
+      object: { type: "string", example: "audio.voice" },
+      name: { type: "string", example: "Narrator" },
+      created_at: { type: "integer", example: 1734220800 },
+      type: { type: "string", description: "How the voice was created: audio_sample or prompt.", example: "audio_sample" },
+      prompt: { type: "string" },
+    },
+  };
+  schemas["core.AudioCustomVoicesResponse"] = {
+    description: "OpenAI's own voice list: one cursor page of an account's custom voices, returned when the request names no model.",
+    type: "object",
+    required: ["data", "has_more", "object"],
+    properties: {
+      object: { type: "string", example: "list" },
+      data: { type: "array", items: { $ref: "#/components/schemas/core.AudioCustomVoice" } },
+      first_id: { type: "string", nullable: true },
+      last_id: { type: "string", nullable: true },
+      has_more: { type: "boolean" },
+    },
+  };
+  const body = spec.paths?.["/v1/audio/voices"]?.get?.responses?.["200"]?.content?.["application/json"];
+  if (!body) {
+    throw new Error("missing JSON response 200 on GET /v1/audio/voices");
+  }
+  body.schema = {
+    description: "The per-model voice list with model; OpenAI's own voice list without it.",
+    oneOf: ["core.AudioVoicesResponse", "core.AudioCustomVoicesResponse"].map((name) => ({ $ref: `#/components/schemas/${name}` })),
+  };
+}
+
 function applyAudioTranscriptionTextSchema() {
   // swag emits one schema across every produced content type, so the text/plain
   // transcription body is generated as a JSON object. For text/srt/vtt the
@@ -624,6 +668,9 @@ applyAudioTranscriptionTextSchema();
 applyCSVExportSchema("/admin/usage/invoice");
 applyCSVExportSchema("/admin/mcp-servers/catalog");
 applyRetrieveModelDialects();
+applyVoiceListShapes();
+// Told apart from OpenAI's own voice list by the member only it carries.
+ensureRequiredProperty("core.AudioVoicesResponse", "voices");
 applyImageEditMultiImageSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("core.AudioSpeechRequest", "model");

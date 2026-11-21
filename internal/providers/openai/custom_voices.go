@@ -29,16 +29,64 @@ const customVoiceIDPrefix = "voice_"
 // endpoint does not accept those, only voices created from a recording.
 const promptVoiceType = "prompt"
 
+// customVoicesPage is one page of OpenAI's GET /audio/voices.
 type customVoicesPage struct {
 	// Data is a pointer so a body without the array is told apart from an
 	// organization with no custom voices.
-	Data *[]struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-		Type string `json:"type"`
-	} `json:"data"`
-	HasMore bool   `json:"has_more"`
-	LastID  string `json:"last_id"`
+	Data    *[]core.AudioCustomVoice `json:"data"`
+	FirstID *string                  `json:"first_id"`
+	LastID  *string                  `json:"last_id"`
+	HasMore bool                     `json:"has_more"`
+}
+
+// fetchCustomVoices reads one page of the organization's custom voices.
+func (p *Provider) fetchCustomVoices(ctx context.Context, model string, params core.AudioCustomVoicesParams) (*customVoicesPage, error) {
+	query := url.Values{}
+	if params.Limit != "" {
+		query.Set("limit", params.Limit)
+	}
+	if params.After != "" {
+		query.Set("after", params.After)
+	}
+	endpoint := "/audio/voices"
+	if len(query) > 0 {
+		endpoint += "?" + query.Encode()
+	}
+	var page customVoicesPage
+	if err := p.Do(ctx, llmclient.Request{Method: http.MethodGet, Endpoint: endpoint, Model: model}, &page); err != nil {
+		return nil, err
+	}
+	if page.Data == nil {
+		return nil, core.NewProviderError(p.providerName, http.StatusBadGateway, p.providerName+" returned an unrecognized voices response", core.ErrUnrecognizedVoices)
+	}
+	return &page, nil
+}
+
+// ServesCustomVoices reports whether this provider talks to OpenAI's own API,
+// which has the custom voice list. A provider pointed at a custom base URL (a
+// self-hosted server) does not.
+func (p *Provider) ServesCustomVoices() bool {
+	return isOpenAIHost(p.GetBaseURL())
+}
+
+// ListCustomVoices serves OpenAI's own voice list: one cursor page of the
+// organization's custom voices, as GET /audio/voices returns it, prompt-
+// generated voices included.
+func (p *Provider) ListCustomVoices(ctx context.Context, params core.AudioCustomVoicesParams) (*core.AudioCustomVoicesResponse, error) {
+	if !p.ServesCustomVoices() {
+		return nil, core.NewAudioCustomVoicesUnsupportedError(p.providerName)
+	}
+	page, err := p.fetchCustomVoices(ctx, "", params)
+	if err != nil {
+		return nil, err
+	}
+	return &core.AudioCustomVoicesResponse{
+		Object:  "list",
+		Data:    *page.Data,
+		FirstID: page.FirstID,
+		LastID:  page.LastID,
+		HasMore: page.HasMore,
+	}, nil
 }
 
 // customVoicesTimeout bounds the whole custom voice lookup. It is an addition
@@ -62,20 +110,9 @@ func (p *Provider) customVoices(ctx context.Context, model string, timeout time.
 	seen := map[string]struct{}{}
 	after := ""
 	for range maxCustomVoicePages {
-		query := url.Values{"limit": {strconv.Itoa(customVoicesPageSize)}}
-		if after != "" {
-			query.Set("after", after)
-		}
-		var page customVoicesPage
-		if err := p.Do(ctx, llmclient.Request{
-			Method:   http.MethodGet,
-			Endpoint: "/audio/voices?" + query.Encode(),
-			Model:    model,
-		}, &page); err != nil {
+		page, err := p.fetchCustomVoices(ctx, model, core.AudioCustomVoicesParams{Limit: strconv.Itoa(customVoicesPageSize), After: after})
+		if err != nil {
 			return voices, err
-		}
-		if page.Data == nil {
-			return voices, core.ErrUnrecognizedVoices
 		}
 		for _, voice := range *page.Data {
 			id := strings.TrimSpace(voice.ID)
@@ -92,7 +129,10 @@ func (p *Provider) customVoices(ctx context.Context, model string, timeout time.
 		if !page.HasMore {
 			return voices, nil
 		}
-		next := strings.TrimSpace(page.LastID)
+		next := ""
+		if page.LastID != nil {
+			next = strings.TrimSpace(*page.LastID)
+		}
 		if next == "" || next == after {
 			return voices, errors.Join(core.ErrUnrecognizedVoices, errors.New("has_more without a new last_id"))
 		}

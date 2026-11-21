@@ -382,3 +382,79 @@ func TestIsOpenAIHost(t *testing.T) {
 		})
 	}
 }
+
+// Without a model the provider serves OpenAI's own voice list as the upstream
+// returns it: one page, cursor parameters forwarded, prompt voices included.
+func TestListCustomVoices_ForwardsOnePage(t *testing.T) {
+	provider, capture := newNativeVoicesProvider(t, "", voicesHandler(http.StatusOK, `{"object":"list","data":[
+		{"object":"audio.voice","id":"voice_rec1","name":"Narrator","type":"audio_sample","created_at":1734220800,"future":true},
+		{"object":"audio.voice","id":"voice_prompt1","name":"Generated","type":"prompt","prompt":"a calm voice","created_at":1734220801}
+	],"first_id":"voice_rec1","last_id":"voice_prompt1","has_more":true}`))
+
+	resp, err := provider.ListCustomVoices(context.Background(), core.AudioCustomVoicesParams{Limit: "2", After: "voice_0"})
+	require.NoError(t, err)
+
+	first, last := "voice_rec1", "voice_prompt1"
+	assert.Equal(t, &core.AudioCustomVoicesResponse{
+		Object: "list",
+		Data: []core.AudioCustomVoice{
+			{ID: "voice_rec1", Object: "audio.voice", Name: "Narrator", CreatedAt: 1734220800, Type: "audio_sample"},
+			{ID: "voice_prompt1", Object: "audio.voice", Name: "Generated", CreatedAt: 1734220801, Type: "prompt", Prompt: "a calm voice"},
+		},
+		FirstID: &first,
+		LastID:  &last,
+		HasMore: true,
+	}, resp)
+	req := capture.Last(t)
+	assert.Equal(t, http.MethodGet, req.Method)
+	assert.Equal(t, "/v1/audio/voices", req.Path)
+	assert.Equal(t, url.Values{"limit": {"2"}, "after": {"voice_0"}}, req.Query)
+	assert.Equal(t, 1, capture.Count())
+}
+
+func TestListCustomVoices_EmptyOrganization(t *testing.T) {
+	provider, capture := newNativeVoicesProvider(t, "", voicesHandler(http.StatusOK, noCustomVoices))
+
+	assert.True(t, provider.ServesCustomVoices())
+	resp, err := provider.ListCustomVoices(context.Background(), core.AudioCustomVoicesParams{})
+	require.NoError(t, err)
+	assert.Equal(t, &core.AudioCustomVoicesResponse{Object: "list", Data: []core.AudioCustomVoice{}}, resp)
+	assert.Empty(t, capture.Last(t).Query, "no cursor parameter is invented")
+}
+
+func TestListCustomVoices_Errors(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     int
+		body       string
+		wantStatus int
+		wantMsg    string
+	}{
+		{name: "upstream rejects the limit", status: http.StatusBadRequest, body: `{"error":{"message":"Invalid 'limit': integer above maximum value.","type":"invalid_request_error","param":"limit"}}`, wantStatus: http.StatusBadRequest, wantMsg: "Invalid 'limit'"},
+		{name: "unknown cursor", status: http.StatusNotFound, body: `{"error":{"message":"No voice found with id 'voice_x'","type":"invalid_request_error"}}`, wantStatus: http.StatusNotFound, wantMsg: "No voice found"},
+		{name: "unrecognized body", status: http.StatusOK, body: `{"object":"list"}`, wantStatus: http.StatusBadGateway, wantMsg: "unrecognized voices response"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, _ := newNativeVoicesProvider(t, "", voicesHandler(tt.status, tt.body))
+
+			_, err := provider.ListCustomVoices(context.Background(), core.AudioCustomVoicesParams{Limit: "101"})
+			var gatewayErr *core.GatewayError
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, tt.wantStatus, gatewayErr.HTTPStatusCode())
+			assert.Contains(t, gatewayErr.Message, tt.wantMsg)
+			assert.NotContains(t, gatewayErr.Error(), "sk-test")
+		})
+	}
+}
+
+// A self-hosted server registered as type openai does not have OpenAI's list.
+func TestListCustomVoices_CustomBaseURLIsUnsupported(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"voices":["alba"]}`)
+	provider := New(providers.ProviderConfig{APIKey: "sk-local", BaseURL: server.URL + "/v1"}, providertest.Options(llmclient.Hooks{})).(*Provider)
+
+	assert.False(t, provider.ServesCustomVoices())
+	_, err := provider.ListCustomVoices(context.Background(), core.AudioCustomVoicesParams{})
+	require.ErrorIs(t, err, core.ErrAudioCustomVoicesUnsupported)
+	assert.Zero(t, capture.Count())
+}
