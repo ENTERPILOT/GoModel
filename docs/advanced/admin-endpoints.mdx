@@ -231,6 +231,10 @@ For a scoped admin:
   `"enabled": false` to deactivate it.
 - Only user-path budgets and rate limits are visible and editable; label,
   provider, and model rules are gateway-wide.
+- `GET /admin/models` lists every model, but each row's `access` shows only
+  the user paths inside the scope (a path granting the whole scope appears as
+  the scope root) and no `override` row. A model restricted to other paths
+  has `effective_enabled: false`.
 - Gateway-wide endpoints return `403` with code `admin_scope_denied`: provider
   status and credentials, runtime settings and refresh, API key import,
   tagging settings, virtual models, workflows, guardrails, MCP servers, pricing

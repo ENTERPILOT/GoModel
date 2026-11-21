@@ -230,6 +230,10 @@ Für einen bereichsbeschränkten Admin gilt:
   `"enabled": false`, um es zu deaktivieren.
 - Nur Budgets und Rate-Limits für User-Paths sind sichtbar und bearbeitbar; Regeln für Labels,
   Provider und Modelle gelten Gateway-weit.
+- `GET /admin/models` listet alle Modelle, aber `access` zeigt nur die User-Paths
+  innerhalb des Scopes (ein Pfad, der den ganzen Scope freigibt, erscheint als
+  Scope-Wurzel) und keine `override`-Zeile. Ein Modell, das auf andere Pfade
+  beschränkt ist, hat `effective_enabled: false`.
 - Gateway-weite Endpunkte liefern `403` mit dem Code `admin_scope_denied`: Provider-Status
   und -Zugangsdaten, Laufzeiteinstellungen und deren Aktualisierung, API-Key-Import,
   Tagging-Einstellungen, virtuelle Modelle, Workflows, Guardrails, MCP-Server, Preisüberschreibungen,
