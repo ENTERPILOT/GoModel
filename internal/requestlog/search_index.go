@@ -47,7 +47,8 @@ func searchText(errorMessage string) string {
 // may not be allowed to install it, in which case the search keeps its slow
 // path and the reason is logged once. The index builds CONCURRENTLY so an
 // existing large table keeps accepting writes while it builds; a build
-// interrupted midway leaves an invalid index, which is dropped and rebuilt.
+// interrupted midway leaves an invalid index, which is dropped and rebuilt,
+// also CONCURRENTLY (see buildIndexConcurrently).
 func ensureTrigramSearchIndex(ctx context.Context, db sqlx.DB, errorMessage string) {
 	if db.Dialect() != sqlx.PostgreSQL {
 		return
@@ -64,7 +65,7 @@ func ensureTrigramSearchIndex(ctx context.Context, db sqlx.DB, errorMessage stri
 	var valid *bool
 	if err := db.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass(?)`, trigramSearchIndex).Scan(&valid); err == nil && valid != nil && !*valid {
 		slog.Warn("requestlog: rebuilding interrupted trigram search index")
-		if _, err := db.Exec(ctx, "DROP INDEX "+trigramSearchIndex); err != nil {
+		if _, err := db.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+trigramSearchIndex); err != nil {
 			slog.Warn("requestlog: failed to drop invalid trigram search index", "error", err)
 			return
 		}
