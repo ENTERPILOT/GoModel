@@ -2,6 +2,7 @@
   // Request log: paginated per-request usage entries following the page's
   // window and facet filters.
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import NoDataIllustration from "$lib/components/atoms/NoDataIllustration.svelte";
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
@@ -32,7 +33,9 @@ import {
   usageEntryCacheLabel,
   usesResponseCostPricing,
 } from "./usage-cost-format.js";
-  import { CircleDollarSign, DatabaseZap } from "lucide";
+  import { playgroundOpener } from "$pages/playground/openInPlayground.svelte.js";
+  import { canOpenUsageEntryInPlayground } from "$pages/playground/playgroundSnapshot.js";
+  import { CircleDollarSign, DatabaseZap, FlaskConical } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const costsMode = $derived(usagePage.usageMode === "costs");
@@ -49,6 +52,14 @@ import {
 
   const hasAuthKeys = $derived(
     usageLogHasAuthKeys(usagePage.filters.authKeys, usagePage.usageLog.entries),
+  );
+
+  // "Open in Playground" replays the request body kept in the request log, so
+  // the column only exists while request logging is on and a row on this page
+  // belongs to an endpoint the Playground speaks.
+  const hasPlaygroundActions = $derived(
+    runtimeConfig.requestLogsVisible() &&
+      usagePage.usageLog.entries.some(canOpenUsageEntryInPlayground),
   );
 
   const onSearchInput = debounced(() => usagePage.fetchUsageLog(true));
@@ -140,6 +151,9 @@ import {
             {/if}
             {#if !costsMode}
               <th class="col-price">{m.usage_column_cost()}</th>
+            {/if}
+            {#if hasPlaygroundActions}
+              <th class="col-actions">{m.usage_column_actions()}</th>
             {/if}
           </tr>
         </thead>
@@ -241,6 +255,20 @@ import {
                   {/if}
                   {#if entry.costs_calculation_caveat}
                     <span class="caveat-icon" title={entry.costs_calculation_caveat}>&#9888;</span>
+                  {/if}
+                </td>
+              {/if}
+              {#if hasPlaygroundActions}
+                <td class="col-actions">
+                  {#if canOpenUsageEntryInPlayground(entry)}
+                    <TableActionButton
+                      label={m.playground_open_request()}
+                      class="table-icon-btn"
+                      disabled={playgroundOpener.pending === playgroundOpener.usageKey(entry)}
+                      onclick={() => playgroundOpener.openUsageEntry(entry)}
+                    >
+                      <Icon icon={FlaskConical} class="table-icon-svg" />
+                    </TableActionButton>
                   {/if}
                 </td>
               {/if}

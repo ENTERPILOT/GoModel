@@ -46,6 +46,27 @@ pierwszych znaków), a embeddingi na token, np. z `token_embed` w vLLM, do
 pierwszego wiersza; wynik pokazuje przy każdym embeddingu liczbę jego wektorów
 tokenów. **Kopiuj** nadal kopiuje pełną odpowiedź.
 
+## Otwieranie zalogowanego requestu
+
+Wiersze requestów do `/v1/chat/completions`, `/v1/responses` i `/v1/messages`
+na stronie **Requests** oraz w logu requestów na stronie **Usage** mają przycisk
+**Open in Playground**. Wczytuje on zalogowany request do Playground — endpoint,
+model, ustawienie streamingu oraz tekstowe wiadomości System, User i Assistant —
+aby można go było edytować i wysłać ponownie. Nic nie jest wysyłane, dopóki nie
+klikniesz przycisku wysyłania.
+
+Przycisk odtwarza body requestu zapisane w logu requestów, więc wymaga
+`LOGGING_ENABLED=true` i `LOGGING_LOG_BODIES=true` (obie wartości domyślne) oraz
+wpisu, który nadal mieści się w `LOGGING_RETENTION_DAYS`. Na stronie Requests pojawia się tylko przy wpisach
+z zapisaną rozmową; na stronie Usage wpis jest wyszukiwany dopiero po kliknięciu,
+a dashboard informuje, gdy nie ma zapisanego body, które da się odtworzyć.
+
+Playground edytuje wyłącznie rozmowy tekstowe. Narzędzia, wywołania narzędzi i
+ich wyniki, obrazy oraz parametry takie jak `temperature` czy `max_tokens` nie są
+przenoszone, a gdy request je zawierał, pojawia się o tym informacja. Ponowny
+request jest wysyłany z Twoim kluczem dashboardu, a nie z kluczem ani ścieżką
+użytkownika pierwotnego klienta.
+
 ## Ograniczanie do ścieżki użytkownika
 
 Modele wirtualne można ograniczyć do konkretnych `user_paths`, a requesty z Playground

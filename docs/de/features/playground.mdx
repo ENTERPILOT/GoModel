@@ -50,6 +50,28 @@ ersten Zeichen) und Embeddings pro Token, etwa von vLLMs `token_embed`, auf ihre
 erste Zeile; das Ergebnis zeigt neben jedem Embedding die Anzahl seiner
 Token-Vektoren. **Kopieren** kopiert weiterhin die vollständige Response.
 
+## Einen protokollierten Request öffnen
+
+Zeilen für Requests an `/v1/chat/completions`, `/v1/responses` und `/v1/messages`
+auf der Seite **Requests** sowie im Request-Log der Seite **Usage** haben einen
+Button **Open in Playground**. Er lädt den protokollierten Request in den
+Playground – Endpoint, Modell, Streaming-Einstellung und die Textnachrichten
+System, User und Assistant –, sodass Sie ihn bearbeiten und erneut senden können.
+Gesendet wird erst, wenn Sie auf Senden klicken.
+
+Der Button spielt den im Request-Log gespeicherten Request-Body erneut ab. Dafür
+braucht es `LOGGING_ENABLED=true` und `LOGGING_LOG_BODIES=true` (beides Standard)
+sowie einen Eintrag, der noch innerhalb von `LOGGING_RETENTION_DAYS` liegt. Auf der Seite Requests erscheint er
+nur bei Einträgen mit gespeicherter Konversation; auf der Seite Usage wird der
+Eintrag erst beim Klick gesucht, und das Dashboard meldet, wenn kein abspielbarer
+Body gespeichert ist.
+
+Der Playground bearbeitet nur Textkonversationen. Tools, Tool-Calls und ihre
+Ergebnisse, Bilder sowie Parameter wie `temperature` oder `max_tokens` werden
+nicht übernommen; ein Hinweis zeigt an, wenn der Request solche enthielt. Der
+erneute Request wird mit Ihrem Dashboard-Key gesendet, nicht mit dem
+Key oder User Path des ursprünglichen Aufrufers.
+
 ## Eingrenzung per User Path
 
 Virtuelle Modelle können auf bestimmte `user_paths` beschränkt werden, und
