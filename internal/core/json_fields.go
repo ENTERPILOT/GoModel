@@ -342,6 +342,34 @@ func (fields UnknownJSONFields) Only(keys ...string) UnknownJSONFields {
 	return fields.Without(drop...)
 }
 
+// WithoutCaseVariants returns the fields without the members named like one of
+// keys in another letter case: equal under Unicode case folding, which is how
+// a case-insensitive JSON decoder matches member names, but spelled
+// differently. A member spelled exactly like a key is kept. It returns fields
+// itself when nothing is dropped.
+func (fields UnknownJSONFields) WithoutCaseVariants(keys ...string) UnknownJSONFields {
+	if len(keys) == 0 {
+		return fields
+	}
+	var drop []string
+	fields.forEachMember(func(name string, _ gjson.Result) bool {
+		if slices.Contains(keys, name) {
+			return true
+		}
+		for _, key := range keys {
+			if strings.EqualFold(name, key) {
+				drop = append(drop, name)
+				break
+			}
+		}
+		return true
+	})
+	if len(drop) == 0 {
+		return fields
+	}
+	return fields.Without(drop...)
+}
+
 // jsonFieldSet answers "is this key a known typed field?" in O(1). Use it via
 // jsonFieldSetOf for the derived struct lists (dozens of fields, checked once
 // per JSON key of every decoded request); the variadic

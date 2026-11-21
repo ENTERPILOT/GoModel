@@ -21,6 +21,11 @@ func ApplyChat(req *core.ChatRequest, defaults, params Set) (*core.ChatRequest, 
 	cloned := *req
 	a := newApplier(chatTypedKeys, req.ExtraFields)
 	apply := func(key string, raw json.RawMessage, force bool) error {
+		// A forced null still strips the key the client sent.
+		if _, skip := responsesOnlyKeys[key]; skip && raw != nil {
+			return nil
+		}
+		a.forcing(key, force)
 		switch key {
 		case "temperature":
 			return setPtr(&cloned.Temperature, raw, force)
@@ -53,16 +58,14 @@ func ApplyChat(req *core.ChatRequest, defaults, params Set) (*core.ChatRequest, 
 		case "tool_choice":
 			return setAny(&cloned.ToolChoice, raw, force)
 		default:
-			// A forced null still strips the key the client sent.
-			if _, skip := responsesOnlyKeys[key]; skip && raw != nil {
-				return nil
-			}
 			return a.route(key, raw, force)
 		}
 	}
 	if err := a.run(defaults, params, apply); err != nil {
 		return nil, err
 	}
+	extras := a.clientExtras(req.ExtraFields)
+	cloned.ExtraFields = extras
 	if a.touchesTyped() {
 		// The frozen body never changes, so keep it out of the round trip.
 		messages, tools, plan := cloned.Messages, cloned.Tools, cloned.PromptCachePlan
@@ -72,7 +75,7 @@ func ApplyChat(req *core.ChatRequest, defaults, params Set) (*core.ChatRequest, 
 		}
 		cloned.Messages, cloned.Tools, cloned.PromptCachePlan = messages, tools, plan
 	}
-	fields, err := a.extraFields(req.ExtraFields)
+	fields, err := a.extraFields(extras)
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +94,11 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 	cloned := *req
 	a := newApplier(responsesTypedKeys, req.ExtraFields)
 	apply := func(key string, raw json.RawMessage, force bool) error {
+		// A forced null still strips the key the client sent.
+		if _, skip := chatOnlyKeys[key]; skip && raw != nil {
+			return nil
+		}
+		a.forcing(key, force)
 		switch key {
 		case "temperature":
 			return setPtr(&cloned.Temperature, raw, force)
@@ -121,16 +129,14 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 		case "tool_choice":
 			return setAny(&cloned.ToolChoice, raw, force)
 		default:
-			// A forced null still strips the key the client sent.
-			if _, skip := chatOnlyKeys[key]; skip && raw != nil {
-				return nil
-			}
 			return a.route(key, raw, force)
 		}
 	}
 	if err := a.run(defaults, params, apply); err != nil {
 		return nil, err
 	}
+	extras := a.clientExtras(req.ExtraFields)
+	cloned.ExtraFields = extras
 	if a.touchesTyped() {
 		// The frozen body never changes, so keep it out of the round trip.
 		input, instructions, tools, prompt := cloned.Input, cloned.Instructions, cloned.Tools, cloned.Prompt
@@ -140,7 +146,7 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 		}
 		cloned.Input, cloned.Instructions, cloned.Tools, cloned.Prompt = input, instructions, tools, prompt
 	}
-	fields, err := a.extraFields(req.ExtraFields)
+	fields, err := a.extraFields(extras)
 	if err != nil {
 		return nil, err
 	}
@@ -210,6 +216,30 @@ func (a *applier) stripExtras(force bool, keys ...string) {
 	}
 }
 
+// forcing records a forced key, so clientExtras can drop the members the
+// client sent under the same name in another letter case. The token limit is
+// one parameter in any spelling, so forcing one covers them all.
+func (a *applier) forcing(key string, force bool) {
+	if !force {
+		return
+	}
+	if _, ok := tokenLimitKeys[key]; !ok {
+		a.forced = append(a.forced, key)
+		return
+	}
+	for spelling := range tokenLimitKeys {
+		a.forced = append(a.forced, spelling)
+	}
+}
+
+// clientExtras returns the client's unknown members without the case variants
+// of the forced keys. The gateway forwards unknown members as written, so an
+// upstream that reads keys case-insensitively could take such a variant
+// instead of the forced value.
+func (a *applier) clientExtras(base core.UnknownJSONFields) core.UnknownJSONFields {
+	return base.WithoutCaseVariants(a.forced...)
+}
+
 func ensureExtras(extras map[string]json.RawMessage) map[string]json.RawMessage {
 	if extras == nil {
 		return map[string]json.RawMessage{}
@@ -261,6 +291,8 @@ type applier struct {
 	// defaults marks merged keys recorded as defaults, which land only when
 	// the encoded request lacks them.
 	defaults map[string]struct{}
+	// forced lists the keys set by params, in every token-limit spelling.
+	forced []string
 	// extras holds the pending ExtraFields members, nil marking a removal,
 	// so a forced value layered over a default on the same key sees the
 	// default rather than the client's original.
