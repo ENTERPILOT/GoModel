@@ -739,6 +739,13 @@ providers:
     #   - id: "openai/gpt-4"
     #   - id: "anthropic/claude-sonnet-latest"
 
+  deepgram:
+    type: deepgram
+    api_key: "${DEEPGRAM_API_KEY}"
+    # base_url defaults to "https://api.deepgram.com/v1".
+    # Voice-only provider: speech-to-text and text-to-speech, no chat. A
+    # text-to-speech model id names its voice ("aura-2-thalia-en").
+
   elevenlabs:
     type: elevenlabs
     api_key: "${ELEVENLABS_API_KEY}"

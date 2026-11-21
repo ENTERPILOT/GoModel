@@ -36,6 +36,7 @@ var knownUncovered = []string{
 	"bedrock",
 	"chatgpt",
 	"cohere",
+	"deepgram",
 	"elevenlabs",
 	"jev",
 	"vertex",
