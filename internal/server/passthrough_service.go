@@ -25,12 +25,19 @@ type passthroughService struct {
 // validatePassthroughAccess checks a body that names a model like any model
 // call. A request that names none, such as GET /files, acts on the whole
 // provider account, so the caller must be granted the whole provider.
+// So does every request that is not a model inference call, whatever its body
+// names: there the model is still checked, but granting it is not enough.
 func (s *passthroughService) validatePassthroughAccess(ctx context.Context, info *core.PassthroughRouteInfo) error {
 	if s.modelAuthorizer == nil {
 		return nil
 	}
 	if selector, ok := passthroughAccessSelector(s.provider, info); ok {
-		return s.modelAuthorizer.ValidateModelAccess(ctx, selector)
+		if err := s.modelAuthorizer.ValidateModelAccess(ctx, selector); err != nil {
+			return err
+		}
+		if passthroughRunsModelInference(ctx, info) {
+			return nil
+		}
 	}
 	return s.modelAuthorizer.ValidateProviderAccess(ctx, info.ProviderName)
 }

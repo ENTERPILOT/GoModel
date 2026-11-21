@@ -72,9 +72,9 @@ func (s *Service) ValidateModelAccess(ctx context.Context, selector core.ModelSe
 	).WithCode("model_access_denied")
 }
 
-// ValidateProviderAccess checks a request that names a provider but no model,
-// such as a passthrough call to a model-less endpoint, which acts on the
-// whole provider account. Only the caller's allowlists apply: the key and
+// ValidateProviderAccess checks a request that acts on the whole provider
+// account rather than on one model, such as a passthrough call to an endpoint
+// that is not model inference. Only the caller's allowlists apply: the key and
 // every user-path policy must grant the whole provider ("provider/" or "/").
 // Model-side rows describe single models, so they do not apply here.
 func (s *Service) ValidateProviderAccess(ctx context.Context, provider string) error {
@@ -84,7 +84,7 @@ func (s *Service) ValidateProviderAccess(ctx context.Context, provider string) e
 	}
 	return core.NewInvalidRequestErrorWithStatus(
 		http.StatusBadRequest,
-		fmt.Sprintf("this API key needs all of provider %q (%q) to call endpoints that name no model", provider, provider+"/"),
+		fmt.Sprintf("this API key needs all of provider %q (%q) to call endpoints that are not model inference", provider, provider+"/"),
 		nil,
 	).WithCode("model_access_denied")
 }
