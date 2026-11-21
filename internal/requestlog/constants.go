@@ -14,7 +14,8 @@ const (
 	// When the batch reaches this size, it's written to storage without waiting for the timer.
 	BatchFlushThreshold = 100
 
-	// APIKeyHashPrefixLength is the number of hex characters from SHA256 hash.
+	// APIKeyHashPrefixLength is the number of hex characters from the keyed
+	// SHA256 hash (HMAC).
 	// 16 hex chars = 64 bits of entropy for identification without exposure.
 	APIKeyHashPrefixLength = 16
 )
