@@ -130,7 +130,7 @@ GoModel 通过一个网关将兼容 OpenAI 的请求路由到众多 AI 提供商
 
 ## 提供商状态
 
-管理控制台（`/admin/dashboard`）在 **Overview** 页面的 **Providers Overview** 部分显示每个已配置提供商的实时状态。
+管理控制台（`/admin/dashboard`）在 **Overview** 页面的 **Providers Overview** 部分显示每个已配置提供商的实时状态。**Providers** 页面在每个提供商行上显示相同的状态标签，以及已发现的模型数量和最近一次错误，包括在 `config.yaml` 或环境变量中声明的提供商（标记为 **Config**）。已禁用的提供商不会注册到路由中，因此其行不显示状态。
 
 <img
   src="/providers/provider-status.png"

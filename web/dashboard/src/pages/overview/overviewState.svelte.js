@@ -127,8 +127,11 @@ class ProviderStatusState {
     }
   }
 
+  // Also aborts an in-flight fetch, so its completion cannot schedule the
+  // next poll after the page that started it is gone.
   stopPolling() {
     this.#clearPoll();
+    if (this.#controller) this.#controller.abort();
   }
 }
 
