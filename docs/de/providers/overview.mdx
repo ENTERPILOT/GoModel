@@ -136,6 +136,17 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   `reasoning_format` selbst (`raw` oder `hidden`), um dies zu überschreiben. Bei JSON-Responses für
   Transkription und Übersetzung wird Groqs herstellerspezifisches Feld `x_groq` entfernt, damit sie
   dem OpenAI-Format entsprechen.
+- **Erneut gesendete Assistant-Nachrichten** – Clients hängen eine Assistant-Nachricht so an den
+  Verlauf an, wie die API sie geliefert hat. Sie enthält daher `refusal`, `annotations`, `audio`
+  und `function_call` von OpenAI sowie GoModels eigenes `reasoning_content`. Einige Provider
+  beantworten diese Felder mit 400. GoModel passt nur an, was der jeweilige Provider ablehnt, und
+  leitet den Rest unverändert weiter: Groq erhält `reasoning_content` als `reasoning` (bei
+  Modellen ohne Reasoning entfällt es) und kein `refusal`, `annotations`, `audio` oder
+  `function_call` mit dem Wert null; Fireworks erhält kein `annotations`, `audio` oder
+  `function_call`; Gemini im Modus `openai_compatible` erhält kein `refusal`, `audio` oder
+  `function_call` mit dem Wert null; xAI erhält kein `name` in System- und Developer-Nachrichten.
+  Die Regeln für Mistral stehen unter [Mistral AI](/de/providers/mistral). Bei Groq kann dadurch
+  auch eine Tool-Schleife über `/v1/responses` ihre Reasoning-Items erneut senden.
 - **MiniMax-Regionen und aktuelle Textmodelle** – der standardmäßige globale Endpunkt ist
   `https://api.minimax.io/v1`; Konten auf der China-Plattform sollten
   `MINIMAX_BASE_URL=https://api.minimaxi.com/v1` setzen. Die aktuellen Textmodell-IDs sind

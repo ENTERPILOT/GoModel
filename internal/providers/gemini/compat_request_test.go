@@ -3,6 +3,7 @@ package gemini
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"testing"
 
@@ -108,6 +109,52 @@ func TestChatCompletion_CompatDropsRejectedFieldsAndClampsEffort(t *testing.T) {
 	assert.Equal(t, "u1", sent["user"])
 	assert.Equal(t, []any{"END"}, sent["stop"])
 	assert.Equal(t, float64(1), sent["n"])
+}
+
+// Google's OpenAI-compatible endpoint answers 400 "Value is not a string:
+// null" to the null refusal OpenAI returns on every assistant message, and the
+// same for a null audio or function_call. A member with a value is read.
+func TestChatCompletion_CompatDropsNullAssistantMembers(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "false")
+	const body = `{"model":"gemini-2.5-flash","messages":[` +
+		`{"role":"user","content":"17*23?","name":"alice"},` +
+		`{"role":"assistant","content":"391","refusal":null,"annotations":[],"audio":null,"function_call":null,"reasoning_content":"17*23"},` +
+		`{"role":"assistant","content":null,"refusal":"no"},` +
+		`{"role":"user","content":"sure?"}]}`
+	want := []any{
+		map[string]any{"role": "user", "content": "17*23?", "name": "alice"},
+		map[string]any{"role": "assistant", "content": "391", "annotations": []any{}, "reasoning_content": "17*23"},
+		map[string]any{"role": "assistant", "content": nil, "refusal": "no"},
+		map[string]any{"role": "user", "content": "sure?"},
+	}
+
+	t.Run("buffered", func(t *testing.T) {
+		server, capture := providertest.JSONServer(t, http.StatusOK, `{"id":"x","object":"chat.completion","model":"gemini-2.5-flash","choices":[]}`)
+		provider := New(providers.ProviderConfig{APIKey: "key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
+		var req core.ChatRequest
+		require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+		_, err := provider.ChatCompletion(context.Background(), &req)
+		require.NoError(t, err)
+
+		assert.Equal(t, want, capture.Last(t).JSON(t)["messages"])
+		assert.True(t, req.Messages[1].ExtraFields.HasAny("refusal"), "the caller's request must not change")
+	})
+
+	t.Run("streaming", func(t *testing.T) {
+		server, capture := providertest.SSEServer(t, providertest.ChatChunkSSE)
+		provider := New(providers.ProviderConfig{APIKey: "key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
+		var req core.ChatRequest
+		require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+		stream, err := provider.StreamChatCompletion(context.Background(), &req)
+		require.NoError(t, err)
+		_, err = io.ReadAll(stream)
+		require.NoError(t, err)
+		require.NoError(t, stream.Close())
+
+		assert.Equal(t, want, capture.Last(t).JSON(t)["messages"])
+	})
 }
 
 func TestChatCompletion_CompatNestedReasoningIsClamped(t *testing.T) {

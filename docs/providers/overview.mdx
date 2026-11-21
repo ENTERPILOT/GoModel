@@ -144,6 +144,18 @@ support, not every individual model capability exposed by an upstream provider.
   the answer. Send `reasoning_format` yourself (`raw` or `hidden`) to override
   it. JSON transcription and translation responses have Groq's vendor `x_groq`
   member removed so they match the OpenAI shape.
+- **Replayed assistant messages** — clients append an assistant message to the
+  history the way the API returned it, so it carries `refusal`, `annotations`,
+  `audio`, and `function_call` from OpenAI and GoModel's own
+  `reasoning_content`. Some providers answer 400 to those members. GoModel
+  adapts only what each one rejects and forwards the rest unchanged:
+  Groq gets `reasoning_content` as `reasoning` (dropped on models without
+  reasoning) and no `refusal`, `annotations`, `audio`, or null
+  `function_call`; Fireworks gets no `annotations`, `audio`, or
+  `function_call`; Gemini in `openai_compatible` mode gets no null `refusal`,
+  `audio`, or `function_call`; xAI gets no `name` on system and developer
+  messages. See [Mistral AI](/providers/mistral) for its rules. On Groq this
+  also lets a `/v1/responses` tool loop replay its reasoning items.
 - **MiniMax regions and current text models** — the default global endpoint is
   `https://api.minimax.io/v1`; accounts on the China platform should set
   `MINIMAX_BASE_URL=https://api.minimaxi.com/v1`. The current text model IDs

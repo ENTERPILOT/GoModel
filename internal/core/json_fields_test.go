@@ -103,6 +103,20 @@ func TestUnknownJSONFieldsOnlyKeepsNamedMembers(t *testing.T) {
 	assert.True(t, UnknownJSONFields{}.Only("prefix").IsEmpty())
 }
 
+func TestUnknownJSONFieldsNullMembers(t *testing.T) {
+	fields, err := extractUnknownJSONFields(
+		[]byte(`{"known":true,"refusal":null,"audio":{"id":"a"},"name":null,"function_call":{"name":"f"},"function_call":null}`),
+		"known",
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"refusal", "function_call"}, fields.NullMembers("refusal", "audio", "function_call", "absent"),
+		"a key sent twice counts when either occurrence is null")
+	assert.Empty(t, fields.NullMembers("audio"))
+	assert.Empty(t, fields.NullMembers())
+	assert.Empty(t, UnknownJSONFields{}.NullMembers("refusal"))
+}
+
 func TestMergeUnknownJSONFields_AddsAndOverrides(t *testing.T) {
 	base := UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 		"keep":     json.RawMessage(`1`),

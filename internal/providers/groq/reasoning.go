@@ -17,9 +17,10 @@ const maxStopSequences = 4
 // adaptChatRequest fits the canonical chat request to Groq: it truncates an
 // over-long "stop" list, maps GoModel's nested reasoning shape (set by the
 // Messages API's thinking and by clients sending reasoning.effort) onto Groq's
-// flat reasoning_effort, and asks Groq to parse chain of thought out of the
-// answer. Groq rejects "reasoning" outright and accepts reasoning_effort only
-// on reasoning models, with per-family values.
+// flat reasoning_effort, asks Groq to parse chain of thought out of the
+// answer, and adapts replayed assistant messages to Groq's message schema.
+// Groq rejects "reasoning" outright and accepts reasoning_effort only on
+// reasoning models, with per-family values.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 	if req == nil {
 		return req, nil
@@ -32,7 +33,11 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 	if err != nil {
 		return nil, err
 	}
-	return adaptReasoningFormat(adapted)
+	adapted, err = adaptReasoningFormat(adapted)
+	if err != nil {
+		return nil, err
+	}
+	return adaptReplayedMessages(adapted)
 }
 
 func adaptReasoningEffort(req *core.ChatRequest) (*core.ChatRequest, error) {

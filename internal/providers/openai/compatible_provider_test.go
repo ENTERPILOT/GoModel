@@ -160,6 +160,41 @@ func TestCompatibleProvider_AdaptChatRequest_RewritesBodyOnChatAndStream(t *test
 	assert.Equal(t, "original-user", original.User, "the caller's request must not be mutated")
 }
 
+// The shared adapter removes no message member on its own (ADR-0011): an
+// upstream that defines refusal or reads reasoning_content keeps getting it,
+// and only a provider's AdaptChatRequest drops what that upstream rejects.
+func TestCompatibleProvider_ForwardsReplayedMessageMembersWithoutAProviderRule(t *testing.T) {
+	const assistant = `{"role":"assistant","content":"391","name":"bot","refusal":null,"annotations":[],"audio":null,"function_call":null,"reasoning_content":"17*23"}`
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"id":"resp","model":"m","choices":[]}`)
+	provider := NewCompatibleProvider(
+		"test-key",
+		providers.ProviderOptions{HTTPClient: server.Client()},
+		CompatibleProviderConfig{ProviderName: "lenient", BaseURL: server.URL},
+	)
+	var req core.ChatRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"model":"m","messages":[{"role":"system","name":"ops","content":"brief"},`+assistant+`]}`), &req))
+
+	_, err := provider.ChatCompletion(context.Background(), &req)
+	require.NoError(t, err)
+	stream, err := provider.StreamChatCompletion(context.Background(), &req)
+	require.NoError(t, err)
+	_, _ = io.ReadAll(stream)
+	require.NoError(t, stream.Close())
+
+	requests := capture.All()
+	require.Len(t, requests, 2)
+	for _, sent := range requests {
+		messages, ok := sent.JSON(t)["messages"].([]any)
+		require.True(t, ok)
+		require.Len(t, messages, 2)
+		assert.Equal(t, map[string]any{"role": "system", "name": "ops", "content": "brief"}, messages[0])
+		assert.Equal(t, map[string]any{
+			"role": "assistant", "content": "391", "name": "bot", "refusal": nil, "annotations": []any{},
+			"audio": nil, "function_call": nil, "reasoning_content": "17*23",
+		}, messages[1])
+	}
+}
+
 func TestCompatibleProvider_AdaptChatRequest_ErrorAborts(t *testing.T) {
 	server, capture := providertest.Server(t, nil)
 	provider := NewCompatibleProvider(
