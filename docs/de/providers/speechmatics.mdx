@@ -1,0 +1,164 @@
+---
+title: "Speechmatics"
+description: "Speechmatics in GoModel konfigurieren: Batch-Speech-to-Text hinter /v1/audio/transcriptions, Regionen, Modelle und Antwortformate."
+icon: "audio-lines"
+tag: "Beta"
+keywords: ["Speechmatics", "Speech-to-Text", "speech-to-text", "STT", "Transkription", "transcription", "Batch-Transkription", "Untertitel", "Provider-Einrichtung", "provider setup"]
+---
+
+<Warning>
+  Die Unterstützung für Speechmatics befindet sich in der Beta-Phase. Sie ist
+  durch automatisierte Tests gegen eine simulierte API abgedeckt, die nach der
+  veröffentlichten API-Referenz von Speechmatics gebaut ist, wurde aber noch
+  nicht mit dem echten Speechmatics-Dienst geprüft. Probleme bitte melden.
+</Warning>
+
+Speechmatics ist ein Speech-to-Text-Provider. GoModel stellt dessen
+[Batch-API](https://docs.speechmatics.com/speech-to-text/batch/quickstart)
+hinter dem Standard-Endpunkt `/v1/audio/transcriptions` bereit. Speechmatics
+hat keine Chat-, `/responses`- oder Embeddings-API, und die
+Text-to-Speech-Vorschau wird von GoModel nicht bedient. Diese Endpunkte
+liefern für Modelle, die an Speechmatics geroutet werden, daher
+`invalid_request_error`.
+
+## Konfiguration
+
+Einen API-Key im [Speechmatics-Portal](https://portal.speechmatics.com/settings/api-keys) erstellen und setzen:
+
+```bash
+SPEECHMATICS_API_KEY=...
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  speechmatics:
+    type: speechmatics
+    api_key: "${SPEECHMATICS_API_KEY}"
+    # base_url ist standardmäßig "https://eu1.asr.api.speechmatics.com/v2".
+```
+
+### Regionen
+
+Audio wird in der Region des Endpunkts verarbeitet. Standard ist EU1; mit
+`SPEECHMATICS_BASE_URL` lässt sich eine andere Region wählen:
+
+| Region | Basis-URL |
+| ------ | --------- |
+| EU1 (Standard) | `https://eu1.asr.api.speechmatics.com/v2` |
+| US1 | `https://us1.asr.api.speechmatics.com/v2` |
+| AU1 | `https://au1.asr.api.speechmatics.com/v2` |
+
+Ein Job existiert nur in der Region, in der er erstellt wurde; ein Provider
+spricht also mit genau einer Region. Für zwei Regionen zwei Provider
+konfigurieren, zum Beispiel `speechmatics` und `speechmatics-us` mit
+unterschiedlichen `base_url`-Werten.
+
+## Modelle
+
+Speechmatics hat keine Modellliste, deshalb listet GoModel die Batch-Modelle
+selbst auf:
+
+| Modell | Geeignet für |
+| ------ | ------------ |
+| `enhanced` | Höchste Genauigkeit, eine Sprache pro Datei |
+| `standard` | Schnellere Verarbeitung, eine Sprache pro Datei |
+| `melia-1` | Audio, in dem zwischen Sprachen gewechselt wird |
+| `oak-1` | Mehrsprachiges Audio aus dem Gesundheitswesen |
+
+Speechmatics-Modelle stehen nicht im Modellkatalog, aus dem GoModel Preise
+bezieht. Die Nutzung wird in Audiosekunden erfasst; für Kosten muss ein
+`per_second_input`-Preis für das Modell gesetzt werden, als
+[überschriebener Preis](/de/features/cost-tracking) oder unter
+`providers.speechmatics.models` in `config.yaml`. Standardmäßig bedient ein
+Provider mit in `config.yaml` aufgelisteten Modellen nur diese; dort also jedes
+verwendete Modell auflisten.
+
+## Transkribieren
+
+```bash
+curl https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F "file=@meeting.mp3" \
+  -F "model=speechmatics/enhanced" \
+  -F "language=en"
+```
+
+Speechmatics transkribiert asynchron. GoModel lädt das Audio als Job hoch,
+wartet auf dessen Abschluss und liefert das Transkript in derselben Antwort.
+Clients sehen also einen gewöhnlichen synchronen Aufruf.
+
+- GoModel wartet bis zu 10 Minuten. Danach antwortet es mit `504` und beendet
+  den Job.
+- Trennt der Client die Verbindung, nachdem der Job angelegt wurde, wird der
+  Job ebenfalls beendet, damit er nicht für ein Ergebnis weiterläuft, das
+  niemand liest. Ein Abbruch während des Uploads kann einen Job hinterlassen,
+  dessen ID GoModel nie erfahren hat.
+- Ein abgeschlossener Job bleibt für die Aufbewahrungsfrist von Speechmatics
+  (7 Tage) im Speechmatics-Konto; GoModel löscht ihn nicht.
+- Sind mehrere API-Keys konfiguriert, verwenden alle Aufrufe eines Jobs
+  denselben Key.
+
+### Parameter
+
+| OpenAI-Parameter | Speechmatics |
+| ---------------- | ------------ |
+| `model` | Das `model` des Jobs |
+| `language` | Die `language` des Jobs. `zh` wird als `cmn` gesendet; Speechmatics-Sprachpakete wie `cmn_en` werden unverändert übernommen. |
+| `response_format` | `json` (Standard), `text`, `verbose_json`, `srt`, `vtt` |
+| `timestamp_granularities[]` | `word` ergänzt `verbose_json` um `words` |
+| `prompt`, `temperature` | Werden ignoriert: Speechmatics hat keine Entsprechung |
+
+Andere Formularfelder werden nicht weitergeleitet, weil ein Speechmatics-Job
+mit JSON statt mit Formularfeldern konfiguriert wird. Für Diarisierung, eigene
+Wörterbücher und andere Job-Optionen eignet sich
+[Passthrough](#nativer-passthrough).
+
+**Ohne `language`** erkennen `enhanced` und `standard` die Sprache
+(`"language": "auto"`) und transkribieren mit dem besten Treffer. Die Erkennung
+braucht Sprache im Audio: Speechmatics empfiehlt mindestens 60 Sekunden und
+lehnt eine Datei ab, in der keine Sprache gefunden wird. Ist die Sprache
+bekannt, sollte `language` gesendet werden.
+
+**`melia-1` und `oak-1`** erkennen Sprachen selbst. GoModel sendet ihnen immer
+`"language": "multi"` und gibt `language` als Sprachhinweis weiter.
+
+### Antwortformate
+
+- `json` – der Text des Transkripts und `usage` mit der Audiodauer
+  (`{"type": "duration", "seconds": 4}`), wie bei `whisper-1`.
+- `text` – der Text des Transkripts.
+- `verbose_json` – ergänzt `language` (der Code, den Speechmatics meldet, etwa
+  `en`), `duration` (Sekunden) und `segments`: eines pro Satz, jeweils
+  mit `id`, `start`, `end` und `text`. Die Decoder-Statistiken von Whisper
+  (`tokens`, `avg_logprob`, ...) sind nicht enthalten. Mit der Granularität
+  `word` kommen zusätzlich `words` mit Zeitangaben pro Wort.
+- `srt` – die SubRip-Ausgabe von Speechmatics selbst.
+- `vtt` – dieselben Untertitel, nach WebVTT konvertiert.
+
+### Fehler
+
+- Ein Job, den Speechmatics ablehnt (nicht lesbares Audio, keine erkennbare
+  Sprache, eine nicht unterstützte Sprache), liefert `400` mit der Begründung
+  von Speechmatics.
+- Ein Job, der nicht rechtzeitig fertig wird, liefert `504`.
+- Andere Speechmatics-Fehler behalten Status und Meldung.
+
+## Nativer Passthrough
+
+Mit `speechmatics` in `ENABLED_PASSTHROUGH_PROVIDERS` lässt sich die Batch-API
+direkt über [Passthrough](/de/features/passthrough-api) aufrufen, zum Beispiel
+`POST /p/speechmatics/jobs` und `GET /p/speechmatics/jobs/{id}/transcript`.
+GoModel ergänzt die Speechmatics-Zugangsdaten und leitet den Request
+unverändert weiter.
+
+## Nicht implementiert
+
+- **Echtzeit-Transkription** – die Realtime-WebSocket-API von Speechmatics hat
+  ein eigenes Nachrichtenprotokoll, nicht das von OpenAI Realtime, das
+  `/v1/realtime` weiterreicht.
+- **Text-to-Speech** – bei Speechmatics in der Vorschau, auf einem eigenen
+  Endpunkt.
+- **Übersetzungen** (`/v1/audio/translations`), Diarisierung, eigene
+  Wörterbücher und Speech-Intelligence-Funktionen als typisierte Parameter.

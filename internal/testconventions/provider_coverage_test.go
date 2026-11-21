@@ -38,6 +38,7 @@ var knownUncovered = []string{
 	"cohere",
 	"elevenlabs",
 	"jev",
+	"speechmatics",
 	"vertex",
 }
 
