@@ -79,9 +79,10 @@ type secretReferencesRestrictedKey struct{}
 // RestrictSecretReferences returns a context in which StoreSecret accepts
 // only the secret references the stored entity already holds. Authentication
 // applies it to every credential other than the master key, when one is
-// configured: a reference resolves on the gateway host, so whoever can add
-// one can read any environment variable or file the gateway can, the master
-// key included.
+// configured, and to every request it lets through without an authenticated
+// identity: a reference resolves on the gateway host, so whoever can add one
+// can read any environment variable or file the gateway can, the master key
+// included.
 func RestrictSecretReferences(ctx context.Context) context.Context {
 	return context.WithValue(ctx, secretReferencesRestrictedKey{}, true)
 }
