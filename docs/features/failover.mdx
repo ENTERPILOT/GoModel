@@ -42,6 +42,15 @@ dropdown. Weights and session keeping do not apply to this strategy, so the
 editor hides them. Removing the pinned row turns the entry into a plain
 redirect: requests for the model go to the remaining targets instead.
 
+Not sure what to fall back to? **Suggest fallbacks** fills the list for you:
+first the same model on your other providers, then up to three text models
+from providers not in the list yet, priced between half and double the
+model's input plus output price, cheapest first. It skips disabled models,
+targets already listed, and models a virtual model redirects elsewhere. The
+suggestions are ordinary target rows — reorder or remove them, then save.
+They are drawn from the models the page has loaded: with a category tab
+selected, only that category is searched.
+
 As code (`config.yaml` or the `VIRTUAL_MODELS` environment variable):
 
 ```yaml
