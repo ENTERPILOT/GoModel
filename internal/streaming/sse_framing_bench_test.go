@@ -35,6 +35,23 @@ func BenchmarkNextEventBoundary(b *testing.B) {
 	}
 }
 
+// BenchmarkCutLineBareCREvent cuts the lines of an event framed with bare CRs
+// only: no line is searched to the end of the event for an LF it does not
+// have.
+func BenchmarkCutLineBareCREvent(b *testing.B) {
+	event := bytes.Repeat([]byte("data: x\r"), 32<<10)
+	b.SetBytes(int64(len(event)))
+	for b.Loop() {
+		lines := 0
+		for rest := event; len(rest) > 0; lines++ {
+			_, _, rest = CutLine(rest)
+		}
+		if lines != 32<<10 {
+			b.Fatalf("lines = %d", lines)
+		}
+	}
+}
+
 // BenchmarkObservedSSEStreamSplitEvent feeds one large Responses terminal
 // event in 4 KiB reads, the shape of a response.completed carrying a long
 // answer. The observer declines decoding so only framing cost is measured.

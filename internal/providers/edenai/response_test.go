@@ -10,6 +10,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -213,4 +214,12 @@ func TestChatCompletion_PropagatesUpstreamErrorWithoutNormalizing(t *testing.T) 
 
 	require.Error(t, err, "ChatCompletion() error = nil, want the upstream error propagated")
 	assert.Nil(t, resp, "response = %+v, want nil alongside the error", resp)
+}
+
+// Eden's cost member, at the response root and once lifted into usage, is one
+// the gateway knows as a provider-reported cost, so a response that must not
+// reveal the provider cost loses it in both places.
+func TestCostFieldIsAKnownProviderCostField(t *testing.T) {
+	assert.True(t, usage.IsProviderCostField(costField, true), "at the response root")
+	assert.True(t, usage.IsProviderCostField(costField, false), "lifted into usage")
 }
