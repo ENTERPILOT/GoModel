@@ -103,6 +103,11 @@ sekundengenauen Input-Preis zurück. Der Fallback greift nur, wenn eine Session 
 gemeldet hat, sodass eine Session nie doppelt abgerechnet wird. Wie bei der Übersetzung übertragen
 WebRTC-Calls ihre Medien außerhalb des Gateways und werden nicht erfasst.
 
+ElevenLabs Scribe Realtime (`scribe_v2_realtime`, `scribe_v3_live`) hat ein eigenes
+WebSocket-Protokoll. Das Gateway übersetzt es in diese Events und zurück, sodass derselbe Client
+mit `/v1/realtime?model=scribe_v2_realtime` funktioniert; die Zuordnung der Events und ihre Grenzen
+beschreibt die Seite [ElevenLabs](/de/providers/elevenlabs).
+
 ## Anthropic-kompatible API
 
 | Endpunkt                    | Methode | Beschreibung                                                                   |
