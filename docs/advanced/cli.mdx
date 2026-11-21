@@ -41,9 +41,10 @@ gomodel --health
 - Exits non-zero otherwise (connection refused, non-`200` status, or any other
   status value).
 
-The probe always targets the loopback interface (`127.0.0.1`) since it runs
-inside the same container as the server, but it derives the `PORT` and
-`BASE_PATH` from configuration instead of hardcoding `8080` and `/health`. Bound
+The probe targets the loopback interface (`127.0.0.1`) since it runs inside the
+same container as the server, or the `SERVER_HOST` address when the listener
+binds a specific one. It derives the `PORT` and `BASE_PATH` from configuration
+instead of hardcoding `8080` and `/health`. Bound
 the request with `--health-timeout`:
 
 ```bash
@@ -67,8 +68,9 @@ unhealthy gateway.
 ## Readiness probe
 
 `--ready` probes `/health/ready`, which reports whether the instance should
-receive traffic. Unlike liveness, readiness checks the dependencies the gateway
-owns:
+receive traffic. It dials the same address as `--health`, including
+`SERVER_HOST` when the listener binds a specific one. Unlike liveness, readiness
+checks the dependencies the gateway owns:
 
 - **Storage** is required. If the backend (SQLite/PostgreSQL/MongoDB) is
   unreachable, readiness reports `not_ready` (HTTP `503`).
@@ -169,8 +171,9 @@ docker exec my-gateway /gomodel --reload
 
 ### What a reload does not change
 
-- **`PORT`** — the socket stays bound so no connection is refused; a port change
-  needs a restart. The gateway logs a warning naming both ports.
+- **`PORT`** and **`SERVER_HOST`** — the socket stays bound so no connection is
+  refused; a port or bind address change needs a restart. The gateway logs a
+  warning naming the bound and the configured value.
 - **`PID_FILE`** — it names the process that is already running.
 - **`GOMODEL_DEMO_MODE`** — the demo warnings are wired up once at startup.
 - **In-memory state** — virtual-model session affinity and live log buffers

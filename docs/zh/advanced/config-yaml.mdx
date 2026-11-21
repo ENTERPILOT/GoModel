@@ -174,8 +174,8 @@ INFO  providers resolved total=1 from_config_file=0 from_env=1
 
 对此文件的修改可通过 `gomodel --reload` 应用到正在运行的网关，
 该命令会重新读取文件和环境变量，并原地重建网关——
-参见 [CLI 操作](/zh/advanced/cli#配置重新加载)。如果新文件加载失败，则不会发生任何变化。`server.port` 和 `server.pid_file` 是例外：
-两者在进程生命周期内固定不变，因此重载时会输出警告，并保留当前运行值，直到网关重启。
+参见 [CLI 操作](/zh/advanced/cli#配置重新加载)。如果新文件加载失败，则不会发生任何变化。`server.host`、`server.port` 和 `server.pid_file` 是例外：
+它们在进程生命周期内固定不变，因此重载时会输出警告，并保留当前运行值，直到网关重启。
 
 ## Docker
 

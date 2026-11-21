@@ -230,7 +230,7 @@ Zmiany w tym pliku stosujesz w działającym gatewayu poleceniem
 `gomodel --reload`, które ponownie odczytuje plik i środowisko oraz przebudowuje
 gateway w miejscu – zobacz [Operacje CLI](/pl/advanced/cli#przeładowanie-konfiguracji).
 Jeśli nowego pliku nie da się załadować, nic się nie zmienia. Wyjątkami są
-`server.port` i `server.pid_file`: oba są stałe przez cały czas życia procesu,
+`server.host`, `server.port` i `server.pid_file`: są stałe przez cały czas życia procesu,
 więc przeładowanie loguje ostrzeżenie i zachowuje bieżące wartości do restartu
 gatewaya.
 

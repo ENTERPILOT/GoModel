@@ -42,6 +42,7 @@ The most common way to configure GoModel. Set any of the variables below to over
 | Variable             | Description                                           | Default                |
 | -------------------- | ----------------------------------------------------- | ---------------------- |
 | `PORT`               | HTTP server port                                      | `8080`                 |
+| `SERVER_HOST`        | Address the listener binds. Empty listens on every interface; set `127.0.0.1` to serve only the local machine | _(empty, all interfaces)_ |
 | `BASE_PATH`          | Mount path prefix, for example `/g`                   | `/`                    |
 | `GOMODEL_MASTER_KEY` | Authentication key for securing the gateway           | _(empty, unsafe mode)_ |
 | `MASTER_KEY_DISABLED` | Turn off master key authentication, leaving [managed keys](/features/users) and authentication extensions as the only credentials | `false`                |

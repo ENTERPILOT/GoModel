@@ -43,8 +43,9 @@ gomodel --health
 - Andernfalls ein Exit-Code ungleich null (Verbindung abgelehnt, Status ungleich
   `200` oder ein anderer Statuswert).
 
-Die Abfrage zielt immer auf das Loopback-Interface (`127.0.0.1`), da sie im
-selben Container wie der Server läuft. `PORT` und `BASE_PATH` leitet sie jedoch
+Die Abfrage zielt auf das Loopback-Interface (`127.0.0.1`), da sie im selben
+Container wie der Server läuft, oder auf die Adresse aus `SERVER_HOST`, wenn der
+Listener an eine bestimmte Adresse bindet. `PORT` und `BASE_PATH` leitet sie
 aus der Konfiguration ab, statt `8080` und `/health` fest zu verdrahten.
 Begrenzen Sie die Dauer des Requests mit `--health-timeout`:
 
@@ -70,8 +71,10 @@ Gateway erkennen und neu starten.
 ## Readiness-Abfrage
 
 `--ready` fragt `/health/ready` ab. Dieser Endpunkt meldet, ob die Instanz
-Traffic erhalten soll. Anders als Liveness prüft Readiness die Abhängigkeiten,
-für die das Gateway selbst verantwortlich ist:
+Traffic erhalten soll. Die Abfrage geht an dieselbe Adresse wie `--health`,
+also auch an `SERVER_HOST`, wenn der Listener an eine bestimmte Adresse gebunden
+ist. Anders als Liveness prüft Readiness die Abhängigkeiten, für die das Gateway
+selbst verantwortlich ist:
 
 - **Storage** ist erforderlich. Ist das Backend (SQLite/PostgreSQL/MongoDB)
   nicht erreichbar, meldet Readiness `not_ready` (HTTP `503`).
@@ -183,9 +186,10 @@ docker exec my-gateway /gomodel --reload
 
 ### Was ein Reload nicht ändert
 
-- **`PORT`** – der Socket bleibt gebunden, damit keine Verbindung abgelehnt
-  wird; ein Portwechsel erfordert einen Neustart. Das Gateway protokolliert
-  eine Warnung mit beiden Ports.
+- **`PORT`** und **`SERVER_HOST`** – der Socket bleibt gebunden, damit keine
+  Verbindung abgelehnt wird; ein Wechsel des Ports oder der Bind-Adresse
+  erfordert einen Neustart. Das Gateway protokolliert eine Warnung mit dem
+  gebundenen und dem konfigurierten Wert.
 - **`PID_FILE`** – sie bezeichnet den bereits laufenden Prozess.
 - **`GOMODEL_DEMO_MODE`** – die Demo-Warnungen werden einmalig beim Start
   eingerichtet.

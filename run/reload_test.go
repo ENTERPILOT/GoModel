@@ -15,6 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/config"
 )
 
 // A .env value applies only where the real environment has nothing to say,
@@ -189,6 +191,22 @@ func TestBoundSocketSurvivesGenerations(t *testing.T) {
 	require.NoError(t, err)
 
 	_ = waiting.Close()
+}
+
+// The default, every interface, is covered by the address the configuration
+// yields; binding it here would open a port to the network during tests.
+func TestListenOnBindsTheConfiguredHost(t *testing.T) {
+	socket, err := listenOn(config.ServerConfig{Host: "127.0.0.1", Port: "0"}.ListenAddress())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = socket.Close() })
+
+	listener, err := socket.next()
+	require.NoError(t, err)
+	defer listener.Close()
+
+	bound, ok := listener.Addr().(*net.TCPAddr)
+	require.True(t, ok)
+	assert.True(t, bound.IP.IsLoopback(), "bound %s", bound)
 }
 
 func testSocket(t *testing.T) *boundSocket {
