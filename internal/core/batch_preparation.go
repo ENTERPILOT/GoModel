@@ -75,7 +75,11 @@ func RewriteBatchSource(
 		return nil, NewInvalidRequestError("batch rewrite function is required", nil)
 	}
 
+	if err := ValidateBatchEndpoint(req.Endpoint); err != nil {
+		return nil, err
+	}
 	forward := cloneBatchRequest(req)
+	forward.Endpoint = BatchItemPath(forward.Endpoint)
 	result := &BatchRewriteResult{Request: forward}
 	hints := map[string]string{}
 
@@ -116,6 +120,7 @@ func rewriteInlineBatchItems(ctx context.Context, req *BatchRequest, operations 
 		if err != nil {
 			return nil, NewInvalidRequestError(fmt.Sprintf("batch item %d: %s", i, err.Error()), err)
 		}
+		req.Requests[i].URL = BatchItemPath(item.URL)
 		if !handled {
 			continue
 		}
@@ -227,27 +232,33 @@ func rewriteBatchJSONLContent(
 				err,
 			)
 		}
+
 		recordBatchEndpointHint(hints, defaultEndpoint, item)
 
 		decoded, handled, err := MaybeDecodeKnownBatchItemRequest(defaultEndpoint, item, operations...)
 		if err != nil {
 			return nil, nil, false, wrapBatchInputFileLineError(lineNo, err)
 		}
-		if !handled {
+		lineChanged := false
+		if path := BatchItemPath(item.URL); path != item.URL {
+			item.URL = path
+			lineChanged = true
+		}
+		if handled {
+			body, err := rewrite(ctx, item, decoded)
+			if err != nil {
+				return nil, nil, false, wrapBatchInputFileLineError(lineNo, err)
+			}
+			if !jsonSemanticallyEqual(item.Body, body) {
+				item.Body = CloneRawJSON(body)
+				lineChanged = true
+			}
+		}
+		if !lineChanged {
 			out.Write(rawLine)
 			continue
 		}
 
-		body, err := rewrite(ctx, item, decoded)
-		if err != nil {
-			return nil, nil, false, wrapBatchInputFileLineError(lineNo, err)
-		}
-		if jsonSemanticallyEqual(item.Body, body) {
-			out.Write(rawLine)
-			continue
-		}
-
-		item.Body = CloneRawJSON(body)
 		encoded, err := json.Marshal(item)
 		if err != nil {
 			return nil, nil, false, NewInvalidRequestError(
