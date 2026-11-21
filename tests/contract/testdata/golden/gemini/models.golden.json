@@ -212,6 +212,24 @@
     },
     {
       "created": 0,
+      "id": "veo-3.1-generate-preview",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "veo-3.1-fast-generate-preview",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "veo-3.1-lite-generate-preview",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
       "id": "gemini-3.5-transcribe-live",
       "object": "model",
       "owned_by": "google"

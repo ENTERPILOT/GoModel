@@ -500,14 +500,16 @@
           "reasoning": true
         },
         "categories": [
-          "text_generation"
+          "text_generation",
+          "video"
         ],
         "context_window": 131072,
         "description": "Gemini Omni Flash Preview",
         "display_name": "Gemini Omni Flash Preview",
         "max_output_tokens": 65536,
         "modes": [
-          "chat"
+          "chat",
+          "video_generation"
         ]
       },
       "object": "model",
@@ -521,14 +523,16 @@
           "reasoning": true
         },
         "categories": [
-          "text_generation"
+          "text_generation",
+          "video"
         ],
         "context_window": 131072,
         "description": "Gemini Omni 1.1 Flash",
         "display_name": "Gemini Omni 1.1 Flash",
         "max_output_tokens": 65536,
         "modes": [
-          "chat"
+          "chat",
+          "video_generation"
         ]
       },
       "object": "model",
@@ -727,6 +731,57 @@
         "display_name": "Gemini Embedding 2",
         "modes": [
           "embedding"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "veo-3.1-generate-preview",
+      "metadata": {
+        "categories": [
+          "video"
+        ],
+        "context_window": 480,
+        "description": "Veo 3.1",
+        "display_name": "Veo 3.1",
+        "modes": [
+          "video_generation"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "veo-3.1-fast-generate-preview",
+      "metadata": {
+        "categories": [
+          "video"
+        ],
+        "context_window": 480,
+        "description": "Veo 3.1 fast",
+        "display_name": "Veo 3.1 fast",
+        "modes": [
+          "video_generation"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "veo-3.1-lite-generate-preview",
+      "metadata": {
+        "categories": [
+          "video"
+        ],
+        "context_window": 480,
+        "description": "Veo 3.1 lite",
+        "display_name": "Veo 3.1 lite",
+        "modes": [
+          "video_generation"
         ]
       },
       "object": "model",

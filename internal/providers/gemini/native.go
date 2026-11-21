@@ -1508,11 +1508,13 @@ func displayModelIDFromGemini(model, backend string) string {
 // isGeminiExposedModel normalizes provider model names and exposes only the
 // model families reachable through the Gemini generateContent and
 // OpenAI-compatible endpoints, including the Gemma open models Google serves
-// there. Families such as imagen-* use different upstream endpoints.
+// there. Families such as imagen-* use different upstream endpoints; veo-*
+// video models are listed for their catalog metadata and pricing.
 func isGeminiExposedModel(modelID string) bool {
 	modelID = normalizeGeminiModelID(modelID)
 	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "gemma-") ||
-		strings.HasPrefix(modelID, "text-embedding-") || strings.HasPrefix(modelID, "imagen-")
+		strings.HasPrefix(modelID, "text-embedding-") || strings.HasPrefix(modelID, "imagen-") ||
+		strings.HasPrefix(modelID, "veo-")
 }
 
 func nativeProviderError(providerName, message string, err error) *core.GatewayError {
