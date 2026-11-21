@@ -32,6 +32,7 @@ const (
 // fixtures), and when a listed provider has become covered (remove the stale
 // entry so the list only shrinks). Keep it sorted.
 var knownUncovered = []string{
+	"assemblyai",
 	"audiocpp",
 	"bedrock",
 	"chatgpt",

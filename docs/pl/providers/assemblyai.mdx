@@ -1,0 +1,132 @@
+---
+title: "AssemblyAI"
+description: "Skonfiguruj AssemblyAI w GoModel: modele zamiany mowy na tekst, formaty odpowiedzi, endpoint EU i usuwanie transkrypcji po każdym żądaniu."
+icon: "audio-lines"
+tag: "Beta"
+keywords: ["AssemblyAI", "speech-to-text", "zamiana mowy na tekst", "STT", "transkrypcja", "transcription", "napisy", "subtitles", "voice", "głos", "konfiguracja providera", "provider setup"]
+---
+
+<Warning>
+  Obsługa AssemblyAI jest w wersji beta. Jest objęta automatycznymi testami na
+  symulowanym API zbudowanym według opublikowanej dokumentacji AssemblyAI, ale
+  nie została jeszcze sprawdzona z prawdziwą usługą AssemblyAI. Zgłaszaj
+  napotkane problemy.
+</Warning>
+
+AssemblyAI to provider zamiany mowy na tekst. GoModel udostępnia jego
+[API dla nagranego audio](https://www.assemblyai.com/docs/pre-recorded-audio/getting-started/transcribe-an-audio-file)
+za standardowym endpointem `/v1/audio/transcriptions`. Czat, `/responses`,
+embeddingi i `/v1/audio/speech` zwracają `invalid_request_error` dla modeli
+kierowanych do AssemblyAI.
+
+## Konfiguracja
+
+```bash
+ASSEMBLYAI_API_KEY=...
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  assemblyai:
+    type: assemblyai
+    api_key: "${ASSEMBLYAI_API_KEY}"
+    # base_url domyślnie ma wartość "https://api.assemblyai.com".
+```
+
+Domyślny endpoint przetwarza audio w USA. Aby dane pozostawały w UE, ustaw
+`ASSEMBLYAI_BASE_URL=https://api.eu.assemblyai.com`.
+
+## Modele
+
+| Model | Zastosowanie |
+| ----- | ------------ |
+| `assemblyai-stt-3-7` | Najdokładniejszy model AssemblyAI, 32 języki |
+| `universal-2` | Niższy koszt, 99 języków |
+
+AssemblyAI nie ma endpointu z listą modeli, więc GoModel sam wystawia te dwa.
+Identyfikator modelu jest wysyłany jako wartość `speech_models` w AssemblyAI.
+O tym, jak AssemblyAI wybiera model zależnie od języka, przeczytasz w
+[przewodniku AssemblyAI po modelach](https://www.assemblyai.com/docs/pre-recorded-audio/select-the-speech-model).
+
+```bash curl
+curl https://your-gateway/v1/audio/transcriptions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -F "file=@meeting.mp3" \
+  -F "model=assemblyai-stt-3-7"
+```
+
+## Pola żądania
+
+| Pole OpenAI | Wysyłane do AssemblyAI jako |
+| ----------- | --------------------------- |
+| `model` | `speech_models` |
+| `language` | `language_code`; gdy go brak, AssemblyAI sam wykrywa język |
+| `prompt` | `prompt` (kontekst nagrania; używa go tylko `assemblyai-stt-3-7`) |
+| `temperature` | `temperature` (używa jej tylko `assemblyai-stt-3-7`) |
+
+`response_format` przyjmuje `json` (domyślnie), `text`, `verbose_json`, `srt`
+i `vtt`:
+
+- `srt` i `vtt` generuje eksport napisów AssemblyAI.
+- `verbose_json` zwraca `segments` zbudowane ze zdań AssemblyAI. Dodaj
+  `timestamp_granularities[]=word`, aby dostać tablicę `words`; samo `word`
+  pomija `segments`. AssemblyAI nie
+  ma danych dekodowania Whispera, więc pola segmentu `seek`, `tokens`,
+  `temperature`, `avg_logprob`, `compression_ratio` i `no_speech_prob` są zawsze
+  zerowe lub puste. `language` to kod języka AssemblyAI, na przykład `en_us`.
+
+Pozostałe pola formularza nie są przekazywane. Do funkcji AssemblyAI bez
+odpowiednika w OpenAI, takich jak etykiety mówców, użyj
+[passthrough](#passthrough).
+
+## Transkrypcja jest asynchroniczna po stronie AssemblyAI
+
+AssemblyAI transkrybuje w tle, więc jedno żądanie do GoModel to kilka wywołań
+upstream: przesłanie audio, utworzenie zadania transkrypcji i sprawdzanie go co
+jedną do trzech sekund, aż się zakończy. Klient i tak dostaje jedną zwykłą
+odpowiedź.
+
+GoModel czeka na zadanie do 10 minut, a potem zwraca `504`. Zadanie, którego
+AssemblyAI nie mógł przetworzyć (brak strumienia audio, nieobsługiwany typ
+pliku, audio krótsze niż 160 ms), zwraca `400` z komunikatem AssemblyAI;
+zadanie zakończone wewnętrznym błędem AssemblyAI zwraca `502`.
+
+## Przechowywanie danych
+
+AssemblyAI przechowuje przesłane audio i gotowe transkrypcje do końca swojego
+[okresu retencji](https://www.assemblyai.com/docs/data-retention-and-model-training).
+Po każdym żądaniu, także nieudanym, przerwanym przez limit czasu i anulowanym,
+GoModel próbuje usunąć transkrypcję, a wraz z nią przesłane audio. Nieudane usunięcie jest logowane z identyfikatorem transkrypcji i nie
+powoduje błędu żądania.
+
+Audio, dla którego nie udało się utworzyć zadania transkrypcji, nie ma
+transkrypcji do usunięcia i pozostaje do czasu, aż usunie je retencja
+AssemblyAI.
+
+## Śledzenie kosztów
+
+AssemblyAI rozlicza się za godzinę audio. Dla `json` i `verbose_json` GoModel
+zapisuje czas trwania audio raportowany przez AssemblyAI; `text`, `srt` i `vtt`
+go nie zawierają, więc GoModel mierzy wtedy przesłany plik (tylko WAV i MP3).
+Modeli AssemblyAI nie ma w katalogu modeli, więc cenę ustaw samodzielnie: dodaj
+[nadpisanie cennika](/pl/features/cost-tracking#nadpisywanie-cennika) z
+`per_second_input`, czyli ceną za godzinę z
+[cennika AssemblyAI](https://www.assemblyai.com/pricing) podzieloną przez 3600.
+
+## Passthrough
+
+Dodaj `assemblyai` do `ENABLED_PASSTHROUGH_PROVIDERS`, aby sięgnąć do natywnego
+API AssemblyAI pod `/p/assemblyai/...`, na przykład
+`POST /p/assemblyai/v2/transcript`. Żądania passthrough nie są sprzątane:
+usunięcie tych transkrypcji należy do wywołującego.
+
+## Niezaimplementowane
+
+- **Strumieniowa zamiana mowy na tekst.** Websocket realtime AssemblyAI ma
+  własny protokół wiadomości, a `/v1/realtime` w GoModel przekazuje tylko sesje
+  zgodne z OpenAI.
+- **Text-to-speech, Sync STT i Dictation API.** Działają na osobnych hostach
+  AssemblyAI.
+- **Tłumaczenia audio** (`/v1/audio/translations`).

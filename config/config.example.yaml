@@ -739,6 +739,13 @@ providers:
     #   - id: "openai/gpt-4"
     #   - id: "anthropic/claude-sonnet-latest"
 
+  assemblyai:
+    type: assemblyai
+    api_key: "${ASSEMBLYAI_API_KEY}"
+    # base_url defaults to "https://api.assemblyai.com"; use
+    # "https://api.eu.assemblyai.com" for EU data residency.
+    # Speech-to-text only: serves /v1/audio/transcriptions, no chat.
+
   elevenlabs:
     type: elevenlabs
     api_key: "${ELEVENLABS_API_KEY}"
