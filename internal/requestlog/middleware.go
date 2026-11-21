@@ -68,7 +68,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				RequestID: requestID,
 				ClientIP:  c.RealIP(),
 				Method:    req.Method,
-				Path:      req.URL.Path,
+				Path:      core.RecordedEndpoint(req.URL.Path),
 				UserPath:  userPath,
 				Data: &LogData{
 					UserAgent: req.UserAgent(),

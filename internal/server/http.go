@@ -528,6 +528,12 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/messages/batches/:id/cancel", handler.CancelMessagesBatch)
 	e.DELETE("/v1/messages/batches/:id", handler.DeleteMessagesBatch)
 	e.GET("/v1/messages/batches/:id/results", handler.MessagesBatchResults)
+	// Gemini API dialect. The model, which may contain slashes, and the method
+	// share the last path segment ({model}:generateContent), so both verbs are
+	// wildcard routes; they only match under /v1beta/models/.
+	e.GET("/v1beta/models", handler.ListGeminiModels)
+	e.GET("/v1beta/models/*", handler.GetGeminiModel)
+	e.POST("/v1beta/models/*", handler.GeminiModelMethod)
 	e.POST("/v1/responses/input_tokens", handler.ResponseInputTokens)
 	e.POST("/v1/responses/compact", handler.CompactResponse)
 	e.GET("/v1/responses/:id/input_items", handler.ListResponseInputItems)

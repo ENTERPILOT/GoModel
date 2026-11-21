@@ -28,6 +28,10 @@ func TestOperationPathsCoverClassifiedPaths(t *testing.T) {
 		"/v1/audio/translations", "/v1/images/generations", "/v1/images/edits",
 		"/v1/realtime", "/v1/realtime/translations/calls", "/mcp", "/mcp/github",
 		"/p/openai/v1/models",
+		// Gemini requests are recorded under the path template, not the
+		// request path, which carries the model.
+		RecordedEndpoint("/v1beta/models/gemini-2.5-flash:generateContent"),
+		RecordedEndpoint("/v1beta/models/openai/gpt-4o:streamGenerateContent"),
 	}
 	for _, path := range paths {
 		want := DescribeEndpointPath(path).Operation

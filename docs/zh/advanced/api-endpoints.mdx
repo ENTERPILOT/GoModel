@@ -100,6 +100,17 @@ WebRTC 翻译通话除外：其媒体流不经过网关，因此不会被计量�
 | `/v1/messages`              | POST   | 通过转换后的模型路由调用 Anthropic Messages API（支持流式传输） |
 | `/v1/messages/count_tokens` | POST   | 基于启发式方法估算 Anthropic Messages 的输入 Token 数 |
 
+## 兼容 Gemini 的 API
+
+Beta；参见 [Gemini API](/zh/advanced/gemini-api)。
+
+| 端点 | 方法 | 说明 |
+| --- | --- | --- |
+| `/v1beta/models/{model}:generateContent` | POST | 通过转换后的模型路由调用 Gemini `generateContent` |
+| `/v1beta/models/{model}:streamGenerateContent` | POST | 以 SSE（`alt=sse`）流式返回 `generateContent` |
+| `/v1beta/models` | GET | 以 Gemini 列表格式返回模型目录 |
+| `/v1beta/models/{model}` | GET | 以 Gemini 模型格式返回单个模型 |
+
 ## Decisions API
 
 在配置了 `openai`、`jev` 或 `openrouter` 提供商时可用；请参阅

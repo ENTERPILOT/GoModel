@@ -54,10 +54,10 @@ klienta). Manifest może je deklarować; GoModel sprawdza, czy
 interfejsy są zaimplementowane, i ignoruje je w runtime. Rodzaj `route` jest
 używany przez modele wirtualne, zobacz [Pluginy strategii routingu](#pluginy-strategii-routingu).
 
-Fazy dotyczą `/v1/chat/completions`, `/v1/responses` i `/v1/messages`.
-Requesty Anthropic są tłumaczone na format czatu przed uruchomieniem jakiegokolwiek hooka,
-więc plugin widzi jeden kształt; `Meta.Dialect` zwraca `anthropic_messages`, gdy ma to
-znaczenie. Elementy inline `/v1/batches` przechodzą przez fazę `prompt`, gdy
+Fazy dotyczą `/v1/chat/completions`, `/v1/responses`, `/v1/messages` oraz tras Gemini API.
+Requesty Anthropic i Gemini są tłumaczone na format czatu przed uruchomieniem jakiegokolwiek
+hooka, więc plugin widzi jeden kształt; `Meta.Dialect` zwraca `anthropic_messages` albo
+`gemini_generate_content`, gdy ma to znaczenie. Elementy inline `/v1/batches` przechodzą przez fazę `prompt`, gdy
 włączone jest `guardrails.enable_for_batch_processing`.
 
 ## Wykonywanie łańcucha

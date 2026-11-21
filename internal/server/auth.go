@@ -117,7 +117,11 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 			}
 
 			token, tokenErr := requestAuthToken(c.Request())
-			hasExplicitCredential := c.Request().Header.Get("Authorization") != "" || c.Request().Header.Get("x-api-key") != ""
+			hasExplicitCredential := c.Request().Header.Get("Authorization") != "" || c.Request().Header.Get("x-api-key") != "" ||
+				geminiCredential(c.Request()) != ""
+			// The key is consumed here; nothing later in the chain may read
+			// it back out of the URL.
+			stripGeminiQueryKey(c.Request())
 			if hasExplicitCredential {
 				// Explicit credentials take precedence over ambient extension
 				// sessions. Hide every identity value installed by outer extension
@@ -322,8 +326,9 @@ func extensionAuthenticationError(c *echo.Context) *core.GatewayError {
 // requestAuthToken extracts the caller's credential from the request. The
 // primary scheme is "Authorization: Bearer <token>"; the Anthropic-native
 // "x-api-key: <token>" header is accepted as a fallback so Anthropic SDK
-// clients work without switching their auth configuration. A non-empty
-// errMessage describes why no token could be extracted.
+// clients work without switching their auth configuration, and so are the
+// Gemini credentials on the Gemini API routes (see geminiCredential). A
+// non-empty errMessage describes why no token could be extracted.
 func requestAuthToken(r *http.Request) (token, errMessage string) {
 	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
 		const prefix = "Bearer "
@@ -335,7 +340,51 @@ func requestAuthToken(r *http.Request) (token, errMessage string) {
 	if apiKey := r.Header.Get("x-api-key"); apiKey != "" {
 		return apiKey, ""
 	}
+	if key := geminiCredential(r); key != "" {
+		return key, ""
+	}
+	if core.IsGeminiAPIPath(r.URL.Path) {
+		return "", "missing credentials: send 'x-goog-api-key: <token>' or 'Authorization: Bearer <token>'"
+	}
 	return "", "missing credentials: send 'Authorization: Bearer <token>' or 'x-api-key: <token>'"
+}
+
+// geminiQueryKeyParam is the query parameter Gemini REST clients put the API
+// key in.
+const geminiQueryKeyParam = "key"
+
+// geminiCredential returns the credential a Gemini client sent the way the
+// Gemini API takes it: the "x-goog-api-key" header the SDKs use, or the
+// "?key=" query parameter of plain REST calls. Both are read on the Gemini
+// API routes only, so no other route starts accepting a credential in its
+// URL.
+func geminiCredential(r *http.Request) string {
+	if !core.IsGeminiAPIPath(r.URL.Path) {
+		return ""
+	}
+	if key := r.Header.Get("x-goog-api-key"); key != "" {
+		return key
+	}
+	if r.URL.RawQuery == "" {
+		return ""
+	}
+	return r.URL.Query().Get(geminiQueryKeyParam)
+}
+
+// stripGeminiQueryKey removes the "?key=" credential from the request URL of
+// a Gemini API route, leaving every other parameter (alt=sse) in place. The
+// access log already sees a redacted RequestURI; this keeps the key away from
+// handlers, plugins and anything else that reads the URL after authentication.
+func stripGeminiQueryKey(r *http.Request) {
+	if r.URL.RawQuery == "" || !core.IsGeminiAPIPath(r.URL.Path) {
+		return
+	}
+	query := r.URL.Query()
+	if !query.Has(geminiQueryKeyParam) {
+		return
+	}
+	query.Del(geminiQueryKeyParam)
+	r.URL.RawQuery = query.Encode()
 }
 
 // managedDashboardAccessKey marks requests authenticated with a managed key.
