@@ -79,11 +79,13 @@ type Options struct {
 	// gomodel binary passes its build-tagged implementation. Default: no-op.
 	ConfigureSwaggerDocs func(basePath string)
 	// Setup, when set, runs once the process is committed to starting the
-	// gateway — after CLI parsing, --version/--health/--ready
-	// short-circuits, dotenv loading, and logging configuration, but before
-	// config loading. Register extensions here so operator tooling modes
-	// stay silent; log handler wrappers are the exception and must be
-	// registered before Run. A returned error aborts startup.
+	// gateway, or to a command that loads its configuration (secrets
+	// reencrypt, config export, usage import) — after CLI parsing,
+	// --version/--health/--ready short-circuits, dotenv loading, and logging
+	// configuration, but before config loading. Register extensions here so
+	// operator tooling modes stay silent; log handler wrappers are the
+	// exception and must be registered before Run. A returned error aborts
+	// startup.
 	Setup func(ctx context.Context) error
 	// SetupConfig runs once after the initial configuration has been loaded and
 	// before the application is constructed. It lets custom distributions
@@ -200,6 +202,18 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
+	var usageImportSource string
+	if cliOpts.UsageArgs != nil {
+		usageImportSource, err = parseUsageArgs(opts.ProductName, cliOpts.UsageArgs, opts.Stdout, opts.Stderr)
+		if err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return &usageError{err: err}
+		}
+		if usageImportSource == "" {
+			return nil // help
+		}
+	}
+
 	if cliOpts.Version {
 		fmt.Fprintln(opts.Stdout, versionLine(opts.ProductName))
 		return nil
@@ -254,6 +268,13 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	if configExport {
 		if err := runConfigExport(ctx, opts); err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return err
+		}
+		return nil
+	}
+	if usageImportSource != "" {
+		if err := runUsageImport(ctx, opts, usageImportSource); err != nil {
 			fmt.Fprintln(opts.Stderr, err)
 			return err
 		}

@@ -173,6 +173,18 @@ gomodel secrets reencrypt [--rotate-data-key]
 
 请参阅[静态数据加密](/zh/advanced/encryption-at-rest)。
 
+## 从另一个实例导入用量
+
+`gomodel usage import` 会从另一个 GoModel 实例的 SQLite 数据库文件读取其用量历史，
+并复制到本实例使用的数据库（SQLite、PostgreSQL 或 MongoDB）中。请使用与网关相同的配置运行。
+源文件以只读方式打开，已存在的记录会被跳过，因此可以安全地重复运行。
+
+```bash
+gomodel usage import /path/to/other/gomodel.db
+```
+
+参见[合并多个实例的用量](/zh/features/cost-tracking#合并多个实例的用量)。
+
 ## 从 LiteLLM 迁移
 
 `gomodel migrate litellm` 会将 LiteLLM 代理的 `config.yaml` 转换为 GoModel 的
