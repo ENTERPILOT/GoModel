@@ -89,6 +89,21 @@ func TestNormalizeMCPConfigRejectsInvalid(t *testing.T) {
 			wantErr: "tool_timeout",
 		},
 		{
+			name:    "negative cache ttl",
+			servers: map[string]MCPServerConfig{"a": {URL: "https://x/mcp", Cache: MCPToolCacheConfig{TTL: -1}}},
+			wantErr: "cache.ttl must not be negative",
+		},
+		{
+			name:    "cache ttl over a year",
+			servers: map[string]MCPServerConfig{"a": {URL: "https://x/mcp", Cache: MCPToolCacheConfig{TTL: maxMCPToolCacheTTL + 1}}},
+			wantErr: "cache.ttl must be at most",
+		},
+		{
+			name:    "cache tools without ttl",
+			servers: map[string]MCPServerConfig{"a": {URL: "https://x/mcp", Cache: MCPToolCacheConfig{Tools: []string{"search"}}}},
+			wantErr: "cache.ttl is required",
+		},
+		{
 			name:    "stdio with headers",
 			servers: map[string]MCPServerConfig{"a": {Command: "npx", Headers: map[string]string{"X": "y"}}},
 			wantErr: "headers are only valid",
@@ -129,6 +144,28 @@ func TestNormalizeMCPConfigCanonicalizesUserPaths(t *testing.T) {
 	want := []string{"/team/a", "/team/b"}
 	require.Equal(t, want, got)
 	assert.Equal(t, []string{"/team/a/contractors"}, cfg.Servers["a"].DisallowedUserPaths)
+}
+
+func TestNormalizeMCPConfigToolCache(t *testing.T) {
+	cfg := MCPConfig{Servers: map[string]MCPServerConfig{
+		"plain":  {URL: "https://x/mcp"},
+		"hinted": {URL: "https://x/mcp", Cache: MCPToolCacheConfig{TTL: 300, Tools: []string{" ", ""}}},
+		"listed": {URL: "https://x/mcp", Cache: MCPToolCacheConfig{TTL: 60, Tools: []string{" search ", "fetch", "search"}}},
+	}}
+	require.NoError(t, normalizeMCPConfig(&cfg))
+
+	assert.Equal(t, MCPToolCacheConfig{}, cfg.Servers["plain"].Cache, "caching must be off unless a server opts in")
+	assert.Equal(t, MCPToolCacheConfig{TTL: 300}, cfg.Servers["hinted"].Cache)
+	assert.Equal(t, MCPToolCacheConfig{TTL: 60, Tools: []string{"search", "fetch"}}, cfg.Servers["listed"].Cache)
+}
+
+func TestApplyMCPEnvReadsToolCache(t *testing.T) {
+	t.Setenv("MCP_SERVERS", `{"docs":{"url":"https://docs.example/mcp","cache":{"ttl":300,"tools":["search"]}}}`)
+	cfg := &Config{}
+	require.NoError(t, applyMCPEnv(cfg))
+	require.NoError(t, normalizeMCPConfig(&cfg.MCP))
+
+	assert.Equal(t, MCPToolCacheConfig{TTL: 300, Tools: []string{"search"}}, cfg.MCP.Servers["docs"].Cache)
 }
 
 func TestApplyMCPEnvMergesOverYAML(t *testing.T) {

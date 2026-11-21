@@ -273,6 +273,7 @@ unten.
 | `REDIS_URL`         | Redis-Verbindungs-URL              | _(leer)_        |
 | `REDIS_KEY_MODELS`     | Redis-Key für den Modell-Cache           | `gomodel:models`    |
 | `REDIS_KEY_RESPONSES`  | Redis-Key für den Response-Cache        | `gomodel:response:` |
+| `REDIS_KEY_MCP`        | Redis-Key-Präfix für [gecachte MCP-Tool-Ergebnisse](/de/features/mcp-gateway#tool-ergebnisse-cachen); ohne `REDIS_URL` oder `cache.mcp.redis.url` bleiben sie im Prozessspeicher | `gomodel:mcp:` |
 | `REDIS_TTL_MODELS`     | TTL in Sekunden für den Modell-Cache      | `86400` (24h)    |
 | `REDIS_TTL_RESPONSES`  | TTL in Sekunden für den Response-Cache   | `3600` (1h)      |
 | `RESPONSE_CACHE_PARTITION_BY_USER_PATH` | Gibt jedem effektiven `user_path` eigene Einträge im exakten und semantischen Cache | `false` |

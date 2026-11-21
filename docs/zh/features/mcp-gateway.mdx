@@ -172,6 +172,7 @@ MCP_SERVERS='{"github":{"url":"https://api.githubcopilot.com/mcp","headers":{"Au
 | `user_paths` | 所有人 | 可见的子树，与虚拟模型相同 |
 | `disallowed_user_paths` | 无 | 永远看不到该服务器的子树；优先于 `user_paths` |
 | `tool_timeout` | `30s` | 单次 `tools/call` 的时间上限 |
+| `cache` | 关闭 | [缓存工具结果](#缓存工具结果)：`ttl`（秒），可选的 `tools` |
 
 无效的声明（错误的 slug、缺少 `url`/`command`、未知的传输方式）会使启动中止并给出明确的错误，而不是静默丢弃该服务器。
 
@@ -332,6 +333,36 @@ mcp:
       url: https://api.githubcopilot.com/mcp
       disallowed_tools: ["delete_repository", "merge_pull_request"]
 ```
+
+## 缓存工具结果
+
+服务器可以从缓存中应答重复的工具调用，而不必再次调用上游。缓存默认关闭，因为工具调用通常不是幂等的：被缓存的 `create_issue` 会报告成功，却什么也没有创建。为服务器设置 TTL 即可开启：
+
+```yaml
+mcp:
+  servers:
+    docs:
+      url: https://docs.example.com/mcp
+      cache:
+        ttl: 300 # 秒；默认 0 = 关闭
+        tools: ["search", "get_page"] # 可选
+```
+
+| 字段 | 默认值 | 含义 |
+| --- | --- | --- |
+| `cache.ttl` | `0`（关闭） | 结果从缓存返回的秒数，最长一年。设置了 `tools` 时必填 |
+| `cache.tools` | 只读工具 | 要缓存的上游工具名称。为空时只缓存服务器标注了 `readOnlyHint` 的工具 |
+
+适合为缓慢、受速率限制或按调用计费的查询开启，例如文档搜索或网页搜索；TTL 应设为可以接受的结果过期时长。会修改数据的工具，以及必须返回最新结果的查询，请保持关闭。
+
+- **缓存哪些工具。** 未设置 `tools` 时，只缓存服务器标记为 `readOnlyHint: true` 的工具。该提示来自上游，GoModel 不会对其进行验证，因此对于不受您控制的服务器，请明确列出 `tools`。列出的工具无论是否带有该提示都会被缓存。
+- **一个条目**对应一个服务器、调用它所用的凭据、一个工具和一组参数。键的顺序和空白字符不影响匹配；上游收到的参数按键排序。更改服务器的 URL、请求头或 TTL，或重新通过 OAuth 登录，都会从空缓存开始。OAuth 登录已过期的服务器不会从缓存应答。
+- **条目在调用方之间共享。** 每个客户端都使用服务器自身的凭据访问服务器，因此结果与调用方无关。用户路径和工具过滤器仍会在每次调用时、读取缓存之前进行检查。
+- **绝不缓存：** 失败的调用、标记为 `isError` 的结果、要求客户端提供输入的结果、超过 1 MB 的结果，以及参数中重复出现同一对象键的调用。这些调用每次都会到达服务器。
+- **用量。** 缓存命中仍然是一条用量条目，其 `cache_type` 为 `exact`，与[响应缓存](/zh/features/cache#缓存分析)命中相同：除非传入 `cache_mode=all`，否则用量总计不包含它。
+- **存储位置。** 默认存放在进程内存中，每个实例最多 64 MB。设置 `REDIS_URL`（或 `cache.mcp.redis.url`）后，条目会以 `gomodel:mcp:` 前缀（`REDIS_KEY_MCP`）存入 Redis，并由所有副本共享。如果启动时无法连接 Redis，该实例会改用内存缓存。stdio 服务器的结果始终保存在运行它的实例的内存中，因为这些结果来自该主机的文件和状态。
+
+缓存在 `config.yaml` 或 `MCP_SERVERS` 中设置；在控制台中添加的服务器暂不支持缓存。
 
 ## 限制谁可以看到服务器
 

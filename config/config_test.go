@@ -66,7 +66,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "MASTER_KEY_DISABLED", "AUTH_KEY_PREFIX", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
 		"SERVER_TRUSTED_PROXIES", "SERVER_CLIENT_IP_HEADER", "SERVER_TRUSTED_HOPS", "SERVER_TLS_CERT_FILE", "SERVER_TLS_KEY_FILE", "SERVER_TLS_CLIENT_CA_FILE",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL", "GOMODEL_OFFLINE", "GOMODEL_VERSION_CHECK_ENABLED", "ALLOWLIST_UPSTREAM_METADATA",
-		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
+		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_KEY_MCP", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
 		"RESPONSE_CACHE_SIMPLE_ENABLED", "RESPONSE_CACHE_PARTITION_BY_USER_PATH",
 		"SEMANTIC_CACHE_ENABLED", "SEMANTIC_CACHE_THRESHOLD", "SEMANTIC_CACHE_TTL", "SEMANTIC_CACHE_MAX_CONV_MESSAGES",
 		"SEMANTIC_CACHE_EXCLUDE_SYSTEM_PROMPT", "SEMANTIC_CACHE_EMBEDDER_PROVIDER", "SEMANTIC_CACHE_EMBEDDER_MODEL",
@@ -1572,6 +1572,32 @@ func TestLoad_EnvOnlyRedisResponseCache(t *testing.T) {
 		assert.Equal(t, "redis://env-host:6379", cfg.Cache.Response.Simple.Redis.URL)
 		assert.Equal(t, "env:responses", cfg.Cache.Response.Simple.Redis.Key)
 		assert.Equal(t, 1800, cfg.Cache.Response.Simple.Redis.TTL)
+	})
+}
+
+func TestLoad_MCPToolCacheRedis(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		result, err := Load()
+		require.NoError(t, err)
+		assert.Equal(t, MCPCacheConfig{}, result.Config.Cache.MCP, "tool results stay in memory unless Redis is configured")
+
+		cfgDir := filepath.Join(dir, "config")
+		require.NoError(t, os.MkdirAll(cfgDir, 0o755))
+		yamlContent := "cache:\n  mcp:\n    redis:\n      url: redis://yaml-host:6379\n      key: \"yaml:mcp:\"\n"
+		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(yamlContent), 0o644))
+
+		result, err = Load()
+		require.NoError(t, err)
+		assert.Equal(t, RedisMCPConfig{URL: "redis://yaml-host:6379", Key: "yaml:mcp:"}, result.Config.Cache.MCP.Redis)
+
+		t.Setenv("REDIS_URL", "redis://env-host:6379")
+		t.Setenv("REDIS_KEY_MCP", "env:mcp:")
+
+		result, err = Load()
+		require.NoError(t, err)
+		assert.Equal(t, RedisMCPConfig{URL: "redis://env-host:6379", Key: "env:mcp:"}, result.Config.Cache.MCP.Redis)
 	})
 }
 

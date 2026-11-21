@@ -2,6 +2,7 @@ package mcpgateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
+	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/storage"
@@ -23,6 +25,8 @@ import (
 type Result struct {
 	Service *Service
 	Store   Store
+	// toolCache holds cached tool results; nil when no server caches.
+	toolCache cache.Store
 
 	closeOnce sync.Once
 	closeErr  error
@@ -40,6 +44,11 @@ func (r *Result) Close() error {
 		if r.Store != nil {
 			if err := r.Store.Close(); err != nil {
 				r.closeErr = fmt.Errorf("store close: %w", err)
+			}
+		}
+		if r.toolCache != nil {
+			if err := r.toolCache.Close(); err != nil {
+				r.closeErr = errors.Join(r.closeErr, fmt.Errorf("tool cache close: %w", err))
 			}
 		}
 	})
@@ -104,6 +113,15 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 	}
 
 	configSpecs := configServerSpecs(cfg.MCP.Servers, providerServers)
+	// The cache store is opened only when a server opts in, so a deployment
+	// that caches nothing holds no Redis connection for it.
+	var toolCache cache.Store
+	for _, spec := range configSpecs {
+		if spec.CacheTTL > 0 {
+			toolCache = newToolCacheStore(cfg.Cache.MCP)
+			break
+		}
+	}
 
 	virtualSpecs := make(map[string]VirtualServerSpec, len(cfg.MCP.VirtualServers))
 	for name, virtualCfg := range cfg.MCP.VirtualServers {
@@ -128,17 +146,22 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		ToolDiscovery:   cfg.MCP.ToolDiscovery,
 		Secrets:         secrets,
 		SharedStore:     sessions,
+		ToolCache:       toolCache,
 		// OAuth records are sealed as a whole: they hold tokens and client
 		// secrets.
 		oauthStore: newOAuthStore(rawStore, box),
 	})
 	if err != nil {
+		if toolCache != nil {
+			_ = toolCache.Close()
+		}
 		return nil, err
 	}
 
 	return &Result{
-		Service: service,
-		Store:   store,
+		Service:   service,
+		Store:     store,
+		toolCache: toolCache,
 	}, nil
 }
 
