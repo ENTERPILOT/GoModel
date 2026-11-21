@@ -231,7 +231,9 @@ System One use only the exact cache), streaming or not:
   Isolation only holds between API keys bound to a `user_path`. The master key
   and managed keys with no bound path choose their path through the
   [user path header](/features/user-path), so they can read any partition, as can
-  every caller when authentication is off.
+  every caller when authentication is off. Multi-tenant setups must bind every
+  key to a `user_path` or set `USER_PATH_HEADER_MASTER_KEY_ONLY=true`, which
+  makes unbound keys ignore the header.
 </Warning>
 
 Changing the setting causes cache misses for existing entries: they are never

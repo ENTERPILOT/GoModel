@@ -250,6 +250,9 @@ Streaming:
   Der Master-Key und verwaltete Keys ohne gebundenen Pfad wählen ihren Pfad über den
   [User-Path-Header](/de/features/user-path) und können daher jede Partition lesen;
   dasselbe gilt für alle Aufrufer, wenn die Authentifizierung deaktiviert ist.
+  Multi-Tenant-Setups müssen jeden Key an einen `user_path` binden oder
+  `USER_PATH_HEADER_MASTER_KEY_ONLY=true` setzen, damit Keys ohne Pfad den Header
+  ignorieren.
 </Warning>
 
 Eine Änderung der Einstellung führt bei bestehenden Einträgen zu Cache-Misses: Sie

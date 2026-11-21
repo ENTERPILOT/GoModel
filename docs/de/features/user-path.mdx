@@ -48,6 +48,26 @@ Hat der API-Key einen eigenen `user_path`, hat der Key Vorrang. GoModel übersch
 Header-Wert mit dem an den Key gebundenen Pfad, bevor Workflow-Abgleich, Request-Logging,
 Nutzungserfassung und Prüfungen des Modellzugriffs laufen.
 
+### Keys ohne gebundenen Pfad
+
+Standardmäßig dürfen der Master-Key **und verwaltete Keys ohne `user_path`** im
+Header einen beliebigen Pfad senden. Für diese Keys sind Rate-Limits und Budgets
+pro Pfad, die [Cache-Partition pro Pfad](/de/features/cache) und MCP-
+[`user_paths`](/de/features/mcp-gateway) keine Grenze: Der Aufrufer wählt den
+Pfad, auf den die Regeln passen.
+
+Multi-Tenant-Setups müssen jeden Key an einen `user_path` binden oder Keys ohne
+Pfad den Header ignorieren lassen:
+
+```bash
+USER_PATH_HEADER_MASTER_KEY_ONLY=true # Standard: false
+```
+
+Oder setzen Sie `server.user_path_header_master_key_only: true`. Requests eines
+Keys ohne Pfad werden dann behandelt, als hätten sie keinen Header gesendet. Der
+Master-Key kann weiterhin einen Pfad wählen, und Keys mit gebundenem Pfad bleiben
+unverändert.
+
 ## Zugriffsbereich
 
 Der an den Key gebundene `user_path` ist zugleich der **Zugriffsbereich** des Keys: der Teilbaum, den er
