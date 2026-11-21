@@ -2,6 +2,7 @@ package requestlog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -227,8 +228,17 @@ func ensureSQLSchema(ctx context.Context, db sqlx.DB) error {
 	if db.Dialect() != sqlx.PostgreSQL {
 		indexes = append(indexes, modelIndexStatements(db.Dialect())...)
 	}
+	// One Schema call per statement keeps them best-effort, and on PostgreSQL
+	// skips the indexes that already exist instead of queueing each for a
+	// lock on audit_logs. A statement that gave up on that lock ends the
+	// loop: each of the rest would wait it out again, a minute at a time.
 	for _, statement := range indexes {
-		if _, err := db.Exec(ctx, statement); err != nil {
+		err := db.Schema(ctx, statement)
+		if errors.Is(err, sqlx.ErrTableLocked) {
+			slog.Warn("request log table is locked; the remaining indexes are left for the next start", "error", err)
+			break
+		}
+		if err != nil {
 			slog.Warn("failed to create index", "error", err)
 		}
 	}
