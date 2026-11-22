@@ -60,9 +60,14 @@ routed from a manual list (see below).
   Responses shape on the way in.
 - **`/responses` models** (Muse Spark, Grok 4.7, the GPT Luna family) are served
   natively on `/responses`, buffered and streamed alike, so a `/v1/responses`
-  request is forwarded unchanged. `/chat/completions` rejects them with "Model
-  does not support this protocol", so a `/v1/chat/completions` request for one of
-  them is translated to the Responses API and rendered back as a chat completion.
+  request goes to that endpoint without being translated to chat. The provider's
+  reasoning policy still applies before the request leaves, though: the effort
+  is mapped onto the `low`/`high`/`max` set Zen accepts, and a default is filled
+  in when the client asked for none, while a client `reasoning.summary` is
+  forwarded exactly as sent. See [Reasoning](#reasoning) for the mapping.
+  `/chat/completions` rejects them with "Model does not support this protocol", so
+  a `/v1/chat/completions` request for one of them is translated to the Responses
+  API and rendered back as a chat completion.
   A chat request the translation cannot carry exactly — an unsupported field, or
   a message shape it does not model — is rejected with an `invalid_request_error`
   instead of returning a completion; send such a request to `/v1/responses`.

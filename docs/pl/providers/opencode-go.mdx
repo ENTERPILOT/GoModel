@@ -59,7 +59,12 @@ są kierowane z ręcznej listy (patrz niżej).
   kształcie Responses po drodze powrotnej.
 - **Modele `/responses`** (Muse Spark, Grok 4.7, rodzina GPT Luna) są obsługiwane
   natywnie przez `/responses`, zarówno buforowane, jak i strumieniowane, więc request
-  `/v1/responses` jest przekazywany bez zmian. `/chat/completions` odrzuca je
+  `/v1/responses` trafia prosto na ten endpoint, bez tłumaczenia na czat. Zanim
+  jednak wyjdzie, nadal działa na nim polityka reasoningu providera: effort jest
+  mapowany na zbiór `low`/`high`/`max`, który akceptuje Zen, i uzupełniany
+  wartością domyślną, gdy klient nie poprosił o żaden, natomiast `reasoning.summary`
+  klienta jest przekazywane dokładnie tak, jak przyszło. Mapowanie opisuje sekcja
+  [Reasoning](#reasoning). `/chat/completions` odrzuca je
   komunikatem "Model does not support this protocol", więc request
   `/v1/chat/completions` dla takiego modelu jest tłumaczony na Responses API i
   zwracany jako chat completion. Request czatu, którego tłumaczenie nie potrafi

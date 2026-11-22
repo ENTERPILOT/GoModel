@@ -63,8 +63,14 @@ weiterhin über eine manuelle Liste geroutet (siehe unten).
   Responses-Form gerendert.
 - **`/responses`-Modelle** (Muse Spark, Grok 4.7, die GPT-Luna-Familie) werden
   nativ über `/responses` bedient, gepuffert wie gestreamt, eine
-  `/v1/responses`-Anfrage wird also unverändert weitergeleitet. `/chat/completions`
-  lehnt sie mit "Model does not support this protocol" ab, daher wird eine
+  `/v1/responses`-Anfrage geht also direkt an diesen Endpunkt, statt auf Chat
+  übersetzt zu werden. Vor dem Versand greift darauf aber weiterhin die
+  Reasoning-Richtlinie des Providers: Der Effort wird auf die von Zen akzeptierte
+  Menge `low`/`high`/`max` abgebildet und ein Standardwert ergänzt, wenn der Client
+  keinen angefordert hat, während ein `reasoning.summary` des Clients unverändert
+  weitergeleitet wird. Das Mapping beschreibt der Abschnitt
+  [Reasoning](#reasoning). `/chat/completions` lehnt sie mit "Model does not
+  support this protocol" ab, daher wird eine
   `/v1/chat/completions`-Anfrage für eines dieser Modelle in die Responses API
   übersetzt und als Chat Completion zurückgegeben. Eine Chat-Anfrage, die die
   Übersetzung nicht exakt abbilden kann — ein nicht unterstütztes Feld oder eine
