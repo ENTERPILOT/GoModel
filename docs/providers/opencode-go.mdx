@@ -48,19 +48,27 @@ OPENCODE_GO_MODELS=glm-5.1,kimi-k2.7-code,deepseek-v4-pro
 OpenCode Zen serves each model on a native dialect, published in the `api`
 member of `GET /models`: OpenAI-style `/chat/completions` (Bearer auth),
 OpenAI-style `/responses`, or the Anthropic-native `/messages` endpoint
-(`x-api-key` auth). GoModel reads that listing and routes per model, so a model
-Zen adds lands on its own endpoint with no configuration change:
+(`x-api-key` auth). GoModel reads that listing and routes chat and Responses
+models per model, so a model Zen adds on either of those dialects lands on its
+own endpoint with no configuration change. Anthropic-native models are still
+routed from a manual list (see below).
 
-- **`/chat/completions` models** (GLM, Kimi, DeepSeek, MiMo, most Qwen) are sent
-  as they arrive, on both surfaces: `/v1/responses` is translated to chat
-  completions.
+- **`/chat/completions` models** (GLM, Kimi, DeepSeek, MiMo, most Qwen): a
+  `/v1/chat/completions` request goes to `/chat/completions` as it arrives. A
+  `/v1/responses` request for the same model is not a passthrough: it is
+  translated to chat completions on the way out and rendered back in the
+  Responses shape on the way in.
 - **`/responses` models** (Muse Spark, Grok 4.7, the GPT Luna family) are served
-  natively on `/responses`, buffered and streamed alike. `/chat/completions`
-  rejects them with "Model does not support this protocol", so a
-  `/v1/chat/completions` request for one of them is translated to the Responses
-  API and rendered back as a chat completion.
-- **Anthropic-only models** are translated to the Anthropic Messages dialect and
-  sent to `/messages`, mirroring how GoModel already serves native Anthropic.
+  natively on `/responses`, buffered and streamed alike, so a `/v1/responses`
+  request is forwarded unchanged. `/chat/completions` rejects them with "Model
+  does not support this protocol", so a `/v1/chat/completions` request for one of
+  them is translated to the Responses API and rendered back as a chat completion.
+  A chat request the translation cannot carry exactly — an unsupported field, or
+  a message shape it does not model — is rejected with an `invalid_request_error`
+  instead of returning a completion; send such a request to `/v1/responses`.
+- **Anthropic-only models** (the manual `/messages` list) are translated to the
+  Anthropic Messages dialect and sent to `/messages`, mirroring how GoModel
+  already serves native Anthropic.
 
 Every path normalizes to the same OpenAI-compatible response, so clients see
 one consistent surface regardless of which model they pick — whether they call
@@ -70,7 +78,9 @@ The listing is read at most once a minute, and only when a request names a model
 the provider has not routed before, so routing costs no upstream call on the
 hot path. A model the listing does not mention — because the listing failed or
 the model is unpublished — is sent to `/chat/completions`, the endpoint that
-serves most models.
+serves most models, except a model in the manual `/messages` list, which still
+goes to `/messages` (`OPENCODE_GO_MESSAGES_MODELS` is authoritative and does not
+depend on the listing).
 
 The set of `/messages`-only models is still maintained manually (default:
 `qwen3.7-max`). Override it when needed:
@@ -147,6 +157,12 @@ Any other value (`turbo`, say) is forwarded unchanged for the upstream to judge.
 `reasoning.effort` is GoModel's canonical field, so a request that sets both it
 and a top-level `reasoning_effort` is sent with the mapped `reasoning.effort` —
 the same precedence every other GoModel provider applies.
+
+A chat request translated to the Responses API also asks for a reasoning summary:
+the Responses API emits summaries only on request, so the translation sends
+`summary: "auto"` unless the client set one, which is forwarded unchanged
+(`"concise"`, `"detailed"`, and so on). Native `/v1/responses` requests carry the
+client's `reasoning.summary` exactly as sent, and none is added to them.
 
 Models routed to `/messages` use the Anthropic thinking dialect instead and are
 not affected by this mapping.

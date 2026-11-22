@@ -47,20 +47,28 @@ OPENCODE_GO_MODELS=glm-5.1,kimi-k2.7-code,deepseek-v4-pro
 OpenCode Zen obsługuje każdy model na jego natywnym dialekcie, publikowanym w polu
 `api` odpowiedzi `GET /models`: OpenAI-owe `/chat/completions` (uwierzytelnianie
 Bearer), OpenAI-owe `/responses` albo natywny dla Anthropic endpoint `/messages`
-(uwierzytelnianie `x-api-key`). GoModel czyta tę listę i kieruje requesty według
-modelu, więc model dodany przez Zen trafia na swój endpoint bez zmian w
-konfiguracji:
+(uwierzytelnianie `x-api-key`). GoModel czyta tę listę i kieruje modele czatu oraz
+Responses per model, więc model dodany przez Zen na którymś z tych dwóch dialektów
+trafia na swój endpoint bez zmian w konfiguracji. Modele natywne dla Anthropic nadal
+są kierowane z ręcznej listy (patrz niżej).
 
-- **Modele `/chat/completions`** (GLM, Kimi, DeepSeek, MiMo, MiniMax, większość Qwen)
-  są wysyłane bez zmian, na obu powierzchniach: `/v1/responses` jest tłumaczone na
-  chat completions.
+- **Modele `/chat/completions`** (GLM, Kimi, DeepSeek, MiMo, MiniMax, większość Qwen):
+  request `/v1/chat/completions` trafia do `/chat/completions` bez zmian. Request
+  `/v1/responses` dla tego samego modelu nie jest przekazywany bezpośrednio: jest
+  tłumaczony na chat completions po drodze do upstreamu i renderowany z powrotem w
+  kształcie Responses po drodze powrotnej.
 - **Modele `/responses`** (Muse Spark, Grok 4.7, rodzina GPT Luna) są obsługiwane
-  natywnie przez `/responses`, zarówno buforowane, jak i strumieniowane.
-  `/chat/completions` odrzuca je komunikatem "Model does not support this protocol",
-  więc request `/v1/chat/completions` dla takiego modelu jest tłumaczony na Responses
-  API i zwracany jako chat completion.
-- **Modele dostępne tylko w Anthropic** są tłumaczone na dialekt Anthropic Messages
-  i wysyłane do `/messages`, tak jak GoModel już obsługuje natywne Anthropic.
+  natywnie przez `/responses`, zarówno buforowane, jak i strumieniowane, więc request
+  `/v1/responses` jest przekazywany bez zmian. `/chat/completions` odrzuca je
+  komunikatem "Model does not support this protocol", więc request
+  `/v1/chat/completions` dla takiego modelu jest tłumaczony na Responses API i
+  zwracany jako chat completion. Request czatu, którego tłumaczenie nie potrafi
+  przenieść dokładnie — nieobsługiwane pole albo kształt wiadomości, którego nie
+  modeluje — jest odrzucany z `invalid_request_error`, a nie zwracany jako ukończenie;
+  taki request wyślij do `/v1/responses`.
+- **Modele dostępne tylko w Anthropic** (ręczna lista `/messages`) są tłumaczone na
+  dialekt Anthropic Messages i wysyłane do `/messages`, tak jak GoModel już obsługuje
+  natywne Anthropic.
 
 Każda ścieżka jest normalizowana do tej samej odpowiedzi kompatybilnej z OpenAI, więc
 klienty widzą jedną spójną powierzchnię niezależnie od wybranego modelu – czy
@@ -70,7 +78,9 @@ Lista jest czytana najwyżej raz na minutę i tylko wtedy, gdy request wskazuje 
 którego provider jeszcze nie routował, więc routing nie kosztuje wywołania upstreamu
 na ścieżce gorącej. Model, którego lista nie wymienia – bo lista się nie powiodła
 albo model nie jest opublikowany – trafia do `/chat/completions`, endpointu
-obsługującego większość modeli.
+obsługującego większość modeli, z wyjątkiem modelu z ręcznej listy `/messages`, który
+nadal trafia do `/messages` (`OPENCODE_GO_MESSAGES_MODELS` jest nadrzędne i nie
+zależy od listy).
 
 Zestaw modeli dostępnych tylko przez `/messages` jest nadal utrzymywany ręcznie
 (domyślnie: `qwen3.7-max`). W razie potrzeby nadpisz go:
@@ -147,6 +157,12 @@ Każda inna wartość (np. `turbo`) jest przekazywana bez zmian do oceny przez u
 jak i `reasoning_effort` najwyższego poziomu, jest wysyłany ze zmapowanym
 `reasoning.effort` – to ta sama kolejność pierwszeństwa, którą stosuje każdy inny
 provider GoModel.
+
+Request czatu tłumaczony na Responses API prosi też o podsumowanie reasoningu:
+Responses API emituje podsumowania tylko na żądanie, więc tłumaczenie wysyła
+`summary: "auto"`, chyba że klient ustawił własne – wtedy jest ono przekazywane bez
+zmian (`"concise"`, `"detailed"` itd.). Natywne requesty `/v1/responses` przenoszą
+`reasoning.summary` klienta dokładnie tak, jak zostało wysłane, i nie dodają żadnego.
 
 Modele kierowane do `/messages` używają zamiast tego dialektu thinking Anthropic
 i nie podlegają temu mapowaniu.

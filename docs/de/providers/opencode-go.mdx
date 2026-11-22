@@ -51,20 +51,29 @@ OpenCode Zen bedient jedes Modell über einen nativen Dialekt, den es im Feld `a
 von `GET /models` veröffentlicht: das OpenAI-artige `/chat/completions`
 (Bearer-Authentifizierung), das OpenAI-artige `/responses` oder den
 Anthropic-nativen Endpunkt `/messages` (Authentifizierung über `x-api-key`).
-GoModel liest diese Liste und routet pro Modell, sodass ein von Zen neu
-aufgenommenes Modell ohne Konfigurationsänderung auf seinem Endpunkt landet:
+GoModel liest diese Liste und routet Chat- und Responses-Modelle pro Modell, sodass
+ein von Zen auf einem dieser beiden Dialekte neu aufgenommenes Modell ohne
+Konfigurationsänderung auf seinem Endpunkt landet. Anthropic-native Modelle werden
+weiterhin über eine manuelle Liste geroutet (siehe unten).
 
-- **`/chat/completions`-Modelle** (GLM, Kimi, DeepSeek, MiMo, die meisten Qwen)
-  werden unverändert gesendet, auf beiden Oberflächen: `/v1/responses` wird auf
-  Chat Completions übersetzt.
+- **`/chat/completions`-Modelle** (GLM, Kimi, DeepSeek, MiMo, die meisten Qwen):
+  eine `/v1/chat/completions`-Anfrage geht unverändert an `/chat/completions`. Eine
+  `/v1/responses`-Anfrage für dasselbe Modell ist kein Passthrough: Sie wird
+  ausgehend auf Chat Completions übersetzt und eingehend wieder in der
+  Responses-Form gerendert.
 - **`/responses`-Modelle** (Muse Spark, Grok 4.7, die GPT-Luna-Familie) werden
-  nativ über `/responses` bedient, gepuffert wie gestreamt. `/chat/completions`
+  nativ über `/responses` bedient, gepuffert wie gestreamt, eine
+  `/v1/responses`-Anfrage wird also unverändert weitergeleitet. `/chat/completions`
   lehnt sie mit "Model does not support this protocol" ab, daher wird eine
   `/v1/chat/completions`-Anfrage für eines dieser Modelle in die Responses API
-  übersetzt und als Chat Completion zurückgegeben.
-- **Reine Anthropic-Modelle** werden in den Dialekt der Anthropic Messages API
-  übersetzt und an `/messages` gesendet – so, wie GoModel bereits natives
-  Anthropic bedient.
+  übersetzt und als Chat Completion zurückgegeben. Eine Chat-Anfrage, die die
+  Übersetzung nicht exakt abbilden kann — ein nicht unterstütztes Feld oder eine
+  nicht modellierte Nachrichtenform — wird mit `invalid_request_error` abgelehnt,
+  statt eine Completion zurückzugeben; senden Sie eine solche Anfrage an
+  `/v1/responses`.
+- **Reine Anthropic-Modelle** (die manuelle `/messages`-Liste) werden in den
+  Dialekt der Anthropic Messages API übersetzt und an `/messages` gesendet – so,
+  wie GoModel bereits natives Anthropic bedient.
 
 Jeder Pfad wird auf dieselbe OpenAI-kompatible Response normalisiert, sodass
 Clients unabhängig vom gewählten Modell eine einheitliche Oberfläche sehen — ob
@@ -74,7 +83,9 @@ Die Liste wird höchstens einmal pro Minute gelesen, und nur wenn eine Anfrage e
 Modell nennt, das der Provider noch nicht geroutet hat; das Routing kostet im
 Normalfall keinen Upstream-Aufruf. Ein Modell, das die Liste nicht nennt — weil die
 Liste fehlschlug oder das Modell nicht veröffentlicht ist — geht an
-`/chat/completions`, den Endpunkt, der die meisten Modelle bedient.
+`/chat/completions`, den Endpunkt, der die meisten Modelle bedient; ausgenommen ist
+ein Modell aus der manuellen `/messages`-Liste, das weiterhin an `/messages` geht
+(`OPENCODE_GO_MESSAGES_MODELS` ist maßgeblich und hängt nicht von der Liste ab).
 
 Die Menge der Modelle, die nur über `/messages` erreichbar sind, wird weiterhin
 manuell gepflegt (Standard: `qwen3.7-max`). Überschreiben Sie sie bei Bedarf:
@@ -157,6 +168,13 @@ darüber entscheidet. `reasoning.effort` ist das kanonische Feld von GoModel; ei
 Request, der sowohl dieses Feld als auch ein `reasoning_effort` auf oberster Ebene
 setzt, wird daher mit dem abgebildeten `reasoning.effort` gesendet — dieselbe
 Rangfolge, die jeder andere GoModel-Provider anwendet.
+
+Eine auf die Responses API übersetzte Chat-Anfrage fordert außerdem eine
+Reasoning-Zusammenfassung an: Die Responses API liefert Zusammenfassungen nur auf
+Anforderung, daher sendet die Übersetzung `summary: "auto"`, sofern der Client keine
+gesetzt hat — eine gesetzte wird unverändert weitergegeben (`"concise"`,
+`"detailed"` und so weiter). Native `/v1/responses`-Anfragen übernehmen
+`reasoning.summary` des Clients genau wie gesendet; es wird keines hinzugefügt.
 
 Modelle, die zu `/messages` geroutet werden, verwenden stattdessen den
 Thinking-Dialekt von Anthropic und sind von dieser Abbildung nicht betroffen.
