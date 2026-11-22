@@ -189,6 +189,7 @@ func (p *Provider) chatRequestForResponses(req *core.ChatRequest) (*core.ChatReq
 	if err != nil {
 		return nil, err
 	}
+	adapted = withClientReasoningSummary(req, adapted)
 	if _, _, ok := core.AllowedToolsChoice(adapted.ToolChoice); !ok {
 		return adapted, nil
 	}
@@ -200,6 +201,33 @@ func (p *Provider) chatRequestForResponses(req *core.ChatRequest) (*core.ChatReq
 	narrowed.Tools = tools
 	narrowed.ToolChoice = choice
 	return &narrowed, nil
+}
+
+// withClientReasoningSummary restores the reasoning summary the chat adapter
+// drops. The chat dialect carries the effort as a flat reasoning_effort and has
+// no nested reasoning object, so adaptChatRequest clears it; the Responses
+// translation reads the summary from that object and would otherwise replace an
+// explicit one with "auto". The caller's summary rides on the nested object only,
+// leaving the flat effort authoritative for the translation.
+func withClientReasoningSummary(original, adapted *core.ChatRequest) *core.ChatRequest {
+	if original == nil || adapted == nil || original.Reasoning == nil {
+		return adapted
+	}
+	summary := strings.TrimSpace(original.Reasoning.Summary)
+	if summary == "" {
+		return adapted
+	}
+	reasoning := core.Reasoning{}
+	if adapted.Reasoning != nil {
+		reasoning = *adapted.Reasoning
+	}
+	if reasoning.Summary == summary {
+		return adapted
+	}
+	reasoning.Summary = summary
+	restored := *adapted
+	restored.Reasoning = &reasoning
+	return &restored
 }
 
 // StreamChatCompletion mirrors ChatCompletion's per-model endpoint routing.

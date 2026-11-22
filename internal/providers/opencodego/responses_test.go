@@ -240,20 +240,44 @@ func TestStreamResponses_ResponsesModel_UsesNativeEndpoint(t *testing.T) {
 	assert.Equal(t, "/responses", capture.Last(t).Path)
 }
 
-// TestResponses_ChatModel_TranslatesToChat covers the pre-existing behaviour
-// the new route must not regress.
+// TestChatCompletion_ResponsesModel_KeepsClientReasoningSummary pins the summary
+// the chat adapter would otherwise lose: the chat dialect carries the effort as a
+// flat reasoning_effort and has no nested reasoning object, so adaptChatRequest
+// clears it, while the Responses translation reads the summary from that object
+// and would replace an explicit one with "auto".
+func TestChatCompletion_ResponsesModel_KeepsClientReasoningSummary(t *testing.T) {
+	url, capture := routedServer(t)
+
+	_, err := newTestProvider(url, nil).ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:     "muse-spark-1.3-contributor",
+		Messages:  []core.Message{{Role: "user", Content: "hi"}},
+		Reasoning: &core.Reasoning{Effort: "high", Summary: "detailed"},
+	})
+	require.NoError(t, err)
+
+	body := capture.Last(t).JSON(t)
+	reasoning, ok := body["reasoning"].(map[string]any)
+	require.True(t, ok, "missing reasoning object in %v", body)
+	assert.Equal(t, "high", reasoning["effort"])
+	assert.Equal(t, "detailed", reasoning["summary"], "an explicit summary must survive the chat-to-Responses translation")
+	assert.NotContains(t, body, "reasoning_effort", "the Responses dialect carries the effort nested")
+}
+
 // TestResponses_ResponsesModel_AppliesReasoningPolicy pins the same policy on
 // the native route: the client's effort is mapped onto the levels OpenCode Zen
 // accepts, and a request that leaves reasoning out gets the configured default.
 func TestResponses_ResponsesModel_AppliesReasoningPolicy(t *testing.T) {
 	tests := []struct {
-		name     string
-		effort   string
-		wantBody string
+		name        string
+		effort      string
+		summary     string
+		wantBody    string
+		wantSummary string
 	}{
-		{name: "xhigh becomes max", effort: "xhigh", wantBody: "max"},
-		{name: "none becomes low", effort: "none", wantBody: "low"},
-		{name: "high passes through", effort: "high", wantBody: "high"},
+		{name: "xhigh becomes max", effort: "xhigh", summary: "auto", wantBody: "max", wantSummary: "auto"},
+		{name: "none becomes low", effort: "none", summary: "auto", wantBody: "low", wantSummary: "auto"},
+		{name: "high passes through", effort: "high", summary: "auto", wantBody: "high", wantSummary: "auto"},
+		{name: "an explicit summary is kept", effort: "high", summary: "detailed", wantBody: "high", wantSummary: "detailed"},
 		{name: "absent gets the default", effort: "", wantBody: defaultReasoningEffort},
 	}
 	for _, tt := range tests {
@@ -261,7 +285,7 @@ func TestResponses_ResponsesModel_AppliesReasoningPolicy(t *testing.T) {
 			url, capture := routedServer(t)
 			req := &core.ResponsesRequest{Model: "muse-spark-1.3-contributor", Input: "hi"}
 			if tt.effort != "" {
-				req.Reasoning = &core.Reasoning{Effort: tt.effort, Summary: "auto"}
+				req.Reasoning = &core.Reasoning{Effort: tt.effort, Summary: tt.summary}
 			}
 
 			_, err := newTestProvider(url, nil).Responses(context.Background(), req)
@@ -271,6 +295,50 @@ func TestResponses_ResponsesModel_AppliesReasoningPolicy(t *testing.T) {
 			reasoning, ok := body["reasoning"].(map[string]any)
 			require.True(t, ok, "missing reasoning object in %v", body)
 			assert.Equal(t, tt.wantBody, reasoning["effort"])
+			if tt.wantSummary != "" {
+				assert.Equal(t, tt.wantSummary, reasoning["summary"], "the native route forwards the client's summary")
+			}
+		})
+	}
+}
+
+// TestResponses_ResponsesModel_PromotesFlatReasoningEffort pins the chat-dialect
+// member a Responses client may send: it is moved onto the nested reasoning object
+// and dropped from the body, instead of reaching an endpoint that does not define
+// it. Promoting it also keeps the default from overriding the client's choice.
+func TestResponses_ResponsesModel_PromotesFlatReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name       string
+		reasoning  *core.Reasoning
+		flat       string
+		wantEffort string
+	}{
+		{name: "flat effort is mapped", flat: `"xhigh"`, wantEffort: "max"},
+		{name: "nested effort wins over flat", reasoning: &core.Reasoning{Effort: "high"}, flat: `"xhigh"`, wantEffort: "high"},
+		{name: "flat effort stops the default", flat: `"high"`, wantEffort: "high"},
+		{name: "invalid flat effort is dropped", flat: `null`, wantEffort: defaultReasoningEffort},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			extra, err := core.MergeUnknownJSONFields(core.UnknownJSONFields{}, map[string]json.RawMessage{
+				"reasoning_effort": json.RawMessage(tt.flat),
+			})
+			require.NoError(t, err)
+			url, capture := routedServer(t)
+
+			_, err = newTestProvider(url, nil).Responses(context.Background(), &core.ResponsesRequest{
+				Model:       "muse-spark-1.3-contributor",
+				Input:       "hi",
+				Reasoning:   tt.reasoning,
+				ExtraFields: extra,
+			})
+			require.NoError(t, err)
+
+			body := capture.Last(t).JSON(t)
+			reasoning, ok := body["reasoning"].(map[string]any)
+			require.True(t, ok, "missing reasoning object in %v", body)
+			assert.Equal(t, tt.wantEffort, reasoning["effort"])
+			assert.NotContains(t, body, "reasoning_effort", "the Responses dialect carries the effort nested")
 		})
 	}
 }

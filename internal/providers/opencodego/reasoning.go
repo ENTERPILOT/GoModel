@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/goccy/go-json"
+
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
@@ -56,33 +58,61 @@ func adaptResponsesRequest(defaultEffort string) func(*core.ResponsesRequest) *c
 		if req == nil {
 			return nil
 		}
-		// A flat reasoning_effort in the provider extras is the client asking
-		// for reasoning in the chat dialect: it must not be overwritten, the
+		// A flat reasoning_effort is the chat dialect's shape, not a member the
+		// Responses endpoint defines. The client clearly asked for reasoning, so
+		// the value is promoted onto the nested object instead of being forwarded
+		// unchanged: dropping it would let the default override the client's
+		// choice, and keeping it would send an unknown field upstream.
+		flatEffort, hadFlat := flatReasoningEffort(req.ExtraFields)
+		if hadFlat {
+			withoutFlat := *req
+			withoutFlat.ExtraFields = req.ExtraFields.Without("reasoning_effort")
+			req = &withoutFlat
+		}
+		// reasoning.effort stays canonical: it wins over the flat member, the
 		// same precedence adaptChatRequest applies.
-		flatEffort := req.ExtraFields.Lookup("reasoning_effort") != nil
-		if req.Reasoning == nil || strings.TrimSpace(req.Reasoning.Effort) == "" {
-			if defaultEffort == "" || flatEffort {
+		effort := ""
+		if req.Reasoning != nil {
+			effort = strings.TrimSpace(req.Reasoning.Effort)
+		}
+		if effort == "" {
+			effort = flatEffort
+		}
+		if effort == "" {
+			if defaultEffort == "" {
 				return req
 			}
-			reasoning := core.Reasoning{}
-			if req.Reasoning != nil {
-				reasoning = *req.Reasoning
-			}
-			reasoning.Effort = defaultEffort
-			adapted := *req
-			adapted.Reasoning = &reasoning
-			return &adapted
+			effort = defaultEffort
 		}
-		effort := normalizeReasoningEffort(req.Reasoning.Effort)
-		if effort == req.Reasoning.Effort {
+		effort = normalizeReasoningEffort(effort)
+		if req.Reasoning != nil && effort == req.Reasoning.Effort {
 			return req
 		}
-		adapted := *req
-		reasoning := *req.Reasoning
+		reasoning := core.Reasoning{}
+		if req.Reasoning != nil {
+			reasoning = *req.Reasoning
+		}
 		reasoning.Effort = effort
+		adapted := *req
 		adapted.Reasoning = &reasoning
 		return &adapted
 	}
+}
+
+// flatReasoningEffort reports the value of a top-level reasoning_effort member
+// and whether the client sent one at all. A value that is not a string yields an
+// empty effort but still reports its presence, so the unsupported member is
+// dropped rather than forwarded.
+func flatReasoningEffort(fields core.UnknownJSONFields) (string, bool) {
+	raw := fields.Lookup("reasoning_effort")
+	if len(raw) == 0 {
+		return "", false
+	}
+	var effort string
+	if json.Unmarshal(raw, &effort) != nil {
+		return "", true
+	}
+	return strings.TrimSpace(effort), true
 }
 
 // normalizeReasoningEffort maps GoModel's effort levels onto the low/high/max
