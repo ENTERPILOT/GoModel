@@ -1,3 +1,5 @@
+import { suggestedModelInventory } from "./minimaxModels.js";
+
 // Model selector list helpers shared by the API Keys and Users pages.
 // An allowlist is entered as free text (comma- or newline-separated) and sent
 // to the backend as an array; the backend canonicalizes "anthropic/*" to
@@ -60,11 +62,13 @@ export function modelSelectorOptions(models, describeProvider = () => "") {
 // are typed in through the picker's custom entry.
 export function modelPickerOptions(models) {
   const seen = new Map();
-  for (const entry of Array.isArray(models) ? models : []) {
+  const sorted = [...(Array.isArray(models) ? models : [])].sort((a, b) =>
+    String(a?.selector || a?.model?.id || "").localeCompare(String(b?.selector || b?.model?.id || "")));
+  for (const entry of suggestedModelInventory(sorted)) {
     const value = String(entry?.selector || entry?.model?.id || "").trim();
     if (!value || seen.has(value)) continue;
     if (entry?.access && entry.access.effective_enabled === false) continue;
     seen.set(value, { value, label: value, description: String(entry?.provider_name || "") });
   }
-  return [...seen.values()].sort((a, b) => a.value.localeCompare(b.value));
+  return [...seen.values()];
 }

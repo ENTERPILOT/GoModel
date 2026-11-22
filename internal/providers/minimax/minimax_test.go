@@ -27,7 +27,7 @@ func TestChatCompatibleContract(t *testing.T) {
 	})
 }
 
-func TestChatCompletion_ClampsZeroTemperature(t *testing.T) {
+func TestChatCompletion_PreservesCurrentModelZeroTemperature(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 	provider := newTestProvider("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
 
@@ -38,7 +38,7 @@ func TestChatCompletion_ClampsZeroTemperature(t *testing.T) {
 		Temperature: &temp,
 	})
 	require.NoError(t, err)
-	assert.Equal(t, float64(1), capture.Last(t).JSON(t)["temperature"])
+	assert.Equal(t, float64(0), capture.Last(t).JSON(t)["temperature"])
 }
 
 // MiniMax serves speech natively (see audio.go), so only the batch and file
@@ -62,7 +62,7 @@ func TestClampTemperature_NilTemperature(t *testing.T) {
 
 func TestClampTemperature_ZeroTemperature(t *testing.T) {
 	temp := 0.0
-	req := &core.ChatRequest{Model: "MiniMax-M3", Temperature: &temp}
+	req := &core.ChatRequest{Model: "MiniMax-M2.7", Temperature: &temp}
 	result := clampTemperature(req)
 	require.NotNil(t, result.Temperature)
 	assert.Equal(t, defaultTemperature, *result.Temperature)

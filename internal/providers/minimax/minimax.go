@@ -4,6 +4,7 @@ package minimax
 import (
 	"context"
 	"io"
+	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -12,8 +13,7 @@ import (
 
 const defaultBaseURL = "https://api.minimax.io/v1"
 
-// defaultTemperature is the fallback temperature for MiniMax.
-// MiniMax requires temperature to be in (0.0, 1.0] — zero is not allowed.
+// defaultTemperature is the fallback for legacy MiniMax models that reject zero.
 const defaultTemperature = 1.0
 
 // Registration provides factory registration for the MiniMax provider.
@@ -35,15 +35,19 @@ var _ core.Provider = (*Provider)(nil)
 // New creates a new MiniMax provider.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	return &Provider{openai.NewChatCompatible(cfg.APIKey, opts, openai.CompatibleProviderConfig{
-		ProviderName: "minimax",
-		BaseURL:      providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
+		ProviderName:     "minimax",
+		BaseURL:          providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
+		AdaptChatRequest: adaptFlashEffort,
 	})}
 }
 
-// clampTemperature returns the request with temperature clamped to (0.0, 1.0].
-// MiniMax rejects temperature=0; if zero or negative, defaultTemperature is used.
+// clampTemperature keeps the legacy fallback for models that reject zero.
+// Current M3 models accept temperature in [0, 2], including zero.
 func clampTemperature(req *core.ChatRequest) *core.ChatRequest {
 	if req == nil || req.Temperature == nil || *req.Temperature > 0 {
+		return req
+	}
+	if strings.EqualFold(req.Model, "MiniMax-M3.1-Flash") || strings.EqualFold(req.Model, "MiniMax-M3") {
 		return req
 	}
 	t := defaultTemperature
