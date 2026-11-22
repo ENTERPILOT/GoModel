@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -182,7 +183,8 @@ func TestCompatibleProvider_AdaptChatRequest_ErrorAborts(t *testing.T) {
 
 // TestCompatibleProvider_ResponsesRequestHeaders_AppliedToNativeResponses is the
 // mirror of the chat case: an upstream that identifies itself on both dialects
-// gets the same headers on the native Responses endpoints, and only there.
+// gets the same headers on the native Responses endpoints, and only there. The
+// hook sees the streamed request copy, so it can tell a streaming call apart.
 func TestCompatibleProvider_ResponsesRequestHeaders_AppliedToNativeResponses(t *testing.T) {
 	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
 		"/models":    jsonHandler(`{"object":"list","data":[]}`),
@@ -195,8 +197,9 @@ func TestCompatibleProvider_ResponsesRequestHeaders_AppliedToNativeResponses(t *
 			ProviderName: "affine",
 			BaseURL:      server.URL,
 			ResponsesRequestHeaders: func(_ context.Context, req *core.ResponsesRequest) http.Header {
-				h := make(http.Header, 1)
+				h := make(http.Header, 2)
 				h.Set("X-Session-Id", "session-"+req.Model)
+				h.Set("X-Request-Stream", strconv.FormatBool(req.Stream))
 				return h
 			},
 		},
@@ -205,12 +208,15 @@ func TestCompatibleProvider_ResponsesRequestHeaders_AppliedToNativeResponses(t *
 	_, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "m", Input: "hi"})
 	require.NoError(t, err)
 	assert.Equal(t, "session-m", capture.Last(t).Header.Get("X-Session-Id"))
+	assert.Equal(t, "false", capture.Last(t).Header.Get("X-Request-Stream"))
 
 	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{Model: "m", Input: "hi"})
 	require.NoError(t, err)
 	_, _ = io.ReadAll(stream)
 	stream.Close()
 	assert.Equal(t, "session-m", capture.Last(t).Header.Get("X-Session-Id"))
+	assert.Equal(t, "true", capture.Last(t).Header.Get("X-Request-Stream"),
+		"the hook must see the streaming request, as the chat path passes it")
 
 	_, err = provider.ListModels(context.Background())
 	require.NoError(t, err)

@@ -407,13 +407,16 @@ func (p *CompatibleProvider) StreamResponses(ctx context.Context, req *core.Resp
 	if req == nil {
 		return nil, core.NewInvalidRequestError("responses request is required", nil)
 	}
+	streamReq := req.WithStreaming()
 	stream, err := p.client.DoStream(ctx, p.prepareRequest(llmclient.Request{
 		Method:    http.MethodPost,
 		Endpoint:  "/responses",
 		Operation: llmclient.OperationChat,
 		Model:     req.Model,
-		Body:      req.WithStreaming(),
-		Headers:   p.responsesHeaders(ctx, req),
+		Body:      streamReq,
+		// The hook sees the streamed copy, as the chat path does, so a provider
+		// deriving headers from the request identifies a streaming call.
+		Headers: p.responsesHeaders(ctx, streamReq),
 	}))
 	if err != nil {
 		return nil, err
