@@ -303,6 +303,51 @@ func TestResponses_ChatModel_TranslatesToChat(t *testing.T) {
 	assert.Equal(t, "/chat/completions", capture.Last(t).Path)
 }
 
+// TestResponses_MessagesOverride_WinsOverNativeResponses pins the manual override:
+// OPENCODE_GO_MESSAGES_MODELS keeps a model on the Anthropic-native endpoint even
+// when the listing also publishes it on /responses, on both the buffered and the
+// streaming route, mirroring what ChatCompletion already does.
+func TestResponses_MessagesOverride_WinsOverNativeResponses(t *testing.T) {
+	t.Setenv(messagesModelsEnvVar, "muse-spark-1.3-contributor")
+	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+		"/models": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, modelsListing)
+		},
+		"/messages": func(w http.ResponseWriter, r *http.Request) {
+			if wantsStream(r) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"msg_1","model":"muse-spark-1.3-contributor","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":2}}`)
+		},
+		"/responses": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, responsesBody)
+		},
+	})
+	provider := newTestProvider(server.URL, nil)
+
+	_, err := provider.Responses(context.Background(), &core.ResponsesRequest{
+		Model: "muse-spark-1.3-contributor",
+		Input: "hi",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "/messages", capture.Last(t).Path, "the override outranks the listing")
+
+	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "muse-spark-1.3-contributor",
+		Input: "hi",
+	})
+	require.NoError(t, err)
+	defer func() { _ = stream.Close() }()
+	_, _ = io.Copy(io.Discard, stream)
+
+	assert.Equal(t, "/messages", capture.Last(t).Path, "streaming honors the override too")
+}
+
 // TestChatCompletion_UnknownModel_FallsBackToChat keeps a listing outage from
 // failing traffic: a model the provider cannot place is sent where most OpenCode
 // Zen models answer, as it was before routing existed.

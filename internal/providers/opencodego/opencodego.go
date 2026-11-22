@@ -222,8 +222,12 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 // Responses forwards natively for a model OpenCode Zen serves on /responses,
 // and translates to the model's own chat dialect otherwise, so /v1/responses
 // honors the per-model routing in both directions.
+//
+// The manual /messages set wins over the listing: OPENCODE_GO_MESSAGES_MODELS is
+// the override that keeps a model on the Anthropic-native endpoint even when Zen
+// publishes it on /responses, mirroring ChatCompletion.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	if req != nil && p.servesResponses(ctx, req.Model) {
+	if req != nil && !p.usesMessages(req.Model) && p.servesResponses(ctx, req.Model) {
 		return p.Compatible().Responses(ctx, p.adaptResponses(req))
 	}
 	return providers.ResponsesViaChat(ctx, p, req, p.ProviderName())
@@ -231,7 +235,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 
 // StreamResponses is Responses for streaming requests.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	if req != nil && p.servesResponses(ctx, req.Model) {
+	if req != nil && !p.usesMessages(req.Model) && p.servesResponses(ctx, req.Model) {
 		return p.Compatible().StreamResponses(ctx, p.adaptResponses(req))
 	}
 	return providers.StreamResponsesViaChat(ctx, p, req, p.ProviderName())
