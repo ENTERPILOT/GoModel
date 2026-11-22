@@ -15,14 +15,19 @@ const (
 	finishReasonLength      = "length"
 )
 
-var modelLengthMarker = []byte(finishReasonModelLength)
+var (
+	modelLengthMarker = []byte(finishReasonModelLength)
+	escapeMarker      = []byte(`\`)
+)
 
 // mapFinishReasons rewrites choices[].finish_reason "model_length" to
 // "length" in a chat completion payload (buffered or single SSE chunk). It
-// returns the original data untouched when the marker is absent, and reports
+// returns the original data untouched when the marker (and any escape) is absent, and reports
 // whether a rewrite happened.
 func mapFinishReasons(data []byte) ([]byte, bool) {
-	if !bytes.Contains(data, modelLengthMarker) {
+	// A JSON string may spell the value with escapes ("model\u005flength"), so
+	// the literal marker is only a fast path when no escape is present.
+	if !bytes.Contains(data, modelLengthMarker) && !bytes.Contains(data, escapeMarker) {
 		return data, false
 	}
 	var top map[string]json.RawMessage
