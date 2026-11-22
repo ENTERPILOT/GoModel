@@ -541,10 +541,10 @@ func TestStreamChatCompletion_MapsModelLengthFinishReason(t *testing.T) {
 	assert.Contains(t, out, "data: [DONE]")
 }
 
-// JSON allows "model_length" as a spelling of "model_length"; the byte
+// JSON allows an escaped underscore (\u005f) inside "model_length"; the byte
 // fast path must not let it through unmapped.
 func TestMapFinishReasons_UnicodeEscapedValue(t *testing.T) {
-	in := []byte(`{"choices":[{"index":0,"finish_reason":"model_length"}]}`)
+	in := []byte(`{"choices":[{"index":0,"finish_reason":"model\u005flength"}]}`)
 	out, changed := mapFinishReasons(in)
 	require.True(t, changed)
 	assert.Contains(t, string(out), `"finish_reason":"length"`)
