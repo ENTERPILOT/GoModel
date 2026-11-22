@@ -111,7 +111,7 @@ func (p *Provider) fetchModelAPIs(ctx context.Context) error {
 			API map[string]struct{} `json:"api"`
 		} `json:"data"`
 	}
-	if err := p.Do(ctx, llmclient.Request{Method: http.MethodGet, Endpoint: "/models"}, &listing); err != nil {
+	if err := p.Do(llmclient.WithoutCircuitBreaker(ctx), llmclient.Request{Method: http.MethodGet, Endpoint: "/models"}, &listing); err != nil {
 		return err
 	}
 	apis := make(map[string][]string, len(listing.Data))
