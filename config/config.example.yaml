@@ -766,6 +766,21 @@ providers:
     # Voice-only provider: text-to-speech and speech-to-text, no chat. The
     # OpenAI "voice" field must be an ElevenLabs voice_id.
 
+  speechmatics:
+    type: speechmatics
+    api_key: "${SPEECHMATICS_API_KEY}"
+    # base_url defaults to "https://eu1.asr.api.speechmatics.com/v2" and
+    # selects the region (eu1, us1, au1). Speech-to-text only, through the
+    # Batch API: models enhanced, standard, melia-1, and oak-1. They are not
+    # in the upstream model catalog; declare pricing here to get a cost. By
+    # default only the models listed here are then served.
+    # models:
+    #   - id: "enhanced"
+    #     metadata:
+    #       pricing:
+    #         currency: USD
+    #         per_second_input: 0.0001 # example; use your Speechmatics rate
+
   audiocpp:
     type: audiocpp
     base_url: "http://localhost:8099"
