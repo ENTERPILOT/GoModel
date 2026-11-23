@@ -99,8 +99,9 @@ func containsFoldASCII(data []byte, word string) bool {
 // variants included. Each one named exactly "usage", at the top level or
 // under exactly "response", then carries this gateway's cost; the others only
 // lose members. Exactly means in those bytes: a stream's usage is read, and
-// priced, only from a member spelled that way (usage.HasUsageObject), so one
-// spelled with escapes would carry the cost of the event before it. With billed, a provider's cost at the top level is removed
+// priced, only from a member spelled that way (usage.HasUsageObject). One
+// spelled with escapes carries no cost, because the cost known when it is
+// written is that of the event before it. With billed, a provider's cost at the top level is removed
 // too. A usage object anywhere else is not read.
 func withUsageCost(data []byte, edit usageCostEdit) ([]byte, bool) {
 	// The scanner relays a larger event unparsed, so a larger payload is no

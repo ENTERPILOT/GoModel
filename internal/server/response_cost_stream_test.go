@@ -209,7 +209,11 @@ type typedUsage struct {
 // cost at all when want is empty.
 func assertOneGatewayCost(t *testing.T, payload []byte, want string) {
 	t.Helper()
-	for _, object := range decodedUsages(t, payload) {
+	usages := decodedUsages(t, payload)
+	if want != "" {
+		require.NotEmpty(t, usages, "no usage object to carry the cost: %s", payload)
+	}
+	for _, object := range usages {
 		cost, ok := object[usageCostMember]
 		if want == "" {
 			assert.False(t, ok, "no cost member may survive: %s", payload)
