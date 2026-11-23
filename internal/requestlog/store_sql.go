@@ -114,31 +114,34 @@ var sqlMigrations = []string{
 
 // sqlIndexes are best-effort: a failure is logged and startup continues, since
 // a missing index degrades query speed rather than correctness.
+//
+// The request log indexes are named idx_audit_ after the tables' name up to
+// v0.2.5, and stay that way (see store_sql_migrate.go).
 var sqlIndexes = []string{
-	"CREATE INDEX IF NOT EXISTS idx_request_logs_timestamp ON request_logs(timestamp)",
-	"DROP INDEX IF EXISTS idx_request_logs_model",
-	"CREATE INDEX IF NOT EXISTS idx_request_logs_status ON request_logs(status_code)",
-	"CREATE INDEX IF NOT EXISTS idx_request_logs_provider ON request_logs(provider)",
-	"CREATE INDEX IF NOT EXISTS idx_request_logs_provider_name ON request_logs(provider_name)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON request_logs(timestamp)",
+	"DROP INDEX IF EXISTS idx_audit_model",
+	"CREATE INDEX IF NOT EXISTS idx_audit_status ON request_logs(status_code)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_provider ON request_logs(provider)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_provider_name ON request_logs(provider_name)",
 	// Retires the index on the pre-v0.1.17 execution_plan_version_id column,
 	// which the workflow rename left behind on older databases.
-	"DROP INDEX IF EXISTS idx_request_logs_execution_plan_version_id",
-	"CREATE INDEX IF NOT EXISTS idx_request_logs_workflow_version_id ON request_logs(workflow_version_id)",
-	"CREATE INDEX IF NOT EXISTS idx_request_logs_request_id ON request_logs(request_id)",
-	"CREATE INDEX IF NOT EXISTS idx_request_logs_principal_id ON request_logs(principal_id)",
-	"CREATE INDEX IF NOT EXISTS idx_request_logs_auth_key_id ON request_logs(auth_key_id)",
-	"CREATE INDEX IF NOT EXISTS idx_request_logs_client_ip ON request_logs(client_ip)",
-	"CREATE INDEX IF NOT EXISTS idx_request_logs_path ON request_logs(path)",
+	"DROP INDEX IF EXISTS idx_audit_execution_plan_version_id",
+	"CREATE INDEX IF NOT EXISTS idx_audit_workflow_version_id ON request_logs(workflow_version_id)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_request_id ON request_logs(request_id)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_principal_id ON request_logs(principal_id)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_id ON request_logs(auth_key_id)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON request_logs(client_ip)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_path ON request_logs(path)",
 	// Composite: serves both the session_id equality filter and its per-thread
 	// timestamp ordering (thread detail and the sessions grouping query). The
 	// drop retires the single-column predecessor, which IF NOT EXISTS would
 	// otherwise leave in place on databases that created it.
-	"DROP INDEX IF EXISTS idx_request_logs_session_id",
-	"CREATE INDEX IF NOT EXISTS idx_request_logs_session_timestamp ON request_logs(session_id, timestamp)",
-	"CREATE INDEX IF NOT EXISTS idx_request_logs_error_type ON request_logs(error_type)",
-	"CREATE INDEX IF NOT EXISTS idx_request_log_attempts_log_seq ON request_log_attempts(request_log_id, seq)",
-	"CREATE INDEX IF NOT EXISTS idx_request_log_attempts_provider ON request_log_attempts(provider_type)",
-	"CREATE INDEX IF NOT EXISTS idx_request_log_attempts_started_at ON request_log_attempts(started_at)",
+	"DROP INDEX IF EXISTS idx_audit_session_id",
+	"CREATE INDEX IF NOT EXISTS idx_audit_session_timestamp ON request_logs(session_id, timestamp)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_error_type ON request_logs(error_type)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_log_seq ON request_log_attempts(request_log_id, seq)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_provider ON request_log_attempts(provider_type)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_started_at ON request_log_attempts(started_at)",
 }
 
 const insertRequestLogPrefix = `INSERT INTO request_logs (
@@ -259,8 +262,8 @@ func userPathIndexes(dialect sqlx.Dialect) []string {
 		column = `user_path COLLATE "C"`
 	}
 	return []string{
-		`DROP INDEX IF EXISTS idx_request_logs_user_path`,
-		`CREATE INDEX IF NOT EXISTS idx_request_logs_user_path_timestamp ON request_logs(` + column + `, timestamp)`,
+		`DROP INDEX IF EXISTS idx_audit_user_path`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_user_path_timestamp ON request_logs(` + column + `, timestamp)`,
 	}
 }
 
@@ -280,17 +283,17 @@ func jsonPathIndexes(dialect sqlx.Dialect) []string {
 	switch dialect {
 	case sqlx.SQLite:
 		return []string{
-			`DROP INDEX IF EXISTS idx_request_logs_response_id`,
-			`DROP INDEX IF EXISTS idx_request_logs_previous_response_id`,
-			`CREATE INDEX IF NOT EXISTS idx_request_logs_response_id_ts ON request_logs(json_extract(data, '$.response_body.id'), timestamp)`,
-			`CREATE INDEX IF NOT EXISTS idx_request_logs_previous_response_id_ts ON request_logs(json_extract(data, '$.request_body.previous_response_id'), timestamp)`,
+			`DROP INDEX IF EXISTS idx_audit_response_id`,
+			`DROP INDEX IF EXISTS idx_audit_previous_response_id`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_response_id_ts ON request_logs(json_extract(data, '$.response_body.id'), timestamp)`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id_ts ON request_logs(json_extract(data, '$.request_body.previous_response_id'), timestamp)`,
 		}
 	case sqlx.PostgreSQL:
 		return []string{
-			`DROP INDEX IF EXISTS idx_request_logs_response_id`,
-			`DROP INDEX IF EXISTS idx_request_logs_previous_response_id`,
-			`CREATE INDEX IF NOT EXISTS idx_request_logs_response_id_ts ON request_logs((data #>> '{response_body,id}'), timestamp)`,
-			`CREATE INDEX IF NOT EXISTS idx_request_logs_previous_response_id_ts ON request_logs((data #>> '{request_body,previous_response_id}'), timestamp)`,
+			`DROP INDEX IF EXISTS idx_audit_response_id`,
+			`DROP INDEX IF EXISTS idx_audit_previous_response_id`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_response_id_ts ON request_logs((data #>> '{response_body,id}'), timestamp)`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id_ts ON request_logs((data #>> '{request_body,previous_response_id}'), timestamp)`,
 		}
 	default:
 		return nil

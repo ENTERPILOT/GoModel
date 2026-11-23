@@ -17,7 +17,7 @@ var searchColumns = []string{
 	"method", "path", "user_path", "session_id", "error_type",
 }
 
-const trigramSearchIndex = "idx_request_logs_search_trgm"
+const trigramSearchIndex = "idx_audit_search_trgm"
 
 // minTrigramSearchLength is the shortest term, in characters, that yields a
 // trigram.

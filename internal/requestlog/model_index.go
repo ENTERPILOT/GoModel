@@ -17,7 +17,7 @@ type requestLogIndex struct {
 // legacyRequestedModelIndex is the single-column requested_model index the
 // model indexes replace; nothing compares that column under its default
 // collation.
-const legacyRequestedModelIndex = "idx_request_logs_requested_model"
+const legacyRequestedModelIndex = "idx_audit_requested_model"
 
 // modelIndexes serve the model prefix filter, which matches the requested or
 // the resolved model: each branch of that OR is a range on its own index, in
@@ -29,8 +29,8 @@ func modelIndexes(dialect sqlx.Dialect) []requestLogIndex {
 		requested, resolved = `requested_model COLLATE "C"`, `resolved_model COLLATE "C"`
 	}
 	return []requestLogIndex{
-		{name: "idx_request_logs_requested_model_timestamp", columns: requested + ", timestamp"},
-		{name: "idx_request_logs_resolved_model_timestamp", columns: resolved + ", timestamp"},
+		{name: "idx_audit_requested_model_timestamp", columns: requested + ", timestamp"},
+		{name: "idx_audit_resolved_model_timestamp", columns: resolved + ", timestamp"},
 	}
 }
 

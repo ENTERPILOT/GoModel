@@ -16,7 +16,7 @@ import (
 const maxLastUsedKeysPerQuery = 500
 
 // GetLastUsedByAuthKeys returns the newest request log timestamp per auth key id.
-// The query rides the idx_request_logs_auth_key_id index; MAX over the timestamp
+// The query rides the idx_audit_auth_key_id index; MAX over the timestamp
 // column orders the same way the list queries' ORDER BY timestamp DESC does.
 // Key ids are queried in bounded batches so key lists beyond the SQLite
 // variable limit still resolve.

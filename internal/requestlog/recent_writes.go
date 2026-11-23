@@ -55,7 +55,7 @@ func NewRecentWriteReader(store storage.Storage) (RecentWriteReader, error) {
 
 // writtenAtIndex serves RecentWrites. It is partial, so it only ever holds
 // the stamped rows: history written before the column existed stays out.
-const writtenAtIndex = "idx_request_logs_written_at"
+const writtenAtIndex = "idx_audit_written_at"
 
 const writtenAtIndexDefinition = "request_logs(written_at) WHERE written_at IS NOT NULL"
 

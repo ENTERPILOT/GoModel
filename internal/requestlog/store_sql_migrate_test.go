@@ -2,7 +2,9 @@ package requestlog
 
 import (
 	"context"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,13 +15,12 @@ import (
 )
 
 // legacyNames spells a statement the way v0.2.5 did: that release created the
-// schema this one creates, under the audit_logs names.
+// schema this one creates, under the audit_logs names. The index names are the
+// same in both.
 var legacyNames = strings.NewReplacer(
 	attemptsTable, legacyAttemptsTable,
 	attemptsLogID, legacyAttemptsLogID,
 	requestLogTable, legacyRequestLogTable,
-	attemptIndexPrefix, legacyAttemptIndexes,
-	requestLogIndexPrefix, legacyIndexPrefix,
 )
 
 // createLegacyTables applies DDL written with the current names under the
@@ -42,7 +43,7 @@ func createLegacySchema(t *testing.T, db sqlx.DB) {
 
 	indexes := append(append([]string{}, sqlIndexes...), userPathIndexes(db.Dialect())...)
 	indexes = append(indexes, jsonPathIndexes(db.Dialect())...)
-	indexes = append(indexes, "CREATE INDEX idx_request_logs_session_id ON request_logs(session_id)")
+	indexes = append(indexes, "CREATE INDEX idx_audit_session_id ON request_logs(session_id)")
 	for _, statement := range indexes {
 		_, err := db.Exec(ctx, legacyNames.Replace(statement))
 		require.NoError(t, err, statement)
@@ -88,6 +89,23 @@ func indexNames(t *testing.T, db sqlx.DB) []string {
 	return names
 }
 
+func queryStrings(ctx context.Context, q sqlx.Querier, query string, args ...any) ([]string, error) {
+	rows, err := q.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var values []string
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 func readEntry(t *testing.T, db sqlx.DB, id string) *LogEntry {
 	t.Helper()
 	reader, err := NewSQLReader(db)
@@ -114,13 +132,11 @@ func TestNewSQLStoreRenamesLegacyTables(t *testing.T) {
 		require.Len(t, entry.Data.Attempts, 1, "attempts follow their entry")
 		assert.Equal(t, 503, entry.Data.Attempts[0].StatusCode)
 
-		for _, name := range indexNames(t, db) {
-			assert.NotContains(t, name, "audit", "index kept a legacy name")
-		}
+		// The indexes followed their tables, under the names they had.
 		names := indexNames(t, db)
-		assert.Contains(t, names, "idx_request_logs_timestamp")
-		assert.Contains(t, names, "idx_request_log_attempts_log_seq")
-		assert.NotContains(t, names, "idx_request_logs_session_id", "the retired index is still dropped")
+		assert.Contains(t, names, "idx_audit_timestamp")
+		assert.Contains(t, names, "idx_audit_attempts_log_seq")
+		assert.NotContains(t, names, "idx_audit_session_id", "the retired index is still dropped")
 
 		wantLegacy := ""
 		if db.Dialect() == sqlx.PostgreSQL {
@@ -135,7 +151,7 @@ func TestNewSQLStoreRenamesLegacyTables(t *testing.T) {
 			definitions, err := queryStrings(ctx, db, `SELECT sql FROM sqlite_master WHERE sql IS NOT NULL`)
 			require.NoError(t, err)
 			for _, definition := range definitions {
-				assert.NotContains(t, definition, "audit")
+				assert.NotContains(t, definition, "audit_log", "a table, index or foreign key still refers to a legacy table")
 			}
 			return
 		}
@@ -347,7 +363,7 @@ func TestNewSQLStoreAbsorbsAfterAnInterruptedRename(t *testing.T) {
 		createLegacySchema(t, db)
 		writeLegacyEntry(t, db, "written-during-rollback", time.Unix(1700000000, 0).UTC())
 
-		// A reader has no attempts table to move into and leaves the rows be.
+		// A reader leaves the rows to the store.
 		_, err := newAdoptingSQLReader(db)
 		require.NoError(t, err)
 		assert.Equal(t, relationTable, relationKindOf(t, db, legacyRequestLogTable))
@@ -362,26 +378,19 @@ func TestNewSQLStoreAbsorbsAfterAnInterruptedRename(t *testing.T) {
 	})
 }
 
-// With the request log tables short of a column the legacy ones hold, moving
-// the rows would drop what it holds. A reader, which cannot migrate the
-// tables, leaves the rows where they are; the store migrates and then moves.
-func TestReaderLeavesLegacyRowsItCannotFullyMove(t *testing.T) {
+// Rows can only be moved into tables that hold every column of theirs, so the
+// store brings the request log tables up to date before it moves any.
+func TestNewSQLStoreMigratesTheTablesBeforeAbsorbing(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
-		tables := make([]string, len(sqlTables))
-		copy(tables, sqlTables)
-		short := strings.Replace(tables[1], "response_body TEXT,", "", 1)
-		require.NotEqual(t, tables[1], short, "the fixture no longer matches the table")
-		tables[1] = short
+		tables := slices.Clone(sqlTables)
+		tables[1] = strings.Replace(tables[1], "response_body TEXT,", "", 1)
+		require.NotEqual(t, sqlTables[1], tables[1], "the fixture no longer matches the table")
 		require.NoError(t, db.Schema(ctx, tables...))
 		createLegacySchema(t, db)
 		writeLegacyEntry(t, db, "written-during-rollback", time.Unix(1700000000, 0).UTC())
 		_, err := db.Exec(ctx, `UPDATE audit_log_attempts SET response_body = ?`, `{"kept":true}`)
 		require.NoError(t, err)
-
-		_, err = newAdoptingSQLReader(db)
-		require.NoError(t, err)
-		assert.Equal(t, relationTable, relationKindOf(t, db, legacyAttemptsTable), "the reader left the rows in place")
 
 		startSQLStore(t, db)
 		var body string
@@ -404,6 +413,8 @@ func TestNewSQLStoreAbsorbWaitsForALegacyWriter(t *testing.T) {
 
 		// The older replica has inserted and not committed yet.
 		inserted, release, written := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+		releaseWriter := sync.OnceFunc(func() { close(release) })
+		defer releaseWriter()
 		go func() {
 			written <- db.InTx(ctx, func(q sqlx.Querier) error {
 				entry := testLogEntry("committed-during-absorb", time.Unix(1700000000, 0).UTC())
@@ -416,7 +427,12 @@ func TestNewSQLStoreAbsorbWaitsForALegacyWriter(t *testing.T) {
 				return nil
 			})
 		}()
-		<-inserted
+		select {
+		case <-inserted:
+		case err := <-written:
+			require.NoError(t, err)
+			t.Fatal("the legacy writer finished before it was released")
+		}
 
 		started := make(chan error, 1)
 		go func() {
@@ -427,12 +443,20 @@ func TestNewSQLStoreAbsorbWaitsForALegacyWriter(t *testing.T) {
 			}
 			started <- err
 		}()
+		// The start has reached the legacy table and is waiting for the writer.
+		require.Eventually(t, func() bool {
+			var waiting int
+			err := db.QueryRow(ctx, `SELECT COUNT(*) FROM pg_locks l JOIN pg_class c ON c.oid = l.relation
+				WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = ? AND NOT l.granted`,
+				legacyRequestLogTable).Scan(&waiting)
+			return err == nil && waiting > 0
+		}, 30*time.Second, 20*time.Millisecond, "the start never waited for a lock on the legacy table")
 		select {
 		case err := <-started:
 			t.Fatalf("the start did not wait for the legacy writer: %v", err)
-		case <-time.After(300 * time.Millisecond):
+		default:
 		}
-		close(release)
+		releaseWriter()
 		require.NoError(t, <-written)
 		require.NoError(t, <-started)
 

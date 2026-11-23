@@ -192,12 +192,12 @@ func TestNewSQLStoreDropsLegacyExecutionPlanIndex(t *testing.T) {
 				execution_plan_version_id TEXT,
 				status_code INTEGER DEFAULT 0
 			)`,
-			`CREATE INDEX idx_request_logs_execution_plan_version_id ON request_logs(execution_plan_version_id)`,
+			`CREATE INDEX idx_audit_execution_plan_version_id ON request_logs(execution_plan_version_id)`,
 		)
 		require.NoError(t, err)
 		startSQLStore(t, db)
 		// Recreating the index must succeed, proving the startup drop removed it.
-		_, err = db.Exec(ctx, `CREATE INDEX idx_request_logs_execution_plan_version_id ON request_logs(execution_plan_version_id)`)
+		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_execution_plan_version_id ON request_logs(execution_plan_version_id)`)
 		require.NoError(t, err)
 	})
 }
@@ -213,15 +213,15 @@ func TestNewSQLStoreReplacesSingleColumnUserPathIndex(t *testing.T) {
 				user_path TEXT,
 				status_code INTEGER DEFAULT 0
 			)`,
-			`CREATE INDEX idx_request_logs_user_path ON request_logs(user_path)`,
+			`CREATE INDEX idx_audit_user_path ON request_logs(user_path)`,
 		)
 		require.NoError(t, err)
 		startSQLStore(t, db)
 		// Recreating the old index must succeed, proving the startup drop removed it.
-		_, err = db.Exec(ctx, `CREATE INDEX idx_request_logs_user_path ON request_logs(user_path)`)
+		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_user_path ON request_logs(user_path)`)
 		require.NoError(t, err)
 		// And the composite replacement must now exist.
-		_, err = db.Exec(ctx, `CREATE INDEX idx_request_logs_user_path_timestamp ON request_logs(user_path, timestamp)`)
+		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_user_path_timestamp ON request_logs(user_path, timestamp)`)
 		require.Error(t, err)
 	})
 }
@@ -291,8 +291,8 @@ func TestUserPathIndexesMatchReaderExpression(t *testing.T) {
 		t.Run(string(dialect), func(t *testing.T) {
 			column := readerDialectFor(dialect).userPath
 			want := []string{
-				"DROP INDEX IF EXISTS idx_request_logs_user_path",
-				"CREATE INDEX IF NOT EXISTS idx_request_logs_user_path_timestamp ON request_logs(" + column + ", timestamp)",
+				"DROP INDEX IF EXISTS idx_audit_user_path",
+				"CREATE INDEX IF NOT EXISTS idx_audit_user_path_timestamp ON request_logs(" + column + ", timestamp)",
 			}
 			require.Equal(t, want, userPathIndexes(dialect))
 		})
@@ -307,8 +307,8 @@ func TestModelIndexesMatchReaderExpressions(t *testing.T) {
 		t.Run(string(dialect), func(t *testing.T) {
 			reader := readerDialectFor(dialect)
 			want := []requestLogIndex{
-				{name: "idx_request_logs_requested_model_timestamp", columns: reader.requestedModel + ", timestamp"},
-				{name: "idx_request_logs_resolved_model_timestamp", columns: reader.resolvedModel + ", timestamp"},
+				{name: "idx_audit_requested_model_timestamp", columns: reader.requestedModel + ", timestamp"},
+				{name: "idx_audit_resolved_model_timestamp", columns: reader.resolvedModel + ", timestamp"},
 			}
 			require.Equal(t, want, modelIndexes(dialect))
 		})
@@ -327,7 +327,7 @@ func TestNewSQLStoreReplacesSingleColumnRequestedModelIndex(t *testing.T) {
 				requested_model TEXT,
 				status_code INTEGER DEFAULT 0
 			)`,
-			`CREATE INDEX idx_request_logs_requested_model ON request_logs(requested_model)`,
+			`CREATE INDEX idx_audit_requested_model ON request_logs(requested_model)`,
 		)
 		require.NoError(t, err)
 		store, err := NewSQLStore(ctx, db, 0)
@@ -336,9 +336,9 @@ func TestNewSQLStoreReplacesSingleColumnRequestedModelIndex(t *testing.T) {
 		// PostgreSQL builds the replacements in the background, then drops the old index.
 		store.indexBuild.Wait()
 		// Recreating the old index must succeed, proving the drop removed it.
-		_, err = db.Exec(ctx, `CREATE INDEX idx_request_logs_requested_model ON request_logs(requested_model)`)
+		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_requested_model ON request_logs(requested_model)`)
 		require.NoError(t, err)
-		_, err = db.Exec(ctx, `CREATE INDEX idx_request_logs_resolved_model_timestamp ON request_logs(resolved_model, timestamp)`)
+		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_resolved_model_timestamp ON request_logs(resolved_model, timestamp)`)
 		require.Error(t, err)
 	})
 }

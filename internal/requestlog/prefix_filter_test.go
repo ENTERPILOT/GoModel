@@ -153,9 +153,9 @@ func TestSQLReader_PrefixFiltersUseIndexes(t *testing.T) {
 			params  LogQueryParams
 			indexes []string
 		}{
-			{name: "user path prefix", params: LogQueryParams{UserPathPrefix: "/team"}, indexes: []string{"idx_request_logs_user_path_timestamp"}},
-			{name: "model prefix", params: LogQueryParams{ModelPrefix: "gpt"}, indexes: []string{"idx_request_logs_requested_model_timestamp", "idx_request_logs_resolved_model_timestamp"}},
-			{name: "request id", params: LogQueryParams{RequestID: "req-1"}, indexes: []string{"idx_request_logs_request_id"}},
+			{name: "user path prefix", params: LogQueryParams{UserPathPrefix: "/team"}, indexes: []string{"idx_audit_user_path_timestamp"}},
+			{name: "model prefix", params: LogQueryParams{ModelPrefix: "gpt"}, indexes: []string{"idx_audit_requested_model_timestamp", "idx_audit_resolved_model_timestamp"}},
+			{name: "request id", params: LogQueryParams{RequestID: "req-1"}, indexes: []string{"idx_audit_request_id"}},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
