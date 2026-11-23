@@ -188,14 +188,14 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	configExport := false
+	var configExport *configExportOptions
 	if cliOpts.ConfigArgs != nil {
 		configExport, err = parseConfigArgs(opts.ProductName, cliOpts.ConfigArgs, opts.Stdout, opts.Stderr)
 		if err != nil {
 			fmt.Fprintln(opts.Stderr, err)
 			return &usageError{err: err}
 		}
-		if !configExport {
+		if configExport == nil {
 			return nil // help
 		}
 	}
@@ -252,8 +252,8 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		return nil
 	}
-	if configExport {
-		if err := runConfigExport(ctx, opts); err != nil {
+	if configExport != nil {
+		if err := runConfigExport(ctx, opts, *configExport); err != nil {
 			fmt.Fprintln(opts.Stderr, err)
 			return err
 		}

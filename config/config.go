@@ -271,7 +271,8 @@ func buildDefaultConfig() *Config {
 			BuiltinRules: true,
 		},
 		MCP: MCPConfig{
-			Enabled: true,
+			Enabled:       true,
+			ToolDiscovery: MCPToolDiscoveryOff,
 		},
 		VersionCheck: VersionCheckConfig{
 			Enabled:        true,
