@@ -46,6 +46,13 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			required:     []string{"api_keys"},
 		},
 		{
+			// Speech-to-text only; same plain API-key shape.
+			providerType: "assemblyai",
+			defaultURL:   "https://api.assemblyai.com",
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models", "models_mode", "billable"},
+			required:     []string{"api_keys"},
+		},
+		{
 			// Voice-only provider (no chat); same plain API-key shape.
 			providerType: "elevenlabs",
 			defaultURL:   "https://api.elevenlabs.io",
@@ -170,7 +177,7 @@ var credentialPayloadFields = []string{
 
 func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 	expected := []string{
-		"anthropic", "audiocpp", "azure", "bailian", "bedrock", "bedrock-mantle", "chatgpt", "chutes", "cohere", "deepinfra", "deepseek", "edenai", "elevenlabs",
+		"anthropic", "assemblyai", "audiocpp", "azure", "bailian", "bedrock", "bedrock-mantle", "chatgpt", "chutes", "cohere", "deepinfra", "deepseek", "edenai", "elevenlabs",
 		"fireworks", "gemini", "github-copilot", "groq", "hetzner", "jev", "kilo", "kimicode", "llamacpp", "llmd", "meta", "minimax", "mistral", "ollama", "openai", "opencode_go",
 		"openrouter", "oracle", "sglang", "together", "vertex", "vllm", "xai", "xiaomi", "zai",
 	}

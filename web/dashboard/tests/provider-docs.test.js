@@ -31,6 +31,7 @@ test("providerDocsUrl normalizes the registry type", () => {
 test("providerDocsUrl links every documented provider to its own page", () => {
   const documented = [
     "anthropic",
+    "assemblyai",
     "azure",
     "bailian",
     "bedrock",

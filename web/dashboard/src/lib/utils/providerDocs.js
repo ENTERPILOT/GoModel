@@ -22,6 +22,7 @@ export const PROVIDER_DOCS_UTM = "utm_source=gomodel_dashboard";
 // Provider docs slugs derived from docs/providers/*.mdx.
 const PROVIDER_DOC_SLUGS = new Set([
   "anthropic",
+  "assemblyai",
   "azure",
   "bailian",
   "bedrock",

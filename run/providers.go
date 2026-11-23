@@ -5,6 +5,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/observability"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/anthropic"
+	"github.com/enterpilot/gomodel/internal/providers/assemblyai"
 	"github.com/enterpilot/gomodel/internal/providers/audiocpp"
 	"github.com/enterpilot/gomodel/internal/providers/azure"
 	"github.com/enterpilot/gomodel/internal/providers/bailian"
@@ -59,6 +60,7 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(bailian.Registration)
 	factory.Add(oracle.Registration)
 	factory.Add(anthropic.Registration)
+	factory.Add(assemblyai.Registration)
 	factory.Add(audiocpp.Registration)
 	factory.Add(bedrock.Registration)
 	factory.Add(bedrockmantle.Registration)
