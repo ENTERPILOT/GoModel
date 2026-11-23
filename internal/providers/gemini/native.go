@@ -15,6 +15,8 @@ import (
 
 	"github.com/goccy/go-json"
 
+	"github.com/google/uuid"
+
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
@@ -410,10 +412,12 @@ func geminiPartsFromContent(content core.MessageContent) ([]geminiPart, error) {
 
 // toolCallIDs hands out tool call IDs. Gemini may omit function call IDs, and a
 // client matches tool results to calls by ID, so a missing or repeated ID is
-// replaced with an unused call_<n>.
+// replaced with a generated one. A toolCallIDs lives for one response, but the
+// IDs must stay unique across the whole conversation: a client such as Claude
+// Code keeps every earlier tool call in its history, and a counter restarting
+// at call_0 on each response would collide with them.
 type toolCallIDs struct {
 	used map[string]struct{}
-	next int
 }
 
 // assign returns id when it is unused, otherwise a generated ID that avoids
@@ -427,8 +431,7 @@ func (g *toolCallIDs) assign(id string, supplied map[string]struct{}) string {
 		return id
 	}
 	for {
-		candidate := "call_" + strconv.Itoa(g.next)
-		g.next++
+		candidate := "call_" + uuid.New().String()
 		_, taken := g.used[candidate]
 		_, reserved := supplied[candidate]
 		if !taken && !reserved {
@@ -1193,6 +1196,9 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 	if err := geminiBlockedPromptError(geminiResp, providerName); err != nil {
 		return nil, err
 	}
+	if err := geminiUnusableTurnError(geminiResp, providerName); err != nil {
+		return nil, err
+	}
 
 	created := time.Now().Unix()
 	respID := geminiResp.ResponseID
@@ -1299,6 +1305,43 @@ func geminiBlockedPromptError(resp *geminiGenerateContentResponse, providerName 
 		return nil
 	}
 	return nativeProviderError(providerName, "Gemini blocked prompt: "+reason, nil)
+}
+
+// geminiUnusableTurnError reports a response in which no candidate carries
+// anything a client can use: each one ended with MALFORMED_FUNCTION_CALL or
+// MALFORMED_RESPONSE, where the model produced output Gemini could not encode
+// (usually a broken tool call), or with STOP and neither parts nor output
+// tokens. Passed through, these read as a successful empty turn, and an agent
+// client such as Claude Code ends its turn mid-task. A 502 lets it retry.
+func geminiUnusableTurnError(resp *geminiGenerateContentResponse, providerName string) *core.GatewayError {
+	if resp == nil || len(resp.Candidates) == 0 {
+		return nil
+	}
+	var reason string
+	for _, candidate := range resp.Candidates {
+		reason = geminiUnusableCandidateReason(candidate, resp.UsageMetadata)
+		if reason == "" {
+			return nil
+		}
+	}
+	return nativeProviderError(providerName, "Gemini returned no usable output: "+reason, nil)
+}
+
+// geminiUnusableCandidateReason returns why candidate carries no usable
+// output, or "" when it does.
+func geminiUnusableCandidateReason(candidate geminiCandidate, usage geminiUsageMetadata) string {
+	reason := strings.ToUpper(strings.TrimSpace(candidate.FinishReason))
+	switch {
+	case reason == "MALFORMED_FUNCTION_CALL", reason == "MALFORMED_RESPONSE":
+	case reason == "STOP" && len(candidate.Content.Parts) == 0 && usage.CandidatesTokenCount == 0:
+		reason = "STOP with no output"
+	default:
+		return ""
+	}
+	if message := strings.TrimSpace(candidate.FinishMessage); message != "" {
+		return reason + ": " + message
+	}
+	return reason
 }
 
 func geminiPromptBlockReason(raw json.RawMessage) string {
