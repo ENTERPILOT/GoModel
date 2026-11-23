@@ -157,6 +157,15 @@ func (t *Tracker) Record(info llmclient.ResponseInfo) {
 	if info.Model == "" || info.Model == llmclient.UnknownModel {
 		return
 	}
+	// A caller-side cancellation proves nothing about provider health; the
+	// circuit breaker treats it as neutral and so does this tracker. Client
+	// deadlines (context.DeadlineExceeded) still count as failures. It only
+	// refreshes the breaker state of a model already tracked, so it never
+	// evicts another model to make room.
+	canceled := errors.Is(info.Error, context.Canceled)
+	if canceled && provider.models[info.Model] == nil {
+		return
+	}
 	model := provider.model(info.Model)
 	// A request that went through a breaker says which one: the model's own
 	// (its state) or the provider's (empty). One that bypassed breakers has
@@ -164,10 +173,7 @@ func (t *Tracker) Record(info llmclient.ResponseInfo) {
 	if info.CircuitState != "" {
 		model.circuitState = info.ModelCircuitState
 	}
-	// A caller-side cancellation proves nothing about provider health; the
-	// circuit breaker treats it as neutral and so does this tracker. Client
-	// deadlines (context.DeadlineExceeded) still count as failures.
-	if errors.Is(info.Error, context.Canceled) {
+	if canceled {
 		return
 	}
 

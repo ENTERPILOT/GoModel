@@ -426,6 +426,13 @@ func TestTrackerKeepsModelCircuitStateWithoutBreakerVerdict(t *testing.T) {
 	})
 	assert.Equal(t, "half-open", state())
 	assert.Equal(t, 2, tracker.Snapshot()["openai"].Requests, "a canceled request is not counted")
+
+	// A canceled request for an untracked model creates no entry.
+	tracker.Record(llmclient.ResponseInfo{
+		Provider: "openai", Model: "new", Error: context.Canceled,
+		CircuitState: "closed", ModelCircuitState: "closed",
+	})
+	assert.Len(t, tracker.providers["openai"].models, 1)
 }
 
 func TestProviderHealthFlaggedModels(t *testing.T) {
