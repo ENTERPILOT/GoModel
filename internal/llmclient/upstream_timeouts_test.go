@@ -2,6 +2,7 @@ package llmclient
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -97,4 +98,72 @@ func TestClient_RetryGetsFreshTimeoutBudget(t *testing.T) {
 	err := client.Do(ctx, Request{Method: http.MethodPost, Endpoint: "/chat/completions", Body: map[string]any{}}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), calls.Load())
+}
+
+// A timeout on a shorter per-model budget is charged to that model's breaker,
+// so under the default provider scope it cannot pause the provider's other
+// models, while the model itself still fails fast.
+func TestClient_ShorterTimeoutTripsOnlyItsModelBreaker(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slow" {
+			delayHeaders(r, 2*time.Second)
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(server.Close)
+
+	httpCfg := httpclient.DefaultConfig()
+	httpCfg.Timeout = 5 * time.Second
+	cfg := DefaultConfig("test", server.URL)
+	cfg.Retry.MaxRetries = 0
+	cfg.CircuitBreaker.FailureThreshold = 1
+	var reported []string
+	cfg.Hooks.OnRequestEnd = func(_ context.Context, info ResponseInfo) {
+		reported = append(reported, info.CircuitState)
+	}
+	client := NewWithHTTPClient(httpclient.NewHTTPClient(&httpCfg), cfg, nil)
+	short := workflowWithTimeouts(core.UpstreamTimeouts{Timeout: 50 * time.Millisecond})
+	request := func(ctx context.Context, model string) error {
+		return client.Do(ctx, Request{Method: http.MethodGet, Endpoint: "/" + model, Model: model}, nil)
+	}
+
+	err := request(short, "slow")
+	var netErr net.Error
+	require.ErrorAs(t, err, &netErr)
+	require.True(t, netErr.Timeout(), "want a timeout, got %v", err)
+	assert.Equal(t, "closed", client.circuitBreaker.State(), "the provider breaker ignores the shortened timeout")
+
+	require.NoError(t, request(context.Background(), "fast"), "other models keep serving")
+	require.ErrorIs(t, request(short, "slow"), ErrCircuitOpen, "the model's own breaker is open")
+	assert.Equal(t, []string{"closed", "closed", "closed"}, reported, "the provider's reported circuit stays closed")
+}
+
+func TestBreakerForRequestScope(t *testing.T) {
+	client := newTimeoutTestClient(t, "", time.Second)
+
+	tests := []struct {
+		name      string
+		ctx       context.Context
+		wantModel bool
+	}{
+		{name: "no override", ctx: context.Background()},
+		{name: "longer timeout", ctx: workflowWithTimeouts(core.UpstreamTimeouts{Timeout: time.Minute})},
+		{name: "shorter timeout", ctx: workflowWithTimeouts(core.UpstreamTimeouts{Timeout: time.Millisecond}), wantModel: true},
+		{
+			name:      "shorter response header timeout",
+			ctx:       workflowWithTimeouts(core.UpstreamTimeouts{ResponseHeaderTimeout: time.Millisecond}),
+			wantModel: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			breaker := client.breakerForRequest(tt.ctx, "model")
+			t.Cleanup(func() { client.releaseModelBreaker("model", breaker) })
+			if tt.wantModel {
+				assert.NotSame(t, client.circuitBreaker, breaker)
+			} else {
+				assert.Same(t, client.circuitBreaker, breaker)
+			}
+		})
+	}
 }

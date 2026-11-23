@@ -270,11 +270,11 @@ virtual_models:
 - An attempt that times out is not retried on the same provider; it counts as
   failed and moves on to the next [failover](/features/failover) target, as
   the failover policy allows.
-- A timed-out attempt also counts as a
+- A timed-out attempt counts as a
   [circuit breaker](/advanced/resilience#what-counts-as-a-failure) failure.
-  With the default `scope: provider`, a short timeout on one model can open
-  the breaker for every model on that provider. Use `scope: model` on
-  providers where you set short timeouts.
+  Requests running on a timeout shorter than the gateway-wide one always use
+  their model's own breaker, so a tight budget on one model never opens the
+  circuit for the provider's other models.
 - Each field resolves on its own: the redirects that route the request come
   first (outermost first), then the resolved model's exact policy
   (`openai/gpt-4o`), then its model-wide policy (`gpt-4o`), then the

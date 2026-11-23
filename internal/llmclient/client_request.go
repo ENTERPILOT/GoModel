@@ -95,15 +95,24 @@ func withUpstreamTimeouts(ctx context.Context) context.Context {
 	if !httpclient.AttemptTimeoutsFromContext(ctx).IsZero() {
 		return ctx
 	}
+	return httpclient.WithAttemptTimeouts(ctx, upstreamTimeouts(ctx))
+}
+
+// upstreamTimeouts returns the per-attempt timeouts in effect for ctx:
+// explicit overrides first, then the ones resolved for the request's model.
+func upstreamTimeouts(ctx context.Context) httpclient.AttemptTimeouts {
+	if timeouts := httpclient.AttemptTimeoutsFromContext(ctx); !timeouts.IsZero() {
+		return timeouts
+	}
 	workflow := core.GetWorkflow(ctx)
 	if workflow == nil || workflow.Resolution == nil {
-		return ctx
+		return httpclient.AttemptTimeouts{}
 	}
 	timeouts := workflow.Resolution.Timeouts
-	return httpclient.WithAttemptTimeouts(ctx, httpclient.AttemptTimeouts{
+	return httpclient.AttemptTimeouts{
 		Timeout:               timeouts.Timeout,
 		ResponseHeaderTimeout: timeouts.ResponseHeaderTimeout,
-	})
+	}
 }
 
 // logTransportError records the transport error for operators, including the

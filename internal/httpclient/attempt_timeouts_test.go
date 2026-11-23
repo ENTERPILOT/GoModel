@@ -183,3 +183,28 @@ func TestWithAttemptTimeoutsZeroKeepsContext(t *testing.T) {
 	cleared := WithAttemptTimeouts(overridden, AttemptTimeouts{})
 	assert.True(t, AttemptTimeoutsFromContext(cleared).IsZero(), "a zero value clears inherited overrides")
 }
+
+func TestShortensTimeouts(t *testing.T) {
+	client := testClient(10*time.Second, 5*time.Second)
+
+	tests := []struct {
+		name     string
+		timeouts AttemptTimeouts
+		want     bool
+	}{
+		{name: "no override"},
+		{name: "longer timeout", timeouts: AttemptTimeouts{Timeout: time.Minute}},
+		{name: "same timeout", timeouts: AttemptTimeouts{Timeout: 10 * time.Second}},
+		{name: "shorter timeout", timeouts: AttemptTimeouts{Timeout: time.Second}, want: true},
+		{name: "longer header timeout", timeouts: AttemptTimeouts{ResponseHeaderTimeout: time.Minute}},
+		{name: "shorter header timeout", timeouts: AttemptTimeouts{ResponseHeaderTimeout: time.Second}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ShortensTimeouts(client, tt.timeouts))
+		})
+	}
+
+	assert.True(t, ShortensTimeouts(testClient(0, 0), AttemptTimeouts{Timeout: time.Second}), "any limit is shorter than none")
+	assert.False(t, ShortensTimeouts(nil, AttemptTimeouts{Timeout: time.Second}))
+}

@@ -114,10 +114,7 @@ stream as a `stream_error`.
 all `5xx` responses as failures. One exhausted retry sequence counts as one
 failure; individual HTTP retries do not increment the breaker. A successful
 sequence records success. Client cancellation is ignored; local client
-timeouts count as failures. That includes a shorter
-[per-model timeout](/features/virtual-models#set-upstream-timeouts): with
-`scope: provider`, repeated timeouts on one model open the breaker for the
-whole provider, so prefer `scope: model` there.
+timeouts count as failures.
 
 **Model discovery and availability probes** bypass the breaker. A failing
 `/models` endpoint does not open the circuit, so a listing outage cannot pause
@@ -168,6 +165,11 @@ gets its own breaker by default. With `scope: model`, each model within a
 provider instance gets an independent breaker; other requests without a model
 use a separate provider breaker, and model discovery bypasses breakers
 entirely. Multipart audio uploads use their explicit model names.
+
+Requests running on a
+[per-model timeout](/features/virtual-models#set-upstream-timeouts) shorter
+than the gateway-wide one use their model's own breaker in either scope: a
+tight budget on one model must not open the circuit for the whole provider.
 
 Each provider retains at most 1,024 model breakers. Idle closed entries expire
 after 10 minutes when a new model is looked up; the oldest idle closed entry
