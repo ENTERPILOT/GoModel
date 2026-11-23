@@ -98,7 +98,7 @@ func (c *Client) finishRequest(scope requestScope, statusCode int, err error) {
 		return
 	}
 	// Under provider scope the reported state stays the provider's: a model
-	// breaker charged for a shortened timeout (see breakerForRequest) must
+	// breaker charged for a per-model timeout (see breakerForRequest) must
 	// not show the whole provider's circuit as open.
 	breaker := scope.breaker
 	if breaker != nil && c.config.CircuitBreaker.Scope != "model" {

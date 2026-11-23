@@ -100,10 +100,10 @@ func TestClient_RetryGetsFreshTimeoutBudget(t *testing.T) {
 	assert.Equal(t, int32(2), calls.Load())
 }
 
-// A timeout on a shorter per-model budget is charged to that model's breaker,
+// A timeout on a per-model budget is charged to that model's breaker,
 // so under the default provider scope it cannot pause the provider's other
 // models, while the model itself still fails fast.
-func TestClient_ShorterTimeoutTripsOnlyItsModelBreaker(t *testing.T) {
+func TestClient_ModelTimeoutTripsOnlyItsModelBreaker(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/slow" {
 			delayHeaders(r, 2*time.Second)
@@ -131,7 +131,7 @@ func TestClient_ShorterTimeoutTripsOnlyItsModelBreaker(t *testing.T) {
 	var netErr net.Error
 	require.ErrorAs(t, err, &netErr)
 	require.True(t, netErr.Timeout(), "want a timeout, got %v", err)
-	assert.Equal(t, "closed", client.circuitBreaker.State(), "the provider breaker ignores the shortened timeout")
+	assert.Equal(t, "closed", client.circuitBreaker.State(), "the provider breaker ignores the per-model timeout")
 
 	require.NoError(t, request(context.Background(), "fast"), "other models keep serving")
 	require.ErrorIs(t, request(short, "slow"), ErrCircuitOpen, "the model's own breaker is open")
@@ -147,11 +147,16 @@ func TestBreakerForRequestScope(t *testing.T) {
 		wantModel bool
 	}{
 		{name: "no override", ctx: context.Background()},
-		{name: "longer timeout", ctx: workflowWithTimeouts(core.UpstreamTimeouts{Timeout: time.Minute})},
-		{name: "shorter timeout", ctx: workflowWithTimeouts(core.UpstreamTimeouts{Timeout: time.Millisecond}), wantModel: true},
+		{name: "model timeout", ctx: workflowWithTimeouts(core.UpstreamTimeouts{Timeout: time.Minute}), wantModel: true},
 		{
-			name:      "shorter response header timeout",
-			ctx:       workflowWithTimeouts(core.UpstreamTimeouts{ResponseHeaderTimeout: time.Millisecond}),
+			name:      "model response header timeout",
+			ctx:       workflowWithTimeouts(core.UpstreamTimeouts{ResponseHeaderTimeout: time.Minute}),
+			wantModel: true,
+		},
+		{
+			name: "explicit context override",
+			ctx: httpclient.WithAttemptTimeouts(context.Background(),
+				httpclient.AttemptTimeouts{ResponseHeaderTimeout: time.Minute}),
 			wantModel: true,
 		},
 	}

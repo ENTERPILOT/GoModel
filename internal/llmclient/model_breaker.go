@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"time"
-
-	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 const maxModelBreakers = 1024
@@ -18,12 +16,12 @@ type modelBreakerEntry struct {
 }
 
 // breakerForRequest returns the breaker a request is charged to. A request
-// running on a shorter per-model timeout (see upstreamTimeouts) always gets
-// its model's breaker: its timeouts reflect that budget, so under
+// running on per-model timeouts (see upstreamTimeouts) always gets its
+// model's breaker: its timeouts reflect that model's budget, so under
 // scope "provider" they must not open the circuit for the provider's other
 // models, while the model itself still fails fast once it keeps timing out.
 func (c *Client) breakerForRequest(ctx context.Context, model string) *circuitBreaker {
-	if c.config.CircuitBreaker.Scope != "model" && !httpclient.ShortensTimeouts(c.httpClient, upstreamTimeouts(ctx)) {
+	if c.config.CircuitBreaker.Scope != "model" && upstreamTimeouts(ctx).IsZero() {
 		return c.circuitBreaker
 	}
 	return c.breakerForModel(model)

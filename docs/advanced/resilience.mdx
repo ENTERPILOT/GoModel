@@ -167,9 +167,9 @@ use a separate provider breaker, and model discovery bypasses breakers
 entirely. Multipart audio uploads use their explicit model names.
 
 Requests running on a
-[per-model timeout](/features/virtual-models#set-upstream-timeouts) shorter
-than the gateway-wide one use their model's own breaker in either scope: a
-tight budget on one model must not open the circuit for the whole provider.
+[per-model timeout](/features/virtual-models#set-upstream-timeouts) use their
+model's own breaker in either scope: a tight budget on one model must not
+open the circuit for the whole provider.
 
 Each provider retains at most 1,024 model breakers. Idle closed entries expire
 after 10 minutes when a new model is looked up; the oldest idle closed entry

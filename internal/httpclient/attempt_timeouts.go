@@ -71,26 +71,6 @@ func Do(client *http.Client, req *http.Request) (*http.Response, error) {
 	return attempt.Do(req) // #nosec G704 -- Same URL, transport and redirect policy; only the timeout changes.
 }
 
-// ShortensTimeouts reports whether timeouts set a budget below one of
-// client's own. Such an attempt can time out while the provider is healthy,
-// so its outcome says less about the provider than about that budget.
-func ShortensTimeouts(client *http.Client, timeouts AttemptTimeouts) bool {
-	if client == nil || timeouts.IsZero() {
-		return false
-	}
-	if shorterTimeout(timeouts.Timeout, client.Timeout) {
-		return true
-	}
-	dt, ok := client.Transport.(*dynamicTransport)
-	return ok && shorterTimeout(timeouts.ResponseHeaderTimeout, dt.config.ResponseHeaderTimeout)
-}
-
-// shorterTimeout reports whether override is set and tighter than
-// configured, where a non-positive configured value means no limit.
-func shorterTimeout(override, configured time.Duration) bool {
-	return override > 0 && (configured <= 0 || override < configured)
-}
-
 // maxHeaderTimeoutVariants caps the pooled transports kept for distinct
 // response-header overrides. Values come from operator configuration, so few
 // are live at once; past the cap one pool is evicted for each new value.

@@ -272,9 +272,9 @@ virtual_models:
   the failover policy allows.
 - A timed-out attempt counts as a
   [circuit breaker](/advanced/resilience#what-counts-as-a-failure) failure.
-  Requests running on a timeout shorter than the gateway-wide one always use
-  their model's own breaker, so a tight budget on one model never opens the
-  circuit for the provider's other models.
+  Requests running on a per-model timeout always use their model's own
+  breaker, so a tight budget on one model never opens the circuit for the
+  provider's other models.
 - Each field resolves on its own: the redirects that route the request come
   first (outermost first), then the resolved model's exact policy
   (`openai/gpt-4o`), then its model-wide policy (`gpt-4o`), then the
