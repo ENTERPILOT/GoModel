@@ -291,6 +291,7 @@
                         "pages": [
                             "guides/production",
                             "guides/updating",
+                            "guides/exporting-config",
                             "guides/migrate-from-litellm",
                             "guides/caddy",
                             "guides/openai-agents-sdk",

@@ -1,0 +1,92 @@
+---
+title: "Exporting Your Configuration"
+description: "Export the configuration a GoModel gateway runs with as one config.yaml, from the binary, Docker Compose, or docker, and why the dashboard has no export button."
+icon: "file-output"
+keywords: ["config export", "config.yaml", "backup", "docker", "docker compose", "dashboard", "secrets"]
+---
+
+`gomodel config export` prints everything a gateway is configured with as one
+`config.yaml`: your `config.yaml`, environment variables, and the objects saved
+in the dashboard, such as providers, virtual models, users, and budgets. Use it
+to review a setup, keep it in Git, or start another instance from it.
+
+## Export
+
+Run the command where the gateway runs, so it reads the same files,
+environment, and database. It is safe while the gateway is running. Logs go to
+stderr, so the file holds only the configuration.
+
+<Tabs>
+  <Tab title="Binary">
+    From the directory the gateway starts in, with the same environment:
+
+    ```bash
+    gomodel config export > gomodel-export.yaml
+    ```
+  </Tab>
+  <Tab title="Docker Compose">
+    ```bash
+    docker compose exec gomodel /gomodel config export > gomodel-export.yaml
+    ```
+
+    `gomodel` is the service name in your `docker-compose.yaml`.
+  </Tab>
+  <Tab title="docker">
+    ```bash
+    docker exec gomodel /gomodel config export > gomodel-export.yaml
+    ```
+
+    `gomodel` is the container name (`docker ps`).
+  </Tab>
+</Tabs>
+
+<Warning>
+  Write to a new file, never onto the `config.yaml` the gateway reads: the
+  shell empties that file before the command starts.
+</Warning>
+
+Settings at their default value are left out, so the file shows only what you
+changed. Add `--include-defaults` to write the defaults too.
+
+## Secrets
+
+The file holds no secret. Each one is written as a reference:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_key: "${env:OPENAI_API_KEY}"
+  groq:
+    type: groq
+    api_key: "${env:GOMODEL_PROVIDERS_GROQ_API_KEY}" # secret not exported: set GOMODEL_PROVIDERS_GROQ_API_KEY
+```
+
+A key typed into the dashboard gets a `# secret not exported` comment naming
+the variable to set. A gateway loading the file does not start until that
+variable is set.
+
+Free-form text, such as a description, is only checked for credential shapes.
+Review it before sharing the file.
+
+## Use the export
+
+Save it as `config/config.yaml` on the target instance, set the variables it
+references, and start the gateway. Objects that came from the dashboard are now
+declared in the file, so they are read-only in the dashboard.
+
+## Why the dashboard has no export button
+
+The export is deliberately a shell command, with no HTTP endpoint behind it.
+
+- **It describes the whole deployment.** Even without secrets, it lists every
+  upstream, database, and internal URL, and where each credential lives.
+- **A dashboard login should not be enough to take it.** An endpoint would hand
+  the file to anyone with an admin login, or a stolen one. Shell access to the
+  gateway is a narrower group, which can already read its files and
+  environment.
+- **Redaction has limits.** A token pasted into a description is written as
+  is, so the file should not be one click away.
+
+See [Exporting the Effective Configuration](/advanced/config-yaml#exporting-the-effective-configuration)
+for the full rules.
