@@ -33,6 +33,9 @@ func (*storeAwareComponent) CheckHealth(context.Context) ext.HealthStatus { retu
 func (*storeAwareComponent) Select(ext.RouteRequest) (string, bool)       { return "", false }
 func (*storeAwareComponent) OnAttemptStart(ext.RouteTarget)               {}
 func (*storeAwareComponent) OnAttemptEnd(ext.RouteOutcome)                {}
+func (*storeAwareComponent) SendAlert(context.Context, ext.AlertEvent) error {
+	return nil
+}
 func (s *storeAwareComponent) SetSharedStore(store ext.SharedStore) {
 	s.store = store
 	s.calls++
@@ -54,8 +57,11 @@ func TestBindSharedStoreReachesEveryRoleOnce(t *testing.T) {
 	registry.RegisterRewriter(everywhere)
 	registry.RegisterHealthChecker(everywhere)
 	registry.RegisterRouteSelector(everywhere)
+	registry.RegisterAlertSink(everywhere)
 	rewriter := &storeAwareComponent{}
 	registry.RegisterRewriter(rewriter)
+	sink := &storeAwareComponent{}
+	registry.RegisterAlertSink(sink)
 	setting := &storeAwareSetting{}
 	registry.RegisterSetting(setting)
 	var typedNil *storeAwareComponent
@@ -65,7 +71,7 @@ func TestBindSharedStoreReachesEveryRoleOnce(t *testing.T) {
 	store := &fakeSharedStore{}
 	bindSharedStore(registry, store)
 	for name, component := range map[string]*storeAwareComponent{
-		"multi-role": everywhere, "rewriter": rewriter, "setting": &setting.storeAwareComponent,
+		"multi-role": everywhere, "rewriter": rewriter, "setting": &setting.storeAwareComponent, "alert sink": sink,
 	} {
 		assert.Same(t, store, component.store, name)
 		assert.Equal(t, 1, component.calls, name)

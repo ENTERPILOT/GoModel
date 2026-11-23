@@ -436,6 +436,24 @@ function ensureBearerAuthSecurityScheme() {
   };
 }
 
+// The workflow feature snapshot of a request log entry still carries its
+// request_logs flag under the name it had through v0.2.5 as well. That alias is
+// written by a custom marshaler (internal/requestlog), which swag cannot see.
+function applyDeprecatedAuditFeatureAlias() {
+  const target = schema("requestlog.WorkflowFeaturesSnapshot");
+  if (!target.properties?.request_logs) {
+    throw new Error("missing request_logs property on schema: requestlog.WorkflowFeaturesSnapshot");
+  }
+  target.properties.audit = {
+    description: "Deprecated alias of request_logs, which was named audit through v0.2.5. Always equal to request_logs.",
+    type: "boolean",
+    deprecated: true,
+  };
+  target.properties = Object.fromEntries(
+    Object.entries(target.properties).sort(([a], [b]) => a.localeCompare(b)),
+  );
+}
+
 function ensureRequiredProperty(schemaName, propertyName) {
   const target = schema(schemaName);
   if (!target.properties?.[propertyName]) {
@@ -506,6 +524,24 @@ function applySlowdownSchemaConstraints() {
   }
 }
 
+function applyUpstreamTimeoutSchemaConstraints() {
+  for (const name of [
+    "admin.upsertVirtualModelRequest",
+    "virtualmodels.View",
+    "virtualmodels.VirtualModel",
+  ]) {
+    const properties = schema(name).properties;
+    for (const field of ["timeout", "response_header_timeout"]) {
+      const property = properties?.[field];
+      if (!property || property.type !== "integer") {
+        throw new Error(`expected integer ${field} property on schema: ${name}`);
+      }
+      property.minimum = 1;
+      property.maximum = 86400;
+    }
+  }
+}
+
 // applyPathSidebarTitles sets the API Reference sidebar entry of every
 // operation to its path so endpoints are listed by URL rather than by
 // natural-language summary. Mintlify renders the HTTP method as a colored
@@ -530,6 +566,21 @@ function applyPathSidebarTitles() {
       operation["x-mint"] ??= {};
       operation["x-mint"].metadata ??= {};
       operation["x-mint"].metadata.sidebarTitle = path;
+    }
+  }
+}
+
+// markDeprecatedSummaries appends "(deprecated)" to the summary of every
+// deprecated operation. A deprecated alias shares its handler, and so its
+// summary, with the route that replaces it; the suffix keeps the two API
+// Reference pages apart and tells readers which one to use.
+function markDeprecatedSummaries() {
+  for (const pathItem of Object.values(spec.paths || {})) {
+    if (!pathItem || typeof pathItem !== "object") continue;
+    for (const operation of Object.values(pathItem)) {
+      if (!operation || typeof operation !== "object" || operation.deprecated !== true) continue;
+      if (typeof operation.summary !== "string" || operation.summary.endsWith("(deprecated)")) continue;
+      operation.summary = `${operation.summary} (deprecated)`;
     }
   }
 }
@@ -627,7 +678,9 @@ ensureRequiredProperty("core.ResponsesConversationRef", "id");
 applyBudgetKeySchemaConstraints();
 applyStringArrayPropertyBounds("admin.upsertVirtualModelRequest", "user_paths", 100, 1024);
 applySlowdownSchemaConstraints();
+applyUpstreamTimeoutSchemaConstraints();
 applyPricingSchemaConstraints();
+markDeprecatedSummaries();
 applyPathSidebarTitles();
 applyMintlifyOperationMetadata();
 
@@ -653,6 +706,8 @@ for (const name of [
   applyResponseInputOneOf(name);
   applyResponseConversationOneOf(name);
 }
+
+applyDeprecatedAuditFeatureAlias();
 
 const inputItemList = schema("core.ResponseInputItemListResponse");
 if (!inputItemList.properties?.data) {

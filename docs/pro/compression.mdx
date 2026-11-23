@@ -33,7 +33,7 @@ agentic coding, chat, and tool-heavy workloads.
 - **Full control.** Choose the level per gateway or per request, exclude
   models by glob, protect pre-existing history with `new_messages_only`, keep
   source code verbatim, and inspect every rewrite through response headers,
-  audit revisions, and metrics.
+  request log revisions, and metrics.
 
 ## Overview
 
@@ -100,7 +100,7 @@ X-GoModel-Pro-Tokens-Saved: 1843
 X-GoModel-Pro-Compression-Blocks: 12
 ```
 
-Audit logs retain the original request and a revision for each rewriter. The
+Request logs retain the original request and a revision for each rewriter. The
 revision records its byte sizes and compression detail; the rewritten body is
 also retained when `LOGGING_LOG_BODIES=true`. Prometheus metrics use the
 `gomodel_pro_compression_` prefix, and the Dashboard Usage page reports Pro

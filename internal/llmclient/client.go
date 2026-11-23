@@ -48,6 +48,11 @@ type ResponseInfo struct {
 	// disabled. It reflects the moment of completion, so metrics built from it
 	// update as traffic flows.
 	CircuitState string
+	// ModelCircuitState is the state of the model's own breaker after this
+	// request completed. It is set only when the request ran on one: a
+	// request naming a model under scope "model", or on a per-model timeout
+	// under scope "provider".
+	ModelCircuitState string
 }
 
 // Hooks defines observability callbacks for request lifecycle events.
@@ -235,8 +240,8 @@ type Response struct {
 	// ContentType is the upstream response Content-Type header, preserved so
 	// callers can describe the bytes actually returned (e.g. audio formats).
 	ContentType string
-	// Header carries the upstream response headers. It is used to audit failed
-	// provider attempts; it is not relayed to API clients.
+	// Header carries the upstream response headers. It is used to record failed
+	// provider attempts in the request log; it is not relayed to API clients.
 	Header http.Header
 	Body   []byte
 	// Stream is the live upstream body of a streaming response (DoStreamResponse),

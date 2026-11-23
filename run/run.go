@@ -188,14 +188,14 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	configExport := false
+	var configExport *configExportOptions
 	if cliOpts.ConfigArgs != nil {
 		configExport, err = parseConfigArgs(opts.ProductName, cliOpts.ConfigArgs, opts.Stdout, opts.Stderr)
 		if err != nil {
 			fmt.Fprintln(opts.Stderr, err)
 			return &usageError{err: err}
 		}
-		if !configExport {
+		if configExport == nil {
 			return nil // help
 		}
 	}
@@ -252,8 +252,8 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		return nil
 	}
-	if configExport {
-		if err := runConfigExport(ctx, opts); err != nil {
+	if configExport != nil {
+		if err := runConfigExport(ctx, opts, *configExport); err != nil {
 			fmt.Fprintln(opts.Stderr, err)
 			return err
 		}
@@ -549,7 +549,7 @@ func watchForReload(ctx context.Context, endGeneration context.CancelFunc, reloa
 // blocks until the server stops and Shutdown is what stops it. Waiting for that
 // goroutine here is the load-bearing part: the process exits the moment Run
 // returns, so anything Shutdown had not reached yet — the buffered usage and
-// audit records, the database handle — would be dropped on every Ctrl+C.
+// request log records, the database handle — would be dropped on every Ctrl+C.
 //
 // Every generation that serves is torn down here, exactly once and on a single
 // shutdownTimeout budget, whichever way the server ended: a signal, a reload, a

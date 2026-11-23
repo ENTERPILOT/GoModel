@@ -34,7 +34,7 @@ i równoważny blok YAML `admin:` znajdziesz w sekcji
 Endpointy Admin REST API (`/admin/*`) akceptują dwa rodzaje danych uwierzytelniających jako token Bearer:
 
 - **`GOMODEL_MASTER_KEY`** – zawsze ma dostęp administracyjny.
-- **Zarządzany klucz API z dostępem do dashboardu** – zarządzane klucze są domyślnie tworzone *bez* dostępu do dashboardu, więc klucz wydany na ruch do modeli nie może czytać logu audytowego, wydawać nowych kluczy ani zmieniać ustawień gatewaya. Requesty wykonane zarządzanym kluczem bez tego dostępu zwracają `403` z kodem błędu `dashboard_access_denied`.
+- **Zarządzany klucz API z dostępem do dashboardu** – zarządzane klucze są domyślnie tworzone *bez* dostępu do dashboardu, więc klucz wydany na ruch do modeli nie może czytać logu requestów, wydawać nowych kluczy ani zmieniać ustawień gatewaya. Requesty wykonane zarządzanym kluczem bez tego dostępu zwracają `403` z kodem błędu `dashboard_access_denied`.
 
 <CodeGroup>
 
@@ -139,7 +139,7 @@ który zwraca zaktualizowany klucz. Nazwa jest przycinana i nie może być pusta
 tak jak przy tworzeniu. Klucz nie może zmienić własnej nazwy
 (`403 auth_key_self_update`). Rekordy użycia zapisują identyfikator klucza, a nie
 jego nazwę, więc dashboard pokazuje wcześniejsze użycie pod nową nazwą; wpisy
-audytu pokazują identyfikator klucza. Ponowny import klucza z LiteLLM ustawia
+logu requestów pokazują identyfikator klucza. Ponowny import klucza z LiteLLM ustawia
 jego nazwę z importu. Gdy dwa klucze mają tę samą nazwę, dashboard pokazuje obok
 każdego zamaskowany token i dodaje krótki identyfikator klucza, gdy tokeny są
 takie same lub ich brakuje. Formularz tworzenia i okno zmiany nazwy ostrzegają,
@@ -210,11 +210,11 @@ Użyj `GET /admin/access`, aby sprawdzić, jakim typem administratora są dane u
 
 Dla administratora zakresowego:
 
-- Endpointy użycia, audytu, kluczy API, użytkowników, budżetów i rate limitów są filtrowane
+- Endpointy użycia, logów requestów, kluczy API, użytkowników, budżetów i rate limitów są filtrowane
   do zakresu. Pominięty filtr `user_path` oznacza katalog główny zakresu;
   `user_path` spoza zakresu zwraca `403` z kodem
   `user_path_out_of_scope`.
-- Obiekty adresowane przez ID, które należą do innego poddrzewa (wpis audytu,
+- Obiekty adresowane przez ID, które należą do innego poddrzewa (wpis logu requestów,
   klucz API), zwracają `404`, dokładnie tak, jakby nie istniały.
 - Nowe klucze API i polityki użytkowników domyślnie trafiają do katalogu głównego zakresu i nie mogą być
   tworzone poza nim. Klucze z dostępem do dashboardu utworzone w ten sposób stają się z kolei
@@ -705,13 +705,15 @@ Dwa endpointy celowo go ignorują: `/admin/cache/overview` zawsze raportuje
 tylko trafienia w cache, a `/admin/usage/sessions` zawsze je uwzględnia (jego pola kosztów
 pozostają wyłącznie kosztami providerów).
 
-### GET /admin/audit/stats
+### GET /admin/request-logs/stats
 
 Zwraca liczby requestów w przedziałach czasowych, pogrupowane w klasy statusów `2xx`/`4xx`/`5xx`,
 ogólne podsumowanie wskaźnika sukcesu oraz średni czas trwania requestu per
 provider. Na tym opierają się wykresy „Requests by Status” i „Provider Latency” na
-stronie Overview w dashboardzie. Dane pochodzą z logu audytowego (logowanie audytowe jest domyślnie włączone;
-`LOGGING_ENABLED`).
+stronie Overview w dashboardzie. Dane pochodzą z logu requestów (logowanie requestów jest domyślnie włączone;
+`LOGGING_ENABLED`). Stare ścieżki `/admin/audit/...` są przestarzałe: nadal działają, a ich odpowiedzi
+zawierają nagłówek `Deprecation: true` oraz nagłówek `Link` wskazujący nową ścieżkę.
+Data ich usunięcia nie jest ustalona.
 
 **Parametry zapytania:**
 
@@ -762,7 +764,7 @@ zakresu do bieżącego momentu.
 Każda seria `provider_latency` odpowiada indeks po indeksie tablicy `buckets`. Wpisy mają wartość
 `null` dla przedziałów, w których provider nie obsłużył żadnego udanego requestu, a
 średnie obejmują tylko udane (2xx) requesty, które dotarły do providera – trafienia w lokalnym
-cache’u odpowiedzi i nieudane requesty są wykluczone. Jeśli logowanie audytowe jest
+cache’u odpowiedzi i nieudane requesty są wykluczone. Jeśli logowanie requestów jest
 wyłączone, zwraca puste przedziały.
 
 ### Dane uwierzytelniające providerów
@@ -807,7 +809,15 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   maskują hasło w `proxy_url`. Odesłanie dowolnej wartości złożonej z trzech
   lub więcej gwiazdek zachowuje zapisaną wartość, więc edycja nigdy nie
   wymaga powtórzenia sekretu; zamaskowany wpis, za którym nie stoi żadna
-  zapisana wartość, zwraca `400`. `proxy_url` odesłane z wciąż zamaskowanym
+  zapisana wartość, zwraca `400`. Zamaskowany klucz API pokazuje pierwsze 5
+  i ostatnie 3 znaki (klucze o długości co najmniej 20 znaków) i wskazuje
+  zapisany klucz, który zastępuje: `sk-pr***********7Qa#2` to drugi, więc
+  wpisy można usuwać i zmieniać ich kolejność. Numery odnoszą się do listy
+  zapisanej w chwili zapisu: maska, której znaki nie pasują już do jej
+  klucza, zwraca `400`. To sprawdzenie pomija w pełni zamaskowane krótkie
+  klucze i klucze o tych samych widocznych znakach, więc po równoczesnych
+  edycjach przeładuj dane przed zapisem.
+  Sama maska zachowuje zapisany klucz na tej samej pozycji. `proxy_url` odesłane z wciąż zamaskowanym
   hasłem (`xxxxx`) zachowuje zapisane hasło, także gdy zmienia się schemat,
   host, port lub nazwa użytkownika. Wartość złożona wyłącznie z referencji do
   sekretów jest pokazywana bez zmian.
@@ -834,6 +844,15 @@ dostępne, gdy zarządzanie budżetem jest włączone.
 `(user_path, period)` lub `(user_path, period_seconds)` dla okresów niestandardowych.
 Te operacje nie działają globalnie dla okresu. Dla tras `PUT` i
 `DELETE` ze ścieżką w URL zakoduj `user_path` w URL; kształt requestu opisuje strona [Budżety](/pl/features/budgets).
+
+`GET /admin/budgets` zwraca każdy budżet ze statusem oraz, gdy minie 5% jego
+okresu, `projected_spend`. `projected_exhaustion_at` pojawia się tylko wtedy,
+gdy według prognozy budżet wyczerpie się przed końcem okresu i nie jest jeszcze
+wydany; szablon budżetu dla każdego potomka nie ma żadnego z tych pól. Obiekt
+`alerts` na
+najwyższym poziomie informuje, czy [alerty budżetowe](/pl/features/budgets#alerty)
+są włączone (`enabled`), i podaje ich `default_thresholds`; budżet z własnymi
+progami niesie `alert_thresholds`, które przyjmuje `PUT`.
 
 Przykłady requestów i zachowanie egzekwowania znajdziesz na stronie [Budżety](/pl/features/budgets).
 
@@ -1077,15 +1096,29 @@ http://localhost:8080/admin/dashboard
 Zapewnia wizualny przegląd statystyk użycia i zarejestrowanych modeli na podstawie tych samych danych co powyższe endpointy REST API.
 
 Gdy `DASHBOARD_LIVE_LOGS_ENABLED=true`, dashboard otwiera
-`GET /admin/live/logs` i streamuje zwięzłe podglądy cyklu życia audytu i użycia. Dzięki
-temu strony Audit Logs i Usage pokazują request w trakcie przechodzenia przez
+`GET /admin/live/logs` i streamuje zwięzłe podglądy cyklu życia logu requestów i użycia. Dzięki
+temu strony „Requesty” i „Usage” pokazują request w trakcie przechodzenia przez
 workflow, zanim zakończy się asynchroniczny zapis do bazy danych. Stream używa kursorów
 sekwencji, ograniczonego odtwarzania i zdarzeń heartbeat, więc ponownie łączące się przeglądarki mogą nadrobić
 zaległości po krótkich przerwach w sieci.
 
-Źródłem prawdy pozostają utrwalone tabele audytu i użycia. Jeśli
+Źródłem prawdy pozostają utrwalone tabele logu requestów i użycia. Jeśli
 kursor przeglądarki wypadnie poza bufor odtwarzania, stream wysyła zdarzenie resetu,
 a dashboard przeładowuje dane ze zwykłych endpointów REST.
+
+Zdarzenia logu requestów nazywają się `request_log.started`, `request_log.updated`,
+`request_log.stream`, `request_log.completed`, `request_log.failed`,
+`request_log.flushed` i `request_log.removed`, a zdarzenia użycia `usage.*`.
+Parametr zapytania `types` wybiera rodzaje zdarzeń, które otrzymuje stream:
+`types=request_log,usage`.
+
+Przed zmianą nazwy logu requestów zdarzenia te nazywały się `audit.*`. Te nazwy
+są przestarzałe, ale nadal obsługiwane. Stream, który wymienia `request_log`
+w `types`, otrzymuje nowe nazwy. Stream, który wymienia tylko stary alias
+`audit` albo nie podaje `types`, nadal otrzymuje `audit.*` (jako nazwę zdarzenia
+SSE, w polu `type` i w `_live_state` ładunku), dopóki przestarzałe nazwy nie
+zostaną usunięte; daty usunięcia jeszcze nie ustalono. Aby przejść na nowe
+nazwy, podaj `types=request_log,usage`.
 
 ## Wyłączanie funkcji administracyjnych
 

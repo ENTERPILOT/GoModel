@@ -1,0 +1,868 @@
+// Pure live-log stream parsing and merge logic.
+//
+// The functions are written as a `this`-based method mixin so the Svelte
+// singleton (liveLogs.svelte.js) and the node:test suite share the identical
+// implementation. The host (`this`) must provide:
+//   - state: requestLog {entries,total,limit,offset}, usageLog {…},
+//     skippedLiveUsageByRequestId, liveLogsLastSeq, requestLogGroupSessions,
+//     requestThreadChildren ({ [session_id]: {loading, entries, total} })
+//   - insert-gate fields: requestLogSearch, requestLogMethod, requestLogStatusCode,
+//     requestLogStream, requestLogHiddenTypes, customStartDate, customEndDate, usageLogSearch,
+//     usageFilters (an object whose isEmpty() reports no active usage filter),
+//     usageLogHideCached, page
+//   - optional cross-module hooks (guarded with typeof):
+//     fetchUsage, fetchRequestLog, isRequestEntryExpanded, cacheRequestLogRecord,
+//     noteLiveTokenUsage, fetchRequestEntryDetail
+//
+// No Svelte runes here, and the single import is by relative path: node --test
+// runs this file directly and cannot resolve the `$lib` alias.
+
+import { consumeEventStream } from "../../lib/api/eventStream.js";
+import { requestEntryTypeVisible } from "./request-operations.js";
+import * as m from "../../lib/paraglide/messages.js";
+
+// A gateway names request log events request_log.* for a stream that asks for
+// request_log. A replica still on v0.2.5 knows them only as audit, and this
+// page can be loaded from one replica and streamed from another, so the stream
+// asks for both: the old replica ignores the name it does not know and sends
+// audit.*, which normalizeLiveLogEvent maps back.
+const LIVE_LOGS_STREAM_PATH = "/admin/live/logs?types=request_log,audit,usage";
+
+const LEGACY_REQUEST_LOG_EVENT_PREFIX = "audit.";
+
+function requestLogEventName(name) {
+    const text = String(name || '').trim();
+    return text.indexOf(LEGACY_REQUEST_LOG_EVENT_PREFIX) === 0
+        ? 'request_log.' + text.slice(LEGACY_REQUEST_LOG_EVENT_PREFIX.length)
+        : text;
+}
+
+// normalizeLiveLogEvent returns the event with a request log event's legacy
+// audit.* name, and the _live_state its data carries, spelled request_log.*.
+// It is the one place the old names are known; everything past it compares
+// against the new ones.
+export function normalizeLiveLogEvent(event) {
+    if (!event || typeof event !== 'object') return event;
+    const type = requestLogEventName(event.type);
+    if (type === String(event.type || '').trim()) return event;
+    const normalized = { ...event, type };
+    const data = event.data;
+    if (data && typeof data === 'object' && typeof data._live_state === 'string') {
+        normalized.data = { ...data, _live_state: requestLogEventName(data._live_state) };
+    }
+    return normalized;
+}
+
+// liveInsertIndex is where a live entry new to a list goes so the list stays
+// newest first, as the server orders it. Local events arrive in request order
+// and land on top; another replica's requests arrive only once persisted,
+// seconds late, and slot in below anything newer. An entry or neighbour
+// without a timestamp goes on top, as every live entry used to.
+function liveInsertIndex(entries, entry) {
+    const time = Date.parse(entry && entry.timestamp);
+    if (!Number.isFinite(time)) return 0;
+    const index = entries.findIndex((candidate) => {
+        const candidateTime = Date.parse(candidate && candidate.timestamp);
+        return !Number.isFinite(candidateTime) || candidateTime <= time;
+    });
+    return index < 0 ? entries.length : index;
+}
+
+function insertLive(entries, entry) {
+    const next = [...entries];
+    next.splice(liveInsertIndex(entries, entry), 0, entry);
+    return next;
+}
+
+// liveEntryCountedBy reports whether a fetched page's counts already include
+// a live entry. Only another replica's entries can be counted in advance:
+// they arrive once persisted, marked with that replica's write stamp
+// (_remote_written_at), and one stamped before the server read the page
+// (as_of, both unix microseconds) was there for its total and thread counts.
+// Local entries reach the page before they are persisted.
+function liveEntryCountedBy(entry, page) {
+    const writtenAt = Number(entry && entry._remote_written_at);
+    const asOf = Number(page && page.as_of);
+    return writtenAt > 0 && asOf > 0 && writtenAt <= asOf;
+}
+
+function liveEntryOlder(entry, than) {
+    const time = Date.parse(entry && entry.timestamp);
+    const thanTime = Date.parse(than && than.timestamp);
+    return Number.isFinite(time) && Number.isFinite(thanTime) && time < thanTime;
+}
+
+function matchesLiveRequestLogKey(entry, id, requestID) {
+    return (!!id && String(entry && entry.id || '').trim() === id) ||
+        (!!requestID && String(entry && entry.request_id || '').trim() === requestID);
+}
+
+// requestLogLivePauseMessage maps a requestLogLivePauseReason to the operator-facing
+// hint shown by the page's live-status indicator.
+export function requestLogLivePauseMessage(reason) {
+    switch (reason) {
+        case 'date_range':
+            return m.requests_live_pause_date_range();
+        case 'filters':
+            return m.requests_live_pause_filters();
+        case 'pagination':
+            return m.requests_live_pause_pagination();
+        default:
+            return '';
+    }
+}
+
+// liveLogsStreamPath builds the stream path with the replay cursor:
+// '/admin/live/logs?types=request_log,audit,usage[&cursor=N]'.
+export function liveLogsStreamPath(lastSeq) {
+    let url = LIVE_LOGS_STREAM_PATH;
+    const seq = Number(lastSeq || 0);
+    if (Number.isFinite(seq) && seq > 0) {
+        url += "&cursor=" + encodeURIComponent(String(seq));
+    }
+    return url;
+}
+
+export function liveLogsMethods() {
+    return {
+        async consumeLiveLogsBody(reader) {
+            await consumeEventStream(reader, (event) => this.applyLiveLogEvent(event));
+        },
+
+        applyLiveLogEvent(event) {
+            if (!event || typeof event !== 'object') return;
+            event = normalizeLiveLogEvent(event);
+            const seq = Number(event.seq || 0);
+            if (Number.isFinite(seq) && seq > this.liveLogsLastSeq) {
+                this.liveLogsLastSeq = seq;
+            }
+            const type = String(event.type || '').trim();
+            if (type === 'heartbeat') return;
+            if (type === 'reset') {
+                this.reloadLiveLogSources();
+                return;
+            }
+            if (type === 'request_log.removed') {
+                this.removeLiveRequestEntry(event.data);
+                return;
+            }
+            if (type.indexOf('request_log.') === 0) {
+                this.mergeLiveRequestEntry(event.data || {}, type);
+                return;
+            }
+            if (type.indexOf('usage.') === 0) {
+                this.mergeLiveUsageEntry(event.data || {}, type);
+                if (typeof this.noteLiveTokenUsage === 'function') {
+                    this.noteLiveTokenUsage(type);
+                }
+            }
+        },
+
+        reloadLiveLogSources() {
+            if (typeof this.fetchUsage === 'function') {
+                this.fetchUsage();
+            }
+            if (this.page === 'requests' && typeof this.fetchRequestLog === 'function') {
+                this.fetchRequestLog(true);
+            }
+        },
+
+        // requestLogLivePauseReason names why live inserts are paused, so the page
+        // can tell the operator how to resume them: 'pagination', 'filters',
+        // 'date_range', or null while inserts flow.
+        requestLogLivePauseReason() {
+            if (!this.requestLog || this.requestLog.offset !== 0) return 'pagination';
+            if (this.requestLogSearch || this.requestLogMethod || this.requestLogStatusCode || this.requestLogStream) {
+                return 'filters';
+            }
+            // A custom date range pauses live inserts — except a range that
+            // ends today (followsToday): an entry arriving now is inside such
+            // a window by definition, and since the range persists across
+            // sessions it must not silently disable live logs forever.
+            if (!this.followsToday && (this.customStartDate || this.customEndDate)) {
+                return 'date_range';
+            }
+            return null;
+        },
+
+        requestLogLiveInsertAllowed() {
+            return !this.requestLogLivePauseReason();
+        },
+
+        usageLiveInsertAllowed() {
+            return this.usageLog && this.usageLog.offset === 0 &&
+                !this.usageLogSearch && (!this.usageFilters || this.usageFilters.isEmpty());
+        },
+
+        mergeLiveRequestEntry(incoming, eventType) {
+            if (!incoming || typeof incoming !== 'object') return;
+            const key = String(incoming.id || incoming.request_id || '').trim();
+            if (!key) return;
+            const requestID = String(incoming.request_id || '').trim();
+            const currentEntries = (this.requestLog && Array.isArray(this.requestLog.entries)) ? this.requestLog.entries : [];
+            const index = currentEntries.findIndex((entry) => matchesLiveRequestLogKey(entry, key, requestID));
+            const previous = index >= 0 ? currentEntries[index] || {} : {};
+            // A detail event IS the fetched detail: re-triggering the detail
+            // fetch for it would loop.
+            const isDetail = eventType === 'request_log.detail';
+            const patch = isDetail
+                // The detail entry carries the full payload, so the slim-list
+                // marker must not survive the merge from the previous row.
+                ? { ...incoming, _detail_loaded: true, _response_partial: false, bodies_omitted: false }
+                : this.liveRequestLogPatch(previous, incoming, eventType);
+            if (index >= 0) {
+                const merged = this.mergeLiveRequestLogPatch(previous, patch);
+                currentEntries.splice(index, 1, merged);
+                this.requestLog.entries = [...currentEntries];
+                // Regrouping may demote this row to a thread child; the detail
+                // and conversation hooks still target the updated row itself.
+                this.regroupLiveRequestLogHead(merged);
+                if (!isDetail) this.fetchExpandedRequestLogDetailIfReady(merged);
+                this.cacheMergedRequestLogRecord(merged, eventType);
+                return merged;
+            }
+            const child = this.mergeLiveRequestLogChild(incoming, patch);
+            if (child) {
+                if (!isDetail) this.fetchExpandedRequestLogDetailIfReady(child);
+                this.cacheMergedRequestLogRecord(child, eventType);
+                return child;
+            }
+            // List filters and pagination gate visual insertion only. The
+            // normalized cache still receives every event so an already-open
+            // Interactions drawer cannot lose its live continuation.
+            if (!this.requestLogLiveInsertAllowed() || !requestEntryTypeVisible(patch, this.requestLogHiddenTypes)) {
+                this.cacheMergedRequestLogRecord(patch, eventType);
+                return;
+            }
+            if (!isDetail && this.requestLogGroupSessions) {
+                const folded = this.foldLiveRequestLogIntoThread(patch);
+                if (folded) {
+                    this.fetchExpandedRequestLogDetailIfReady(folded);
+                    this.cacheMergedRequestLogRecord(folded, eventType);
+                    return folded;
+                }
+            }
+            const inserted = this.mergeLiveRequestLogUsagePatch(patch);
+            this.requestLog.entries = insertLive(currentEntries, inserted).slice(0, this.requestLog.limit || 25);
+            if (!liveEntryCountedBy(patch, this.requestLog)) {
+                this.requestLog.total = Number(this.requestLog.total || 0) + 1;
+            }
+            if (!isDetail) this.fetchExpandedRequestLogDetailIfReady(inserted);
+            this.cacheMergedRequestLogRecord(inserted, eventType);
+            return inserted;
+        },
+
+        // liveRequestLogPatch stamps the live lifecycle state onto an incoming
+        // event's data, ratcheting _live_state forward from the previous row.
+        liveRequestLogPatch(previous, incoming, eventType) {
+            const liveState = this.liveRequestLogStateAfter(previous._live_state, eventType);
+            const requestLogFlushed = this.liveRequestLogEventFlushed(previous._live_state) || this.liveRequestLogEventFlushed(liveState);
+            const patch = {
+                ...incoming,
+                _live: true,
+                _live_state: liveState,
+                _request_log_flushed: requestLogFlushed,
+                _live_pending: !requestLogFlushed
+            };
+            // A stream event's response body is a partial reconstruction of a
+            // still-running stream; the flag drops once a settled state
+            // delivers the real body. Other events leave the previous flag
+            // untouched.
+            if (eventType === 'request_log.stream') {
+                patch._response_partial = true;
+            } else if (this.liveRequestLogStateSettled(eventType)) {
+                patch._response_partial = false;
+            }
+            return patch;
+        },
+
+        // --- Session-thread grouping ---------------------------------------
+        // With "Group by session" on, list entries are thread heads (carrying
+        // session_count) and each unfolded thread keeps its older entries in
+        // requestThreadChildren[session_id].
+
+        // mergeLiveRequestLogChild merges a live patch into an entry living in a
+        // loaded thread-children list (a request that was displaced from head
+        // position, or an expanded child whose detail arrived).
+        mergeLiveRequestLogChild(incoming, patch) {
+            const lists = this.requestThreadChildren;
+            if (!lists || typeof lists !== 'object') return null;
+            const id = String(incoming.id || '').trim();
+            const requestID = String(incoming.request_id || '').trim();
+            const sessionIds = Object.keys(lists);
+            for (let i = 0; i < sessionIds.length; i++) {
+                const list = lists[sessionIds[i]];
+                const entries = list && Array.isArray(list.entries) ? list.entries : [];
+                const index = entries.findIndex((entry) => matchesLiveRequestLogKey(entry, id, requestID));
+                if (index < 0) continue;
+                const merged = this.mergeLiveRequestLogPatch(entries[index] || {}, patch);
+                const nextEntries = [...entries];
+                nextEntries.splice(index, 1, merged);
+                this.requestThreadChildren = { ...lists, [sessionIds[i]]: { ...list, entries: nextEntries } };
+                return merged;
+            }
+            return null;
+        },
+
+        // regroupLiveRequestLogHead folds a list row into another on-screen head of
+        // the same session after an in-place merge. This is how a live row
+        // inserted sessionless (request_log.started fires before session detection
+        // stamps the context) joins its thread once a later event delivers the
+        // session id: the NEWEST of the two rows becomes the thread head — the
+        // event that happens to complete last is not necessarily the newest
+        // request — the other is retained in the thread's children slot, and
+        // the two rows collapse into one thread (total shrinks by one).
+        regroupLiveRequestLogHead(entry) {
+            if (!this.requestLogGroupSessions) return null;
+            const sessionId = String((entry && entry.session_id) || '').trim();
+            if (!sessionId) return null;
+            const entries = (this.requestLog && Array.isArray(this.requestLog.entries)) ? this.requestLog.entries : [];
+            const id = String(entry.id || '').trim();
+            const myIndex = entries.findIndex((candidate) => String(candidate.id || '').trim() === id);
+            if (myIndex < 0) return null;
+            const otherIndex = entries.findIndex((candidate, index) => {
+                return index !== myIndex && String(candidate.session_id || '').trim() === sessionId;
+            });
+            if (otherIndex < 0) return null;
+            const other = entries[otherIndex];
+            const otherTime = Date.parse(other && other.timestamp);
+            const entryTime = Date.parse(entry && entry.timestamp);
+            const otherIsNewer =
+                Number.isFinite(otherTime) && Number.isFinite(entryTime) && otherTime > entryTime;
+            const head = otherIsNewer ? other : entry;
+            const child = otherIsNewer ? entry : other;
+            const merged = {
+                ...head,
+                session_count:
+                    Math.max(1, Number(other.session_count || 1)) +
+                    Math.max(1, Number(entry.session_count || 1))
+            };
+            const next = entries.filter((_, index) => index !== myIndex && index !== otherIndex);
+            this.requestLog.entries = insertLive(next, merged);
+            this.requestLog.total = Math.max(0, Number(this.requestLog.total || 0) - 1);
+            this.insertLiveRequestThreadChild(sessionId, child);
+            return merged;
+        },
+
+        // foldLiveRequestLogIntoThread makes a fresh live request the new head of
+        // its on-screen thread: the old head moves into the loaded children
+        // list (or waits for the lazy fetch) and the thread moves up to its
+        // new latest activity (the top, for local traffic) with its count
+        // bumped. A request older than the head — another replica's, arriving
+        // once persisted — joins the children instead and the thread stays
+        // put. Total is unchanged (same thread count).
+        foldLiveRequestLogIntoThread(patch) {
+            const sessionId = String((patch && patch.session_id) || '').trim();
+            if (!sessionId) return null;
+            const entries = (this.requestLog && Array.isArray(this.requestLog.entries)) ? this.requestLog.entries : [];
+            const headIndex = entries.findIndex((entry) => String(entry.session_id || '').trim() === sessionId);
+            if (headIndex < 0) return null;
+            const oldHead = entries[headIndex];
+            const oldCount = Number(oldHead.session_count);
+            const counted = liveEntryCountedBy(patch, this.requestLog);
+            const sessionCount = (Number.isFinite(oldCount) && oldCount > 0 ? oldCount : 1) + (counted ? 0 : 1);
+            const next = [...entries];
+            if (liveEntryOlder(patch, oldHead)) {
+                next.splice(headIndex, 1, { ...oldHead, session_count: sessionCount });
+                this.requestLog.entries = next;
+                const child = this.mergeLiveRequestLogUsagePatch(patch);
+                this.insertLiveRequestThreadChild(sessionId, child);
+                return child;
+            }
+            const newHead = this.mergeLiveRequestLogUsagePatch({ ...patch, session_count: sessionCount });
+            next.splice(headIndex, 1);
+            this.requestLog.entries = insertLive(next, newHead);
+            this.insertLiveRequestThreadChild(sessionId, oldHead);
+            return newHead;
+        },
+
+        // insertLiveRequestThreadChild retains a displaced thread member in the
+        // session's children slot, newest first. When the thread was never
+        // expanded it creates a partial list (loaded: false, so expanding
+        // still triggers the full fetch) — dropping the entry instead would
+        // make its later live events look like brand-new requests and inflate
+        // the thread count on every event.
+        insertLiveRequestThreadChild(sessionId, entry) {
+            const lists = this.requestThreadChildren || {};
+            const list = lists[sessionId];
+            const child = { ...entry };
+            delete child.session_count;
+            // A fetched children list's total already counts another
+            // replica's entry persisted before the fetch; a partial list's
+            // total is just the entries it holds.
+            const counted = !!(list && list.loaded) && liveEntryCountedBy(child, list);
+            const next = list && Array.isArray(list.entries)
+                ? {
+                    ...list,
+                    entries: insertLive(list.entries, child),
+                    total: Number(list.total || list.entries.length) + (counted ? 0 : 1)
+                }
+                : { loading: false, loaded: false, entries: [child], total: 1 };
+            this.requestThreadChildren = { ...lists, [sessionId]: next };
+        },
+
+        removeLiveRequestThreadChild(id, requestID) {
+            const lists = this.requestThreadChildren;
+            if (!lists || typeof lists !== 'object') return;
+            Object.keys(lists).forEach((sessionId) => {
+                const list = lists[sessionId];
+                const entries = list && Array.isArray(list.entries) ? list.entries : [];
+                const next = entries.filter((entry) => !matchesLiveRequestLogKey(entry, id, requestID));
+                const removed = entries.length - next.length;
+                if (removed === 0) return;
+                this.requestThreadChildren = {
+                    ...this.requestThreadChildren,
+                    [sessionId]: { ...list, entries: next, total: Math.max(0, Number(list.total || entries.length) - removed) }
+                };
+                this.decrementLiveRequestThreadCount(sessionId, removed);
+            });
+        },
+
+        decrementLiveRequestThreadCount(sessionId, count) {
+            const entries = (this.requestLog && Array.isArray(this.requestLog.entries)) ? this.requestLog.entries : [];
+            const index = entries.findIndex((entry) => String(entry.session_id || '').trim() === sessionId);
+            if (index < 0) return;
+            const head = entries[index];
+            const next = [...entries];
+            next.splice(index, 1, {
+                ...head,
+                session_count: Math.max(1, Number(head.session_count || 1) - count)
+            });
+            this.requestLog.entries = next;
+        },
+
+        mergeLiveRequestLogPatch(previous, patch) {
+            const merged = { ...previous, ...patch };
+            if (patch.data === undefined && previous.data !== undefined) {
+                merged.data = previous.data;
+            } else if (previous.data && patch.data &&
+                typeof previous.data === 'object' && typeof patch.data === 'object' &&
+                !Array.isArray(previous.data) && !Array.isArray(patch.data)) {
+                merged.data = { ...previous.data, ...patch.data };
+            }
+            return this.mergeLiveRequestLogUsagePatch(merged);
+        },
+
+        mergeLiveRequestLogUsagePatch(entry) {
+            const usageEntry = this.liveUsageEntryForRequestLog(entry);
+            if (!usageEntry) return entry;
+            const merged = this.requestEntryWithLiveUsage(entry, usageEntry);
+            this.removeSkippedLiveUsage(usageEntry);
+            return merged;
+        },
+
+        liveUsageEntryForRequestLog(entry) {
+            const requestID = String(entry && entry.request_id || '').trim();
+            if (!requestID) return null;
+            const entries = this.usageLog && Array.isArray(this.usageLog.entries) ? this.usageLog.entries : [];
+            const visible = entries.find((usageEntry) => {
+                return String(usageEntry && usageEntry.request_id || '').trim() === requestID;
+            });
+            if (visible) return visible;
+            return this.skippedLiveUsageByRequestId && this.skippedLiveUsageByRequestId[requestID] || null;
+        },
+
+        cacheMergedRequestLogRecord(entry, eventType) {
+            if (entry && typeof this.cacheRequestLogRecord === 'function') {
+                return this.cacheRequestLogRecord(entry, eventType);
+            }
+            return entry;
+        },
+
+        fetchExpandedRequestLogDetailIfReady(entry) {
+            if (!entry || !this.isRequestEntryExpanded || !this.isRequestEntryExpanded(entry)) return;
+            const state = String(entry._live_state || '').trim();
+            if (state !== 'request_log.flushed' && !entry._request_log_flushed) return;
+            if (typeof this.fetchRequestEntryDetail === 'function') {
+                this.fetchRequestEntryDetail(entry);
+            }
+        },
+
+        liveRequestLogStateRank(state) {
+            switch (String(state || '').trim()) {
+            case 'request_log.started':
+                return 10;
+            case 'request_log.updated':
+            case 'request_log.stream':
+                return 20;
+            case 'request_log.completed':
+                return 30;
+            case 'request_log.failed':
+            case 'request_log.flushed':
+            case 'request_log.detail':
+                return 40;
+            default:
+                return 0;
+            }
+        },
+
+        liveRequestLogStateAfter(previousState, incomingState) {
+            const previous = String(previousState || '').trim();
+            const incoming = String(incomingState || '').trim();
+            return this.liveRequestLogStateRank(previous) > this.liveRequestLogStateRank(incoming) ? previous : incoming;
+        },
+
+        // liveRequestLogStateSettled reports whether a live state already carries
+        // its final response (request_log.completed or later); below that the
+        // request is still in flight.
+        liveRequestLogStateSettled(state) {
+            return this.liveRequestLogStateRank(state) >= this.liveRequestLogStateRank('request_log.completed');
+        },
+
+        liveRequestLogEventFlushed(state) {
+            const normalized = String(state || '').trim();
+            return normalized === 'request_log.failed' || normalized === 'request_log.flushed' || normalized === 'request_log.detail';
+        },
+
+        removeLiveRequestEntry(incoming) {
+            if (!incoming || !this.requestLog || !Array.isArray(this.requestLog.entries)) return;
+            const id = String(incoming.id || '').trim();
+            const requestID = String(incoming.request_id || '').trim();
+            if (!id && !requestID) return;
+            const current = this.requestLog.entries;
+            const next = [];
+            let removedCount = 0;
+            let preservedThreads = 0;
+            let reloadGroupedList = false;
+            current.forEach((entry) => {
+                if (!matchesLiveRequestLogKey(entry, id, requestID)) {
+                    next.push(entry);
+                    return;
+                }
+                removedCount++;
+                const sessionId = String(entry.session_id || '').trim();
+                const sessionCount = Math.max(1, Number(entry.session_count || 1));
+                if (!this.requestLogGroupSessions || !sessionId || sessionCount <= 1) return;
+
+                // Removing a live thread head does not remove the persisted
+                // session behind it. Promote the newest loaded child; if the
+                // thread was never expanded, refetch the grouped source.
+                preservedThreads++;
+                const list = this.requestThreadChildren && this.requestThreadChildren[sessionId];
+                const children = list && Array.isArray(list.entries)
+                    ? list.entries.filter((child) => !matchesLiveRequestLogKey(child, id, requestID))
+                    : [];
+                if (children.length === 0) {
+                    reloadGroupedList = true;
+                    return;
+                }
+                const promoted = {
+                    ...children[0],
+                    session_id: sessionId,
+                    session_count: sessionCount - 1
+                };
+                next.push(promoted);
+                this.requestThreadChildren = {
+                    ...this.requestThreadChildren,
+                    [sessionId]: {
+                        ...list,
+                        entries: children.slice(1),
+                        total: Math.max(0, Number(list.total || sessionCount) - 1)
+                    }
+                };
+            });
+            if (removedCount > 0) {
+                this.requestLog.entries = next;
+                this.requestLog.total = Math.max(
+                    0,
+                    Number(this.requestLog.total || 0) - removedCount + preservedThreads
+                );
+            }
+            this.removeLiveRequestThreadChild(id, requestID);
+            if (reloadGroupedList && typeof this.fetchRequestLog === 'function') {
+                this.fetchRequestLog(true);
+            }
+        },
+
+        mergeLiveUsageEntry(incoming, eventType) {
+            if (!incoming || typeof incoming !== 'object') return;
+            incoming = { ...incoming, _live_state: eventType || incoming._live_state || 'usage.completed' };
+            const id = String(incoming.id || '').trim();
+            if (!id) return;
+            const currentEntries = (this.usageLog && Array.isArray(this.usageLog.entries)) ? this.usageLog.entries : [];
+            const index = currentEntries.findIndex((entry) => String(entry.id || '').trim() === id);
+            if (index >= 0) {
+                const previous = currentEntries[index] || {};
+                const merged = this.mergeLiveUsagePatch(previous, incoming);
+                this.applyLiveUsageToRequestLog(merged);
+                // A row the server put on this page stays on it: a paused
+                // view (filters, search, a later page) only stops new rows.
+                // It leaves only for a filter the page can check itself.
+                if (this.liveUsageHiddenByFilter(merged)) {
+                    currentEntries.splice(index, 1);
+                    this.usageLog.entries = [...currentEntries];
+                    this.usageLog.total = Math.max(0, Number(this.usageLog.total || 0) - 1);
+                    this.storeSkippedLiveUsage(merged);
+                    return;
+                }
+                currentEntries.splice(index, 1, merged);
+                this.usageLog.entries = [...currentEntries];
+                this.removeSkippedLiveUsage(merged);
+                return;
+            }
+            const liveEntry = this.mergeLiveUsagePatch(this.liveUsageSeedForEntry(incoming), incoming);
+            this.applyLiveUsageToRequestLog(liveEntry);
+            if (this.liveUsageShouldSkip(liveEntry)) {
+                this.storeSkippedLiveUsage(liveEntry);
+                return;
+            }
+            this.removeSkippedLiveUsage(liveEntry);
+            this.usageLog.entries = insertLive(currentEntries, liveEntry).slice(0, this.usageLog.limit || 50);
+            if (!liveEntryCountedBy(incoming, this.usageLog)) {
+                this.usageLog.total = Number(this.usageLog.total || 0) + 1;
+            }
+        },
+
+        mergeLiveUsagePatch(previous, incoming) {
+            previous = previous && typeof previous === 'object' ? previous : {};
+            const liveState = this.liveUsageStateAfter(previous._live_state, incoming && incoming._live_state);
+            const usageFlushed = this.liveUsageEventFlushed(previous) || this.liveUsageEventFlushed({ ...incoming, _live_state: liveState });
+            return {
+                ...previous,
+                ...incoming,
+                _live: true,
+                _live_state: liveState || 'usage.completed',
+                _live_pending: !usageFlushed,
+                _usage_flushed: usageFlushed
+            };
+        },
+
+        // liveUsageShouldSkip reports that a live usage entry new to the page
+        // stays off it: hidden by a filter the page checks itself, or live
+        // inserts are paused because the page cannot tell whether it belongs.
+        liveUsageShouldSkip(entry) {
+            return this.liveUsageHiddenByFilter(entry) || !this.usageLiveInsertAllowed();
+        },
+
+        // liveUsageHiddenByFilter reports that the entry fails a filter the
+        // page can evaluate client side: hiding cached requests. The other
+        // filters and search run on the server.
+        liveUsageHiddenByFilter(entry) {
+            return !!(this.usageLogHideCached && this.liveUsageEntryCached(entry));
+        },
+
+        liveUsageSeedForEntry(entry) {
+            return this.skippedLiveUsageForEntry(entry) || this.requestLogLiveUsageForEntry(entry);
+        },
+
+        skippedLiveUsageForEntry(entry) {
+            const requestID = String(entry && entry.request_id || '').trim();
+            return requestID && this.skippedLiveUsageByRequestId ? this.skippedLiveUsageByRequestId[requestID] : null;
+        },
+
+        requestLogLiveUsageForEntry(entry) {
+            const requestID = String(entry && entry.request_id || '').trim();
+            if (!requestID || !this.requestLog || !Array.isArray(this.requestLog.entries)) return null;
+            const requestEntry = this.requestLog.entries.find((candidate) => String(candidate && candidate.request_id || '').trim() === requestID);
+            const usage = requestEntry && requestEntry.usage && typeof requestEntry.usage === 'object' && !Array.isArray(requestEntry.usage)
+                ? requestEntry.usage
+                : null;
+            if (!usage) return null;
+            return {
+                id: entry && entry.id,
+                request_id: requestID,
+                entries: usage.entries,
+                input_tokens: usage.input_tokens,
+                uncached_input_tokens: usage.uncached_input_tokens,
+                cached_input_tokens: usage.cached_input_tokens,
+                cache_write_input_tokens: usage.cache_write_input_tokens,
+                output_tokens: usage.output_tokens,
+                total_tokens: usage.total_tokens,
+                cached_input_ratio: usage.cached_input_ratio,
+                estimated_cached_characters: usage.estimated_cached_characters,
+                _live_state: requestEntry._usage_live_state,
+                _live_pending: requestEntry._usage_live_pending,
+                _usage_flushed: requestEntry._usage_flushed
+            };
+        },
+
+        storeSkippedLiveUsage(entry) {
+            const requestID = String(entry && entry.request_id || '').trim();
+            if (!requestID) return;
+            if (!this.skippedLiveUsageByRequestId || typeof this.skippedLiveUsageByRequestId !== 'object' || Array.isArray(this.skippedLiveUsageByRequestId)) {
+                this.skippedLiveUsageByRequestId = {};
+            }
+            this.skippedLiveUsageByRequestId[requestID] = entry;
+        },
+
+        removeSkippedLiveUsage(entry) {
+            const requestID = String(entry && entry.request_id || '').trim();
+            if (requestID && this.skippedLiveUsageByRequestId) {
+                delete this.skippedLiveUsageByRequestId[requestID];
+            }
+        },
+
+        liveUsageEntryCached(entry) {
+            const cacheType = String(entry && entry.cache_type || '').trim().toLowerCase();
+            return cacheType === 'exact' || cacheType === 'semantic' || !!(entry && entry.cache_hit);
+        },
+
+        liveUsageEventFlushed(entry) {
+            const state = String(entry && entry._live_state || '').trim();
+            return !!(entry && entry._usage_flushed) || state === 'usage.failed' || state === 'usage.flushed';
+        },
+
+        liveUsageStateRank(state) {
+            switch (String(state || '').trim()) {
+            case 'usage.completed':
+                return 10;
+            case 'usage.failed':
+            case 'usage.flushed':
+                return 20;
+            default:
+                return 0;
+            }
+        },
+
+        liveUsageStateAfter(previousState, incomingState) {
+            const previous = String(previousState || '').trim();
+            const incoming = String(incomingState || '').trim();
+            return this.liveUsageStateRank(previous) > this.liveUsageStateRank(incoming) ? previous : incoming;
+        },
+
+        applyLiveUsageToRequestLog(usageEntry) {
+            const requestID = String(usageEntry && usageEntry.request_id || '').trim();
+            if (!requestID || !this.requestLog || !Array.isArray(this.requestLog.entries)) return;
+            const index = this.requestLog.entries.findIndex((entry) => String(entry.request_id || '').trim() === requestID);
+            if (index >= 0) {
+                const entry = this.requestLog.entries[index];
+                this.requestLog.entries.splice(index, 1, this.requestEntryWithLiveUsage(entry, usageEntry));
+                this.requestLog.entries = [...this.requestLog.entries];
+            }
+
+            const lists = this.requestThreadChildren;
+            if (!lists || typeof lists !== 'object') return;
+            let nextLists = lists;
+            let changed = false;
+            Object.keys(lists).forEach((sessionId) => {
+                const list = nextLists[sessionId];
+                const entries = list && Array.isArray(list.entries) ? list.entries : [];
+                const childIndex = entries.findIndex((entry) => String(entry.request_id || '').trim() === requestID);
+                if (childIndex < 0) return;
+                const nextEntries = [...entries];
+                nextEntries.splice(
+                    childIndex,
+                    1,
+                    this.requestEntryWithLiveUsage(entries[childIndex], usageEntry)
+                );
+                nextLists = { ...nextLists, [sessionId]: { ...list, entries: nextEntries } };
+                changed = true;
+            });
+            if (changed) {
+                this.requestThreadChildren = nextLists;
+            }
+        },
+
+        requestEntryWithLiveUsage(entry, usageEntry) {
+            const usageLiveState = this.liveUsageStateAfter(entry._usage_live_state, usageEntry._live_state || 'usage.completed');
+            const usageFlushed = this.liveUsageEventFlushed({
+                _live_state: usageLiveState,
+                _usage_flushed: entry._usage_flushed || usageEntry._usage_flushed
+            });
+            return {
+                ...entry,
+                usage: this.liveUsageSummary(usageEntry, entry.usage),
+                _usage_live_state: usageLiveState || 'usage.completed',
+                _usage_live_pending: !usageFlushed,
+                _usage_flushed: usageFlushed
+            };
+        },
+
+        liveUsageSummary(usageEntry, previousUsage) {
+            const previous = previousUsage && typeof previousUsage === 'object' && !Array.isArray(previousUsage) ? previousUsage : {};
+            const inputTokens = this.liveNumber(usageEntry.input_tokens, this.liveNumber(previous.input_tokens, 0));
+            const outputTokens = this.liveNumber(usageEntry.output_tokens, this.liveNumber(previous.output_tokens, 0));
+            let uncachedInputTokens = this.liveNumber(usageEntry.uncached_input_tokens, this.liveNumber(previous.uncached_input_tokens, 0));
+            const cachedInputTokens = this.liveNumber(usageEntry.cached_input_tokens, this.liveNumber(previous.cached_input_tokens, 0));
+            const cacheWriteInputTokens = this.liveNumber(usageEntry.cache_write_input_tokens, this.liveNumber(previous.cache_write_input_tokens, 0));
+            if (inputTokens > 0 && uncachedInputTokens + cachedInputTokens + cacheWriteInputTokens === 0) {
+                uncachedInputTokens = inputTokens;
+            }
+            const segmentedInputTokens = uncachedInputTokens + cachedInputTokens + cacheWriteInputTokens;
+            const normalizedInputTokens = segmentedInputTokens || inputTokens;
+            const computedTotalTokens = normalizedInputTokens + outputTokens;
+            const totalTokens = computedTotalTokens || this.liveNumber(
+                usageEntry.total_tokens,
+                this.liveNumber(previous.total_tokens, 0)
+            );
+            const cachedInputRatio = this.liveNumber(
+                usageEntry.cached_input_ratio,
+                this.liveNumber(previous.cached_input_ratio, normalizedInputTokens > 0 ? cachedInputTokens / normalizedInputTokens : 0)
+            );
+            return {
+                entries: Math.max(1, this.liveNumber(usageEntry.entries, this.liveNumber(previous.entries, 1))),
+                input_tokens: normalizedInputTokens,
+                uncached_input_tokens: uncachedInputTokens,
+                cached_input_tokens: cachedInputTokens,
+                cache_write_input_tokens: cacheWriteInputTokens,
+                output_tokens: outputTokens,
+                total_tokens: totalTokens,
+                cached_input_ratio: cachedInputRatio,
+                estimated_cached_characters: this.liveNumber(
+                    usageEntry.estimated_cached_characters,
+                    this.liveNumber(previous.estimated_cached_characters, cachedInputTokens * 4)
+                )
+            };
+        },
+
+        liveNumber(value, fallback) {
+            const number = Number(value);
+            return Number.isFinite(number) ? number : fallback;
+        },
+
+        requestEntryShouldFetchDetail(entry) {
+            if (!entry || entry._detail_loading || entry._detail_loaded) return false;
+            if (this.requestEntryLiveDetailPending(entry)) return false;
+            if (this.requestEntryNeedsPersistedLiveDetail(entry)) return true;
+            // The list endpoint ships slim entries (bodies stripped
+            // server-side); the flag is the explicit signal that the full
+            // payload lives behind the detail endpoint.
+            if (entry.bodies_omitted) return true;
+            return !this.requestEntryHasDetailData(entry);
+        },
+
+        requestEntryLiveDetailPending(entry) {
+            if (!entry || !entry._live) return false;
+            const state = String(entry._live_state || '').trim();
+            if (state === 'request_log.failed') return true;
+            return !entry._request_log_flushed && state !== 'request_log.flushed' && state !== 'request_log.detail';
+        },
+
+        requestEntryNeedsPersistedLiveDetail(entry) {
+            return !!(entry && entry._live && !entry._detail_loaded);
+        },
+
+        requestEntryHasDetailData(entry) {
+            const data = entry && entry.data;
+            if (!data || typeof data !== 'object') return false;
+            return data.request_headers !== undefined ||
+                data.response_headers !== undefined ||
+                data.request_body !== undefined ||
+                data.response_body !== undefined ||
+                data.request_body_too_big_to_handle !== undefined ||
+                data.response_body_too_big_to_handle !== undefined ||
+                data.user_agent !== undefined ||
+                data.api_key_hash !== undefined ||
+                data.temperature !== undefined ||
+                data.max_tokens !== undefined ||
+                data.error_message !== undefined ||
+                data.error_code !== undefined;
+        },
+
+        clearRequestLogDetailLoading(entry) {
+            if (!entry) return;
+            const id = String(entry.id || '').trim();
+            const requestID = String(entry.request_id || '').trim();
+            const entries = this.requestLog && Array.isArray(this.requestLog.entries) ? this.requestLog.entries : [];
+            const current = entries.find((candidate) => {
+                if (id && String(candidate.id || '').trim() === id) return true;
+                return !!(requestID && String(candidate.request_id || '').trim() === requestID);
+            });
+            const target = current || entry;
+            target._detail_loading = false;
+            if (current) {
+                this.requestLog.entries = [...entries];
+            }
+        }
+    };
+}

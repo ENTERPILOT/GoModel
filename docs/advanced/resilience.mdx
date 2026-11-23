@@ -64,7 +64,9 @@ including `500` — are returned to the caller without retrying. The following p
 retry less than the table suggests:
 
 - **Local HTTP client timeouts** return immediately without retrying. An
-  expired overall request context also prevents further attempts.
+  expired overall request context also prevents further attempts. To give one
+  model or redirect its own `HTTP_TIMEOUT` or `HTTP_RESPONSE_HEADER_TIMEOUT`,
+  see [Set upstream timeouts](/features/virtual-models#set-upstream-timeouts).
 
 - **Streaming** requests are never retried once dispatched, because partial
   data may already have been sent.
@@ -163,6 +165,11 @@ gets its own breaker by default. With `scope: model`, each model within a
 provider instance gets an independent breaker; other requests without a model
 use a separate provider breaker, and model discovery bypasses breakers
 entirely. Multipart audio uploads use their explicit model names.
+
+Requests running on a
+[per-model timeout](/features/virtual-models#set-upstream-timeouts) use their
+model's own breaker in either scope: a tight budget on one model must not
+open the circuit for the whole provider.
 
 Each provider retains at most 1,024 model breakers. Idle closed entries expire
 after 10 minutes when a new model is looked up; the oldest idle closed entry
@@ -289,6 +296,14 @@ half or more of its windowed requests) marks the provider `Degraded` even
 while model discovery still succeeds — this catches upstreams that list
 models fine but fail real calls, e.g. with misreported `4xx` errors that
 deliberately never trip the breaker.
+
+A model that has its own breaker (under `scope: model`, or because it runs on
+a [per-model timeout](/features/virtual-models#set-upstream-timeouts)) shows
+that breaker's state next to its name in the card's **Models (Recent
+Traffic)** list while it is `Open` or `Half-open`. An open model breaker also
+marks an otherwise healthy provider `Degraded`. Like the provider's, the state
+is the one seen by the model's most recent request; it leaves the card with
+the model once that request is older than the 10-minute window.
 
 Request-health signals only ever worsen the discovery-based status, never
 improve it, and the tracking is in-memory per gateway process. The breaker

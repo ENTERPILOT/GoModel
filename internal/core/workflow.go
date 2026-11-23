@@ -1,6 +1,10 @@
 package core
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/goccy/go-json"
+)
 
 // ExecutionMode describes how the gateway intends to execute a request.
 type ExecutionMode string
@@ -99,24 +103,81 @@ func NewWorkflowSelector(provider, model string, userPath ...string) WorkflowSel
 // WorkflowFeatures stores resolved per-request feature flags sourced from the
 // matched persisted workflow.
 type WorkflowFeatures struct {
-	Cache      bool `json:"cache"`
-	Audit      bool `json:"audit"`
-	Usage      bool `json:"usage"`
-	Budget     bool `json:"budget"`
-	Guardrails bool `json:"guardrails"`
-	Failover   bool `json:"failover"`
+	Cache       bool `json:"cache"`
+	RequestLogs bool `json:"request_logs"`
+	Usage       bool `json:"usage"`
+	Budget      bool `json:"budget"`
+	Guardrails  bool `json:"guardrails"`
+	Failover    bool `json:"failover"`
+}
+
+// workflowFeaturesWire is WorkflowFeatures as JSON. The request_logs flag was
+// named audit through v0.2.5, and clients and replicas of that version read
+// only audit, so both keys are written. request_logs wins when both are read.
+type workflowFeaturesWire struct {
+	Cache       bool  `json:"cache"`
+	RequestLogs *bool `json:"request_logs,omitempty"`
+	Audit       *bool `json:"audit,omitempty"`
+	Usage       bool  `json:"usage"`
+	Budget      bool  `json:"budget"`
+	Guardrails  bool  `json:"guardrails"`
+	Failover    bool  `json:"failover"`
+}
+
+// MarshalJSON writes request_logs and its deprecated alias audit.
+func (f WorkflowFeatures) MarshalJSON() ([]byte, error) {
+	return json.Marshal(workflowFeaturesWire{
+		Cache:       f.Cache,
+		RequestLogs: &f.RequestLogs,
+		Audit:       &f.RequestLogs, // deprecated alias: drop this line to stop writing it
+		Usage:       f.Usage,
+		Budget:      f.Budget,
+		Guardrails:  f.Guardrails,
+		Failover:    f.Failover,
+	})
+}
+
+// UnmarshalJSON reads request_logs, falling back to its deprecated alias audit.
+func (f *WorkflowFeatures) UnmarshalJSON(data []byte) error {
+	var wire workflowFeaturesWire
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*f = WorkflowFeatures{
+		Cache:       wire.Cache,
+		RequestLogs: RequestLogsFlag(wire.RequestLogs, wire.Audit),
+		Usage:       wire.Usage,
+		Budget:      wire.Budget,
+		Guardrails:  wire.Guardrails,
+		Failover:    wire.Failover,
+	}
+	return nil
+}
+
+// RequestLogsFlag resolves the workflow request_logs flag from a decoded
+// document: requestLogs when the document carried it, otherwise its deprecated
+// alias audit, otherwise false.
+func RequestLogsFlag(requestLogs, audit *bool) bool {
+	switch {
+	case requestLogs != nil:
+		return *requestLogs
+	case audit != nil:
+		return *audit
+	default:
+		return false
+	}
 }
 
 // ApplyUpperBound returns features with process-level caps applied.
 func (f WorkflowFeatures) ApplyUpperBound(caps WorkflowFeatures) WorkflowFeatures {
 	usage := f.Usage && caps.Usage
 	return WorkflowFeatures{
-		Cache:      f.Cache && caps.Cache,
-		Audit:      f.Audit && caps.Audit,
-		Usage:      usage,
-		Budget:     usage && f.Budget && caps.Budget,
-		Guardrails: f.Guardrails && caps.Guardrails,
-		Failover:   f.Failover && caps.Failover,
+		Cache:       f.Cache && caps.Cache,
+		RequestLogs: f.RequestLogs && caps.RequestLogs,
+		Usage:       usage,
+		Budget:      usage && f.Budget && caps.Budget,
+		Guardrails:  f.Guardrails && caps.Guardrails,
+		Failover:    f.Failover && caps.Failover,
 	}
 }
 
@@ -124,12 +185,12 @@ func (f WorkflowFeatures) ApplyUpperBound(caps WorkflowFeatures) WorkflowFeature
 // persisted workflow has been attached to the request.
 func DefaultWorkflowFeatures() WorkflowFeatures {
 	return WorkflowFeatures{
-		Cache:      true,
-		Audit:      true,
-		Usage:      true,
-		Budget:     true,
-		Guardrails: true,
-		Failover:   true,
+		Cache:       true,
+		RequestLogs: true,
+		Usage:       true,
+		Budget:      true,
+		Guardrails:  true,
+		Failover:    true,
 	}
 }
 
@@ -201,9 +262,9 @@ func (p *Workflow) CacheEnabled() bool {
 	return p.featureEnabled(func(features WorkflowFeatures) bool { return features.Cache })
 }
 
-// AuditEnabled reports whether audit logging is enabled for the request.
-func (p *Workflow) AuditEnabled() bool {
-	return p.featureEnabled(func(features WorkflowFeatures) bool { return features.Audit })
+// RequestLogEnabled reports whether request logging is enabled for the request.
+func (p *Workflow) RequestLogEnabled() bool {
+	return p.featureEnabled(func(features WorkflowFeatures) bool { return features.RequestLogs })
 }
 
 // UsageEnabled reports whether usage tracking is enabled for the request.

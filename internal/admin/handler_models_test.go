@@ -67,6 +67,29 @@ func TestListModels_IncludesModelAccessState(t *testing.T) {
 	require.Equal(t, "openai/gpt-4o", row.Access.Override.Source)
 }
 
+func TestListModels_IncludesModelWidePolicy(t *testing.T) {
+	registry := newVMModelRegistry(t)
+	timeout, headerTimeout := 120, 30
+	service := newVMServiceForRegistry(t, registry, true,
+		virtualmodels.VirtualModel{Source: "gpt-4o", Timeout: &timeout, Enabled: true},
+		virtualmodels.VirtualModel{Source: "openai/gpt-4o", ResponseHeaderTimeout: &headerTimeout, Enabled: true},
+	)
+
+	h := NewHandler(nil, registry, WithVirtualModels(service))
+	c, rec := echotest.Get(t, "/admin/models")
+	require.NoError(t, h.ListModels(c))
+
+	body := echotest.Decode[[]modelInventoryResponse](t, rec)
+	require.Len(t, body, 1)
+
+	access := body[0].Access
+	require.NotNil(t, access.Override)
+	require.Equal(t, "openai/gpt-4o", access.Override.Source)
+	require.NotNil(t, access.ModelPolicy)
+	require.Equal(t, "gpt-4o", access.ModelPolicy.Source)
+	require.Equal(t, &timeout, access.ModelPolicy.Timeout)
+}
+
 func TestListModels_DisabledPolicyTurnsModelOff(t *testing.T) {
 	registry := newVMModelRegistry(t)
 	service := newVMServiceForRegistry(t, registry, true, virtualmodels.VirtualModel{

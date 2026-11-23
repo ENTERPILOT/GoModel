@@ -24,24 +24,24 @@ const (
 
 func TestBudget_EnforcesAndPersistsAcrossDatabases(t *testing.T) {
 	tests := []struct {
-		name         string
-		dbType       string
-		auditEnabled bool
+		name              string
+		dbType            string
+		requestLogEnabled bool
 	}{
-		{name: "postgresql audit enabled", dbType: "postgresql", auditEnabled: true},
-		{name: "postgresql audit disabled", dbType: "postgresql", auditEnabled: false},
-		{name: "mongodb audit enabled", dbType: "mongodb", auditEnabled: true},
-		{name: "mongodb audit disabled", dbType: "mongodb", auditEnabled: false},
+		{name: "postgresql request log enabled", dbType: "postgresql", requestLogEnabled: true},
+		{name: "postgresql request log disabled", dbType: "postgresql", requestLogEnabled: false},
+		{name: "mongodb request log enabled", dbType: "mongodb", requestLogEnabled: true},
+		{name: "mongodb request log disabled", dbType: "mongodb", requestLogEnabled: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fixture := SetupTestServer(t, TestServerConfig{
 				DBType:                tt.dbType,
-				AuditLogEnabled:       tt.auditEnabled,
+				RequestLogEnabled:     tt.requestLogEnabled,
 				UsageEnabled:          true,
 				BudgetsEnabled:        true,
-				LogBodies:             tt.auditEnabled,
+				LogBodies:             tt.requestLogEnabled,
 				AdminEndpointsEnabled: true,
 				OnlyModelInteractions: false,
 				BudgetUserPaths: []config.BudgetUserPathConfig{
@@ -90,16 +90,16 @@ func TestBudget_EnforcesAndPersistsAcrossDatabases(t *testing.T) {
 			require.Empty(t, usageEntriesByRequestID(t, fixture, secondRequestID), "blocked request must not write usage")
 			require.Len(t, fixture.MockLLM.Requests(), 1, "blocked request must not reach upstream provider")
 
-			if tt.auditEnabled {
-				auditEntry := waitForAuditEntry(t, fixture, secondRequestID)
-				require.Equal(t, http.StatusTooManyRequests, auditEntry.StatusCode)
-				require.Equal(t, integrationBudgetPath+"/app", auditEntry.UserPath)
-				require.Equal(t, string(core.ErrorTypeRateLimit), auditEntry.ErrorType)
-				if auditEntry.Data != nil {
-					require.Equal(t, "budget_exceeded", auditEntry.Data.ErrorCode)
+			if tt.requestLogEnabled {
+				requestLogEntry := waitForRequestLogEntry(t, fixture, secondRequestID)
+				require.Equal(t, http.StatusTooManyRequests, requestLogEntry.StatusCode)
+				require.Equal(t, integrationBudgetPath+"/app", requestLogEntry.UserPath)
+				require.Equal(t, string(core.ErrorTypeRateLimit), requestLogEntry.ErrorType)
+				if requestLogEntry.Data != nil {
+					require.Equal(t, "budget_exceeded", requestLogEntry.Data.ErrorCode)
 				}
 			} else {
-				require.False(t, dbassert.StorageObjectExists(t, tt.dbType, fixture.PgPool, fixture.MongoDb, "audit_logs"))
+				require.False(t, dbassert.StorageObjectExists(t, tt.dbType, fixture.PgPool, fixture.MongoDb, "request_logs"))
 			}
 		})
 	}
@@ -131,16 +131,16 @@ func usageEntriesByRequestID(t *testing.T, fixture *TestServerFixture, requestID
 	}
 }
 
-func waitForAuditEntry(t *testing.T, fixture *TestServerFixture, requestID string) dbassert.AuditLogEntry {
+func waitForRequestLogEntry(t *testing.T, fixture *TestServerFixture, requestID string) dbassert.RequestLogEntry {
 	t.Helper()
 
-	var entries []dbassert.AuditLogEntry
+	var entries []dbassert.RequestLogEntry
 	require.Eventually(t, func() bool {
 		switch fixture.DBType {
 		case "postgresql":
-			entries = dbassert.QueryAuditLogsByRequestID(t, fixture.PgPool, requestID)
+			entries = dbassert.QueryRequestLogsByRequestID(t, fixture.PgPool, requestID)
 		case "mongodb":
-			entries = dbassert.QueryAuditLogsByRequestIDMongo(t, fixture.MongoDb, requestID)
+			entries = dbassert.QueryRequestLogsByRequestIDMongo(t, fixture.MongoDb, requestID)
 		default:
 			t.Fatalf("unsupported DB type %q", fixture.DBType)
 		}

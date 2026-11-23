@@ -233,6 +233,23 @@ gomodel config export > gomodel-export.yaml
 docker exec my-gateway /gomodel config export > gomodel-export.yaml
 ```
 
+Settings that hold their default value are left out, since they load the same
+way, so the file shows only what differs from the defaults. A setting that
+differs is kept even when empty, such as `enable_passthrough_routes: false`
+or an explicit empty list such as `retry_on_statuses: []`, and so is a
+`${VAR}` expansion or a secret reference, whatever it gives. A gateway with nothing configured
+exports `{}`. Defaults that depend on where the gateway runs, such as
+`storage.sqlite.path`, are left out too, so the instance that loads the file
+uses its own.
+
+Pass `--include-defaults` to also write the defaults, for a file that keeps
+its values when a later version changes one. Settings that are empty by
+default (`""`, `0`, `false`, unset) are left out either way.
+
+```bash
+gomodel config export --include-defaults > gomodel-export.yaml
+```
+
 <Warning>
 Write the export to a new file, not onto the `config.yaml` the gateway reads:
 the shell empties that file before the command starts, so the original is
@@ -279,7 +296,12 @@ plugin marks as secret. Under `extensions:`, plugin settings, and maps such as
 `resource_attributes`, any string under a key naming a credential (`token`,
 `api_key`, `password`, `auth`, ...) counts as one too. So does any other
 text holding a secret's value, a `Bearer` token, or a credential assignment
-such as `password=...`.
+such as `password=...`. In plugin settings and under `extensions:`, the value
+of a `Name: value` header line is one when the name names a credential
+(`X-Proxy-Key: ...`) or the value is a `Bearer` token or `Basic` credentials,
+as in a `header_edit` rule's `upstream_set`, commented out with `#` or not.
+Each such line gets its own variable; the header name and the other lines are
+kept.
 
 <Note>
 Free-form text, such as a description typed into the dashboard, is checked

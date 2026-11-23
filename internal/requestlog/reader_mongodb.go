@@ -1,0 +1,494 @@
+package requestlog
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	"github.com/enterpilot/gomodel/internal/core"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+)
+
+// MongoDBReader implements Reader for MongoDB.
+type MongoDBReader struct {
+	database   *mongo.Database
+	collection atomic.Pointer[mongo.Collection]
+}
+
+// logs returns the collection to query. A reader that started on audit_logs
+// looks again each time: a store on another replica renames the collection
+// when it starts, and from then on the old name holds nothing.
+func (r *MongoDBReader) logs(ctx context.Context) *mongo.Collection {
+	collection := r.collection.Load()
+	if collection.Name() == requestLogCollectionName {
+		return collection
+	}
+	// A failure to list leaves the query to report what is wrong.
+	if found, err := existingRequestLogCollection(ctx, r.database); err == nil {
+		collection = found
+		r.collection.Store(found)
+	}
+	return collection
+}
+
+type mongoLogRow struct {
+	ID                string    `bson:"_id"`
+	Timestamp         time.Time `bson:"timestamp"`
+	DurationNs        int64     `bson:"duration_ns"`
+	RequestedModel    string    `bson:"requested_model"`
+	LegacyModel       string    `bson:"model"`
+	ResolvedModel     string    `bson:"resolved_model"`
+	Provider          string    `bson:"provider"`
+	ProviderName      string    `bson:"provider_name"`
+	AliasUsed         bool      `bson:"alias_used"`
+	WorkflowVersionID string    `bson:"workflow_version_id"`
+	CacheType         string    `bson:"cache_type"`
+	StatusCode        int       `bson:"status_code"`
+	RequestID         string    `bson:"request_id"`
+	PrincipalID       string    `bson:"principal_id"`
+	AuthKeyID         string    `bson:"auth_key_id"`
+	AuthMethod        string    `bson:"auth_method"`
+	ClientIP          string    `bson:"client_ip"`
+	Method            string    `bson:"method"`
+	Path              string    `bson:"path"`
+	UserPath          string    `bson:"user_path"`
+	SessionID         string    `bson:"session_id"`
+	Stream            bool      `bson:"stream"`
+	ErrorType         string    `bson:"error_type"`
+	Data              *LogData  `bson:"data"`
+}
+
+func (r mongoLogRow) toLogEntry() *LogEntry {
+	return &LogEntry{
+		ID:                r.ID,
+		Timestamp:         r.Timestamp,
+		DurationNs:        r.DurationNs,
+		RequestedModel:    firstNonEmpty(r.RequestedModel, r.LegacyModel),
+		ResolvedModel:     r.ResolvedModel,
+		Provider:          r.Provider,
+		ProviderName:      displayRequestLogProviderName(r.ProviderName, r.Provider),
+		AliasUsed:         r.AliasUsed,
+		WorkflowVersionID: r.WorkflowVersionID,
+		CacheType:         normalizeCacheType(r.CacheType),
+		StatusCode:        r.StatusCode,
+		RequestID:         r.RequestID,
+		PrincipalID:       r.PrincipalID,
+		AuthKeyID:         r.AuthKeyID,
+		AuthMethod:        r.AuthMethod,
+		ClientIP:          r.ClientIP,
+		Method:            r.Method,
+		Path:              r.Path,
+		UserPath:          r.UserPath,
+		SessionID:         r.SessionID,
+		Stream:            r.Stream,
+		ErrorType:         r.ErrorType,
+		Data:              sanitizeLogData(r.Data),
+	}
+}
+
+func sanitizeLogData(data *LogData) *LogData {
+	if data == nil {
+		return nil
+	}
+	clean := *data
+	clean.RequestHeaders = RedactHeaders(data.RequestHeaders)
+	clean.ResponseHeaders = RedactHeaders(data.ResponseHeaders)
+	clean.Attempts = normalizeAttemptSnapshots(data.Attempts)
+	return &clean
+}
+
+// NewMongoDBReader creates a new MongoDB request log reader.
+func NewMongoDBReader(database *mongo.Database) (*MongoDBReader, error) {
+	if database == nil {
+		return nil, fmt.Errorf("database is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	collection, err := existingRequestLogCollection(ctx, database)
+	if err != nil {
+		return nil, err
+	}
+	reader := &MongoDBReader{database: database}
+	reader.collection.Store(collection)
+	return reader, nil
+}
+
+func mongoUserPathMatchFilter(userPath string) bson.E {
+	regexFilter := bson.D{{
+		Key: "user_path",
+		Value: bson.D{
+			{Key: "$regex", Value: requestLogUserPathSubtreeRegex(userPath)},
+		},
+	}}
+	if userPath != "/" {
+		return regexFilter[0]
+	}
+	return bson.E{
+		Key: "$or",
+		Value: bson.A{
+			regexFilter,
+			bson.D{{Key: "user_path", Value: bson.D{{Key: "$exists", Value: false}}}},
+			bson.D{{Key: "user_path", Value: nil}},
+		},
+	}
+}
+
+func mongoExactUserPathMatchFilter(userPath string) bson.E {
+	if userPath != "/" {
+		return bson.E{Key: "user_path", Value: userPath}
+	}
+	return bson.E{
+		Key: "$or",
+		Value: bson.A{
+			bson.D{{Key: "user_path", Value: "/"}},
+			bson.D{{Key: "user_path", Value: ""}},
+			bson.D{{Key: "user_path", Value: bson.D{{Key: "$exists", Value: false}}}},
+			bson.D{{Key: "user_path", Value: nil}},
+		},
+	}
+}
+
+// GetLogs returns a paginated list of request log entries.
+func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogListResult, error) {
+	limit, offset := clampLimitOffset(params.Limit, params.Offset)
+
+	matchFilters, err := mongoLogMatchFilters(params)
+	if err != nil {
+		return nil, err
+	}
+
+	pipeline := bson.A{}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
+	}
+	if params.OmitAttempts {
+		pipeline = append(pipeline, bson.D{{Key: "$project", Value: bson.D{{Key: "data.attempts", Value: 0}}}})
+	}
+
+	pipeline = append(pipeline, bson.D{{Key: "$facet", Value: bson.D{
+		{Key: "data", Value: bson.A{
+			bson.D{{Key: "$sort", Value: bson.D{{Key: "timestamp", Value: -1}, {Key: "_id", Value: -1}}}},
+			bson.D{{Key: "$skip", Value: offset}},
+			bson.D{{Key: "$limit", Value: limit}},
+		}},
+		{Key: "total", Value: bson.A{
+			bson.D{{Key: "$count", Value: "count"}},
+		}},
+	}}})
+
+	cursor, err := r.logs(ctx).Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate request logs: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var facetResult struct {
+		Data  []mongoLogRow `bson:"data"`
+		Total []struct {
+			Count int `bson:"count"`
+		} `bson:"total"`
+	}
+
+	if cursor.Next(ctx) {
+		if err := cursor.Decode(&facetResult); err != nil {
+			return nil, fmt.Errorf("failed to decode request log facet result: %w", err)
+		}
+	}
+
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating request log cursor: %w", err)
+	}
+
+	total := 0
+	if len(facetResult.Total) > 0 {
+		total = facetResult.Total[0].Count
+	}
+
+	entries := make([]LogEntry, 0, len(facetResult.Data))
+	for _, row := range facetResult.Data {
+		entry := row.toLogEntry()
+		if entry != nil {
+			entries = append(entries, *entry)
+		}
+	}
+
+	return &LogListResult{
+		Entries: entries,
+		Total:   total,
+		Limit:   limit,
+		Offset:  offset,
+	}, nil
+}
+
+// mongoLogMatchFilters builds the $match document for a log query, shared by
+// the paginated list and the sessions aggregation.
+func mongoLogMatchFilters(params LogQueryParams) (bson.D, error) {
+	matchFilters := bson.D{}
+
+	if tsFilter := mongoDateRangeFilter(params.QueryParams); tsFilter != nil {
+		matchFilters = append(matchFilters, bson.E{Key: "timestamp", Value: tsFilter})
+	}
+	if !params.beforeTimestamp.IsZero() && params.beforeID != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "$and", Value: bson.A{
+			bson.D{{Key: "$or", Value: bson.A{
+				bson.D{{Key: "timestamp", Value: bson.D{{Key: "$lt", Value: params.beforeTimestamp.UTC()}}}},
+				bson.D{
+					{Key: "timestamp", Value: params.beforeTimestamp.UTC()},
+					{Key: "_id", Value: bson.D{{Key: "$lt", Value: params.beforeID}}},
+				},
+			}}},
+		}})
+	}
+	if params.RequestedModel != "" {
+		matchFilters = append(matchFilters, bson.E{
+			Key: "$or",
+			Value: bson.A{
+				bson.D{{Key: "requested_model", Value: bson.D{
+					{Key: "$regex", Value: regexp.QuoteMeta(params.RequestedModel)},
+					{Key: "$options", Value: "i"},
+				}}},
+				bson.D{{Key: "model", Value: bson.D{
+					{Key: "$regex", Value: regexp.QuoteMeta(params.RequestedModel)},
+					{Key: "$options", Value: "i"},
+				}}},
+			},
+		})
+	}
+	if prefix, err := normalizeRequestLogPrefix("model_prefix", params.ModelPrefix); err != nil {
+		return nil, err
+	} else if prefix != "" {
+		// Anchored, case-sensitive regexes become index bounds; every $or
+		// branch has its own index, so the planner can union them. Documents
+		// written before the requested/resolved split keep the requested
+		// model in the legacy "model" field.
+		regex := bson.D{{Key: "$regex", Value: requestLogPrefixRegex(prefix)}}
+		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
+			bson.D{{Key: "requested_model", Value: regex}},
+			bson.D{{Key: "resolved_model", Value: regex}},
+			bson.D{{Key: "model", Value: regex}},
+		}})
+	}
+	if params.Provider != "" {
+		regex := bson.D{
+			{Key: "$regex", Value: regexp.QuoteMeta(params.Provider)},
+			{Key: "$options", Value: "i"},
+		}
+		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
+			bson.D{{Key: "provider", Value: regex}},
+			bson.D{{Key: "provider_name", Value: regex}},
+		}})
+	}
+	if params.Method != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "method", Value: params.Method})
+	}
+	if params.Path != "" {
+		matchFilters = append(matchFilters, bson.E{
+			Key: "path",
+			Value: bson.D{
+				{Key: "$regex", Value: regexp.QuoteMeta(params.Path)},
+				{Key: "$options", Value: "i"},
+			},
+		})
+	}
+	if userPath, err := normalizeRequestLogUserPathFilter(params.UserPath); err != nil {
+		return nil, core.NewInvalidRequestError(err.Error(), err)
+	} else if userPath != "" {
+		if params.ExactUserPath {
+			matchFilters = append(matchFilters, mongoExactUserPathMatchFilter(userPath))
+		} else {
+			matchFilters = append(matchFilters, mongoUserPathMatchFilter(userPath))
+		}
+	}
+	if prefix, err := normalizeRequestLogUserPathPrefix(params.UserPathPrefix); err != nil {
+		return nil, err
+	} else if prefix != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "user_path", Value: bson.D{
+			{Key: "$regex", Value: requestLogPrefixRegex(prefix)},
+		}})
+	}
+	if params.ErrorType != "" {
+		matchFilters = append(matchFilters, bson.E{
+			Key: "error_type",
+			Value: bson.D{
+				{Key: "$regex", Value: regexp.QuoteMeta(params.ErrorType)},
+				{Key: "$options", Value: "i"},
+			},
+		})
+	}
+	if params.SessionID != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "session_id", Value: params.SessionID})
+	}
+	if params.RequestID != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "request_id", Value: params.RequestID})
+	}
+	if params.StatusCode != nil {
+		matchFilters = append(matchFilters, bson.E{Key: "status_code", Value: *params.StatusCode})
+	}
+	if params.Stream != nil {
+		matchFilters = append(matchFilters, bson.E{Key: "stream", Value: *params.Stream})
+	}
+	if len(params.ExcludeOperations) > 0 {
+		matchFilters = append(matchFilters, mongoExcludeOperationsFilter(params.ExcludeOperations))
+	}
+	if params.Search != "" && isCanonicalUUID(params.Search) {
+		// A full canonical UUID is a pasted identifier: match the indexed
+		// identity fields by equality (both spellings — stored ids are
+		// lowercase, pastes may not be) instead of the regex sweep below.
+		// Mirrors the SQL reader's fast path, including its trade-off: a UUID
+		// that only appears inside free text no longer matches.
+		spellings := bson.A{params.Search, strings.ToLower(params.Search)}
+		exact := bson.D{{Key: "$in", Value: spellings}}
+		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
+			bson.D{{Key: "_id", Value: exact}},
+			bson.D{{Key: "request_id", Value: exact}},
+			bson.D{{Key: "auth_key_id", Value: exact}},
+			bson.D{{Key: "session_id", Value: exact}},
+		}})
+	} else if params.Search != "" {
+		pattern := regexp.QuoteMeta(params.Search)
+		regex := bson.D{{Key: "$regex", Value: pattern}, {Key: "$options", Value: "i"}}
+		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
+			bson.D{{Key: "request_id", Value: regex}},
+			bson.D{{Key: "auth_key_id", Value: regex}},
+			bson.D{{Key: "requested_model", Value: regex}},
+			bson.D{{Key: "model", Value: regex}},
+			bson.D{{Key: "provider", Value: regex}},
+			bson.D{{Key: "provider_name", Value: regex}},
+			bson.D{{Key: "method", Value: regex}},
+			bson.D{{Key: "path", Value: regex}},
+			bson.D{{Key: "user_path", Value: regex}},
+			bson.D{{Key: "session_id", Value: regex}},
+			bson.D{{Key: "error_type", Value: regex}},
+			bson.D{{Key: "data.error_message", Value: regex}},
+		}})
+	}
+
+	return matchFilters, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// GetLogByID returns a single request log entry by ID.
+func (r *MongoDBReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error) {
+	var row mongoLogRow
+
+	err := r.logs(ctx).FindOne(ctx, bson.D{{Key: "_id", Value: id}}).Decode(&row)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to query request log by id: %w", err)
+	}
+
+	return row.toLogEntry(), nil
+}
+
+func (r *MongoDBReader) GetInteractionParent(ctx context.Context, id string) (*InteractionParent, error) {
+	var row struct {
+		UserPath  string `bson:"user_path"`
+		SessionID string `bson:"session_id"`
+	}
+	opts := options.FindOne().SetProjection(bson.D{
+		{Key: "user_path", Value: 1},
+		{Key: "session_id", Value: 1},
+	})
+	if err := r.logs(ctx).FindOne(ctx, bson.D{{Key: "_id", Value: id}}, opts).Decode(&row); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to query interaction parent: %w", err)
+	}
+	return &InteractionParent{UserPath: row.UserPath, SessionID: row.SessionID}, nil
+}
+
+func (r *MongoDBReader) GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error) {
+	return buildConversation(ctx, logID, limit, r.getConversationLogByID, r.GetLogs,
+		r.findByResponseID, r.findByPreviousResponseID)
+}
+
+func (r *MongoDBReader) getConversationLogByID(ctx context.Context, id string) (*LogEntry, error) {
+	return r.findConversationEntry(ctx, bson.D{{Key: "_id", Value: id}}, nil, "id")
+}
+
+func mongoDateRangeFilter(params QueryParams) bson.D {
+	startZero := params.StartDate.IsZero()
+	endZero := params.EndDate.IsZero()
+
+	if !startZero && !endZero {
+		return bson.D{{Key: "$gte", Value: params.StartDate.UTC()}, {Key: "$lt", Value: params.EndDate.AddDate(0, 0, 1).UTC()}}
+	}
+	if !startZero {
+		return bson.D{{Key: "$gte", Value: params.StartDate.UTC()}}
+	}
+	if !endZero {
+		return bson.D{{Key: "$lt", Value: params.EndDate.AddDate(0, 0, 1).UTC()}}
+	}
+	return nil
+}
+
+func (r *MongoDBReader) findByResponseID(ctx context.Context, responseID string) (*LogEntry, error) {
+	return r.findFirstByField(ctx, "data.response_body.id", responseID, "response_id")
+}
+
+func (r *MongoDBReader) findByPreviousResponseID(ctx context.Context, previousResponseID string) (*LogEntry, error) {
+	return r.findFirstByField(ctx, "data.request_body.previous_response_id", previousResponseID, "previous_response_id")
+}
+
+func (r *MongoDBReader) findFirstByField(ctx context.Context, field string, value any, label string) (*LogEntry, error) {
+	filter := bson.D{{Key: field, Value: value}}
+	sort := bson.D{{Key: "timestamp", Value: 1}}
+	return r.findConversationEntry(ctx, filter, sort, label)
+}
+
+func (r *MongoDBReader) findConversationEntry(ctx context.Context, filter bson.D, sort bson.D, label string) (*LogEntry, error) {
+	opts := options.FindOne().SetProjection(bson.D{{Key: "data.attempts", Value: 0}})
+	if len(sort) > 0 {
+		opts.SetSort(sort)
+	}
+
+	var row mongoLogRow
+
+	if err := r.logs(ctx).FindOne(ctx, filter, opts).Decode(&row); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to query request log by %s: %w", label, err)
+	}
+
+	return row.toLogEntry(), nil
+}
+
+// mongoExcludeOperationsFilter drops paths belonging to any of the
+// operations; entries without a path stay. Exact paths also match with one
+// trailing slash, as DescribeEndpoint does.
+func mongoExcludeOperationsFilter(ops []core.Operation) bson.E {
+	var exact bson.A
+	var nor bson.A
+	for _, op := range ops {
+		paths, _ := core.PathsForOperation(op)
+		for _, path := range paths.Exact {
+			exact = append(exact, path, path+"/")
+		}
+		for _, prefix := range paths.Prefixes {
+			exact = append(exact, prefix)
+			nor = append(nor, bson.D{{Key: "path", Value: bson.D{
+				{Key: "$regex", Value: "^" + regexp.QuoteMeta(prefix+"/")},
+			}}})
+		}
+	}
+	nor = append(nor, bson.D{{Key: "path", Value: bson.D{{Key: "$in", Value: exact}}}})
+	return bson.E{Key: "$nor", Value: nor}
+}

@@ -9,7 +9,6 @@ import (
 	"hash"
 	"log/slog"
 	"net/http"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,7 +40,7 @@ type semanticCacheMiddleware struct {
 	store            VecStore
 	cfg              config.SemanticCacheConfig
 	embedderIdentity string
-	hitRecorder      func(exchange, []byte, string)
+	hitRecorder      hitRecorder
 
 	partitionByUserPath bool
 
@@ -55,7 +54,7 @@ type semanticCacheMiddleware struct {
 	closed  bool
 }
 
-func newSemanticCacheMiddleware(emb embedding.Embedder, store VecStore, cfg config.SemanticCacheConfig, hitRecorder func(exchange, []byte, string)) *semanticCacheMiddleware {
+func newSemanticCacheMiddleware(emb embedding.Embedder, store VecStore, cfg config.SemanticCacheConfig, hitRecorder hitRecorder) *semanticCacheMiddleware {
 	m := &semanticCacheMiddleware{
 		embedder:         emb,
 		store:            store,
@@ -121,6 +120,13 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 		return next()
 	}
 
+	// A streamed Messages reply is an Anthropic event stream, which
+	// validateCacheableSSE does not accept yet. Nothing is ever stored for it,
+	// so a lookup could not hit and would only spend an embedding call.
+	if path == messagesPath && isStreamingRequest(path, body) {
+		return next()
+	}
+
 	ctx := ex.Context()
 	plan := core.GetWorkflow(ctx)
 
@@ -169,12 +175,11 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 	}
 
 	if len(results) > 0 && float64(results[0].Score) >= threshold {
+		recordHit := m.hitRecorder.prepare(ex, results[0].Response, CacheTypeSemantic)
 		replayErr := ex.ReplayHit(body, results[0].Response, CacheTypeSemantic)
 		if replayErr == nil || replayCommitted(replayErr) {
 			ex.MarkHit(CacheTypeSemantic)
-			if m.hitRecorder != nil {
-				m.hitRecorder(ex, results[0].Response, CacheTypeSemantic)
-			}
+			recordHit()
 			slog.Info("semantic cache hit",
 				"path", path,
 				"score", results[0].Score,
@@ -284,10 +289,12 @@ func embedTextFromMessages(messages []embedMessage, excludeSystem bool) (text st
 	return lastUserText, nonSystemCount
 }
 
-// conversationInvariantFingerprint hashes structural cache context: every message's
-// role and raw content except the last user turn, where only non-text parts (e.g.
-// image_url) are included so paraphrases of the final user text share a namespace.
-// For Responses API, "input" may be a string (empty fingerprint) or a message array
+// conversationInvariantFingerprint hashes the part of the conversation a hit
+// has to match exactly: every message or input item in full, tool calls and
+// tool results included, except the last user turn. That turn's text is matched
+// by embedding, so only its other fields and non-text parts (e.g. image_url)
+// are hashed and paraphrases of it share a namespace.
+// For Responses API, "input" may be a string (empty fingerprint) or an item array
 // (same treatment as "messages"). ok is false if the JSON envelope cannot be parsed or
 // there is no usable messages/input payload.
 func conversationInvariantFingerprint(body []byte, excludeSystem bool) (fingerprint string, ok bool) {
@@ -306,61 +313,50 @@ func conversationInvariantFingerprint(body []byte, excludeSystem bool) (fingerpr
 		return "", true
 	}
 
-	type msgPart struct {
-		role        string
-		content     json.RawMessage
-		unparseable bool
-		rawMsg      json.RawMessage
-	}
-	var included []msgPart
+	var included []json.RawMessage
+	lastUser := -1
 	for _, rawMsg := range msgs {
+		// An item without a string role, such as a Responses function call,
+		// is neither a system nor a user turn and is hashed in full.
 		var m struct {
-			Role    string          `json:"role"`
-			Content json.RawMessage `json:"content"`
+			Role string `json:"role"`
 		}
-		if err := json.Unmarshal(rawMsg, &m); err != nil {
-			var roleOnly struct {
-				Role string `json:"role"`
-			}
-			_ = json.Unmarshal(rawMsg, &roleOnly)
-			if roleOnly.Role == "system" && excludeSystem {
-				continue
-			}
-			included = append(included, msgPart{role: roleOnly.Role, unparseable: true, rawMsg: rawMsg})
-			continue
-		}
+		_ = json.Unmarshal(rawMsg, &m)
 		if m.Role == "system" && excludeSystem {
 			continue
 		}
-		included = append(included, msgPart{role: m.Role, content: m.Content})
-	}
-
-	lastUser := -1
-	for i, part := range slices.Backward(included) {
-		if part.role == "user" {
-			lastUser = i
-			break
+		if m.Role == "user" {
+			lastUser = len(included)
 		}
+		included = append(included, rawMsg)
 	}
 
 	h := sha256.New()
-	for i, p := range included {
-		h.Write([]byte(p.role))
-		h.Write([]byte{0})
-		if p.unparseable {
-			sum := sha256.Sum256(p.rawMsg)
-			h.Write(sum[:])
-			h.Write([]byte{0})
-			continue
-		}
-		if i == lastUser && lastUser >= 0 {
-			writeNonTextUserContentFingerprint(h, p.content)
-		} else if len(p.content) > 0 {
-			h.Write(p.content)
+	for i, rawMsg := range included {
+		if i == lastUser {
+			writeLastUserFingerprint(h, rawMsg)
+		} else {
+			h.Write(canonicalJSON(rawMsg))
 		}
 		h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil)), true
+}
+
+// writeLastUserFingerprint hashes the last user message without its text:
+// every field but content, then the non-text content parts.
+func writeLastUserFingerprint(h hash.Hash, rawMsg json.RawMessage) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(rawMsg, &fields) != nil {
+		h.Write(rawMsg)
+		return
+	}
+	content := fields["content"]
+	delete(fields, "content")
+	rest, _ := json.Marshal(fields)
+	h.Write(canonicalJSON(rest))
+	h.Write([]byte{0})
+	writeNonTextUserContentFingerprint(h, content)
 }
 
 func messageRawListFromMessagesOrInput(messages []json.RawMessage, input json.RawMessage) (msgs []json.RawMessage, ok bool) {
@@ -457,7 +453,8 @@ var paramsHashPromptFields = map[string]struct{}{
 // paramsHashCallerFields identify the caller or steer provider-side prompt
 // caching. They never change what the model generates, so they are left out
 // of the hash, except on responsesPath: a Responses object echoes them back,
-// and a hit must not hand one caller's values to another.
+// and a hit must not hand one caller's values to another. The exact-cache key
+// leaves them out on the same terms (see cacheKeyRequestBody).
 var paramsHashCallerFields = map[string]struct{}{
 	"user":                   {},
 	"metadata":               {},

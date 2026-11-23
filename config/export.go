@@ -39,6 +39,9 @@ type ExportDocument struct {
 	Secrets []string
 	// Header is written as comment lines above the document.
 	Header string
+	// IncludeDefaults also writes the settings that hold their default value.
+	// Those empty by default are left out either way.
+	IncludeDefaults bool
 }
 
 // exportRoot lays out an ExportDocument as config.yaml reads it.
@@ -67,6 +70,10 @@ const (
 	exportSecret
 	exportURL
 	exportArgs
+	// exportFree is a string no schema describes, which may hold HTTP
+	// headers as "Name: value" lines, as the header_edit plugin takes them:
+	// the value of a header that carries a credential is a secret.
+	exportFree
 )
 
 // ExportYAML renders doc as a config.yaml that holds no secret, so it can be
@@ -76,14 +83,18 @@ const (
 // one instead: ${env:NAME} for the environment variable in environ that holds
 // it, otherwise ${env:NAME} for a variable to set, with a comment saying so,
 // which stops startup until it is set rather than loading an empty credential.
-// Any other "$" is escaped, so the document reads back what it shows.
+// Any other "$" is escaped, so the document reads back what it shows. A
+// setting that holds its default is left out, as it reads back the same;
+// doc.IncludeDefaults keeps those whose default is not empty.
 //
 // Secrets are the fields tagged `export:"secret"`, `export:"url"`, or
 // `export:"args"`, the fields in doc.SecretFields, and every string under a
 // map key, or a key of a section no schema describes (extension sections and
 // free-form settings), that names a credential, such as api_key, token, or
 // password. Any other string that equals a resolved secret, is a URL carrying
-// user information, or is a connection string carrying a password is one too.
+// user information, or is a connection string carrying a password is one too,
+// as is the value of a "Name: value" header line in such a section when the
+// header carries a credential.
 func (r *LoadResult) ExportYAML(doc ExportDocument, environ []string) ([]byte, error) {
 	if r == nil || doc.Config == nil {
 		return nil, fmt.Errorf("export configuration: no config")
@@ -128,11 +139,12 @@ func (r *LoadResult) ExportYAML(doc ExportDocument, environ []string) ([]byte, e
 	// A first pass finds the secret settings, so only what resolved into
 	// one counts as a secret wherever else it appears.
 	survey := newExporter(r.Secrets, environ, doc, r.expanded)
-	survey.survey, survey.blocks = true, blocks
-	survey.walk("", value, &surveyed, exportPlain, "")
+	survey.survey, survey.blocks, survey.includeDefaults = true, blocks, doc.IncludeDefaults
+	defaults := reflect.ValueOf(exportRoot{Config: exportDefaults(&cfg)})
+	survey.walk("", value, defaults, &surveyed, exportPlain, "")
 	e := newExporter(r.Secrets, environ, doc, r.expanded)
-	e.secretPaths, e.secretValues, e.blocks = survey.secretPaths, survey.secretValues, blocks
-	e.walk("", value, &root, exportPlain, "")
+	e.secretPaths, e.secretValues, e.blocks, e.includeDefaults = survey.secretPaths, survey.secretValues, blocks, doc.IncludeDefaults
+	e.walk("", value, defaults, &root, exportPlain, "")
 	root.HeadComment = doc.Header
 
 	var buf bytes.Buffer
@@ -145,6 +157,18 @@ func (r *LoadResult) ExportYAML(doc ExportDocument, environ []string) ([]byte, e
 		return nil, fmt.Errorf("export configuration: %w", err)
 	}
 	return []byte(strings.NewReplacer(e.texts...).Replace(buf.String())), nil
+}
+
+// exportDefaults returns the settings Load gives a config.yaml that sets
+// none of them, to tell which of cfg's say something.
+func exportDefaults(cfg *Config) *Config {
+	defaults := buildDefaultConfig()
+	// As Load fills it in: the local model cache is the default only when no
+	// other is configured.
+	if cfg.Cache.Model.Redis == nil {
+		defaults.Cache.Model.Local = &LocalCacheConfig{}
+	}
+	return defaults
 }
 
 // exporter rewrites the secrets of one encoded document.
@@ -176,6 +200,9 @@ type exporter struct {
 	suggested map[string]string
 	// blocks maps the placeholders strings were encoded as to the strings.
 	blocks map[string]string
+	// includeDefaults keeps the settings that hold a default that is not
+	// empty.
+	includeDefaults bool
 }
 
 func newExporter(secrets *Secrets, environ []string, doc ExportDocument, expanded map[string]writtenScalar) *exporter {
@@ -212,15 +239,21 @@ func newExporter(secrets *Secrets, environ []string, doc ExportDocument, expande
 	return e
 }
 
-// walk visits node, encoded from v found at path. class is how the field
-// holding v is exported and envName the variable that sets it, if any. A nil
-// slice, map, or pointer under a mapping is dropped: it encodes as [], {}, or
-// null, which config.yaml does not always read as unset. A nil value in a
-// free-form map is kept: it is a null the configuration states, such as a
-// parameter a virtual model strips from requests.
-func (e *exporter) walk(path string, v reflect.Value, node *yaml.Node, class exportClass, envName string) {
+// walk visits node, encoded from v found at path. def is the default v
+// takes when config.yaml leaves it out, invalid when that is the zero value.
+// class is how the field holding v is exported and envName the variable that
+// sets it, if any. A nil slice, map, or pointer under a mapping is dropped: it
+// encodes as [], {}, or null, which config.yaml does not always read as
+// unset. So is a struct field holding its default (see atDefault): it reads
+// back the same left out. A nil value in a free-form map is kept: it is a
+// null the configuration states, such as a parameter a virtual model strips
+// from requests.
+func (e *exporter) walk(path string, v, def reflect.Value, node *yaml.Node, class exportClass, envName string) {
 	for v.Kind() == reflect.Pointer {
 		v = v.Elem()
+	}
+	for def.Kind() == reflect.Pointer {
+		def = def.Elem()
 	}
 	if !v.IsValid() {
 		return
@@ -243,7 +276,8 @@ func (e *exporter) walk(path string, v reflect.Value, node *yaml.Node, class exp
 			return
 		}
 		for i, item := range node.Content {
-			e.walk(path+"["+strconv.Itoa(i)+"]", v.Index(i), item, class, "")
+			// A slice item config.yaml declares starts from its zero value.
+			e.walk(path+"["+strconv.Itoa(i)+"]", v.Index(i), reflect.Value{}, item, class, "")
 		}
 	case yaml.MappingNode:
 		kept := node.Content[:0]
@@ -260,20 +294,44 @@ func (e *exporter) walk(path string, v reflect.Value, node *yaml.Node, class exp
 				if class == exportPlain && credentialKey(key.Value) {
 					childClass = exportSecret
 				}
-				e.walk(childPath, child, value, childClass, "")
+				// As does a map value.
+				e.walk(childPath, child, reflect.Value{}, value, childClass, "")
 			case reflect.Struct:
 				field, child, ok := yamlField(v, key.Value)
 				if !ok {
 					e.walkUntyped(childPath, value, false)
 					break
 				}
+				var defChild reflect.Value
+				if def.Kind() == reflect.Struct {
+					_, defChild, _ = yamlField(def, key.Value)
+				}
+				// A value environment expansion or a secret reference wrote is
+				// kept as written, whatever it gave, as is a section holding
+				// one: it reads the variable or the secret on the next load.
+				expanded := e.expandedUnder(childPath) || e.secrets.referencedUnder(childPath)
+				if !expanded && (isNil(child) || e.atDefault(child, defChild)) {
+					continue
+				}
 				if isNil(child) {
+					// Expanded to empty, as "enabled: ${VAR:-}" does.
+					written, ok := e.expanded[childPath]
+					if !ok {
+						continue
+					}
+					value.Kind, value.Value, value.Tag, value.Style, value.Content = yaml.ScalarNode, written.value, "!!str", written.style, nil
+					e.key(key)
+					kept = append(kept, key, value)
 					continue
 				}
 				if field.Tag.Get("secrets") == secretsDeferred || field.Type == yamlNodeType || field.Type.Kind() == reflect.Map && field.Type.Elem() == yamlNodeType {
 					e.unresolved = append(e.unresolved, childPath)
 				}
-				e.walk(childPath, child, value, exportClassOf(field), field.Tag.Get("env"))
+				e.walk(childPath, child, defChild, value, exportClassOf(field), field.Tag.Get("env"))
+				// A struct with every field dropped is dropped too.
+				if value.Kind == yaml.MappingNode && len(value.Content) == 0 && child.Kind() == reflect.Struct && (isEmpty(defChild) || !e.includeDefaults) && !expanded {
+					continue
+				}
 			}
 			e.key(key)
 			kept = append(kept, key, value)
@@ -290,6 +348,23 @@ func isNil(v reflect.Value) bool {
 		return v.IsNil()
 	}
 	return false
+}
+
+// isEmpty reports whether v is a zero value. A pointer to a zero value, or
+// an empty but non-nil slice or map, is not: it states the value, as
+// retry_on_statuses: [] disables the statuses a nil list inherits.
+func isEmpty(v reflect.Value) bool {
+	return !v.IsValid() || v.IsZero()
+}
+
+// atDefault reports whether v holds the default def, so config.yaml reads it
+// back the same left out. With includeDefaults, only a default that is empty
+// counts.
+func (e *exporter) atDefault(v, def reflect.Value) bool {
+	if isEmpty(v) && isEmpty(def) {
+		return true
+	}
+	return !e.includeDefaults && def.IsValid() && reflect.DeepEqual(v.Interface(), def.Interface())
 }
 
 // walkUntyped visits a node no Go type describes. Strings under a key that
@@ -309,7 +384,7 @@ func (e *exporter) walkUntyped(path string, node *yaml.Node, secret bool) {
 				return
 			}
 		}
-		class := exportPlain
+		class := exportFree
 		if secret {
 			class = exportSecret
 		}
@@ -393,10 +468,13 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 			e.secretPaths[path] = true
 		}
 		if secret := node.Value; class == exportSecret && prefix <= len(secret) {
-			secret = secret[prefix:]
-			e.recordSecret(secret)
-			if _, credential, ok := cutAuthScheme(secret); ok {
-				e.recordSecret(strings.TrimLeft(credential, " \t"))
+			e.recordCredential(secret[prefix:])
+		}
+		if class == exportFree {
+			for line := range strings.SplitSeq(node.Value, "\n") {
+				if start, end := e.headerCredential(path, line); start >= 0 {
+					e.recordCredential(line[start:end])
+				}
 			}
 		}
 		if class == exportURL {
@@ -408,7 +486,12 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 		return
 	}
 	switch class {
-	case exportPlain:
+	case exportPlain, exportFree:
+		free := class == exportFree
+		class = exportPlain
+		if free && e.headerLines(path, node, value, configured, !restored) {
+			return
+		}
 		if e.leaksSecret(value, !restored) {
 			class = exportSecret
 		}
@@ -433,11 +516,28 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 	e.setSecret(path, node, head, secret, envName)
 }
 
+// pathUnder reports whether path is section or a path inside it.
+func pathUnder(path, section string) bool {
+	rest, ok := strings.CutPrefix(path, section)
+	return ok && (rest == "" || rest[0] == '.' || rest[0] == '[')
+}
+
+// expandedUnder reports whether environment expansion wrote the value at
+// path or one inside it.
+func (e *exporter) expandedUnder(path string) bool {
+	for written := range e.expanded {
+		if pathUnder(written, path) {
+			return true
+		}
+	}
+	return false
+}
+
 // isUnresolved reports whether path is in a section config.Load leaves
 // unresolved.
 func (e *exporter) isUnresolved(path string) bool {
 	for _, section := range e.unresolved {
-		if rest, ok := strings.CutPrefix(path, section); ok && (rest == "" || rest[0] == '.' || rest[0] == '[') {
+		if pathUnder(path, section) {
 			return true
 		}
 	}
@@ -471,24 +571,89 @@ func (e *exporter) setValue(path string, node *yaml.Node, value string, configur
 
 // setSecret writes secret, which follows the text head, as an env reference.
 func (e *exporter) setSecret(path string, node *yaml.Node, head, secret, envName string) {
-	head = escapeReferences(head)
+	text, unset := e.reference(path, secret, envName)
+	e.setText(node, quoteText(escapeReferences(head)+text))
+	if unset != "" {
+		node.LineComment = "# secret not exported: set " + unset
+	}
+}
+
+// reference returns the env reference written in place of secret, and the
+// variable to set when none holds it: envName, or one named after path.
+func (e *exporter) reference(path, secret, envName string) (text, unset string) {
 	if name, ok := e.envHolding(secret, envName); ok {
-		e.setText(node, quoteText(head+"${env:"+name+"}"))
-		return
+		return "${env:" + name + "}", ""
 	}
 	// An Authorization value keeps its scheme: only the credential is secret.
+	head := ""
 	if scheme, credential, ok := cutAuthScheme(secret); ok {
 		if name, ok := e.envHolding(credential, ""); ok {
-			e.setText(node, quoteText(head+scheme+" ${env:"+name+"}"))
-			return
+			return scheme + " ${env:" + name + "}", ""
 		}
-		head += scheme + " "
+		head = scheme + " "
 	}
 	if envName == "" {
 		envName = e.suggestEnvName(path)
 	}
-	e.setText(node, quoteText(head+"${env:"+envName+"}"))
-	node.LineComment = "# secret not exported: set " + envName
+	return head + "${env:" + envName + "}", envName
+}
+
+// headerCredential is headerCredential for a line of the string at path. A
+// variable config.Load left unset is kept, as in scalar.
+func (e *exporter) headerCredential(path, line string) (start, end int) {
+	start, end = headerCredential(line)
+	if start >= 0 && e.isUnresolved(path) && unsetVariables.MatchString(line[start:end]) {
+		return -1, -1
+	}
+	return start, end
+}
+
+// headerLines writes value with the credential of each "Name: value" header
+// line that carries one (headerCredential) as an env reference, named after
+// the line when value holds several. It reports false, writing nothing, when
+// no line does, or when the rest of value leaks a secret as well (leaksSecret
+// with resolved), so all of it is one.
+func (e *exporter) headerLines(path string, node *yaml.Node, value string, configured, resolved bool) bool {
+	lines := strings.Split(value, "\n")
+	rest := slices.Clone(lines)
+	found := false
+	for i, line := range lines {
+		if start, end := e.headerCredential(path, line); start >= 0 {
+			rest[i] = line[:start] + line[end:]
+			found = true
+		}
+	}
+	if !found || e.leaksSecret(strings.Join(rest, "\n"), resolved) {
+		return false
+	}
+	plain := func(s string) string {
+		if configured {
+			return s
+		}
+		return escapeReferences(s)
+	}
+	var unset []string
+	for i, line := range lines {
+		start, end := e.headerCredential(path, line)
+		if start < 0 {
+			lines[i] = plain(line)
+			continue
+		}
+		linePath := path
+		if len(lines) > 1 {
+			linePath += "[" + strconv.Itoa(i) + "]"
+		}
+		text, name := e.reference(linePath, line[start:end], "")
+		if name != "" {
+			unset = append(unset, name)
+		}
+		lines[i] = plain(line[:start]) + text + plain(line[end:])
+	}
+	e.setValue(path, node, strings.Join(lines, "\n"), true)
+	if len(unset) > 0 {
+		node.LineComment = "# secret not exported: set " + strings.Join(unset, ", ")
+	}
+	return true
 }
 
 // suggestEnvName returns suggestedEnvName(path), numbered when another path
@@ -524,6 +689,15 @@ func setScalar(node *yaml.Node, value string, changed bool) {
 	node.Value = value
 	node.Tag = "!!str"
 	node.Style = yaml.DoubleQuotedStyle
+}
+
+// recordCredential records secret and, when it starts with an auth scheme,
+// the credential after it.
+func (e *exporter) recordCredential(secret string) {
+	e.recordSecret(secret)
+	if _, credential, ok := cutAuthScheme(secret); ok {
+		e.recordSecret(strings.TrimLeft(credential, " \t"))
+	}
 }
 
 // recordSecret records secret, unless it is too short or a reference, so
@@ -609,6 +783,22 @@ func (s *Secrets) configured(field, resolved string) (string, bool) {
 		return "", false
 	}
 	return use.original, true
+}
+
+// referencedUnder reports whether the value at path, or one inside it, was
+// configured as a secret reference.
+func (s *Secrets) referencedUnder(path string) bool {
+	if s == nil {
+		return false
+	}
+	s.rotation.mu.Lock()
+	defer s.rotation.mu.Unlock()
+	for field := range s.rotation.uses {
+		if pathUnder(field, path) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolvedSecretWhere reports whether a reference recorded for a field

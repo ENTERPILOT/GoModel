@@ -172,7 +172,7 @@ Die Modellauflistung der SDKs erwartet das Format von TypeSafe, während
 ## System One API
 
 `POST /v1/systemone` ist ein Gateway-Endpunkt und kein reiner Proxy: Er wendet
-virtuelle Modelle, Guardrails auf `state`, den Response-Cache, Failover, Audit
+virtuelle Modelle, Guardrails auf `state`, den Response-Cache, Failover, Request-Logging
 und Nutzungserfassung an und leitet den Request nativ weiter, ohne ihn zu
 übersetzen. `/v1/systemone/permute` und `/v1/systemone/separate` von Kev
 funktionieren auf dieselbe Weise. Das vollständige Verhalten, einschließlich

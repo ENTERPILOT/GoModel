@@ -1,6 +1,6 @@
 ---
 title: "GoModel i n8n"
-description: "Kieruj każde wywołanie węzłów AI Agent, LLM Chain i OpenAI w n8n przez GoModel z jednymi danymi uwierzytelniającymi i uzyskaj logi audytowe, śledzenie kosztów oraz metryki dla wszystkich swoich workflow."
+description: "Kieruj każde wywołanie węzłów AI Agent, LLM Chain i OpenAI w n8n przez GoModel z jednymi danymi uwierzytelniającymi i uzyskaj logi requestów, śledzenie kosztów oraz metryki dla wszystkich swoich workflow."
 icon: "workflow"
 keywords: ["n8n", "AI Agent", "OpenAI credential", "dane uwierzytelniające OpenAI", "base URL", "automatyzacja workflow", "workflow automation", "obserwowalność LLM", "LLM observability", "przewodnik konfiguracji", "setup guide"]
 ---
@@ -19,7 +19,7 @@ Przepływ:
 
 Co zyskujesz:
 
-- Pełne treści requestów i odpowiedzi każdego wywołania AI w logu audytowym GoModel.
+- Pełne treści requestów i odpowiedzi każdego wywołania AI w logu requestów GoModel.
 - Użycie tokenów i koszt per model, per klucz API i per etykieta.
 - Metryki Prometheus i trace'y OpenTelemetry dla ruchu AI.
 - Failover, cache, limity żądań i budżety stosowane do ruchu z n8n.
@@ -102,7 +102,7 @@ Ponieważ lista pochodzi z GoModel, możesz wybrać
 `anthropic/claude-haiku-4-5-20251001` albo `gemini/gemini-2.5-flash` w tym samym
 węźle, który wcześniej obsługiwał tylko OpenAI. Działają zarówno id z prefiksem providera
 z selektora, jak i zwykłe id, takie jak `gpt-5-mini`. Uruchom workflow, a następnie otwórz
-dashboard GoModel: wywołanie pojawi się w logu audytowym z pełnym promptem,
+dashboard GoModel: wywołanie pojawi się w logu requestów z pełnym promptem,
 definicjami narzędzi dołączonymi przez n8n, odpowiedzią, tokenami i kosztem.
 
 <Note>

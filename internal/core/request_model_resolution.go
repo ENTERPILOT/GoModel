@@ -1,6 +1,9 @@
 package core
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // RequestModelResolution captures the requested model selector at ingress and
 // the concrete selector chosen for execution after alias resolution.
@@ -13,6 +16,10 @@ type RequestModelResolution struct {
 	// Slowdown is the extra-time factor selected for this request. A value of
 	// 0.5 adds 50% of measured inference time; zero disables slowdown.
 	Slowdown float64
+	// Timeouts are the per-attempt upstream timeouts configured on the
+	// virtual model or model policy that matched. Zero fields inherit the
+	// gateway-wide HTTP timeouts.
+	Timeouts UpstreamTimeouts
 	// VirtualModelPath lists the virtual models routing passed through to
 	// reach ResolvedSelector, outermost first. It is empty when no virtual
 	// model applied.
@@ -27,6 +34,16 @@ type RequestModelResolution struct {
 	resolvedRoute      string
 	cachedSelector     ModelSelector
 	cachedProviderName string
+}
+
+// UpstreamTimeouts overrides the gateway-wide upstream HTTP timeouts for
+// each attempt of one request, including retries and failovers, on paths
+// that apply them (native Bedrock SDK calls and realtime handshakes do not).
+// Each attempt gets a fresh budget. A zero field inherits the gateway-wide
+// setting.
+type UpstreamTimeouts struct {
+	Timeout               time.Duration
+	ResponseHeaderTimeout time.Duration
 }
 
 // CacheDerivedSelectors precomputes the strings returned by
@@ -62,7 +79,7 @@ func (r *RequestModelResolution) ResolvedQualifiedModel() string {
 	return r.ResolvedSelector.QualifiedModel()
 }
 
-// ResolvedRouteModel returns the executed route selector recorded in audit
+// ResolvedRouteModel returns the executed route selector recorded in request
 // logs: the resolved model qualified by the configured provider instance name
 // when known, falling back to the selector's own provider prefix.
 func (r *RequestModelResolution) ResolvedRouteModel() string {

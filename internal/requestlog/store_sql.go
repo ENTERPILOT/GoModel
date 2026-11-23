@@ -1,0 +1,511 @@
+package requestlog
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
+)
+
+// SQLite allows 999 bindable parameters per statement
+// (SQLITE_MAX_VARIABLE_NUMBER). At 25 columns per entry that is 39 entries,
+// so larger batches are chunked. PostgreSQL's limit is far higher, but one
+// chunk size keeps the write path identical on both.
+const (
+	maxSQLParams       = 999
+	columnsPerEntry    = 25
+	maxEntriesPerBatch = maxSQLParams / columnsPerEntry
+	// Attempt rows are inserted the same way, and a failover-heavy batch can
+	// carry several per entry, so they are chunked on their own column count.
+	columnsPerAttempt   = 15
+	maxAttemptsPerBatch = maxSQLParams / columnsPerAttempt
+)
+
+const requestLogTable = "request_logs"
+
+// SQLStore implements LogStore for SQL databases.
+type SQLStore struct {
+	db            sqlx.DB
+	retentionDays int
+	stopCleanup   chan struct{}
+	closeOnce     sync.Once
+
+	// indexBuild tracks the background written_at and trigram search index
+	// builds, so tests can wait for them; production never blocks on them.
+	// Close cancels a build still in flight rather than holding shutdown for
+	// it — the interrupted index is dropped and rebuilt on the next start.
+	indexBuild       sync.WaitGroup
+	cancelIndexBuild context.CancelFunc
+}
+
+var sqlTables = []string{
+	`CREATE TABLE IF NOT EXISTS request_logs (
+		id TEXT PRIMARY KEY,
+		timestamp ` + sqlx.TypeTimestamp + ` NOT NULL,
+		duration_ns ` + sqlx.TypeInt64 + ` DEFAULT 0,
+		requested_model TEXT,
+		resolved_model TEXT,
+		provider TEXT,
+		provider_name TEXT,
+		alias_used ` + sqlx.TypeBool + ` DEFAULT FALSE,
+		workflow_version_id TEXT,
+		cache_type TEXT,
+		status_code INTEGER DEFAULT 0,
+		request_id TEXT,
+		principal_id TEXT,
+		auth_key_id TEXT,
+		auth_method TEXT,
+		client_ip TEXT,
+		method TEXT,
+		path TEXT,
+		user_path TEXT,
+		session_id TEXT,
+		stream ` + sqlx.TypeBool + ` DEFAULT FALSE,
+		error_type TEXT,
+		data ` + sqlx.TypeJSON + `,
+		writer_id TEXT,
+		written_at ` + sqlx.TypeInt64 + `
+	)`,
+	`CREATE TABLE IF NOT EXISTS request_log_attempts (
+		id ` + sqlx.TypeSerialPK + `,
+		request_log_id TEXT NOT NULL,
+		seq INTEGER NOT NULL,
+		kind TEXT NOT NULL,
+		provider_type TEXT,
+		provider_name TEXT,
+		model TEXT,
+		status_code INTEGER DEFAULT 0,
+		success ` + sqlx.TypeBool + ` DEFAULT FALSE,
+		error_type TEXT,
+		error_code TEXT,
+		error_message TEXT,
+		response_body TEXT,
+		response_headers TEXT,
+		started_at ` + sqlx.TypeTimestamp + `,
+		duration_ns ` + sqlx.TypeInt64 + ` DEFAULT 0,
+		UNIQUE(request_log_id, seq),
+		FOREIGN KEY(request_log_id) REFERENCES request_logs(id) ON DELETE CASCADE
+	)`,
+}
+
+// sqlMigrations backfill columns added after the tables' first release.
+var sqlMigrations = []string{
+	"ALTER TABLE request_logs ADD COLUMN requested_model TEXT",
+	"ALTER TABLE request_logs ADD COLUMN resolved_model TEXT",
+	"ALTER TABLE request_logs ADD COLUMN provider_name TEXT",
+	"ALTER TABLE request_logs ADD COLUMN alias_used " + sqlx.TypeBool + " DEFAULT FALSE",
+	"ALTER TABLE request_logs ADD COLUMN workflow_version_id TEXT",
+	"ALTER TABLE request_logs ADD COLUMN cache_type TEXT",
+	"ALTER TABLE request_logs ADD COLUMN principal_id TEXT",
+	"ALTER TABLE request_logs ADD COLUMN auth_key_id TEXT",
+	"ALTER TABLE request_logs ADD COLUMN auth_method TEXT",
+	"ALTER TABLE request_logs ADD COLUMN user_path TEXT",
+	"ALTER TABLE request_logs ADD COLUMN session_id TEXT",
+	"ALTER TABLE request_logs ADD COLUMN writer_id TEXT",
+	"ALTER TABLE request_logs ADD COLUMN written_at " + sqlx.TypeInt64,
+	"ALTER TABLE request_log_attempts ADD COLUMN response_body TEXT",
+	"ALTER TABLE request_log_attempts ADD COLUMN response_headers TEXT",
+}
+
+// sqlIndexes are best-effort: a failure is logged and startup continues, since
+// a missing index degrades query speed rather than correctness.
+//
+// The request log indexes are named idx_audit_ after the tables' name up to
+// v0.2.5, and stay that way (see store_sql_migrate.go).
+var sqlIndexes = []string{
+	"CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON request_logs(timestamp)",
+	"DROP INDEX IF EXISTS idx_audit_model",
+	"CREATE INDEX IF NOT EXISTS idx_audit_status ON request_logs(status_code)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_provider ON request_logs(provider)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_provider_name ON request_logs(provider_name)",
+	// Retires the index on the pre-v0.1.17 execution_plan_version_id column,
+	// which the workflow rename left behind on older databases.
+	"DROP INDEX IF EXISTS idx_audit_execution_plan_version_id",
+	"CREATE INDEX IF NOT EXISTS idx_audit_workflow_version_id ON request_logs(workflow_version_id)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_request_id ON request_logs(request_id)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_principal_id ON request_logs(principal_id)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_id ON request_logs(auth_key_id)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON request_logs(client_ip)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_path ON request_logs(path)",
+	// Composite: serves both the session_id equality filter and its per-thread
+	// timestamp ordering (thread detail and the sessions grouping query). The
+	// drop retires the single-column predecessor, which IF NOT EXISTS would
+	// otherwise leave in place on databases that created it.
+	"DROP INDEX IF EXISTS idx_audit_session_id",
+	"CREATE INDEX IF NOT EXISTS idx_audit_session_timestamp ON request_logs(session_id, timestamp)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_error_type ON request_logs(error_type)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_log_seq ON request_log_attempts(request_log_id, seq)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_provider ON request_log_attempts(provider_type)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_started_at ON request_log_attempts(started_at)",
+}
+
+const insertRequestLogPrefix = `INSERT INTO request_logs (
+	id, timestamp, duration_ns, requested_model, resolved_model, provider,
+	provider_name, alias_used, workflow_version_id, cache_type, status_code,
+	request_id, principal_id, auth_key_id, auth_method, client_ip, method, path, user_path,
+	session_id, stream, error_type, data, writer_id, written_at
+) VALUES `
+
+// requestLogRowPlaceholder is one VALUES tuple of columnsPerEntry placeholders.
+var requestLogRowPlaceholder = "(" + strings.TrimSuffix(strings.Repeat("?, ", columnsPerEntry), ", ") + ")"
+
+const insertAttemptPrefix = `INSERT INTO request_log_attempts (
+	request_log_id, seq, kind, provider_type, provider_name, model,
+	status_code, success, error_type, error_code, error_message,
+	response_body, response_headers, started_at, duration_ns
+) VALUES `
+
+const insertAttemptSuffix = ` ON CONFLICT (request_log_id, seq) DO NOTHING`
+
+const attemptRowPlaceholder = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+
+// NewSQLStore creates a SQL request log store, creating its tables if needed and
+// starting the retention sweep when one is configured.
+func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database connection is required")
+	}
+	// Under the lock the index builds below take: see withSchemaLock.
+	if err := withSchemaLock(ctx, db, func(session sqlx.DB) error { return ensureSQLSchema(ctx, session) }); err != nil {
+		return nil, err
+	}
+
+	store := &SQLStore{
+		db:            db,
+		retentionDays: retentionDays,
+		stopCleanup:   make(chan struct{}),
+	}
+	// The written_at, model and trigram search indexes can take minutes to
+	// build on a large existing PostgreSQL table, so they are built off the
+	// startup path (and CONCURRENTLY, so writes keep flowing); readers pick
+	// each up as soon as it exists. They are built one after the other, since
+	// PostgreSQL runs one concurrent build per table at a time. The written_at
+	// index gets one attempt first and its retries last, so one that keeps
+	// failing holds up neither of the others.
+	buildCtx, cancel := context.WithCancel(context.Background())
+	store.cancelIndexBuild = cancel
+	store.indexBuild.Go(func() {
+		writtenAt, ok := writtenAtIndexBuilder(db)
+		built := !ok || writtenAt.TryBuild(buildCtx, writtenAtBackgroundIndex)
+		if buildCtx.Err() != nil {
+			return
+		}
+		err := withSchemaLock(buildCtx, db, func(session sqlx.DB) error {
+			ensureModelIndexesConcurrently(buildCtx, session)
+			ensureTrigramSearchIndex(buildCtx, session, postgresErrorMessage)
+			return nil
+		})
+		if err != nil && buildCtx.Err() == nil {
+			slog.Warn("requestlog: failed to build model and search indexes", "error", err)
+		}
+		if !built {
+			writtenAt.Build(buildCtx, writtenAtBackgroundIndex)
+		}
+	})
+	if retentionDays > 0 {
+		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
+	}
+	return store, nil
+}
+
+// ensureSQLSchema creates the request log tables, brings older ones up to date
+// (first of all onto their current names) and creates the indexes built at
+// startup.
+func ensureSQLSchema(ctx context.Context, db sqlx.DB) error {
+	if err := adoptLegacyTables(ctx, db, false); err != nil {
+		return err
+	}
+	if err := db.Schema(ctx, sqlTables...); err != nil {
+		return fmt.Errorf("failed to create request log tables: %w", err)
+	}
+	if err := renameRequestLogColumn(ctx, db, requestLogTable, "model", "requested_model"); err != nil {
+		return fmt.Errorf("failed to rename request_logs.model to requested_model: %w", err)
+	}
+	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
+		return err
+	}
+	// Now that both tables exist in their current shape: see adoptLegacyTables.
+	if err := adoptLegacyTables(ctx, db, true); err != nil {
+		return err
+	}
+	if err := ensureLegacyViews(ctx, db); err != nil {
+		return err
+	}
+	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
+	indexes = append(indexes, writtenAtIndexes(db.Dialect())...)
+	if db.Dialect() != sqlx.PostgreSQL {
+		indexes = append(indexes, modelIndexStatements(db.Dialect())...)
+	}
+	for _, statement := range indexes {
+		if _, err := db.Exec(ctx, statement); err != nil {
+			slog.Warn("failed to create index", "error", err)
+		}
+	}
+	return nil
+}
+
+// userPathIndexes serve the user-path filter: the exact-match term and the
+// subtree range both probe the leading column, and the trailing timestamp
+// lets an exact match stream the page in order without a sort. The column is
+// indexed under byte-wise ordering, matching the expression the reader
+// compares against (readerDialect.userPath) — on PostgreSQL the default
+// collation is locale-aware, so a plain index could not serve a range that
+// means "prefix". The drop retires the single-column predecessor.
+func userPathIndexes(dialect sqlx.Dialect) []string {
+	column := "user_path"
+	if dialect == sqlx.PostgreSQL {
+		column = `user_path COLLATE "C"`
+	}
+	return []string{
+		`DROP INDEX IF EXISTS idx_audit_user_path`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_user_path_timestamp ON request_logs(` + column + `, timestamp)`,
+	}
+}
+
+// jsonPathIndexes index the two JSON fields the Responses lookups filter on.
+// The expression is engine-specific, so it is built rather than tokenised.
+//
+// The indexes are composite on (expression, timestamp) because the lookups
+// run `WHERE <expr> = ? ORDER BY timestamp ASC LIMIT 1`: with a bare
+// expression index, PostgreSQL's planner routinely prefers walking the
+// timestamp index and filtering — which detoasts the JSON blob of every row
+// it passes and can scan the whole table when the value is rare. Measured on
+// a user deployment, one such lookup held /admin/request-logs/conversation open
+// until the fronting proxy gave up. The composite index satisfies both the
+// filter and the order, so that plan is never attractive. The old
+// single-expression indexes are dropped on startup.
+func jsonPathIndexes(dialect sqlx.Dialect) []string {
+	switch dialect {
+	case sqlx.SQLite:
+		return []string{
+			`DROP INDEX IF EXISTS idx_audit_response_id`,
+			`DROP INDEX IF EXISTS idx_audit_previous_response_id`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_response_id_ts ON request_logs(json_extract(data, '$.response_body.id'), timestamp)`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id_ts ON request_logs(json_extract(data, '$.request_body.previous_response_id'), timestamp)`,
+		}
+	case sqlx.PostgreSQL:
+		return []string{
+			`DROP INDEX IF EXISTS idx_audit_response_id`,
+			`DROP INDEX IF EXISTS idx_audit_previous_response_id`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_response_id_ts ON request_logs((data #>> '{response_body,id}'), timestamp)`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id_ts ON request_logs((data #>> '{request_body,previous_response_id}'), timestamp)`,
+		}
+	default:
+		return nil
+	}
+}
+
+// WriteBatch writes log entries, chunked to stay within the parameter limit.
+// Each chunk's entries and their provider attempts commit together, so a
+// reader never sees an entry before its attempts.
+func (s *SQLStore) WriteBatch(ctx context.Context, entries []*LogEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	dialect := s.db.Dialect()
+
+	for i := 0; i < len(entries); i += maxEntriesPerBatch {
+		chunk := entries[i:min(i+maxEntriesPerBatch, len(entries))]
+
+		placeholders := make([]string, len(chunk))
+		values := make([]any, 0, len(chunk)*columnsPerEntry)
+		for j, e := range chunk {
+			placeholders[j] = requestLogRowPlaceholder
+			values = append(values, requestLogValues(dialect, e)...)
+		}
+
+		query := insertRequestLogPrefix + strings.Join(placeholders, ",") + ` ON CONFLICT (id) DO NOTHING`
+		err := s.db.InTx(ctx, func(q sqlx.Querier) error {
+			if _, err := q.Exec(ctx, query, values...); err != nil {
+				return fmt.Errorf("failed to insert request logs batch %d: %w", i/maxEntriesPerBatch, err)
+			}
+			return writeAttempts(ctx, q, dialect, chunk)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func requestLogValues(dialect sqlx.Dialect, e *LogEntry) []any {
+	// A nil data document becomes SQL NULL rather than the string "null".
+	var dataValue any
+	if dataJSON := marshalLogData(e.Data, e.ID); dataJSON != nil {
+		dataValue = string(dataJSON)
+	}
+	var cacheTypeValue any
+	if cacheType := normalizeCacheType(e.CacheType); cacheType != "" {
+		cacheTypeValue = cacheType
+	}
+	userPathValue := e.UserPath
+	if strings.TrimSpace(userPathValue) == "" {
+		userPathValue = "/"
+	}
+	writerID, writtenAt := e.Stamp.SQLValues()
+
+	return []any{
+		e.ID,
+		dialect.TimestampArg(e.Timestamp),
+		e.DurationNs,
+		e.RequestedModel,
+		e.ResolvedModel,
+		e.Provider,
+		e.ProviderName,
+		e.AliasUsed,
+		e.WorkflowVersionID,
+		cacheTypeValue,
+		e.StatusCode,
+		e.RequestID,
+		e.PrincipalID,
+		e.AuthKeyID,
+		e.AuthMethod,
+		e.ClientIP,
+		e.Method,
+		e.Path,
+		userPathValue,
+		e.SessionID,
+		e.Stream,
+		e.ErrorType,
+		dataValue,
+		writerID,
+		writtenAt,
+	}
+}
+
+// attemptRef names one attempt row for error reporting: a rejected multi-row
+// insert reports a database error for the statement, not for the tuple, so the
+// range the statement covered is what lets an operator find the bad record.
+type attemptRef struct {
+	entryID string
+	seq     int
+}
+
+func (r attemptRef) String() string {
+	return fmt.Sprintf("%s seq %d", r.entryID, r.seq)
+}
+
+// writeAttempts inserts the provider attempts of every entry, one multi-row
+// statement per chunk. Rows are serialized into the chunk being filled and
+// handed to the database as soon as it is full, so the transient cost stays
+// bounded by the chunk size however many attempts (and however large their
+// captured bodies) the batch carries.
+func writeAttempts(ctx context.Context, q sqlx.Querier, dialect sqlx.Dialect, entries []*LogEntry) error {
+	values := make([]any, 0, maxAttemptsPerBatch*columnsPerAttempt)
+	rows := 0
+	var first, last attemptRef
+
+	flush := func() error {
+		if rows == 0 {
+			return nil
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat(attemptRowPlaceholder+",", rows), ",")
+		query := insertAttemptPrefix + placeholders + insertAttemptSuffix
+		if _, err := q.Exec(ctx, query, values...); err != nil {
+			return fmt.Errorf("failed to insert request log attempts %s through %s: %w", first, last, err)
+		}
+		values = values[:0]
+		rows = 0
+		return nil
+	}
+
+	for _, entry := range entries {
+		for _, attempt := range requestLogAttempts(entry) {
+			ref := attemptRef{entryID: entry.ID, seq: attempt.Seq}
+			if rows == 0 {
+				first = ref
+			}
+			last = ref
+			values = append(values, requestLogAttemptValues(dialect, entry.ID, attempt)...)
+			rows++
+			if rows == maxAttemptsPerBatch {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return flush()
+}
+
+func requestLogAttemptValues(dialect sqlx.Dialect, entryID string, attempt AttemptSnapshot) []any {
+	return []any{
+		entryID,
+		attempt.Seq,
+		attempt.Kind,
+		attempt.ProviderType,
+		attempt.ProviderName,
+		attempt.Model,
+		attempt.StatusCode,
+		attempt.Success,
+		attempt.ErrorType,
+		attempt.ErrorCode,
+		attempt.ErrorMessage,
+		marshalAttemptColumn(attempt.ResponseBody),
+		marshalAttemptColumn(attempt.ResponseHeaders),
+		dialect.NullableTimestampArg(attempt.StartedAt),
+		attempt.DurationNs,
+	}
+}
+
+// Flush is a no-op: writes are synchronous.
+func (s *SQLStore) Flush(_ context.Context) error {
+	return nil
+}
+
+// Close stops the cleanup goroutine. The connection is managed by the storage
+// layer. Safe to call multiple times.
+func (s *SQLStore) Close() error {
+	s.closeOnce.Do(func() {
+		if s.cancelIndexBuild != nil {
+			s.cancelIndexBuild()
+		}
+		if s.retentionDays > 0 && s.stopCleanup != nil {
+			close(s.stopCleanup)
+		}
+	})
+	return nil
+}
+
+// cleanup deletes log entries older than the retention period.
+func (s *SQLStore) cleanup() {
+	if s.retentionDays <= 0 {
+		return
+	}
+	ctx := context.Background()
+	cutoff := s.db.Dialect().TimestampArg(time.Now().AddDate(0, 0, -s.retentionDays))
+
+	if _, err := s.db.Exec(ctx,
+		"DELETE FROM request_log_attempts WHERE request_log_id IN (SELECT id FROM request_logs WHERE timestamp < ?)",
+		cutoff); err != nil {
+		slog.Error("failed to cleanup old request log attempts", "error", err)
+		return
+	}
+	deleted, err := s.db.Exec(ctx, "DELETE FROM request_logs WHERE timestamp < ?", cutoff)
+	if err != nil {
+		slog.Error("failed to cleanup old request logs", "error", err)
+		return
+	}
+	if deleted > 0 {
+		slog.Info("cleaned up old request logs", "deleted", deleted)
+	}
+}
+
+// renameRequestLogColumn renames a column when the old name is still present and
+// the new one is not, so the rename runs once and is a no-op thereafter.
+func renameRequestLogColumn(ctx context.Context, db sqlx.DB, table, from, to string) error {
+	columns, err := sqlx.Columns(ctx, db, table)
+	if err != nil {
+		return err
+	}
+	if !columns[from] || columns[to] {
+		return nil
+	}
+	_, err = db.Exec(ctx, fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s", table, from, to))
+	return err
+}

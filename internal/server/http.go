@@ -21,7 +21,6 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/admin"
 	"github.com/enterpilot/gomodel/internal/admin/dashboard"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	batchstore "github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -29,6 +28,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/mediastore"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/session"
@@ -51,12 +51,17 @@ const (
 	inboundServerReadTimeout       = 30 * time.Second
 	inboundServerReadHeaderTimeout = 10 * time.Second
 	inboundServerWriteTimeout      = 30 * time.Second
+	// inboundServerIdleTimeout keeps idle keep-alive connections open longer
+	// than the common 60s load balancer idle timeout, so the balancer closes
+	// first instead of reusing a connection the gateway is closing. Left unset,
+	// net/http would fall back to the 30s ReadTimeout.
+	inboundServerIdleTimeout = 120 * time.Second
 
 	// GracefulDrainTimeout bounds how long the HTTP server waits for in-flight
 	// requests to finish once shutdown begins. Streamed model responses run far
 	// longer than any drain window worth waiting for, so this is deliberately a
 	// cutoff rather than a promise: past it the remaining connections are cut
-	// and shutdown moves on to flushing usage and audit records. It is sized
+	// and shutdown moves on to flushing usage and request log records. It is sized
 	// for the short requests that can actually finish — a dashboard fetch, a
 	// health check — not for model traffic.
 	//
@@ -79,9 +84,11 @@ type Config struct {
 	BodySizeLimit                   string                                 // Max request body size (e.g., "10M", "1024K")
 	StreamStallTimeout              time.Duration                          // Max time one response write on a model route waits for the client to read; 0 disables
 	PprofEnabled                    bool                                   // Whether to expose debug profiling routes at /debug/pprof/*
-	AuditLogger                     auditlog.LoggerInterface               // Optional: Audit logger for request/response logging
-	AuditReader                     auditlog.Reader                        // Optional: audit lookup used for dashboard interaction continuations
+	RequestLogger                   requestlog.LoggerInterface             // Optional: Request logger for request/response logging
+	RequestLogReader                requestlog.Reader                      // Optional: request log lookup used for dashboard interaction continuations
 	UsageLogger                     usage.LoggerInterface                  // Optional: Usage logger for token tracking
+	ResponseCostEnabled             bool                                   // Return each model request's calculated cost to its caller (usage.cost in the body, and X-GoModel-Cost headers on buffered responses)
+	ResponseCostBilled              bool                                   // With ResponseCostEnabled: return the billed cost instead of the provider cost (markups enabled)
 	BudgetChecker                   BudgetChecker                          // Optional: per-user-path budget checker
 	RateLimiter                     RateLimiter                            // Optional: per-user-path rate limiter
 	UsageSummarizer                 UsageSummarizer                        // Optional: usage aggregates for the self-service GET /v1/usage endpoint
@@ -100,7 +107,7 @@ type Config struct {
 	PassthroughSemanticEnrichers    []core.PassthroughSemanticEnricher     // Optional: provider-owned passthrough semantic enrichers before workflow resolution
 	BatchStore                      batchstore.Store                       // Optional: Batch lifecycle persistence store
 	FileStore                       filestore.Store                        // Optional: File provider mapping persistence store
-	MediaStore                      *mediastore.Service                    // Optional: where audited audio and image payloads are stored
+	MediaStore                      *mediastore.Service                    // Optional: where logged audio and image payloads are stored
 	ResponseStore                   responsestore.Store                    // Optional: Responses lifecycle persistence store
 	ConversationStore               conversationstore.Store                // Optional: Conversations lifecycle persistence store
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
@@ -127,13 +134,13 @@ type Config struct {
 	HealthCheckers                  []ext.HealthChecker                    // Optional: extension components reported by /health/ready (degraded: 200, down: 503)
 	RequestRewriters                []ext.RequestRewriter                  // Optional: raw-body rewriters invoked on inference ingress (post-auth, pre-workflow-resolution)
 	OuterMiddleware                 []echo.MiddlewareFunc                  // Optional: extension middleware after sensitive URI redaction, before logging/recovery/limits
-	ExtraMiddleware                 []echo.MiddlewareFunc                  // Optional: extension middleware registered after audit, before gateway auth
+	ExtraMiddleware                 []echo.MiddlewareFunc                  // Optional: extension middleware registered after request logging, before gateway auth
 	ExtraRoutes                     []func(*echo.Echo)                     // Optional: extension route registration callbacks invoked after core routes
 	ExtraAdminRoutes                []func(*echo.Group)                    // Optional: extension callbacks mounted on the /admin group behind the admin gate
 	ExtraAuthSkipPaths              []string                               // Optional: extension paths appended to the auth skip list ("/*" suffix matches a prefix)
 	RequestAuthenticators           []ext.RequestAuthenticator             // Optional extension-provided request authentication mechanisms
 	Tagging                         *tagging.Service                       // Optional: request labelling based on configured tagging headers
-	SessionDetector                 *session.Detector                      // Optional: client session identification for sticky routing and audit grouping
+	SessionDetector                 *session.Detector                      // Optional: client session identification for sticky routing and request log grouping
 	VersionChecker                  *versioncheck.Checker                  // Optional: daily update check backing GET /version
 	TLSConfig                       *tls.Config                            // Optional: serve HTTPS with this configuration; nil serves plain HTTP
 	ClientCertificatesRequired      bool                                   // With TLSConfig: reject requests without a verified client certificate, except the health probes
@@ -203,12 +210,12 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	// Get loggers from config (may be nil)
-	var auditLogger auditlog.LoggerInterface
+	var requestLogger requestlog.LoggerInterface
 	var usageLogger usage.LoggerInterface
 	var budgetChecker BudgetChecker
 	var pricingResolver usage.PricingResolver
 	if cfg != nil {
-		auditLogger = cfg.AuditLogger
+		requestLogger = cfg.RequestLogger
 		usageLogger = cfg.UsageLogger
 		budgetChecker = cfg.BudgetChecker
 		pricingResolver = cfg.PricingResolver
@@ -227,7 +234,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		translatedRequestPatcher = cfg.TranslatedRequestPatcher
 	}
 
-	handler := newHandlerWithAuthorizer(provider, auditLogger, usageLogger, pricingResolver, modelResolver, modelAuthorizer, workflowPolicyResolver, failoverResolver, translatedRequestPatcher)
+	handler := newHandlerWithAuthorizer(provider, requestLogger, usageLogger, pricingResolver, modelResolver, modelAuthorizer, workflowPolicyResolver, failoverResolver, translatedRequestPatcher)
 	handler.budgetChecker = budgetChecker
 	if cfg != nil {
 		handler.failoverPolicy = cfg.FailoverPolicy
@@ -325,19 +332,19 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	// Global middleware stack (order matters)
-	// Scrub credential-like query values before the outer request logger
+	// Scrub credential-like query values before the outer access logger
 	// snapshots RequestURI. URL.RawQuery remains intact for handlers.
 	e.Use(redactSensitiveRequestURI())
 	e.Use(middleware.Recover())
 	// Outer extension middleware covers the complete HTTP request while still
-	// seeing the credential-redacted URI. It runs before request logging,
-	// limits, audit, and auth, so it must not depend on identity.
+	// seeing the credential-redacted URI. It runs before access logging,
+	// limits, request logging, and auth, so it must not depend on identity.
 	if cfg != nil {
 		for _, m := range cfg.OuterMiddleware {
 			e.Use(m)
 		}
 	}
-	// Request logger with optional filtering for model-only interactions
+	// Access logger (Echo's RequestLogger) with optional filtering for model-only interactions
 	if cfg != nil && cfg.LogOnlyModelInteractions {
 		e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
 			Skipper: func(c *echo.Context) bool {
@@ -386,7 +393,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	e.Use(modelInteractionWriteDeadlineMiddleware(streamStallTimeout(cfg)))
 
-	// Ingress capture (before auth/audit/model validation so they can consume
+	// Ingress capture (before auth/request logging/model validation so they can consume
 	// shared request state; the body is added after auth). Also assigns the
 	// per-request ID: the snapshot middleware runs unconditionally and calls
 	// ensureRequestID first thing, so a separate request-ID middleware would
@@ -397,7 +404,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.Use(RequestSnapshotCapture(userPathHeaderName))
 
 	// Request labelling from configured tagging headers (after snapshot capture so
-	// audit logging still sees the original headers, before audit logging so
+	// request logging still sees the original headers, before request logging so
 	// entries can record the labels)
 	if cfg != nil && cfg.Tagging != nil {
 		e.Use(TaggingCapture(cfg.Tagging))
@@ -407,15 +414,22 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.Use(PassthroughSemanticEnrichment(provider, cfg.PassthroughSemanticEnrichers, passthroughV1PrefixNormalizationEnabled(cfg)))
 	}
 
-	// Audit logging runs before workflow resolution so early workflow resolution/validation
+	// Request logging runs before workflow resolution so early workflow resolution/validation
 	// failures are still logged. The middleware defers request capture and
 	// dynamically gates response capture on the final resolved workflow, so
-	// Audit=false still suppresses per-request capture work.
-	if cfg != nil && cfg.AuditLogger != nil && cfg.AuditLogger.Config().Enabled {
-		e.Use(auditlog.Middleware(cfg.AuditLogger))
+	// RequestLogs=false still suppresses per-request capture work.
+	if cfg != nil && cfg.RequestLogger != nil && cfg.RequestLogger.Config().Enabled {
+		e.Use(requestlog.Middleware(cfg.RequestLogger))
 	}
 
-	// Extension middleware runs after audit capture and before gateway auth so
+	// Registered after the request log middleware, so the request log capture
+	// sees the response as the client receives it, cost included. Not
+	// registered while off, so responses stay exactly as they are.
+	if cfg != nil && cfg.ResponseCostEnabled {
+		e.Use(responseCostMiddleware(cfg.ResponseCostBilled))
+	}
+
+	// Extension middleware runs after request log capture and before gateway auth so
 	// extensions (e.g. SSO sessions) can normalize credentials for the auth check.
 	if cfg != nil {
 		for _, m := range cfg.ExtraMiddleware {
@@ -445,18 +459,18 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Session identification runs after auth so session ids are scoped by the
 	// EFFECTIVE user path (a managed key's bound path, not the ingress header)
 	// and before workflow resolution, which consumes the id for sticky
-	// virtual-model routing. The audit middleware re-reads the id after the
+	// virtual-model routing. The request log middleware re-reads the id after the
 	// handler returns, so persisted entries carry it even though they are
 	// created earlier in the chain.
 	if cfg != nil && cfg.SessionDetector != nil {
-		e.Use(sessionCapture(cfg.SessionDetector, cfg.AuditReader, !authMiddlewareRegistered))
+		e.Use(sessionCapture(cfg.SessionDetector, cfg.RequestLogReader, !authMiddlewareRegistered))
 	}
 
 	// LiteLLM tags become labels post-auth (only authenticated bodies are
 	// read) and before request rewriters and workflow resolution, which see
 	// the body without them. Turned off, requests keep their tags untouched.
 	if cfg == nil || !cfg.DisableLiteLLMTags {
-		e.Use(LiteLLMTags(auditLogger))
+		e.Use(LiteLLMTags(requestLogger))
 	}
 
 	// Request rewriters run post-auth (rewriters only see authenticated
@@ -464,12 +478,12 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// affect routing, failover, guardrails, budgets, and caching). Not
 	// registered when no rewriters exist, so the default build pays nothing.
 	if cfg != nil && len(cfg.RequestRewriters) > 0 {
-		e.Use(RequestRewriteMiddleware(cfg.RequestRewriters, auditLogger))
+		e.Use(RequestRewriteMiddleware(cfg.RequestRewriters, requestLogger))
 	}
 
 	// Workflow resolution resolves the request-scoped workflow after auth so
 	// managed auth key user-path overrides are visible to policy resolution while
-	// still keeping workflow resolution failures loggable through the audit middleware.
+	// still keeping workflow resolution failures loggable through the request log middleware.
 	e.Use(WorkflowResolutionWithResolverAndPolicy(provider, modelResolver, workflowPolicyResolver))
 
 	// Public routes
@@ -587,7 +601,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// need dashboard access to pass the gate; the master key always does.
 	if cfg != nil && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
 		adminGate := AdminAccessMiddleware()
-		// Admin responses are large, highly compressible JSON (audit entries
+		// Admin responses are large, highly compressible JSON (request log entries
 		// carrying request/response bodies, usage aggregates), so gzip cuts
 		// the wire size roughly an order of magnitude. The live-log SSE
 		// stream is exempt: each event must flush to the client immediately,
@@ -622,6 +636,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.GET("/admin/dashboard", cfg.DashboardHandler.Index)
 		e.GET("/admin/dashboard/*", cfg.DashboardHandler.Index)
 		e.GET("/admin/static/*", cfg.DashboardHandler.Static)
+		// Probes and link checkers use HEAD; it answers with GET's headers.
+		e.HEAD("/admin/dashboard", cfg.DashboardHandler.Index)
+		e.HEAD("/admin/dashboard/*", cfg.DashboardHandler.Index)
+		e.HEAD("/admin/static/*", cfg.DashboardHandler.Static)
 	}
 
 	// Extension routes register after all core routes.
@@ -799,6 +817,7 @@ func configureGatewayHTTPServer(server *http.Server) error {
 	server.ReadTimeout = inboundServerReadTimeout
 	server.ReadHeaderTimeout = inboundServerReadHeaderTimeout
 	server.WriteTimeout = inboundServerWriteTimeout
+	server.IdleTimeout = inboundServerIdleTimeout
 	return nil
 }
 

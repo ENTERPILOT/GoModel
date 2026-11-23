@@ -208,7 +208,7 @@ func newWorkflowHandlerWithModelRegistry(t *testing.T, store workflows.Store, mo
 
 func TestListWorkflows(t *testing.T) {
 	failoverDisabled := false
-	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Failover: &failoverDisabled})}}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Failover: &failoverDisabled})}}
 
 	h := newWorkflowHandler(t, store, nil)
 	c, rec := echotest.Get(t, "/admin/workflows")
@@ -223,7 +223,7 @@ func TestListWorkflows(t *testing.T) {
 	require.NotNil(t, body[0].Payload.Features.Failover, "payload failover must stay explicit")
 	assert.False(t, *body[0].Payload.Features.Failover)
 	assert.True(t, body[0].EffectiveFeatures.Cache)
-	assert.True(t, body[0].EffectiveFeatures.Audit)
+	assert.True(t, body[0].EffectiveFeatures.RequestLogs)
 	assert.True(t, body[0].EffectiveFeatures.Usage)
 	assert.False(t, body[0].EffectiveFeatures.Failover)
 }
@@ -267,7 +267,7 @@ func TestGetWorkflow(t *testing.T) {
 	failoverEnabled := true
 	store := &workflowTestStore{
 		versions: []workflows.Version{
-			globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true}),
+			globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true}),
 			{
 				ID:          "provider-workflow-v1",
 				Scope:       workflows.Scope{Provider: "openai", Model: "gpt-5"},
@@ -279,11 +279,11 @@ func TestGetWorkflow(t *testing.T) {
 				Payload: workflows.Payload{
 					SchemaVersion: 1,
 					Features: workflows.FeatureFlags{
-						Cache:      true,
-						Audit:      true,
-						Usage:      true,
-						Guardrails: true,
-						Failover:   &failoverEnabled,
+						Cache:       true,
+						RequestLogs: true,
+						Usage:       true,
+						Guardrails:  true,
+						Failover:    &failoverEnabled,
 					},
 					Guardrails: []workflows.GuardrailStep{
 						{Ref: "policy-system", Step: 10},
@@ -307,7 +307,7 @@ func TestGetWorkflow(t *testing.T) {
 	err = json.Unmarshal(rawBody["effective_features"], &effectiveFeatures)
 	require.NoError(t, err)
 
-	for _, key := range []string{"cache", "audit", "usage", "guardrails", "failover"} {
+	for _, key := range []string{"cache", "request_logs", "audit", "usage", "guardrails", "failover"} {
 		assert.Contains(t, effectiveFeatures, key, "effective_features must use lower-case keys")
 	}
 	assert.True(t, effectiveFeatures["failover"], "renamed field must round-trip")
@@ -319,14 +319,14 @@ func TestGetWorkflow(t *testing.T) {
 	assert.Equal(t, "provider_model", body.ScopeType)
 	assert.Equal(t, "openai/gpt-5", body.ScopeDisplay)
 	assert.True(t, body.Payload.Features.Usage)
-	assert.True(t, body.Payload.Features.Audit)
+	assert.True(t, body.Payload.Features.RequestLogs)
 	assert.True(t, body.Payload.Features.Guardrails)
 	require.NotNil(t, body.Payload.Features.Failover)
 	assert.True(t, *body.Payload.Features.Failover)
 }
 
 func TestCreateWorkflow_NormalizesScopeUserPath(t *testing.T) {
-	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true})}}
 	h := newWorkflowHandler(t, store, nil)
 
 	c, rec := echotest.Request(t, http.MethodPost, "/admin/workflows", `{
@@ -336,7 +336,7 @@ func TestCreateWorkflow_NormalizesScopeUserPath(t *testing.T) {
 		"name":"Scoped workflow",
 		"workflow_payload":{
 			"schema_version":1,
-			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false}
+			"features":{"cache":true,"request_logs":true,"usage":true,"guardrails":false}
 		}
 	}`)
 	err := h.CreateWorkflow(c)
@@ -345,6 +345,46 @@ func TestCreateWorkflow_NormalizesScopeUserPath(t *testing.T) {
 
 	version := echotest.Decode[workflows.Version](t, rec)
 	assert.Equal(t, "/team/alpha/user", version.Scope.UserPath)
+}
+
+// The request_logs feature flag was named audit through v0.2.5. The API takes
+// either name, request_logs first, and answers with both.
+func TestCreateWorkflow_RequestLogsFlagAndAuditAlias(t *testing.T) {
+	tests := []struct {
+		name     string
+		features string
+		want     bool
+	}{
+		{name: "request_logs", features: `{"cache":true,"request_logs":true,"usage":true}`, want: true},
+		{name: "deprecated audit alias", features: `{"cache":true,"audit":true,"usage":true}`, want: true},
+		{name: "request_logs wins over audit", features: `{"cache":true,"audit":true,"request_logs":false,"usage":true}`, want: false},
+		{name: "neither", features: `{"cache":true,"usage":true}`, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true})}}
+			h := newWorkflowHandler(t, store, nil)
+
+			c, rec := echotest.Request(t, http.MethodPost, "/admin/workflows", `{
+				"scope_provider_name":"openai",
+				"name":"Provider workflow",
+				"workflow_payload":{"schema_version":2,"features":`+tt.features+`}
+			}`)
+			require.NoError(t, h.CreateWorkflow(c))
+			require.Equal(t, http.StatusCreated, rec.Code)
+
+			var body struct {
+				Payload struct {
+					Features map[string]bool `json:"features"`
+				} `json:"workflow_payload"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			require.Contains(t, body.Payload.Features, "request_logs")
+			require.Contains(t, body.Payload.Features, "audit", "v0.2.5 clients read only audit")
+			assert.Equal(t, tt.want, body.Payload.Features["request_logs"])
+			assert.Equal(t, tt.want, body.Payload.Features["audit"])
+		})
+	}
 }
 
 func TestListWorkflowGuardrails(t *testing.T) {
@@ -377,7 +417,7 @@ func TestListWorkflowGuardrails(t *testing.T) {
 }
 
 func TestCreateWorkflow(t *testing.T) {
-	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true})}}
 
 	h := newWorkflowHandler(t, store, nil)
 
@@ -388,7 +428,7 @@ func TestCreateWorkflow(t *testing.T) {
 		"description":"provider-model workflow",
 		"workflow_payload":{
 			"schema_version":1,
-			"features":{"cache":false,"audit":true,"usage":true,"guardrails":false,"failover":false},
+			"features":{"cache":false,"request_logs":true,"usage":true,"guardrails":false,"failover":false},
 			"guardrails":[]
 		}
 	}`)
@@ -423,7 +463,7 @@ func TestCreateWorkflow_StoresCanonicalScopeModel(t *testing.T) {
 				"name":"trimmed model",
 				"workflow_payload":{
 					"schema_version":1,
-					"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
+					"features":{"cache":true,"request_logs":true,"usage":true,"guardrails":false},
 					"guardrails":[]
 				}
 			}`,
@@ -438,7 +478,7 @@ func TestCreateWorkflow_StoresCanonicalScopeModel(t *testing.T) {
 				"name":"provider only",
 				"workflow_payload":{
 					"schema_version":1,
-					"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
+					"features":{"cache":true,"request_logs":true,"usage":true,"guardrails":false},
 					"guardrails":[]
 				}
 			}`,
@@ -449,7 +489,7 @@ func TestCreateWorkflow_StoresCanonicalScopeModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
+			store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true})}}
 
 			h := newWorkflowHandler(t, store, nil)
 
@@ -466,7 +506,7 @@ func TestCreateWorkflow_StoresCanonicalScopeModel(t *testing.T) {
 }
 
 func TestCreateWorkflow_LegacyProviderTypeResolvesToConfiguredProviderName(t *testing.T) {
-	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true})}}
 
 	modelRegistry := providers.NewModelRegistry()
 	modelRegistry.RegisterProviderWithNameAndType(&handlerMockProvider{
@@ -488,7 +528,7 @@ func TestCreateWorkflow_LegacyProviderTypeResolvesToConfiguredProviderName(t *te
 		"name":"legacy provider type scope",
 		"workflow_payload":{
 			"schema_version":1,
-			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
+			"features":{"cache":true,"request_logs":true,"usage":true,"guardrails":false},
 			"guardrails":[]
 		}
 	}`)
@@ -502,7 +542,7 @@ func TestCreateWorkflow_LegacyProviderTypeResolvesToConfiguredProviderName(t *te
 }
 
 func TestCreateWorkflow_AllowsEmptyName(t *testing.T) {
-	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true})}}
 
 	h := newWorkflowHandler(t, store, nil)
 
@@ -512,7 +552,7 @@ func TestCreateWorkflow_AllowsEmptyName(t *testing.T) {
 		"description":"provider-model workflow",
 		"workflow_payload":{
 			"schema_version":1,
-			"features":{"cache":false,"audit":true,"usage":true,"guardrails":false},
+			"features":{"cache":false,"request_logs":true,"usage":true,"guardrails":false},
 			"guardrails":[]
 		}
 	}`)
@@ -525,7 +565,7 @@ func TestCreateWorkflow_AllowsEmptyName(t *testing.T) {
 }
 
 func TestCreateWorkflowRejectsUnknownGuardrail(t *testing.T) {
-	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true})}}
 	registry := newWorkflowRegistry(t)
 	h := newWorkflowHandler(t, store, registry)
 
@@ -533,7 +573,7 @@ func TestCreateWorkflowRejectsUnknownGuardrail(t *testing.T) {
 		"name":"guardrail workflow",
 		"workflow_payload":{
 			"schema_version":1,
-			"features":{"cache":true,"audit":true,"usage":true,"guardrails":true},
+			"features":{"cache":true,"request_logs":true,"usage":true,"guardrails":true},
 			"guardrails":[{"ref":"missing-guardrail","step":10}]
 		}
 	}`)
@@ -549,7 +589,7 @@ func TestCreateWorkflowRejectsUnknownGuardrail(t *testing.T) {
 }
 
 func TestCreateWorkflowReturnsValidationErrors(t *testing.T) {
-	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true})}}
 
 	h := newWorkflowHandler(t, store, nil)
 
@@ -558,7 +598,7 @@ func TestCreateWorkflowReturnsValidationErrors(t *testing.T) {
 		"name":"invalid scope",
 		"workflow_payload":{
 			"schema_version":1,
-			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
+			"features":{"cache":true,"request_logs":true,"usage":true,"guardrails":false},
 			"guardrails":[]
 		}
 	}`)
@@ -573,7 +613,7 @@ func TestCreateWorkflowReturnsValidationErrors(t *testing.T) {
 }
 
 func TestCreateWorkflowRejectsUnknownProviderOrModelScope(t *testing.T) {
-	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true})}}
 
 	tests := []struct {
 		name        string
@@ -587,7 +627,7 @@ func TestCreateWorkflowRejectsUnknownProviderOrModelScope(t *testing.T) {
 				"name":"invalid provider",
 				"workflow_payload":{
 					"schema_version":1,
-					"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
+					"features":{"cache":true,"request_logs":true,"usage":true,"guardrails":false},
 					"guardrails":[]
 				}
 			}`,
@@ -601,7 +641,7 @@ func TestCreateWorkflowRejectsUnknownProviderOrModelScope(t *testing.T) {
 				"name":"invalid model",
 				"workflow_payload":{
 					"schema_version":1,
-					"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
+					"features":{"cache":true,"request_logs":true,"usage":true,"guardrails":false},
 					"guardrails":[]
 				}
 			}`,
@@ -628,7 +668,7 @@ func TestCreateWorkflowRejectsUnknownProviderOrModelScope(t *testing.T) {
 }
 
 func TestCreateWorkflow_UsesScopeUserPathInValidationErrors(t *testing.T) {
-	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true})}}
 	h := newWorkflowHandler(t, store, nil)
 
 	c, rec := echotest.Request(t, http.MethodPost, "/admin/workflows", `{
@@ -636,7 +676,7 @@ func TestCreateWorkflow_UsesScopeUserPathInValidationErrors(t *testing.T) {
 		"name":"invalid path",
 		"workflow_payload":{
 			"schema_version":1,
-			"features":{"cache":true,"audit":true,"usage":true,"guardrails":false},
+			"features":{"cache":true,"request_logs":true,"usage":true,"guardrails":false},
 			"guardrails":[]
 		}
 	}`)
@@ -650,13 +690,13 @@ func TestCreateWorkflow_UsesScopeUserPathInValidationErrors(t *testing.T) {
 }
 
 func TestWorkflowViewReflectsFeatureCaps(t *testing.T) {
-	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true})}}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: true})}}
 
 	service, err := workflows.NewService(store, workflows.NewCompilerWithFeatureCaps(nil, core.WorkflowFeatures{
-		Cache:      false,
-		Audit:      true,
-		Usage:      true,
-		Guardrails: false,
+		Cache:       false,
+		RequestLogs: true,
+		Usage:       true,
+		Guardrails:  false,
 	}))
 	require.NoError(t, err)
 	err = service.Refresh(context.Background())
@@ -677,7 +717,7 @@ func TestWorkflowViewReflectsFeatureCaps(t *testing.T) {
 func TestDeactivateWorkflow(t *testing.T) {
 	store := &workflowTestStore{
 		versions: []workflows.Version{
-			globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true}),
+			globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true}),
 			{
 				ID:       "provider-workflow",
 				Scope:    workflows.Scope{Provider: "openai"},
@@ -687,7 +727,7 @@ func TestDeactivateWorkflow(t *testing.T) {
 				Name:     "openai",
 				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+					Features:      workflows.FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 				},
 				WorkflowHash: "hash-provider",
 			},
@@ -708,7 +748,7 @@ func TestDeactivateWorkflow(t *testing.T) {
 }
 
 func TestDeactivateWorkflowRejectsGlobalWorkflow(t *testing.T) {
-	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
+	store := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true})}}
 
 	h := newWorkflowHandler(t, store, nil)
 

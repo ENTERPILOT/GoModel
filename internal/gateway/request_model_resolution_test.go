@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/stretchr/testify/assert"
@@ -382,4 +383,54 @@ func TestResolveRequestModelCarriesVirtualModelPath(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"team", "smart"}, resolution.VirtualModelPath)
+}
+
+type requestTimeoutsResolver struct {
+	requestRouteResolver
+	timeouts core.UpstreamTimeouts
+	route    []string
+}
+
+func (r *requestTimeoutsResolver) ResolveTimeouts(_ context.Context, _ core.RequestedModelSelector, _ core.ModelSelector, route []string) core.UpstreamTimeouts {
+	r.route = route
+	return r.timeouts
+}
+
+func TestResolveRequestModelCarriesResolvedTimeouts(t *testing.T) {
+	want := core.UpstreamTimeouts{Timeout: 30 * time.Second, ResponseHeaderTimeout: 5 * time.Second}
+	resolver := &requestTimeoutsResolver{
+		requestAliasResolver: requestAliasResolver{"smart": {Provider: "openai", Model: "gpt-4o"}},
+		path:                 []string{"smart", "inner"},
+		timeouts:             want,
+	}
+
+	resolution, err := ResolveRequestModelWithAuthorizer(
+		context.Background(), newRequestRefreshProvider(1), resolver, nil,
+		core.NewRequestedModelSelector("smart", ""),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, want, resolution.Timeouts)
+	assert.Equal(t, []string{"smart", "inner"}, resolver.route, "the recorded route reaches the timeouts resolver")
+
+	resolution, err = ResolveRequestModelWithAuthorizer(
+		context.Background(), newRequestRefreshProvider(1), requestAliasResolver{}, nil,
+		core.NewRequestedModelSelector("openai/gpt-4o", ""),
+	)
+	require.NoError(t, err)
+	assert.Zero(t, resolution.Timeouts, "a resolver without the timeouts contract inherits")
+}
+
+func TestResolveExecutionRouteReturnsVirtualModelPath(t *testing.T) {
+	resolver := requestRouteResolver{
+		requestAliasResolver: requestAliasResolver{"team": {Provider: "openai", Model: "gpt-4o"}},
+		path:                 []string{"team", "smart"},
+	}
+
+	selector, route, err := ResolveExecutionRoute(
+		context.Background(), newRequestRefreshProvider(1), resolver,
+		core.NewRequestedModelSelector("team", ""),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "openai/gpt-4o", selector.QualifiedModel())
+	assert.Equal(t, []string{"team", "smart"}, route)
 }

@@ -19,5 +19,5 @@ func TestPassthroughSemanticEnricherUsesOpenRouterType(t *testing.T) {
 	require.NotNil(t, info)
 	require.Equal(t, "chat", info.GenAIOperation)
 	require.Equal(t, "openrouter.chat_completions", info.SemanticOperation)
-	require.Equal(t, "/v1/chat/completions", info.AuditPath)
+	require.Equal(t, "/v1/chat/completions", info.RequestLogPath)
 }

@@ -97,7 +97,7 @@ export function hiddenUserPathCount(paths, active, known) {
   return (paths || []).length - userPathOptionList(paths, active, { known }).length;
 }
 
-// The request log shows its API key column only when there is something to
+// The usage log shows its API key column only when there is something to
 // show: an entry made with a managed key, or an active key filter.
 export function usageLogHasAuthKeys(filterAuthKeys, logEntries) {
   if (filterValues(filterAuthKeys).length > 0) return true;

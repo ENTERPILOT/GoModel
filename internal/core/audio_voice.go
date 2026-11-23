@@ -56,3 +56,21 @@ func (r *AudioSpeechRequest) WithStringVoice() *AudioSpeechRequest {
 	plain.customVoice = nil
 	return &plain
 }
+
+// WithObjectVoice returns r, or a copy that sends a string voice in OpenAI's
+// custom-voice object form ({"id": voice}), for an upstream that takes a
+// custom voice ID only that way.
+func (r *AudioSpeechRequest) WithObjectVoice() *AudioSpeechRequest {
+	if r == nil || r.Voice == "" || (r.customVoice != nil && r.customVoice.id == r.Voice) {
+		return r
+	}
+	raw, err := json.Marshal(struct {
+		ID string `json:"id"`
+	}{ID: r.Voice})
+	if err != nil {
+		return r
+	}
+	object := *r
+	object.customVoice = &speechVoiceObject{id: r.Voice, raw: raw}
+	return &object
+}

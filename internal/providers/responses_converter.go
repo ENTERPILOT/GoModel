@@ -75,6 +75,8 @@ type openAIStreamChunk struct {
 			ToolCalls        []openAIChunkToolCall `json:"tool_calls"`
 			ExtraContent     json.RawMessage       `json:"extra_content"`
 			Images           json.RawMessage       `json:"images"`
+			// ContentChunks is the MistralContentChunksField member.
+			ContentChunks []json.RawMessage `json:"mistral_content_chunks"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -289,8 +291,11 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	// Recorded before the text and tool calls of the same delta: a tool call
 	// closes the message item on the spot, and its output_item.done must
 	// already carry the state. Text after an image opens its new item first,
-	// so the state lands on the item it arrived with.
+	// so the state lands on the item it arrived with; so do chunks that
+	// follow a closed message, which is why they come before the replay
+	// state of the same delta.
 	sc.openMessageAfterImage(choice.Delta.Content != "", choice.Delta.ExtraContent)
+	sc.appendContentChunks(choice.Delta.ContentChunks)
 	sc.setMessageExtraContent(choice.Delta.ExtraContent)
 	// "reasoning_content" wins over the vendor "reasoning" member (Groq,
 	// OpenRouter), the same precedence the streaming codec applies.
@@ -319,6 +324,23 @@ func (sc *OpenAIResponsesStreamConverter) setMessageExtraContent(raw json.RawMes
 	if extra := bytes.TrimSpace(raw); len(extra) > 0 && !bytes.Equal(extra, []byte("null")) {
 		sc.output.SetAssistantExtraContent(extra)
 	}
+}
+
+// appendContentChunks records the content chunks of a delta
+// (MistralContentChunksField) for the message item. Callers record them
+// before the rest of the delta, so a tool call in the same delta closes the
+// item with them, and before the delta's replay state, so that state follows
+// them to a new item. Chunks that arrive after the item closed go to a new
+// message item, opened at the end of the stream at the latest, instead of
+// changing one whose output_item.done is already out.
+func (sc *OpenAIResponsesStreamConverter) appendContentChunks(chunks []json.RawMessage) {
+	if len(chunks) == 0 {
+		return
+	}
+	if sc.output.AssistantDone() {
+		sc.output.StartNextAssistantMessage(sc.assistantOutputIndex)
+	}
+	sc.output.AppendAssistantContentChunks(chunks)
 }
 
 // processChunkTolerant mirrors processChunk with per-field type assertions, so
@@ -360,6 +382,9 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 			extra, _ = json.Marshal(value)
 		}
 		sc.openMessageAfterImage(content != "", extra)
+		if _, ok := delta[MistralContentChunksField]; ok {
+			sc.appendContentChunks(rawDeltaContentChunks(data))
+		}
 		sc.setMessageExtraContent(extra)
 		reasoning, _ := delta["reasoning_content"].(string)
 		if reasoning == "" {
@@ -387,6 +412,23 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 	if finishReason == "tool_calls" {
 		sc.buffer.AppendString(sc.completePendingToolCalls())
 	}
+}
+
+// rawDeltaContentChunks decodes only the MistralContentChunksField member of
+// a chunk's first delta. The tolerant path uses it instead of the generic
+// map, which would round a reference id above 2^53 to a float.
+func rawDeltaContentChunks(data []byte) []json.RawMessage {
+	var chunk struct {
+		Choices []struct {
+			Delta struct {
+				ContentChunks []json.RawMessage `json:"mistral_content_chunks"`
+			} `json:"delta"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(data, &chunk); err != nil || len(chunk.Choices) == 0 {
+		return nil
+	}
+	return chunk.Choices[0].Delta.ContentChunks
 }
 
 // chunkToolCallsFromAny converts generically parsed tool-call deltas into the
@@ -530,7 +572,10 @@ func (sc *OpenAIResponsesStreamConverter) appendTerminalEvents() {
 		eventName = "response.incomplete"
 	}
 	sc.buffer.AppendString(sc.output.FinishReasoningOutput(reasoningOutputIndex, status))
-	if sc.extraAwaitsMessage {
+	// Content chunks that arrived without any text still need a message item
+	// to ride on. It is reserved here, not on arrival, so it cannot take the
+	// reasoning item's slot.
+	if sc.extraAwaitsMessage || sc.output.HasAssistantContentChunks() {
 		sc.reserveAssistantOutput()
 	}
 	sc.buffer.AppendString(sc.output.FinishAssistantOutput(sc.assistantOutputIndex, status))

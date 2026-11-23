@@ -12,6 +12,7 @@ import {
   workflowModelOptions,
   workflowPreview,
   workflowSourceFeatures,
+  workflowNormalizedFeatures,
   workflowSourceGuardrails,
   workflowActiveScopeMatch,
   workflowDisplayName,
@@ -27,7 +28,7 @@ import {
 } from "../src/pages/workflows/workflowsLogic.js";
 import {
   workflowChart,
-  workflowAuditChart,
+  workflowRequestLogChart,
   workflowChartWorkflowID,
   workflowRuntimeFromEntry,
   workflowGuardrailLabel,
@@ -51,7 +52,7 @@ import {
 // All feature gates on: the default when no runtime flags disable anything.
 const ALL_CAPS = {
   cache: true,
-  audit: true,
+  request_logs: true,
   usage: true,
   budget: true,
   guardrails: true,
@@ -61,7 +62,7 @@ const ALL_CAPS = {
 // Every gate off (legacy: all runtime flags explicitly "off").
 const NO_CAPS = {
   cache: false,
-  audit: false,
+  request_logs: false,
   usage: false,
   budget: false,
   guardrails: false,
@@ -109,7 +110,7 @@ test("workflowPreview mirrors the draft workflow card state from the editor form
     description: "Live preview of the edited workflow",
     features: {
       cache: true,
-      audit: false,
+      request_logs: false,
       usage: true,
       guardrails: true,
       failover: false,
@@ -131,7 +132,7 @@ test("workflowPreview mirrors the draft workflow card state from the editor form
       schema_version: 2,
       features: {
         cache: true,
-        audit: false,
+        request_logs: false,
         usage: true,
         budget: true,
         guardrails: true,
@@ -151,7 +152,7 @@ test("workflowPreview renders path-scoped draft labels using canonical scope dis
     description: "Preview should include the canonical path scope",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: false,
@@ -177,7 +178,7 @@ test("workflowPreview does not coerce blank guardrail steps into step zero", () 
     description: "Preview should not invent step zero",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: true,
       failover: false,
@@ -200,7 +201,7 @@ test("workflowChart returns the shared chart contract for workflow sources", () 
         workflow_payload: {
           features: {
             cache: true,
-            audit: true,
+            request_logs: true,
             usage: false,
             budget: true,
             guardrails: true,
@@ -261,10 +262,10 @@ test("workflowChart returns the shared chart contract for workflow sources", () 
       authNodeClass: "",
       authNodeSublabel: null,
       usageNodeClass: "",
-      auditNodeClass: "",
+      requestLogNodeClass: "",
       showAsync: true,
       showUsage: false,
-      showAudit: true,
+      showRequestLog: true,
       workflowID: "workflow-openai-gpt-5-v7",
     },
   );
@@ -280,7 +281,7 @@ test("workflowChart masks globally disabled workflow features from persisted wor
       workflow_payload: {
         features: {
           cache: true,
-          audit: true,
+          request_logs: true,
           usage: true,
           budget: true,
           guardrails: true,
@@ -299,7 +300,7 @@ test("workflowChart masks globally disabled workflow features from persisted wor
   assert.equal(chart.showFailover, true);
   assert.equal(chart.showAsync, false);
   assert.equal(chart.showUsage, false);
-  assert.equal(chart.showAudit, false);
+  assert.equal(chart.showRequestLog, false);
   assert.equal(chart.workflowID, null);
 });
 
@@ -320,7 +321,7 @@ test("workflowChartWorkflowID ignores the draft preview sentinel and falls back 
   );
 });
 
-test("workflowAuditChart returns the shared chart contract for audit runtime entries", () => {
+test("workflowRequestLogChart returns the shared chart contract for request log runtime entries", () => {
   const source = {
     id: "historical-v1",
     scope: {
@@ -330,7 +331,7 @@ test("workflowAuditChart returns the shared chart contract for audit runtime ent
     workflow_payload: {
       features: {
         cache: false,
-        audit: true,
+        request_logs: true,
         usage: true,
         budget: true,
         guardrails: true,
@@ -341,7 +342,7 @@ test("workflowAuditChart returns the shared chart contract for audit runtime ent
   };
 
   assert.deepEqual(
-    workflowAuditChart(
+    workflowRequestLogChart(
       {
         workflow_version_id: "historical-v1",
         cache_type: "semantic",
@@ -405,17 +406,17 @@ test("workflowAuditChart returns the shared chart contract for audit runtime ent
       authNodeClass: "",
       authNodeSublabel: null,
       usageNodeClass: "workflow-node-success",
-      auditNodeClass: "workflow-node-success",
+      requestLogNodeClass: "workflow-node-success",
       showAsync: true,
       showUsage: true,
-      showAudit: true,
+      showRequestLog: true,
       workflowID: "historical-v1",
     },
   );
 });
 
-test("workflowAuditChart forces audit nodes even when the workflow version cannot be resolved", () => {
-  const chart = workflowAuditChart(
+test("workflowRequestLogChart forces request log nodes even when the workflow version cannot be resolved", () => {
+  const chart = workflowRequestLogChart(
     {
       workflow_version_id: "missing-workflow",
       cache_type: "exact",
@@ -436,12 +437,12 @@ test("workflowAuditChart forces audit nodes even when the workflow version canno
   assert.equal(chart.responseNodeClass, "workflow-node-success");
   assert.equal(chart.showAsync, true);
   assert.equal(chart.showUsage, false);
-  assert.equal(chart.showAudit, true);
-  assert.equal(chart.auditNodeClass, "workflow-node-success");
+  assert.equal(chart.showRequestLog, true);
+  assert.equal(chart.requestLogNodeClass, "workflow-node-success");
   assert.equal(chart.workflowID, "missing-workflow");
 });
 
-test("workflowAuditChart names the configured provider instance, not its type", () => {
+test("workflowRequestLogChart names the configured provider instance, not its type", () => {
   const entry = {
     workflow_version_id: "missing-workflow",
     provider: "deepseek",
@@ -450,19 +451,19 @@ test("workflowAuditChart names the configured provider instance, not its type", 
     status_code: 200,
   };
 
-  assert.equal(workflowAuditChart(entry, null, ALL_CAPS).aiLabel, "mockds");
+  assert.equal(workflowRequestLogChart(entry, null, ALL_CAPS).aiLabel, "mockds");
   // Entries recorded without an instance name still show the provider type.
   assert.equal(
-    workflowAuditChart({ ...entry, provider_name: "" }, null, ALL_CAPS).aiLabel,
+    workflowRequestLogChart({ ...entry, provider_name: "" }, null, ALL_CAPS).aiLabel,
     "deepseek",
   );
   assert.equal(
-    workflowAuditChart({ ...entry, provider_name: "   " }, null, ALL_CAPS).aiLabel,
+    workflowRequestLogChart({ ...entry, provider_name: "   " }, null, ALL_CAPS).aiLabel,
     "deepseek",
   );
 });
 
-test("workflowAuditChart prefers request-time workflow features over current workflow state", () => {
+test("workflowRequestLogChart prefers request-time workflow features over current workflow state", () => {
   const source = {
     id: "historical-v2",
     scope: {
@@ -472,7 +473,7 @@ test("workflowAuditChart prefers request-time workflow features over current wor
     workflow_payload: {
       features: {
         cache: true,
-        audit: true,
+        request_logs: true,
         usage: true,
         budget: true,
         guardrails: true,
@@ -482,7 +483,7 @@ test("workflowAuditChart prefers request-time workflow features over current wor
     },
   };
 
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     {
       workflow_version_id: "historical-v2",
       provider: "openai",
@@ -491,7 +492,7 @@ test("workflowAuditChart prefers request-time workflow features over current wor
       data: {
         workflow_features: {
           cache: false,
-          audit: true,
+          request_logs: true,
           usage: false,
           budget: false,
           guardrails: false,
@@ -509,10 +510,10 @@ test("workflowAuditChart prefers request-time workflow features over current wor
   assert.equal(chart.showFailover, true);
   assert.equal(chart.aiNodeClass, "workflow-node-success");
   assert.equal(chart.showUsage, false);
-  assert.equal(chart.showAudit, true);
+  assert.equal(chart.showRequestLog, true);
 });
 
-test("workflowAuditChart highlights configured failover redirects and exposes the target", () => {
+test("workflowRequestLogChart highlights configured failover redirects and exposes the target", () => {
   const source = {
     id: "historical-v3",
     scope: {
@@ -522,7 +523,7 @@ test("workflowAuditChart highlights configured failover redirects and exposes th
     workflow_payload: {
       features: {
         cache: false,
-        audit: true,
+        request_logs: true,
         usage: true,
         budget: true,
         guardrails: false,
@@ -532,7 +533,7 @@ test("workflowAuditChart highlights configured failover redirects and exposes th
     },
   };
 
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     {
       workflow_version_id: "historical-v3",
       provider: "azure",
@@ -542,7 +543,7 @@ test("workflowAuditChart highlights configured failover redirects and exposes th
       data: {
         workflow_features: {
           cache: false,
-          audit: true,
+          request_logs: true,
           usage: true,
           budget: true,
           guardrails: false,
@@ -629,7 +630,7 @@ test("workflowRuntimeFromEntry derives cache hit state from cache_type", () => {
   assert.equal(empty.statusCode, null);
 });
 
-test("audit runtime uses explicit cache-hit labels and highlights the uncached 200 path", () => {
+test("request log runtime uses explicit cache-hit labels and highlights the uncached 200 path", () => {
   const semanticHit = workflowRuntimeFromEntry({
     cache_type: "semantic",
     status_code: 200,
@@ -660,7 +661,7 @@ test("response runtime maps status ranges to chart colors", () => {
   assert.equal(runtimeFor(204).aiSuccess, true);
 });
 
-test("auth runtime highlights auth node state from audit entries", () => {
+test("auth runtime highlights auth node state from request log entries", () => {
   const failedAuth = workflowRuntimeFromEntry({
     auth_method: "api_key",
     error_type: "authentication_error",
@@ -676,7 +677,7 @@ test("auth runtime highlights auth node state from audit entries", () => {
   assert.equal(workflowAuthNodeSublabel(masterKeyAuth), "master_key");
 });
 
-test("budget runtime highlights audit budget node success and exceeded states", () => {
+test("budget runtime highlights request log budget node success and exceeded states", () => {
   const successfulBudget = workflowRuntimeFromEntry({
     status_code: 200,
     data: { workflow_features: { budget: true } },
@@ -698,7 +699,7 @@ test("budget runtime highlights audit budget node success and exceeded states", 
   assert.equal(workflowBudgetNodeClass(true, exceededBudget, true), "workflow-node-error");
   assert.equal(workflowBudgetStatusLabel(exceededBudget), "Exceeded");
 
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     {
       workflow_version_id: "missing-budget-workflow",
       status_code: 429,
@@ -719,29 +720,29 @@ test("workflowAsyncNodeClass only marks async nodes green when highlighted", () 
   assert.equal(workflowAsyncNodeClass(true, false, true), "workflow-node-current");
 });
 
-test("workflowAuditChart marks live current steps and waits for async flushes", () => {
-  const started = workflowAuditChart(
+test("workflowRequestLogChart marks live current steps and waits for async flushes", () => {
+  const started = workflowRequestLogChart(
     {
-      id: "audit-live-1",
+      id: "request-log-live-1",
       request_id: "req-live-1",
       _live: true,
-      _live_state: "audit.started",
+      _live_state: "request_log.started",
       _live_pending: true,
     },
     null,
     ALL_CAPS,
   );
   assert.equal(started.authNodeClass, "workflow-node-current");
-  assert.equal(started.auditNodeClass, "");
+  assert.equal(started.requestLogNodeClass, "");
 
-  const inAi = workflowAuditChart(
+  const inAi = workflowRequestLogChart(
     {
-      id: "audit-live-1",
+      id: "request-log-live-1",
       request_id: "req-live-1",
       provider: "openai",
       requested_model: "gpt-5",
       _live: true,
-      _live_state: "audit.updated",
+      _live_state: "request_log.updated",
       _live_pending: true,
     },
     null,
@@ -749,55 +750,55 @@ test("workflowAuditChart marks live current steps and waits for async flushes", 
   );
   assert.equal(inAi.aiNodeClass, "workflow-node-current");
 
-  const auditQueued = workflowAuditChart(
+  const requestLogQueued = workflowRequestLogChart(
     {
-      id: "audit-live-1",
+      id: "request-log-live-1",
       request_id: "req-live-1",
       provider: "openai",
       requested_model: "gpt-5",
       status_code: 200,
       _live: true,
-      _live_state: "audit.completed",
+      _live_state: "request_log.completed",
       _live_pending: true,
       _usage_live_state: "usage.completed",
       _usage_live_pending: true,
       _usage_flushed: false,
-      data: { workflow_features: { audit: true, usage: true } },
+      data: { workflow_features: { request_logs: true, usage: true } },
     },
     null,
     ALL_CAPS,
   );
-  assert.equal(auditQueued.responseNodeClass, "workflow-node-success");
-  assert.equal(auditQueued.auditNodeClass, "workflow-node-current");
-  assert.equal(auditQueued.usageNodeClass, "workflow-node-current");
+  assert.equal(requestLogQueued.responseNodeClass, "workflow-node-success");
+  assert.equal(requestLogQueued.requestLogNodeClass, "workflow-node-current");
+  assert.equal(requestLogQueued.usageNodeClass, "workflow-node-current");
 
-  const auditFlushedUsageQueuedEntry = {
-    id: "audit-live-1",
+  const requestLogFlushedUsageQueuedEntry = {
+    id: "request-log-live-1",
     request_id: "req-live-1",
     provider: "openai",
     requested_model: "gpt-5",
     status_code: 200,
     usage: { entries: 1 },
     _live: true,
-    _live_state: "audit.flushed",
+    _live_state: "request_log.flushed",
     _live_pending: false,
-    _audit_flushed: true,
+    _request_log_flushed: true,
     _usage_live_state: "usage.completed",
     _usage_live_pending: true,
     _usage_flushed: false,
-    data: { workflow_features: { audit: true, usage: true } },
+    data: { workflow_features: { request_logs: true, usage: true } },
   };
-  const auditFlushedUsageQueued = workflowAuditChart(
-    auditFlushedUsageQueuedEntry,
+  const requestLogFlushedUsageQueued = workflowRequestLogChart(
+    requestLogFlushedUsageQueuedEntry,
     null,
     ALL_CAPS,
   );
-  assert.equal(auditFlushedUsageQueued.auditNodeClass, "workflow-node-success");
-  assert.equal(auditFlushedUsageQueued.usageNodeClass, "workflow-node-current");
+  assert.equal(requestLogFlushedUsageQueued.requestLogNodeClass, "workflow-node-success");
+  assert.equal(requestLogFlushedUsageQueued.usageNodeClass, "workflow-node-current");
 
-  const fullyFlushed = workflowAuditChart(
+  const fullyFlushed = workflowRequestLogChart(
     {
-      ...auditFlushedUsageQueuedEntry,
+      ...requestLogFlushedUsageQueuedEntry,
       _usage_live_state: "usage.flushed",
       _usage_live_pending: false,
       _usage_flushed: true,
@@ -805,7 +806,7 @@ test("workflowAuditChart marks live current steps and waits for async flushes", 
     null,
     ALL_CAPS,
   );
-  assert.equal(fullyFlushed.auditNodeClass, "workflow-node-success");
+  assert.equal(fullyFlushed.requestLogNodeClass, "workflow-node-success");
   assert.equal(fullyFlushed.usageNodeClass, "workflow-node-success");
 });
 
@@ -851,7 +852,7 @@ test("buildWorkflowRequest emits provider-model payload and strips guardrails wh
     description: "Primary translated requests",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: false,
@@ -869,6 +870,7 @@ test("buildWorkflowRequest emits provider-model payload and strips guardrails wh
       schema_version: 2,
       features: {
         cache: true,
+        request_logs: true,
         audit: true,
         usage: true,
         budget: true,
@@ -888,7 +890,7 @@ test("buildWorkflowRequest disables budget when usage is disabled in the form", 
     description: "Usage disabled",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: false,
       budget: true,
       guardrails: false,
@@ -911,7 +913,7 @@ test("buildWorkflowRequest omits failover for new workflows when the control is 
     description: "Preserve hidden failover state",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: false,
@@ -923,6 +925,7 @@ test("buildWorkflowRequest omits failover for new workflows when the control is 
     buildWorkflowRequest({ form, caps: HIDDEN_FAILOVER_CAPS }).workflow_payload.features,
     {
       cache: true,
+      request_logs: true,
       audit: true,
       usage: true,
       budget: true,
@@ -939,7 +942,7 @@ test("buildWorkflowRequest preserves failover state for hydrated workflows even 
     description: "Preserve hidden failover state",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: false,
@@ -956,6 +959,7 @@ test("buildWorkflowRequest preserves failover state for hydrated workflows even 
     }).workflow_payload.features,
     {
       cache: true,
+      request_logs: true,
       audit: true,
       usage: true,
       budget: true,
@@ -973,7 +977,7 @@ test("buildWorkflowRequest preserves hidden failover for fresh save flows matchi
       workflow_payload: {
         features: {
           cache: true,
-          audit: true,
+          request_logs: true,
           usage: true,
           guardrails: false,
           failover: false,
@@ -989,7 +993,7 @@ test("buildWorkflowRequest preserves hidden failover for fresh save flows matchi
     description: "Preserve hidden failover from the active workflow",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: true,
@@ -1006,6 +1010,7 @@ test("buildWorkflowRequest preserves hidden failover for fresh save flows matchi
     }).workflow_payload.features,
     {
       cache: true,
+      request_logs: true,
       audit: true,
       usage: true,
       budget: true,
@@ -1023,7 +1028,7 @@ test("buildWorkflowRequest omits hidden failover when a hydrated workflow is ret
     description: "Retargeted hidden failover should not carry over",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: true,
@@ -1040,6 +1045,7 @@ test("buildWorkflowRequest omits hidden failover when a hydrated workflow is ret
     }).workflow_payload.features,
     {
       cache: true,
+      request_logs: true,
       audit: true,
       usage: true,
       budget: true,
@@ -1056,7 +1062,7 @@ test("buildWorkflowRequest clamps globally disabled features off even when enabl
     description: "Globally disabled features should be forced off",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: true,
       failover: true,
@@ -1073,6 +1079,7 @@ test("buildWorkflowRequest clamps globally disabled features off even when enabl
       schema_version: 2,
       features: {
         cache: false,
+        request_logs: false,
         audit: false,
         usage: false,
         budget: false,
@@ -1092,7 +1099,7 @@ test("buildWorkflowRequest preserves blank guardrail steps as invalid so validat
     description: "Primary translated requests",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: true,
       failover: true,
@@ -1116,7 +1123,7 @@ test("validateWorkflowRequest rejects negative guardrail steps and duplicate ref
     name: "Global",
     workflow_payload: {
       schema_version: 1,
-      features: { cache: true, audit: true, usage: true, guardrails: true },
+      features: { cache: true, request_logs: true, usage: true, guardrails: true },
       guardrails,
     },
   });
@@ -1149,7 +1156,7 @@ test("validateWorkflowRequest accepts slashless scope_user_path values", () => {
     name: "Scoped workflow",
     workflow_payload: {
       schema_version: 1,
-      features: { cache: true, audit: true, usage: true, guardrails: false },
+      features: { cache: true, request_logs: true, usage: true, guardrails: false },
       guardrails: [],
     },
   };
@@ -1185,7 +1192,7 @@ test("validateWorkflowRequest rejects invalid scope_user_path segments", () => {
     scope_user_path: scopeUserPath,
     workflow_payload: {
       schema_version: 1,
-      features: { cache: true, audit: true, usage: true, guardrails: false },
+      features: { cache: true, request_logs: true, usage: true, guardrails: false },
       guardrails: [],
     },
   });
@@ -1210,7 +1217,7 @@ test("validateWorkflowRequest rejects unregistered provider-model selections", (
         scope_model: "",
         workflow_payload: {
           schema_version: 1,
-          features: { cache: true, audit: true, usage: true, guardrails: false },
+          features: { cache: true, request_logs: true, usage: true, guardrails: false },
           guardrails: [],
         },
       },
@@ -1226,7 +1233,7 @@ test("validateWorkflowRequest rejects unregistered provider-model selections", (
         scope_model: "gpt-4o-mini",
         workflow_payload: {
           schema_version: 1,
-          features: { cache: true, audit: true, usage: true, guardrails: false },
+          features: { cache: true, request_logs: true, usage: true, guardrails: false },
           guardrails: [],
         },
       },
@@ -1259,7 +1266,7 @@ test("editing a cloned workflow preserves retired provider and model options", (
     description: "Cloned from an older deployment",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       guardrails: false,
       failover: true,
@@ -1307,7 +1314,7 @@ test("workflowSourceFeatures defaults failover to true when omitted", () => {
         workflow_payload: {
           features: {
             cache: true,
-            audit: false,
+            request_logs: false,
             usage: true,
             guardrails: false,
           },
@@ -1317,7 +1324,7 @@ test("workflowSourceFeatures defaults failover to true when omitted", () => {
     ),
     {
       cache: true,
-      audit: false,
+      request_logs: false,
       usage: true,
       budget: true,
       guardrails: false,
@@ -1333,7 +1340,7 @@ test("workflowSourceFeatures respects effective runtime features for persisted w
         workflow_payload: {
           features: {
             cache: true,
-            audit: true,
+            request_logs: true,
             usage: true,
             guardrails: true,
             failover: true,
@@ -1341,7 +1348,7 @@ test("workflowSourceFeatures respects effective runtime features for persisted w
         },
         effective_features: {
           cache: false,
-          audit: false,
+          request_logs: false,
           usage: true,
           budget: true,
           guardrails: false,
@@ -1352,7 +1359,7 @@ test("workflowSourceFeatures respects effective runtime features for persisted w
     ),
     {
       cache: false,
-      audit: false,
+      request_logs: false,
       usage: true,
       budget: true,
       guardrails: false,
@@ -1368,7 +1375,7 @@ test("workflowSourceFeatures masks raw features by global caps when effective fe
         workflow_payload: {
           features: {
             cache: true,
-            audit: true,
+            request_logs: true,
             usage: true,
             guardrails: true,
             failover: true,
@@ -1379,7 +1386,7 @@ test("workflowSourceFeatures masks raw features by global caps when effective fe
     ),
     {
       cache: false,
-      audit: false,
+      request_logs: false,
       usage: false,
       budget: false,
       guardrails: false,
@@ -1792,7 +1799,7 @@ const GUARDED_SOURCE = {
   scope: { scope_provider: "openai", scope_model: "gpt-5" },
   workflow_payload: {
     schema_version: 2,
-    features: { audit: true, usage: true, guardrails: true, cache: false, budget: false, failover: false },
+    features: { request_logs: true, usage: true, guardrails: true, cache: false, budget: false, failover: false },
     steps: [
       { ref: "pii-filter", phase: "prompt", step: 10 },
       { ref: "policy", phase: "prompt", step: 20 },
@@ -1969,7 +1976,7 @@ test("guardrail labels carry the code only for a stop", () => {
 });
 
 test("a prompt block colors the node red, skips the model and keeps the response status", () => {
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     guardedEntry(
       [
         { seq: 1, phase: "prompt", step: 10, instance: "pii-filter", action: "allow", edited: true },
@@ -2025,7 +2032,7 @@ test("a prompt block colors the node red, skips the model and keeps the response
 });
 
 test("a prompt respond marks the response as answered by the guardrail", () => {
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     guardedEntry([
       { seq: 1, phase: "prompt", step: 10, instance: "pii-filter", action: "allow" },
       { seq: 2, phase: "prompt", step: 20, instance: "policy", action: "respond", code: "canned" },
@@ -2048,7 +2055,7 @@ test("a prompt respond marks the response as answered by the guardrail", () => {
 
 test("guardrail phase rollups rank failures by fail mode and warnings over passes", () => {
   const rollup = (outcomes) => {
-    const chart = workflowAuditChart(guardedEntry(outcomes), GUARDED_SOURCE, ALL_CAPS);
+    const chart = workflowRequestLogChart(guardedEntry(outcomes), GUARDED_SOURCE, ALL_CAPS);
     return [chart.guardrailNodeClass, chart.guardrailStatusLabel];
   };
   assert.deepEqual(
@@ -2093,7 +2100,7 @@ test("guardrail phase rollups rank failures by fail mode and warnings over passe
   );
 
   // A fail-open failure keeps the model call: the AI node stays green.
-  const open = workflowAuditChart(
+  const open = workflowRequestLogChart(
     guardedEntry([{ phase: "prompt", instance: "pii-filter", action: "failure", fail_mode: "open" }]),
     GUARDED_SOURCE,
     ALL_CAPS,
@@ -2110,7 +2117,7 @@ test("guardrail phase rollups rank failures by fail mode and warnings over passe
 });
 
 test("a response-phase block leaves the AI node green and colors the response node by status", () => {
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     guardedEntry(
       [
         { seq: 1, phase: "prompt", step: 10, instance: "pii-filter", action: "allow" },
@@ -2135,8 +2142,8 @@ test("a response-phase block leaves the AI node green and colors the response no
 
 test("guardrail phases without outcomes are skipped only once the entry finished", () => {
   // Live, still running: nothing is known yet.
-  const running = workflowAuditChart(
-    { ...guardedEntry([]), status_code: null, _live: true, _live_pending: true, _live_state: "audit.started" },
+  const running = workflowRequestLogChart(
+    { ...guardedEntry([]), status_code: null, _live: true, _live_pending: true, _live_state: "request_log.started" },
     GUARDED_SOURCE,
     ALL_CAPS,
   );
@@ -2149,7 +2156,7 @@ test("guardrail phases without outcomes are skipped only once the entry finished
   ]);
   // A finished entry with a passed prompt phase but no later outcomes (the
   // stream phase does not run for a non-streaming call, say).
-  const finished = workflowAuditChart(
+  const finished = workflowRequestLogChart(
     guardedEntry([
       { phase: "prompt", instance: "pii-filter", action: "allow" },
       { phase: "prompt", instance: "policy", action: "allow" },
@@ -2163,7 +2170,7 @@ test("guardrail phases without outcomes are skipped only once the entry finished
   assert.equal(finished.streamGuardrailNodeClass, "workflow-node-skipped");
   assert.equal(finished.streamGuardrailStatusLabel, "Skipped");
   // A configured ref the phase never reached is skipped inside a phase that ran.
-  const partial = workflowAuditChart(
+  const partial = workflowRequestLogChart(
     guardedEntry([{ phase: "prompt", step: 10, instance: "pii-filter", action: "block" }], { status_code: 403 }),
     GUARDED_SOURCE,
     ALL_CAPS,
@@ -2182,14 +2189,14 @@ test("guardrail phases without outcomes are skipped only once the entry finished
 });
 
 test("recorded outcomes show guardrail nodes even when the workflow version is unresolved", () => {
-  const chart = workflowAuditChart(
+  const chart = workflowRequestLogChart(
     {
       workflow_version_id: "gone",
       provider: "openai",
       model: "gpt-5",
       status_code: 200,
       data: {
-        workflow_features: { guardrails: false, audit: true, usage: true },
+        workflow_features: { guardrails: false, request_logs: true, usage: true },
         guardrails: [
           { seq: 1, phase: "prompt", step: 10, instance: "pii-filter", action: "warn", code: "pii" },
           { seq: 2, phase: "stream", step: 5, instance: "redact", action: "allow", edited: true, replaced_events: 2 },
@@ -2210,4 +2217,64 @@ test("recorded outcomes show guardrail nodes even when the workflow version is u
   assert.deepEqual(chart.guardrailFlows.prompt.map((s) => [s.step, s.refs]), [[10, ["pii-filter"]]]);
   assert.equal(chart.guardrailFlows.stream[0].outcomes.redact.replacedEvents, 2);
   assert.equal(chart.guardrailFlows.stream[0].outcomes.redact.tone, "success");
+});
+
+// The request_logs flag was named audit through v0.2.5: stored workflows,
+// stored request log entries and replicas of that release carry audit alone.
+test("workflowNormalizedFeatures reads request_logs and falls back to audit", () => {
+  assert.equal(workflowNormalizedFeatures({ request_logs: true }).request_logs, true);
+  assert.equal(workflowNormalizedFeatures({ audit: true }).request_logs, true);
+  assert.equal(workflowNormalizedFeatures({ audit: false }).request_logs, false);
+  assert.equal(workflowNormalizedFeatures({ cache: true }).request_logs, false);
+  // Both present: request_logs wins, as on the server.
+  assert.equal(
+    workflowNormalizedFeatures({ audit: true, request_logs: false }).request_logs,
+    false,
+  );
+  assert.equal(
+    workflowNormalizedFeatures({ audit: false, request_logs: true }).request_logs,
+    true,
+  );
+  assert.equal("audit" in workflowNormalizedFeatures({ audit: true }), false);
+});
+
+test("buildWorkflowRequest sends request_logs with its audit alias for v0.2.5 replicas", () => {
+  for (const enabled of [true, false]) {
+    const form = {
+      ...defaultWorkflowForm(),
+      features: { ...defaultWorkflowForm().features, request_logs: enabled },
+    };
+    const features = buildWorkflowRequest({ form, caps: ALL_CAPS }).workflow_payload.features;
+    assert.equal(features.request_logs, enabled);
+    assert.equal(features.audit, enabled);
+  }
+});
+
+test("workflowSourceFeatures reads workflows a v0.2.5 replica stored or served", () => {
+  // Stored payload and server-side effective features, each with audit alone.
+  assert.equal(
+    workflowSourceFeatures(
+      { workflow_payload: { features: { cache: true, audit: true, usage: true } } },
+      ALL_CAPS,
+    ).request_logs,
+    true,
+  );
+  assert.equal(
+    workflowSourceFeatures(
+      {
+        workflow_payload: { features: { audit: true } },
+        effective_features: { cache: true, audit: false, usage: true },
+      },
+      ALL_CAPS,
+    ).request_logs,
+    false,
+  );
+  // The global request log switch still caps the flag under its new name.
+  assert.equal(
+    workflowSourceFeatures(
+      { workflow_payload: { features: { request_logs: true, audit: true } } },
+      { ...ALL_CAPS, request_logs: false },
+    ).request_logs,
+    false,
+  );
 });

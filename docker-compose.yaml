@@ -17,13 +17,13 @@ services:
       - REDIS_URL=redis://redis:6379
       # Metrics
       - METRICS_ENABLED=true
-      # Storage configuration (PostgreSQL for audit logs)
+      # Storage configuration (PostgreSQL for request logs)
       - POSTGRES_URL=postgres://gomodel:gomodel@postgres:5432/gomodel
       # MongoDB configuration (uncomment to use MongoDB instead).
       # directConnection: the replica set advertises localhost:27017, which
       # reaches MongoDB from the host but not from this container.
       - MONGODB_URL=mongodb://mongodb:27017/gomodel?directConnection=true
-      # Audit logging is enabled by default; pick its storage backend below
+      # Request logging is enabled by default; pick its storage backend below
       # - STORAGE_TYPE=postgresql
       - STORAGE_TYPE=mongodb
     volumes:
@@ -41,7 +41,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     ports:
       - "6379:6379"
     volumes:
@@ -88,7 +88,7 @@ services:
       start_period: 10s
 
   adminer:
-    image: adminer:5
+    image: adminer:6
     ports:
       - "8081:8080"
     depends_on:
@@ -98,7 +98,7 @@ services:
   prometheus:
     profiles:
       - app
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.16.0
     ports:
       - "9090:9090"
     volumes:

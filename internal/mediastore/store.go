@@ -38,9 +38,21 @@ const (
 // how it is retained.
 type Source string
 
-// SourceAudit marks media captured for the audit log: the payload of an
+// SourceRequestLog marks media captured for the request log: the payload of an
 // audio or image request whose body logging is enabled.
-const SourceAudit Source = "audit"
+const SourceRequestLog Source = "request_log"
+
+// legacySourceRequestLog is how SourceRequestLog was stored up to v0.2.5.
+// Objects stored then keep it, so the stores read it as SourceRequestLog.
+const legacySourceRequestLog Source = "audit"
+
+// storedSource converts a source read from storage.
+func storedSource(source string) Source {
+	if Source(source) == legacySourceRequestLog {
+		return SourceRequestLog
+	}
+	return Source(source)
+}
 
 // Object is one stored media payload.
 type Object struct {

@@ -11,9 +11,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/realtime"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -29,8 +29,9 @@ var (
 // realtimeService adapts Echo requests to the realtime websocket reverse proxy.
 // It stays a thin transport layer: validate, authorize, enforce budget, resolve
 // the upstream target (credential injection lives in the provider), then relay
-// frames verbatim. The realtime event schema is the wire format, so no request
-// or response translation happens here.
+// frames. The realtime event schema is the wire format, so no request or
+// response translation happens here; a provider with its own protocol brings a
+// translator in its target.
 type realtimeService struct {
 	provider        core.RoutableProvider
 	modelResolver   RequestModelResolver
@@ -161,7 +162,10 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint, intent st
 		// usage; tapping the attach session too would double-count every response.
 		tap = nil
 	}
-	hooks := realtime.Hooks{OnServerFrame: tap}
+	// A provider with its own websocket protocol brings a translator that
+	// converts the session to and from the OpenAI event schema; without one the
+	// frames relay verbatim.
+	hooks := realtime.Hooks{OnServerFrame: tap, Translator: target.Translator}
 	// A provider that leaves the model out of the upstream URL (OpenAI
 	// transcription sessions) asks the gateway to pin the client's in-session
 	// model selection to the routed model the caller was authorized for.
@@ -224,7 +228,7 @@ func (s *realtimeService) prepare(c *echo.Context, model, providerHint string) (
 	if err := enforceBudget(c, s.budgetChecker, rateLimitRoute{provider: providerName}); err != nil {
 		return nil, realtimeRoute{}, err
 	}
-	auditlog.EnrichEntry(c, selector.Model, "")
+	requestlog.EnrichEntry(c, selector.Model, "")
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
 	c.SetRequest(c.Request().WithContext(ctx))

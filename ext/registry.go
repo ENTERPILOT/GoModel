@@ -44,6 +44,7 @@ type Registry struct {
 	proxySelector   ProxySelector
 	settings        []RuntimeSetting
 	authenticators  []RequestAuthenticator
+	alertSinks      []AlertSink
 	capabilities    map[Capability]struct{}
 	plugins         []PluginFactory
 	license         License
@@ -75,8 +76,8 @@ func (r *Registry) HasCapability(capability Capability) bool {
 }
 
 // UseOuterMiddleware adds middleware at the outer HTTP boundary, after
-// credential-like request URI values are redacted and before request logging,
-// recovery, limits, audit capture, and authentication. It is intended for
+// credential-like request URI values are redacted and before access logging,
+// recovery, limits, request log capture, and authentication. It is intended for
 // observability and correlation middleware that must cover the whole request.
 // It must not depend on an authenticated identity.
 func (r *Registry) UseOuterMiddleware(m echo.MiddlewareFunc) {
@@ -91,6 +92,32 @@ func (r *Registry) RegisterAuthenticator(authenticator RequestAuthenticator) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.authenticators = append(r.authenticators, authenticator)
+}
+
+// RegisterAlertSink adds a destination for gateway alerts, such as budget
+// thresholds. Core offers every alert it raises to every registered sink,
+// alongside its generic webhook; delivery is at most once and can miss an
+// alert, as AlertSink describes.
+//
+// A sink is a destination, and budget alerts are evaluated only when one
+// exists, so a sink turns them on without a webhook. It does so only where
+// budgets are enabled (BUDGETS_ENABLED, the default), which in turn needs
+// usage tracking (USAGE_ENABLED, the default): on a gateway without them no
+// alert is raised and the sink is never called.
+func (r *Registry) RegisterAlertSink(sink AlertSink) {
+	if sink == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.alertSinks = append(r.alertSinks, sink)
+}
+
+// AlertSinks returns a defensive copy of the registered alert sinks.
+func (r *Registry) AlertSinks() []AlertSink {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.alertSinks)
 }
 
 // RegisterSetting adds a deployment-wide setting exposed through the generic
@@ -109,7 +136,7 @@ func (r *Registry) RegisterRewriter(rw RequestRewriter) {
 	r.rewriters = append(r.rewriters, rw)
 }
 
-// UseMiddleware adds an Echo middleware that runs after audit capture and
+// UseMiddleware adds an Echo middleware that runs after request log capture and
 // before gateway authentication, so it can normalize credentials (for
 // example an SSO session) before the gateway auth check.
 func (r *Registry) UseMiddleware(m echo.MiddlewareFunc) {
@@ -290,6 +317,9 @@ func RegisterSetting(setting RuntimeSetting) { Default.RegisterSetting(setting) 
 func RegisterAuthenticator(authenticator RequestAuthenticator) {
 	Default.RegisterAuthenticator(authenticator)
 }
+
+// RegisterAlertSink registers an alert sink on the Default registry.
+func RegisterAlertSink(sink AlertSink) { Default.RegisterAlertSink(sink) }
 
 // EnableCapability unlocks an optional core behavior on the Default registry.
 func EnableCapability(capability Capability) { Default.EnableCapability(capability) }

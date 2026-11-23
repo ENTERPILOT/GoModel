@@ -76,7 +76,23 @@
         },
         {
             "source": "/api-reference/admin/get-conversation-thread-around-an-audit-log-entry",
-            "destination": "/api-reference/admin/get-the-interaction-session-containing-an-audit-log-entry"
+            "destination": "/api-reference/admin/get-the-interaction-session-containing-a-request-log-entry"
+        },
+        {
+            "source": "/api-reference/admin/get-the-interaction-session-containing-an-audit-log-entry",
+            "destination": "/api-reference/admin/get-the-interaction-session-containing-a-request-log-entry"
+        },
+        {
+            "source": "/api-reference/admin/get-paginated-audit-log-entries",
+            "destination": "/api-reference/admin/get-paginated-request-log-entries"
+        },
+        {
+            "source": "/api-reference/admin/get-paginated-audit-sessions-threads",
+            "destination": "/api-reference/admin/get-paginated-request-log-sessions-threads"
+        },
+        {
+            "source": "/api-reference/admin/get-audit-log-entry-detail",
+            "destination": "/api-reference/admin/get-request-log-entry-detail"
         },
         {
             "source": "/api-reference/admin/get-dashboard-runtime-configuration",
@@ -195,6 +211,7 @@
                                     "features/budgets",
                                     "features/rate-limits",
                                     "features/cost-tracking",
+                                    "features/response-cost",
                                     "features/labelling",
                                     "features/cache",
                                     "features/failover"
@@ -206,6 +223,7 @@
                                 "pages": [
                                     "pro/overview",
                                     "pro/compression",
+                                    "pro/courtesy-replies",
                                     "pro/sso",
                                     "pro/saml",
                                     "pro/intelligent-routing",
@@ -274,6 +292,7 @@
                         "pages": [
                             "guides/production",
                             "guides/updating",
+                            "guides/exporting-config",
                             "guides/migrate-from-litellm",
                             "guides/caddy",
                             "guides/openai-agents-sdk",
@@ -382,6 +401,7 @@
                                     "de/features/budgets",
                                     "de/features/rate-limits",
                                     "de/features/cost-tracking",
+                                    "de/features/response-cost",
                                     "de/features/labelling",
                                     "de/features/cache",
                                     "de/features/failover"
@@ -393,6 +413,7 @@
                                 "pages": [
                                     "de/pro/overview",
                                     "de/pro/compression",
+                                    "de/pro/courtesy-replies",
                                     "de/pro/sso",
                                     "de/pro/saml",
                                     "de/pro/intelligent-routing",
@@ -461,6 +482,7 @@
                         "pages": [
                             "de/guides/production",
                             "de/guides/updating",
+                            "de/guides/exporting-config",
                             "de/guides/migrate-from-litellm",
                             "de/guides/caddy",
                             "de/guides/openai-agents-sdk",
@@ -561,6 +583,7 @@
                                     "zh/features/budgets",
                                     "zh/features/rate-limits",
                                     "zh/features/cost-tracking",
+                                    "zh/features/response-cost",
                                     "zh/features/labelling",
                                     "zh/features/cache",
                                     "zh/features/failover"
@@ -572,6 +595,7 @@
                                 "pages": [
                                     "zh/pro/overview",
                                     "zh/pro/compression",
+                                    "zh/pro/courtesy-replies",
                                     "zh/pro/sso",
                                     "zh/pro/saml",
                                     "zh/pro/intelligent-routing",
@@ -640,6 +664,7 @@
                         "pages": [
                             "zh/guides/production",
                             "zh/guides/updating",
+                            "zh/guides/exporting-config",
                             "zh/guides/migrate-from-litellm",
                             "zh/guides/caddy",
                             "zh/guides/openai-agents-sdk",
@@ -740,6 +765,7 @@
                                     "pl/features/budgets",
                                     "pl/features/rate-limits",
                                     "pl/features/cost-tracking",
+                                    "pl/features/response-cost",
                                     "pl/features/labelling",
                                     "pl/features/cache",
                                     "pl/features/failover"
@@ -751,6 +777,7 @@
                                 "pages": [
                                     "pl/pro/overview",
                                     "pl/pro/compression",
+                                    "pl/pro/courtesy-replies",
                                     "pl/pro/sso",
                                     "pl/pro/saml",
                                     "pl/pro/intelligent-routing",
@@ -819,6 +846,7 @@
                         "pages": [
                             "pl/guides/production",
                             "pl/guides/updating",
+                            "pl/guides/exporting-config",
                             "pl/guides/migrate-from-litellm",
                             "pl/guides/caddy",
                             "pl/guides/openai-agents-sdk",

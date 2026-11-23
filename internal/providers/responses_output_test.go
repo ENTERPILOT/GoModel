@@ -61,6 +61,77 @@ func TestBuildResponsesOutputItems_ForwardsOnlyExtraContent(t *testing.T) {
 	require.Equal(t, `{"google":{"thought_signature":"sig-1"}}`, got)
 }
 
+// The mistral provider keeps content chunks it cannot map to standard chat
+// output (citation references) in a vendor member of the message. The message
+// item carries them at extra_content.mistral.content_chunks, the one extension
+// member the router strips from replayed items, and no other unknown member.
+func TestBuildResponsesOutputItems_KeepsMistralContentChunks(t *testing.T) {
+	const chunks = `[{"type":"reference","reference_ids":[0,2]}]`
+	tests := []struct {
+		name   string
+		fields map[string]json.RawMessage
+		want   string
+	}{
+		{
+			name: "chunks ride in the message item's extra_content",
+			fields: map[string]json.RawMessage{
+				MistralContentChunksField: json.RawMessage(chunks),
+				"provider_index":          json.RawMessage(`7`),
+			},
+			want: `{"mistral":{"content_chunks":` + chunks + `}}`,
+		},
+		{name: "null member is dropped", fields: map[string]json.RawMessage{MistralContentChunksField: json.RawMessage(`null`)}},
+		{name: "no member", fields: map[string]json.RawMessage{"provider_index": json.RawMessage(`7`)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items := BuildResponsesOutputItems(core.ResponseMessage{
+				Role:        "assistant",
+				Content:     "Paris.",
+				ExtraFields: core.UnknownJSONFieldsFromMap(tt.fields),
+			})
+			require.Len(t, items, 1)
+			require.Equal(t, "message", items[0].Type)
+
+			encoded, err := json.Marshal(items[0])
+			require.NoError(t, err)
+			var wire map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(encoded, &wire))
+			assert.NotContains(t, wire, "provider_index")
+			assert.NotContains(t, wire, MistralContentChunksField)
+			assert.JSONEq(t, `[{"type":"output_text","text":"Paris.","annotations":[]}]`, string(wire["content"]))
+			if tt.want == "" {
+				assert.NotContains(t, wire, core.ExtraContentField)
+				return
+			}
+			assert.JSONEq(t, tt.want, string(wire[core.ExtraContentField]))
+		})
+	}
+}
+
+// A tool-call turn without text has no message item of its own. Content
+// chunks open one, so they are not lost with it.
+func TestBuildResponsesOutputItems_MistralContentChunksWithoutText(t *testing.T) {
+	toolCall := core.ToolCall{ID: "call_1", Type: "function", Function: core.FunctionCall{Name: "lookup", Arguments: "{}"}}
+	items := BuildResponsesOutputItems(core.ResponseMessage{Role: "assistant", ToolCalls: []core.ToolCall{toolCall}})
+	require.Len(t, items, 1)
+	require.Equal(t, "function_call", items[0].Type)
+
+	items = BuildResponsesOutputItems(core.ResponseMessage{
+		Role:      "assistant",
+		ToolCalls: []core.ToolCall{toolCall},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			MistralContentChunksField: json.RawMessage(`[{"type":"reference","reference_ids":[9007199254740993]}]`),
+		}),
+	})
+	require.Len(t, items, 2)
+	require.Equal(t, "message", items[0].Type)
+	require.Equal(t, "function_call", items[1].Type)
+	assert.JSONEq(t, `{"mistral":{"content_chunks":[{"type":"reference","reference_ids":[9007199254740993]}]}}`,
+		string(items[0].ExtraFields.Lookup(core.ExtraContentField)))
+	assert.Contains(t, string(items[0].ExtraFields.Lookup(core.ExtraContentField)), "9007199254740993")
+}
+
 // A reasoning item belongs to the assistant turn that follows it. When no
 // assistant turn does — the history moves straight on to a user message — the
 // replay state must be dropped, not held over and pinned to whatever assistant

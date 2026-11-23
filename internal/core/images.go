@@ -7,7 +7,7 @@ import (
 )
 
 // ImageGenerationRequest is an OpenAI-compatible POST /v1/images/generations
-// request. Only the fields the gateway needs to route, validate, and audit are
+// request. Only the fields the gateway needs to route, validate, and log are
 // typed; every other field (quality, size, style, background, output_format,
 // moderation, ...) is preserved verbatim in ExtraFields and forwarded upstream
 // so new provider parameters work without a gateway change.
@@ -95,6 +95,7 @@ func (r ImageGenerationRequest) MarshalJSON() ([]byte, error) {
 // providers that do not simply omit them.
 type ImageGenerationResponse struct {
 	Created      int64       `json:"created"`
+	RequestID    string      `json:"request_id,omitempty"`
 	Data         []ImageData `json:"data"`
 	Background   string      `json:"background,omitempty"`
 	OutputFormat string      `json:"output_format,omitempty"`
@@ -107,12 +108,33 @@ type ImageGenerationResponse struct {
 	Provider string `json:"provider,omitempty"`
 }
 
-// ImageData is one generated image: either a hosted URL or inline base64
-// bytes, depending on the model and response_format.
+// GeneratedImageCount returns the number of items that carry an image. Usage
+// and per-image pricing count these, so an item that failed (Error set) or
+// came back without a URL or inline bytes is never billed.
+func (r *ImageGenerationResponse) GeneratedImageCount() int {
+	count := 0
+	for _, item := range r.Data {
+		if item.Error == nil && (item.URL != "" || item.B64JSON != "") {
+			count++
+		}
+	}
+	return count
+}
+
+// ImageData holds a generated URL or inline base64 bytes on success, or
+// an error for an individual failed item in a partially successful batch.
 type ImageData struct {
-	URL           string `json:"url,omitempty"`
-	B64JSON       string `json:"b64_json,omitempty"`
-	RevisedPrompt string `json:"revised_prompt,omitempty"`
+	URL           string          `json:"url,omitempty"`
+	B64JSON       string          `json:"b64_json,omitempty"`
+	RevisedPrompt string          `json:"revised_prompt,omitempty"`
+	Size          string          `json:"size,omitempty"`
+	Error         *ImageItemError `json:"error,omitempty"`
+}
+
+// ImageItemError is an individual generation failure in a partially successful batch.
+type ImageItemError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // ImageUsage is the token usage block returned by token-billed image models

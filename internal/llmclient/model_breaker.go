@@ -1,6 +1,7 @@
 package llmclient
 
 import (
+	"context"
 	"crypto/sha256"
 	"time"
 )
@@ -14,11 +15,24 @@ type modelBreakerEntry struct {
 	lastUsed time.Time
 }
 
-// breakerForModel pins a breaker until finishRequest releases it. Only idle,
-// closed breakers can be evicted, preserving failures and in-flight probes.
-// Fixed-size hashes also bound retained memory for caller-supplied model names.
+// breakerForRequest returns the breaker a request is charged to. A request
+// running on per-model timeouts (see upstreamTimeouts) always gets its
+// model's breaker: its timeouts reflect that model's budget, so under
+// scope "provider" they must not open the circuit for the provider's other
+// models, while the model itself still fails fast once it keeps timing out.
+func (c *Client) breakerForRequest(ctx context.Context, model string) *circuitBreaker {
+	if c.config.CircuitBreaker.Scope != "model" && upstreamTimeouts(ctx).IsZero() {
+		return c.circuitBreaker
+	}
+	return c.breakerForModel(model)
+}
+
+// breakerForModel pins the model's own breaker until finishRequest releases
+// it. Only idle, closed breakers can be evicted, preserving failures and
+// in-flight probes. Fixed-size hashes also bound retained memory for
+// caller-supplied model names.
 func (c *Client) breakerForModel(model string) *circuitBreaker {
-	if c.circuitBreaker == nil || c.config.CircuitBreaker.Scope != "model" || model == "" || model == UnknownModel {
+	if c.circuitBreaker == nil || model == "" || model == UnknownModel {
 		return c.circuitBreaker
 	}
 	key := sha256.Sum256([]byte(model))

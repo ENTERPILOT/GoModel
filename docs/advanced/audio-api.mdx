@@ -109,6 +109,12 @@ unchanged; ElevenLabs, MiniMax, Xiaomi and audio.cpp use its `id` as the voice.
 An object without a non-blank string `id` returns `400`. A compatible provider
 that does not support custom voices may reject the object.
 
+OpenAI accepts a custom voice only in the object form. For OpenAI
+(`api.openai.com` and its regional hosts) GoModel therefore sends a string
+that starts with `voice_` as `{"id": "voice_…"}`, so an `id` from
+[voice discovery](/advanced/api-endpoints#voice-discovery) also works as a
+plain string.
+
 Synthesized audio is **relayed as the provider produces it** — see
 [Streaming](#streaming).
 
@@ -258,7 +264,7 @@ and the routing hint `provider`, plus the transcription options it re-emits —
 `timestamp_granularities`), and extra **file** parts on a transcription
 upload; only the audio in `file` is sent.
 
-Forwarded values are not stored in the [audit log](/advanced/admin-endpoints):
+Forwarded values are not stored in the [request log](/advanced/admin-endpoints):
 because they are arbitrary client input that may carry provider credentials,
 the entry records only the field **names** under `forwarded_fields`.
 
@@ -302,7 +308,7 @@ through the full inference orchestrator**. Compared with `/v1/chat/completions`:
 - **No failover, guardrails, or response cache** — these stages are skipped.
   Requests are still authorized, budget-checked, metered (see
   [cost tracking](#cost-tracking)), and written to the
-  [audit log](/advanced/admin-endpoints) under their `/v1/audio/*` path.
+  [request log](/advanced/admin-endpoints) under their `/v1/audio/*` path.
 - **OpenAI request shape in, provider dialect out** — clients always send OpenAI's
   audio format. OpenAI-compatible upstreams receive it unchanged; Xiaomi MiMo,
   Cohere, and MiniMax requests are translated to each provider's native audio
@@ -314,11 +320,11 @@ For a provider whose native audio API differs from OpenAI's, use the
 [passthrough API](/features/passthrough-api) (`/p/{provider}/v1/audio/...`) to
 forward bytes verbatim to that upstream.
 
-## Audit logging
+## Request logging
 
-Audio requests appear in the audit log like any other model interaction. Because
+Audio requests appear in the request log like any other model interaction. Because
 audio payloads are binary and large, their bodies are gated by a dedicated
-setting, [`LOGGING_LOG_AUDIO_BODIES`](/advanced/configuration#audit-logging)
+setting, [`LOGGING_LOG_AUDIO_BODIES`](/advanced/configuration#request-logging)
 (default `false`), which **refines** `LOGGING_LOG_BODIES` — it has no effect
 unless body logging is enabled:
 
@@ -332,7 +338,7 @@ unless body logging is enabled:
   dashboard) alongside the upload metadata (filename, model, params).
 
 The audio bytes go to [media storage](/advanced/configuration#media-storage),
-not into the audit database: the entry carries a `media_id` and the dashboard
+not into the request log database: the entry carries a `media_id` and the dashboard
 fetches the file through `GET /admin/media/{id}`. Nothing caps the size, and a
 streamed response is stored as it is relayed. Files are kept as long as the
-audit entries that reference them (`LOGGING_RETENTION_DAYS`).
+request log entries that reference them (`LOGGING_RETENTION_DAYS`).

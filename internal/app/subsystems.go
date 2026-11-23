@@ -54,9 +54,10 @@ const (
 	subsystemProviders           = "providers"
 	subsystemSecretRotation      = "secret rotation"
 	subsystemRouteStrategies     = "routing-strategy plugins"
-	subsystemAudit               = "audit"
+	subsystemRequestLog          = "request log"
 	subsystemUsage               = "usage"
 	subsystemBudgets             = "budgets"
+	subsystemBudgetAlerts        = "budget alerts"
 	subsystemRateLimits          = "rate limits"
 	subsystemBatch               = "batch store"
 	subsystemFileStore           = "file store"
@@ -122,6 +123,12 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		// Stop refreshing snapshots changed on other instances before the
 		// services that hold them are torn down.
 		{name: subsystemClusterSync, close: closerOf(a.clusterSync)},
+		// Stops alert evaluation, then drains the alerts already claimed.
+		// A sink may keep state in the shared store, so this runs while
+		// that store is open; nothing else a delivery uses (the outbound
+		// HTTP transport, the budget and usage stores, telemetry, storage)
+		// closes before it either.
+		{name: subsystemBudgetAlerts, close: closerOf(a.budgetAlerts)},
 		// Fail extension shared-store calls with ext.ErrSharedStoreClosed
 		// from here on, so an extension's background work never reaches the
 		// connection closed below. The server has drained, so no request
@@ -142,8 +149,8 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		{name: subsystemAuthKeys, close: closerOf(a.authKeys)},
 		{name: subsystemUsers, close: closerOf(a.users)},
 		{name: subsystemFileStore, close: closerOf(a.fileStore)},
-		// Stops the media retention sweep; audit entries referencing media
-		// are flushed by the audit subsystem below.
+		// Stops the media retention sweep; request log entries referencing media
+		// are flushed by the request log subsystem below.
 		{name: subsystemMediaStore, close: closerOf(a.media)},
 		// The remaining stores flush buffered work into storage, so they must
 		// close before the connection they write through.
@@ -151,7 +158,7 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		{name: subsystemBudgets, close: closerOf(a.budgets)},
 		{name: subsystemRateLimits, close: closerOf(a.rateLimits)},
 		{name: subsystemUsage, close: closerOf(a.usage)},
-		{name: subsystemAudit, close: closerOf(a.audit)},
+		{name: subsystemRequestLog, close: closerOf(a.requestLog)},
 		// Flushes the last spans and metric points once nothing else can emit.
 		{name: subsystemTelemetry, close: closerOf(a.telemetry)},
 		{name: subsystemStorage, close: closerOf(a.storage)},

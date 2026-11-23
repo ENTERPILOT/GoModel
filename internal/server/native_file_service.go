@@ -9,9 +9,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/filestore"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // nativeFileService owns native file orchestration so HTTP handlers can remain
@@ -80,12 +80,12 @@ func (s *nativeFileService) fileByID(
 		// A scoped caller may only address files the gateway tracks inside
 		// its scope. Anything else is reported like a missing file and no
 		// provider is consulted, so the ID leaks nothing.
-		auditlog.EnrichEntry(c, "file", "")
+		requestlog.EnrichEntry(c, "file", "")
 		return handleError(c, core.NewNotFoundError("file not found: "+id))
 	}
 
 	if providerType := fileReq.Provider; providerType != "" {
-		auditlog.EnrichEntry(c, "file", providerType)
+		requestlog.EnrichEntry(c, "file", providerType)
 		result, err := callFn(nativeRouter, providerType, id)
 		if err != nil {
 			return handleError(c, err)
@@ -102,7 +102,7 @@ func (s *nativeFileService) fileByID(
 		providerType := strings.TrimSpace(stored.ProviderType)
 		result, err := callFn(nativeRouter, providerType, id)
 		if err == nil {
-			auditlog.EnrichEntry(c, "file", providerType)
+			requestlog.EnrichEntry(c, "file", providerType)
 			if onSuccess != nil {
 				if err := onSuccess(c.Request().Context(), providerType, id); err != nil {
 					return handleError(c, err)
@@ -126,13 +126,13 @@ func (s *nativeFileService) fileByID(
 	if err != nil {
 		return handleError(c, err)
 	}
-	auditlog.EnrichEntry(c, "file", "")
+	requestlog.EnrichEntry(c, "file", "")
 
 	var firstErr error
 	for _, candidate := range providers {
 		result, err := callFn(nativeRouter, candidate, id)
 		if err == nil {
-			auditlog.EnrichEntry(c, "file", candidate)
+			requestlog.EnrichEntry(c, "file", candidate)
 			if onSuccess != nil {
 				if err := onSuccess(c.Request().Context(), candidate, id); err != nil {
 					return handleError(c, err)
@@ -178,7 +178,7 @@ func (s *nativeFileService) CreateFile(c *echo.Context) error {
 			return handleError(c, core.NewInvalidRequestError("provider is required when multiple providers are configured; pass ?provider=<type>", nil))
 		}
 	}
-	auditlog.EnrichEntry(c, "file", providerType)
+	requestlog.EnrichEntry(c, "file", providerType)
 
 	purpose := strings.TrimSpace(fileReq.Purpose)
 	if purpose == "" {
@@ -251,7 +251,7 @@ func (s *nativeFileService) ListFiles(c *echo.Context) error {
 	if !scope.Global() {
 		// A scoped caller lists its own tracked files, whichever provider
 		// holds them; provider listings cannot tell tenants apart.
-		auditlog.EnrichEntry(c, "file", providerType)
+		requestlog.EnrichEntry(c, "file", providerType)
 		resp, err := s.listScopedFiles(ctx, scope, providerType, purpose, limit, after)
 		if err != nil {
 			return handleError(c, err)
@@ -260,7 +260,7 @@ func (s *nativeFileService) ListFiles(c *echo.Context) error {
 	}
 
 	if providerType != "" {
-		auditlog.EnrichEntry(c, "file", providerType)
+		requestlog.EnrichEntry(c, "file", providerType)
 		resp, err := nativeRouter.ListFiles(ctx, providerType, purpose, limit, after)
 		if err != nil {
 			return handleError(c, err)
@@ -278,7 +278,7 @@ func (s *nativeFileService) ListFiles(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	auditlog.EnrichEntry(c, "file", "")
+	requestlog.EnrichEntry(c, "file", "")
 	resp, err := s.listMergedFiles(ctx, nativeRouter, providers, purpose, limit, after)
 	if err != nil {
 		return handleError(c, err)

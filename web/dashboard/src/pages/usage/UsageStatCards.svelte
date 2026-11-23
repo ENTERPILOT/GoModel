@@ -1,5 +1,5 @@
 <script>
-  // Period totals for the active filters. Requests follow the request log's
+  // Period totals for the active filters. Requests follow the usage log's
   // cache scope (cached rows count unless "Hide cached requests" is on);
   // cost comes from the uncached summary so cached rows' avoided cost never
   // inflates it. Billed cost (shown once pricing.markups is configured) is

@@ -50,7 +50,7 @@ func TestParseAddColumn(t *testing.T) {
 		{"plain", `ALTER TABLE usage ADD COLUMN user_path TEXT`, "usage", "user_path", true},
 		{"type token", `ALTER TABLE t ADD COLUMN flag ` + TypeBool + ` NOT NULL DEFAULT FALSE`, "t", "flag", true},
 		{"if not exists", `ALTER TABLE t ADD COLUMN IF NOT EXISTS note TEXT`, "t", "note", true},
-		{"mixed case and whitespace", "alter  table Audit_Logs\n\tadd column Session_ID TEXT", "audit_logs", "session_id", true},
+		{"mixed case and whitespace", "alter  table Request_Logs\n\tadd column Session_ID TEXT", "request_logs", "session_id", true},
 		{"rename is not an add", `ALTER TABLE t RENAME TO t_old`, "", "", false},
 		{"drop column", `ALTER TABLE t DROP COLUMN note`, "", "", false},
 		{"quoted column", `ALTER TABLE t ADD COLUMN "Note" TEXT`, "", "", false},

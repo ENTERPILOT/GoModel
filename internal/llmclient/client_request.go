@@ -18,10 +18,11 @@ import (
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // maxErrorBodyBytes caps how much of an upstream error body is read into
-// memory. It matches core's audit capture cap; a misbehaving upstream that
+// memory. It matches core's request log capture cap; a misbehaving upstream that
 // answers an error status with an endless body must not be buffered whole.
 const maxErrorBodyBytes = 64 * 1024
 
@@ -71,7 +72,7 @@ func extractStatusCode(err error) int {
 // live upstream response. Metrics hooks are called at the logical request
 // level, not here, to avoid counting each attempt separately.
 func (c *Client) doHTTPRequest(ctx context.Context, req Request) (*http.Response, error) {
-	httpReq, err := c.buildRequest(ctx, req)
+	httpReq, err := c.buildRequest(withUpstreamTimeouts(ctx), req)
 	if err != nil {
 		// The transport owns closing the body once the request reaches it;
 		// a request that never gets there must release the reader here.
@@ -79,12 +80,39 @@ func (c *Client) doHTTPRequest(ctx context.Context, req Request) (*http.Response
 		return nil, err
 	}
 
-	resp, err := c.httpClient.Do(httpReq)
+	resp, err := httpclient.Do(c.httpClient, httpReq)
 	if err != nil {
 		logTransportError("provider request failed", c.config.ProviderName, req.Endpoint, err)
 		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), transportErrorMessage(err), err)
 	}
 	return resp, nil
+}
+
+// withUpstreamTimeouts applies the per-attempt timeouts resolved for the
+// request's model (see core.RequestModelResolution.Timeouts) unless the
+// context already carries explicit overrides.
+func withUpstreamTimeouts(ctx context.Context) context.Context {
+	if !httpclient.AttemptTimeoutsFromContext(ctx).IsZero() {
+		return ctx
+	}
+	return httpclient.WithAttemptTimeouts(ctx, upstreamTimeouts(ctx))
+}
+
+// upstreamTimeouts returns the per-attempt timeouts in effect for ctx:
+// explicit overrides first, then the ones resolved for the request's model.
+func upstreamTimeouts(ctx context.Context) httpclient.AttemptTimeouts {
+	if timeouts := httpclient.AttemptTimeoutsFromContext(ctx); !timeouts.IsZero() {
+		return timeouts
+	}
+	workflow := core.GetWorkflow(ctx)
+	if workflow == nil || workflow.Resolution == nil {
+		return httpclient.AttemptTimeouts{}
+	}
+	timeouts := workflow.Resolution.Timeouts
+	return httpclient.AttemptTimeouts{
+		Timeout:               timeouts.Timeout,
+		ResponseHeaderTimeout: timeouts.ResponseHeaderTimeout,
+	}
 }
 
 // logTransportError records the transport error for operators, including the
@@ -204,7 +232,7 @@ func (c *Client) doRequest(ctx context.Context, req Request) (*Response, error) 
 	}()
 
 	// Successful responses are read whole (large results are legitimate);
-	// error bodies are bounded — they only feed error parsing and audit
+	// error bodies are bounded — they only feed error parsing and request log
 	// capture, both of which cap at the same size.
 	reader := io.Reader(resp.Body)
 	if resp.StatusCode >= http.StatusBadRequest {

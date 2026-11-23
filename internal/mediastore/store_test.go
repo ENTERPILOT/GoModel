@@ -78,7 +78,7 @@ func testObject(id string, expiresAt time.Time) *Object {
 	return &Object{
 		ID:          id,
 		Kind:        KindAudio,
-		Source:      SourceAudit,
+		Source:      SourceRequestLog,
 		ContentType: "audio/mpeg",
 		Bytes:       12,
 		StorageKey:  "audio/2026/09/22/" + id + ".mp3",
@@ -87,6 +87,23 @@ func testObject(id string, expiresAt time.Time) *Object {
 		CreatedAt:   time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC),
 		ExpiresAt:   expiresAt,
 	}
+}
+
+// An object stored by v0.2.5 carries the source that release wrote.
+func TestStore_ReadsLegacyRequestLogSource(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		if _, inMemory := store.(*MemoryStore); inMemory {
+			t.Skip("a memory store holds nothing from an older release")
+		}
+		ctx := context.Background()
+		object := testObject("legacy", time.Time{})
+		object.Source = legacySourceRequestLog
+		require.NoError(t, store.Insert(ctx, object))
+
+		got, err := store.Get(ctx, "legacy")
+		require.NoError(t, err)
+		assert.Equal(t, SourceRequestLog, got.Source)
+	})
 }
 
 func TestStore_InsertGetDelete(t *testing.T) {
@@ -98,7 +115,7 @@ func TestStore_InsertGetDelete(t *testing.T) {
 		got, err := store.Get(ctx, "a")
 		require.NoError(t, err)
 		assert.Equal(t, KindAudio, got.Kind)
-		assert.Equal(t, SourceAudit, got.Source)
+		assert.Equal(t, SourceRequestLog, got.Source)
 		assert.Equal(t, "audio/mpeg", got.ContentType)
 		assert.Equal(t, int64(12), got.Bytes)
 		assert.Equal(t, "audio/2026/09/22/a.mp3", got.StorageKey)
