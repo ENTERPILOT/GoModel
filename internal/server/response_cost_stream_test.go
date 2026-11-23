@@ -109,11 +109,6 @@ func TestWithUsageCost(t *testing.T) {
 			want: `{"usage":{"total_tokens":3,` + cost + `},"USAGE":{}}`,
 		},
 		{
-			name: "an escaped usage name carries the cost",
-			data: `{"us\u0061ge":{"total_tokens":3}}`,
-			want: `{"us\u0061ge":{"total_tokens":3,` + cost + `}}`,
-		},
-		{
 			name:    "message_start usage only loses an upstream's member",
 			data:    `{"type":"message_start","message":{"usage":{"input_tokens":9,"cost":9}}}`,
 			unknown: true,
@@ -156,6 +151,27 @@ func TestWithUsageCost(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A stream's usage is read, and priced, only from a member spelled "usage"
+// in those bytes. One spelled with escapes loses an upstream's cost like any
+// other, but carries none: the cost known when it is written is the cost of
+// another event's usage.
+func TestWithUsageCost_EscapedUsageNameCarriesNoCost(t *testing.T) {
+	edit := newUsageCostEdit(0.00000542, true, false)
+	for data, want := range map[string]string{
+		`{"us\u0061ge":{"total_tokens":3,"cost":9}}`:                            `{"us\u0061ge":{"total_tokens":3}}`,
+		`{"response":{"\u0075sage":{"total_tokens":3,"cost":9}}}`:               `{"response":{"\u0075sage":{"total_tokens":3}}}`,
+		`{"us\u0061ge":{"total_tokens":3,"cost":9},"usage":{"total_tokens":3}}`: `{"us\u0061ge":{"total_tokens":3},"usage":{"total_tokens":3,"cost":0.00000542}}`,
+	} {
+		got, ok := withUsageCost([]byte(data), edit)
+
+		require.True(t, ok, data)
+		assert.Equal(t, want, string(got))
+		assert.Equal(t, want, string(editBodyPieces(&jsonUsageEditor{edit: edit}, data)), "a body is rewritten the same way")
+	}
+	_, ok := withUsageCost([]byte(`{"us\u0061ge":{"total_tokens":3}}`), edit)
+	assert.False(t, ok, "nothing to remove and no cost to add")
 }
 
 // decodedUsages decodes payload the way a Go, JavaScript or Python client

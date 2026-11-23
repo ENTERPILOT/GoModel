@@ -120,7 +120,7 @@ func (e *jsonUsageEditor) nameMember() {
 	e.member, e.exact = memberOther, false
 	switch {
 	case strings.EqualFold(name, "usage"):
-		e.member, e.exact = memberUsage, name == "usage"
+		e.member, e.exact = memberUsage, string(e.key) == usageMemberName
 	case e.depth == 1 && isUsageEnvelope(name):
 		e.member, e.exact = memberEnvelope, name == "response"
 	case e.depth == 1 && e.edit.dropsRootMember(name):
