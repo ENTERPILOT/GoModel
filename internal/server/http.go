@@ -87,6 +87,8 @@ type Config struct {
 	RequestLogger                   requestlog.LoggerInterface             // Optional: Request logger for request/response logging
 	RequestLogReader                requestlog.Reader                      // Optional: request log lookup used for dashboard interaction continuations
 	UsageLogger                     usage.LoggerInterface                  // Optional: Usage logger for token tracking
+	ResponseCostEnabled             bool                                   // Return each model request's calculated cost to its caller (usage.cost in the body, and X-GoModel-Cost headers on buffered responses)
+	ResponseCostBilled              bool                                   // With ResponseCostEnabled: return the billed cost instead of the provider cost (markups enabled)
 	BudgetChecker                   BudgetChecker                          // Optional: per-user-path budget checker
 	RateLimiter                     RateLimiter                            // Optional: per-user-path rate limiter
 	UsageSummarizer                 UsageSummarizer                        // Optional: usage aggregates for the self-service GET /v1/usage endpoint
@@ -418,6 +420,13 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// RequestLogs=false still suppresses per-request capture work.
 	if cfg != nil && cfg.RequestLogger != nil && cfg.RequestLogger.Config().Enabled {
 		e.Use(requestlog.Middleware(cfg.RequestLogger))
+	}
+
+	// Registered after the request log middleware, so the request log capture
+	// sees the response as the client receives it, cost included. Not
+	// registered while off, so responses stay exactly as they are.
+	if cfg != nil && cfg.ResponseCostEnabled {
+		e.Use(responseCostMiddleware(cfg.ResponseCostBilled))
 	}
 
 	// Extension middleware runs after request log capture and before gateway auth so
