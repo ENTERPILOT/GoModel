@@ -8,8 +8,7 @@ keywords: ["playground", "dashboard", "chat completions", "responses", "messages
 Strona **Playground** (`/admin/dashboard/playground`) wysyła requesty przez
 publiczne API gatewaya z Twoim kluczem dashboardu, więc każde wywołanie jest routowane,
 logowane i rozliczane dokładnie tak jak request klienta. Wybierz endpoint (`/v1/chat/completions`,
-`/v1/responses` lub `/v1/messages`), model z inwentarza albo dowolny alias
-lub model wirtualny po nazwie oraz to, czy używać streamingu; zbuduj rozmowę
+`/v1/responses` lub `/v1/messages`), model oraz to, czy używać streamingu; zbuduj rozmowę
 z edytowalnych wiadomości System, User i Assistant, których kolejność można zmieniać, i wyślij prompt.
 Panel JSON po prawej stronie pokazuje body requestu w postaci, w jakiej zostanie wysłane (aktualizowane na żywo
 podczas edycji), oraz ostatnią odpowiedź z jej statusem, opóźnieniem i użyciem tokenów —
@@ -17,11 +16,21 @@ odpowiedzi streamowane są składane do tego samego kształtu, jaki zwraca wywo�
 Requesty podlegają tym samym budżetom, limitom żądań, guardrails i logowaniu requestów
 co każdy inny klient gatewaya.
 
+Lista wyboru modelu pokazuje najpierw
+[modele wirtualne](/pl/features/virtual-models), oznaczone jako
+**Model wirtualny**, a potem modele Twoich providerów. Model wirtualny jest na
+liście, gdy jest włączony i ma dostępny model docelowy. Model wirtualny zastępuje
+na liście model providera o tej samej nazwie. Możesz też wpisać dowolną
+nazwę modelu. Klucz dashboardu przypisany do ścieżki użytkownika nie widzi
+modeli wirtualnych na liście; wpisz wtedy ich nazwę.
+
 ## Obrazy, mowa, transkrypcja i embeddingi
 
 Przełącznik **Tryb** nad selektorem modelu pozwala testować także modele multimedialne. Każdy tryb
 wywołuje odpowiedni endpoint gatewaya kompatybilny z OpenAI i wyświetla na początku listy modele,
 których metadane deklarują dany tryb; nadal możesz wpisać dowolny model lub alias.
+Model wirtualny jest ukrywany w danym trybie tylko wtedy, gdy każdy jego model docelowy
+jest znanym modelem, który deklaruje inne tryby.
 
 | Tryb | Endpoint | Wejście | Wynik |
 | --- | --- | --- | --- |

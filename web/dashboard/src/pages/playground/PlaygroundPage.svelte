@@ -6,6 +6,8 @@
   // on the right.
   import { onDestroy } from "svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import { access } from "$lib/stores/access.svelte.js";
+  import { auth } from "$lib/stores/auth.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
   import { modelsStore } from "$lib/stores/models.svelte.js";
   import { sortableList } from "$lib/utils/sortable.js";
@@ -19,27 +21,38 @@
   import PlaygroundMediaResult from "./PlaygroundMediaResult.svelte";
   import { playgroundStore as store } from "./playground.svelte.js";
   import { playgroundMediaStore as media } from "./playgroundMedia.svelte.js";
-  import { defaultUserPathForModel } from "./playgroundLogic.js";
+  import { defaultPlaygroundModel } from "./playgroundLogic.js";
   import { modeModelOptions } from "./playgroundMedia.js";
+  import { virtualModels } from "../models/virtualModels.svelte.js";
 
   const PAGE = "playground";
 
   onDestroy(() => media.releaseAudio());
 
-  const modelOptions = $derived(modeModelOptions(modelsStore.models, store.mode));
+  // Virtual models load on entering the page and whenever the API key
+  // changes. Their endpoint is global-only, so wait for the access scope and
+  // skip the request under a scoped key.
+  $effect(() => {
+    void auth.refreshTick;
+    if (router.page !== PAGE || !access.loaded || access.scoped) return;
+    virtualModels.fetchVirtualModels();
+  });
+
+  const modelOptions = $derived(modeModelOptions(modelsStore.models, store.mode, store.virtualModels));
   const error = $derived(store.mode === "chat" ? store.error : media.error);
 
   // Pick the first inventory model once, when nothing has been chosen yet.
-  // If a model is already set (restored from storage), prefill the user path
-  // with its first allowed path when one exists and none is chosen yet.
-  // Re-runs when store.userPath changes; Svelte bails on identical assignment,
-  // so this does not loop.
+  // If a model is already set (restored from storage), keep the user path on
+  // its first allowed path as the inventory and the virtual models arrive,
+  // unless the user typed one. Re-runs when store.userPath changes; Svelte
+  // bails on identical assignment, so this does not loop.
   $effect(() => {
     if (router.page !== PAGE || modelOptions.length === 0) return;
     if (!store.model) {
-      store.setModel(modelOptions[0].id);
-    } else if (!store.userPath) {
-      store.setUserPath(defaultUserPathForModel(modelsStore.models, store.model));
+      const model = defaultPlaygroundModel(modelOptions, modelsStore.loading);
+      if (model) store.setModel(model);
+    } else {
+      store.syncUserPath();
     }
   });
 
