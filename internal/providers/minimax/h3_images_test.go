@@ -18,7 +18,7 @@ func TestCreateH3Image(t *testing.T) {
 		{"highspeed", "MiniMax-H3-Image-Highspeed", `"response_format":"base64","area":"2K","aspect_ratio":"16:9","aigc_watermark":true`, `"b64_json":"aW1hZ2U="`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server, capture := providertest.JSONServer(t, http.StatusOK, `{"created":1792308678,"request_id":"trace","data":[{`+tc.result+`,"size":"2720x1536","revised_prompt":"A lighthouse at dawn"},{"error":{"code":"1027","message":"image withheld"}}],"output_format":"jpeg","usage":{"generated_images":1,"total_tokens":7254}}`)
+			server, capture := providertest.JSONServer(t, http.StatusOK, `{"created":1792308678,"request_id":"trace","data":[{`+tc.result+`,"size":"2720x1536","revised_prompt":"A lighthouse at dawn"},{"error":{"code":"1027","message":"image withheld"}}],"output_format":"jpeg","usage":{"generated_images":1,"total_tokens":7254,"input_tokens":3174,"output_tokens":4080,"input_tokens_details":{"text_tokens":3174,"image_tokens":0},"output_tokens_details":{"image_tokens":4080}}}`)
 			p := newTestProvider("test-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 			var req core.ImageGenerationRequest
 			require.NoError(t, json.Unmarshal([]byte(`{"model":"`+tc.model+`","provider":"minimax","user":"local","prompt":"A lighthouse","n":2,"output_format":"jpeg","disable_prompt_enhanced":true,`+tc.options+`}`), &req))
@@ -42,6 +42,9 @@ func TestCreateH3Image(t *testing.T) {
 			assert.Equal(t, "jpeg", resp.OutputFormat)
 			require.NotNil(t, resp.Usage)
 			assert.Equal(t, 7254, resp.Usage.TotalTokens)
+			assert.Equal(t, 3174, resp.Usage.InputTokens)
+			assert.Equal(t, 4080, resp.Usage.OutputTokens)
+			assert.Equal(t, 1, resp.GeneratedImageCount())
 			require.Len(t, resp.Data, 2)
 			assert.Equal(t, "2720x1536", resp.Data[0].Size)
 			assert.Equal(t, "A lighthouse at dawn", resp.Data[0].RevisedPrompt)
@@ -65,15 +68,20 @@ func TestCreateH3Image(t *testing.T) {
 
 func TestCreateH3ImageErrors(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		status int
-		body   string
-		want   int
+		name    string
+		status  int
+		body    string
+		want    int
+		message string
 	}{
-		{"limited", 429, `{"type":"error","error":{"type":"rate_limit_error","message":"too many requests (1002)"}}`, 429},
-		{"balance", 402, `{"type":"error","error":{"type":"insufficient_balance_error","message":"insufficient balance (1008)"}}`, 402},
-		{"malformed", 200, `{"data":[{}]}`, 502},
-		{"empty", 200, `{"data":[]}`, 502},
+		{"limited", 429, `{"type":"error","error":{"type":"rate_limit_error","message":"too many requests (1002)"}}`, 429, "too many requests (1002)"},
+		{"balance", 402, `{"type":"error","error":{"type":"insufficient_balance_error","message":"insufficient balance (1008)"}}`, 402, "insufficient balance (1008)"},
+		// MiniMax answers a batch that failed entirely with an HTTP error
+		// that still carries data and usage.
+		{"all withheld", 422, `{"type":"error","error":{"type":"unprocessable_entity_error","message":"all images failed content safety check (1027)","http_code":"422"},"data":[{"error":{"code":"1027","message":"output image failed content safety check"}}],"usage":{"generated_images":0,"total_tokens":0},"request_id":"trace"}`, 422, "all images failed content safety check (1027)"},
+		{"all failed with HTTP 200", 200, `{"request_id":"trace","data":[{"error":{"code":"1027","message":"output image failed content safety check"}}]}`, 502, "output image failed content safety check (1027), request_id trace"},
+		{"malformed", 200, `{"data":[{}]}`, 502, "contains no images"},
+		{"empty", 200, `{"data":[]}`, 502, "contains no images"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, tc.status, tc.body)
@@ -82,6 +90,7 @@ func TestCreateH3ImageErrors(t *testing.T) {
 			var gatewayErr *core.GatewayError
 			require.ErrorAs(t, err, &gatewayErr)
 			assert.Equal(t, tc.want, gatewayErr.HTTPStatusCode())
+			assert.Contains(t, gatewayErr.Message, tc.message)
 			assert.Equal(t, 1, capture.Count(), "a billed generation must never be retried")
 		})
 	}
@@ -100,4 +109,37 @@ func TestCreateH3ImageValidation(t *testing.T) {
 		assert.Equal(t, 400, gatewayErr.HTTPStatusCode())
 	}
 	assert.Zero(t, capture.Count())
+}
+
+// The images of a partially successful batch are already billed, so an item
+// that came back with neither an image nor an error must not discard them.
+func TestCreateH3ImageKeepsImagesBesideEmptyItem(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{"created":1792308678,"data":[{"url":"https://example.com/image.jpg","size":"2720x1536"},{}]}`)
+	p := newTestProvider("test-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+
+	resp, err := p.CreateImage(t.Context(), &core.ImageGenerationRequest{Model: "MiniMax-H3-Image", Prompt: "A lighthouse", N: new(2)})
+
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 2)
+	assert.Equal(t, "https://example.com/image.jpg", resp.Data[0].URL)
+	assert.Equal(t, 1, resp.GeneratedImageCount())
+}
+
+func TestH3ImageModel(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{"MiniMax-H3-Image", true},
+		{"MiniMax-H3-Image-Highspeed", true},
+		{" minimax-h3-image ", true},
+		{"image-01", false},
+		{"image-01-live", false},
+		{"MiniMax-H3", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			assert.Equal(t, tt.want, h3ImageModel(tt.model))
+		})
+	}
 }

@@ -12,6 +12,14 @@ import (
 	"github.com/goccy/go-json"
 )
 
+// h3ImageModel reports whether model is one of the H3 image models, which
+// MiniMax serves from the OpenAI-shaped /images/generations endpoint rather
+// than the legacy /image_generation one.
+func h3ImageModel(model string) bool {
+	model = strings.TrimSpace(model)
+	return strings.EqualFold(model, "MiniMax-H3-Image") || strings.EqualFold(model, "MiniMax-H3-Image-Highspeed")
+}
+
 // createH3Image sends a non-replayable POST. H3 may finish and charge for
 // the image even when the client never receives a response.
 func (p *Provider) createH3Image(ctx context.Context, req *core.ImageGenerationRequest) (*core.ImageGenerationResponse, error) {
@@ -41,13 +49,35 @@ func (p *Provider) createH3Image(ctx context.Context, req *core.ImageGenerationR
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range resp.Data {
-		if item.Error == nil && strings.TrimSpace(item.URL) == "" && strings.TrimSpace(item.B64JSON) == "" {
-			return nil, core.NewProviderError("minimax", http.StatusBadGateway, "H3 image result contains no image or error", nil)
-		}
-	}
+	// A partially successful batch is returned as it is: its images are
+	// already billed, so one failed or empty item must not discard them.
 	if resp.GeneratedImageCount() == 0 {
-		return nil, core.NewProviderError("minimax", http.StatusBadGateway, "H3 response contains no successful images", nil)
+		return nil, h3NoImagesError(&resp)
 	}
 	return &resp, nil
+}
+
+// h3NoImagesError reports an HTTP 200 answer without a single image. MiniMax
+// documents 402, 422, or 500 for a batch that failed entirely, so this is an
+// unexpected answer; the first item error and the request ID are kept so the
+// call can still be diagnosed and reported to MiniMax.
+func h3NoImagesError(resp *core.ImageGenerationResponse) error {
+	var message strings.Builder
+	message.WriteString("minimax H3 response contains no images")
+	for _, item := range resp.Data {
+		if item.Error == nil {
+			continue
+		}
+		if detail := strings.TrimSpace(item.Error.Message); detail != "" {
+			message.WriteString(": " + detail)
+		}
+		if code := strings.TrimSpace(item.Error.Code); code != "" {
+			message.WriteString(" (" + code + ")")
+		}
+		break
+	}
+	if requestID := strings.TrimSpace(resp.RequestID); requestID != "" {
+		message.WriteString(", request_id " + requestID)
+	}
+	return core.NewProviderError("minimax", http.StatusBadGateway, truncateStatusMessage(message.String()), nil)
 }

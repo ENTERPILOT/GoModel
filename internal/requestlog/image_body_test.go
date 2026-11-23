@@ -243,3 +243,33 @@ func TestBuildImageResponseBody_CapsRevisedPrompt(t *testing.T) {
 	assert.LessOrEqual(t, len(kept), imageRevisedPromptMaxBytes)
 	assert.True(t, utf8.ValidString(kept))
 }
+
+// A partially successful batch keeps what an operator needs to investigate
+// it: each image's size, the failed item's error, and the upstream request ID.
+func TestBuildImageResponseBody_KeepsItemErrorsSizesAndRequestID(t *testing.T) {
+	body := BuildImageResponseBody(nil, &core.ImageGenerationResponse{
+		RequestID: "trace",
+		Data: []core.ImageData{
+			{URL: "https://img/1.jpg", Size: "2720x1536"},
+			{Error: &core.ImageItemError{Code: "1027", Message: "output image failed content safety check"}},
+		},
+	})
+
+	require.Len(t, body.Items, 2)
+	assert.Equal(t, "2720x1536", body.Items[0].Size)
+	assert.Nil(t, body.Items[0].Error)
+	assert.Equal(t, &ImageItemErrorLog{Code: "1027", Message: "output image failed content safety check"}, body.Items[1].Error)
+	assert.Empty(t, body.Items[1].URL)
+	assert.Equal(t, "trace", body.Meta["request_id"])
+}
+
+func TestBuildImageResponseBody_CapsItemError(t *testing.T) {
+	long := strings.Repeat("é", imageItemDetailMaxBytes) // 2 bytes per rune
+	body := BuildImageResponseBody(nil, &core.ImageGenerationResponse{
+		Data: []core.ImageData{{Error: &core.ImageItemError{Code: "1027", Message: long}}},
+	})
+
+	kept := body.Items[0].Error.Message
+	assert.LessOrEqual(t, len(kept), imageItemDetailMaxBytes)
+	assert.True(t, utf8.ValidString(kept))
+}

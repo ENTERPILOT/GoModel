@@ -86,3 +86,18 @@ test("renderImageBody with a non-array images field renders meta only", () => {
   assert.doesNotMatch(html, /<figure/);
   assert.match(html, /request-log-audio-metadata/);
 });
+
+test("renderImageBody shows a failed image's error and each image's size", () => {
+  const html = renderImageBody({
+    __images__: true,
+    images: [
+      { role: "output", url: "https://img.example/1.jpg", size: "2720x1536", stored: false },
+      { role: "output", stored: false, error: { code: "1027", message: "withheld <b>image</b>" } },
+    ],
+    meta: { request_id: "trace" },
+  });
+  assert.match(html, /Output · 2720x1536/);
+  assert.match(html, /1027: withheld &lt;b&gt;image&lt;\/b&gt;/);
+  assert.doesNotMatch(html, /LOGGING_LOG_IMAGE_BODIES=true/);
+  assert.match(html, /trace/);
+});

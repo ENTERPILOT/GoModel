@@ -108,11 +108,13 @@ type ImageGenerationResponse struct {
 	Provider string `json:"provider,omitempty"`
 }
 
-// GeneratedImageCount excludes per-image errors from usage and billing.
+// GeneratedImageCount returns the number of items that carry an image. Usage
+// and per-image pricing count these, so an item that failed (Error set) or
+// came back without a URL or inline bytes is never billed.
 func (r *ImageGenerationResponse) GeneratedImageCount() int {
 	count := 0
 	for _, item := range r.Data {
-		if item.Error == nil {
+		if item.Error == nil && (item.URL != "" || item.B64JSON != "") {
 			count++
 		}
 	}

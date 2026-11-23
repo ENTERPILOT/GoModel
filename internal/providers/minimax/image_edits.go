@@ -27,6 +27,11 @@ func (p *Provider) CreateImageEdit(ctx context.Context, req *core.ImageEditReque
 	if err := core.ValidateImageEditRequest(req); err != nil {
 		return nil, err
 	}
+	if h3ImageModel(req.Model) {
+		// H3 edits live on /images/edits with their own request shape; the
+		// character-reference translation below is for image-01 only.
+		return nil, core.NewInvalidRequestError("minimax H3 image edits are not supported; use image-01 or image-01-live", nil)
+	}
 	if req.Mask != nil {
 		return nil, core.NewInvalidRequestError("minimax image edits do not support masks", nil)
 	}

@@ -336,3 +336,22 @@ func TestExtractFromImageResponse_PartialSuccess(t *testing.T) {
 	require.NotNil(t, entry.OutputCost)
 	assert.InDelta(t, 0.04, *entry.OutputCost, 1e-9)
 }
+
+// MiniMax H3 bills by token and reports usage for the successful images only,
+// so a partially successful batch is priced from those tokens.
+func TestExtractFromImageResponse_TokenBilledPartialSuccess(t *testing.T) {
+	var resp core.ImageGenerationResponse
+	require.NoError(t, json.Unmarshal([]byte(`{"created":1792308678,"request_id":"trace","data":[{"url":"https://example.com/generated.jpg","size":"2720x1536"},{"error":{"code":"1027","message":"image withheld"}}],"usage":{"generated_images":1,"total_tokens":7254,"input_tokens":3174,"output_tokens":4080,"input_tokens_details":{"text_tokens":3174,"image_tokens":0},"output_tokens_details":{"image_tokens":4080}}}`), &resp))
+	pricing := &core.ModelPricing{InputPerMtok: new(2.3), OutputImagePerMtok: new(3.8)}
+
+	entry := ExtractFromImageResponse(&resp, "req", "MiniMax-H3-Image", "minimax", pricing)
+
+	assert.Equal(t, 3174, entry.InputTokens)
+	assert.Equal(t, 4080, entry.OutputTokens)
+	assert.Equal(t, 7254, entry.TotalTokens)
+	assert.Equal(t, 1, entry.RawData[rawKeyImages])
+	// 3174 * 2.3 / 1e6 + 4080 * 3.8 / 1e6
+	require.NotNil(t, entry.TotalCost)
+	assert.True(t, costsNearlyEqual(*entry.TotalCost, 0.0228042), "total cost = %v", *entry.TotalCost)
+	assert.Empty(t, entry.CostsCalculationCaveat)
+}
