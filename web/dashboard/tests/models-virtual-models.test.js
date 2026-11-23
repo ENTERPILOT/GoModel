@@ -16,7 +16,9 @@ import {
   rowIsManaged,
   rowRedirectCanRemove,
   rowAnchorID,
+  rowSlowdown,
   rowUpstreamTimeouts,
+  slowdownLabel,
   upstreamTimeoutsLabel,
 } from "../src/pages/models/displayRows.js";
 import {
@@ -1793,35 +1795,95 @@ test("toggle payloads preserve configured timeouts", () => {
   assert.equal(payload.response_header_timeout, 20);
 });
 
-test("rowUpstreamTimeouts shows the masking redirect's timeouts, else the model policy", () => {
+test("rowUpstreamTimeouts shows the masking redirect's timeouts, else the model's policies", () => {
+  const modelPolicy = { source: "gpt-4o", timeout: 120, response_header_timeout: 30 };
+  const none = { timeout_source: "", response_header_timeout_source: "" };
   const cases = [
     {
       name: "alias row",
       row: { is_alias: true, alias: { timeout: 30, response_header_timeout: null } },
-      want: { timeout: 30, response_header_timeout: null },
+      want: { ...none, timeout: 30, response_header_timeout: null },
     },
     {
-      name: "a masking redirect replaces the model's own policy",
+      name: "a masking redirect replaces the model's own policies",
       row: {
         masking_alias: { timeout: 30 },
-        access: { override: { timeout: 60, response_header_timeout: 10 } },
+        access: { override: { timeout: 60, response_header_timeout: 10 }, model_policy: modelPolicy },
       },
-      want: { timeout: 30, response_header_timeout: null },
+      want: { ...none, timeout: 30, response_header_timeout: null },
     },
     {
-      name: "model policy without a masking redirect",
+      name: "exact policy without a masking redirect",
       row: { access: { override: { timeout: 60, response_header_timeout: 10 } } },
-      want: { timeout: 60, response_header_timeout: 10 },
+      want: { ...none, timeout: 60, response_header_timeout: 10 },
+    },
+    {
+      name: "the model-wide policy fills what the exact policy leaves unset",
+      row: { access: { override: { timeout: 60 }, model_policy: modelPolicy } },
+      want: {
+        timeout: 60,
+        timeout_source: "",
+        response_header_timeout: 30,
+        response_header_timeout_source: "gpt-4o",
+      },
+    },
+    {
+      name: "model-wide policy alone",
+      row: { access: { model_policy: modelPolicy } },
+      want: {
+        timeout: 120,
+        timeout_source: "gpt-4o",
+        response_header_timeout: 30,
+        response_header_timeout_source: "gpt-4o",
+      },
     },
     {
       name: "nothing configured",
       row: { access: {} },
-      want: { timeout: null, response_header_timeout: null },
+      want: { ...none, timeout: null, response_header_timeout: null },
     },
   ];
   for (const { name, row, want } of cases) {
     assert.deepEqual(rowUpstreamTimeouts(row), want, name);
   }
+});
+
+test("rowSlowdown prefers the masking redirect, then the exact and model-wide policies", () => {
+  const modelPolicy = { source: "gpt-4o", slowdown: 0.5 };
+  const cases = [
+    { name: "alias row", row: { is_alias: true, alias: { slowdown: 2 } }, want: { value: 2, source: "" } },
+    {
+      name: "masking redirect",
+      row: { masking_alias: { slowdown: 1 }, access: { override: { slowdown: 2 } } },
+      want: { value: 1, source: "" },
+    },
+    {
+      name: "exact policy",
+      row: { access: { override: { slowdown: 2 }, model_policy: modelPolicy } },
+      want: { value: 2, source: "" },
+    },
+    {
+      name: "an exact zero disables the model-wide slowdown",
+      row: { access: { override: { slowdown: 0 }, model_policy: modelPolicy } },
+      want: { value: 0, source: "" },
+    },
+    {
+      name: "model-wide policy",
+      row: { access: { override: {}, model_policy: modelPolicy } },
+      want: { value: 0.5, source: "gpt-4o" },
+    },
+    { name: "nothing configured", row: { access: {} }, want: { value: null, source: "" } },
+  ];
+  for (const { name, row, want } of cases) {
+    assert.deepEqual(rowSlowdown(row), want, name);
+  }
+});
+
+test("slowdownLabel names the policy an inherited factor comes from", () => {
+  assert.equal(slowdownLabel({ value: null, source: "" }), "");
+  assert.equal(slowdownLabel({ value: 0, source: "" }), "");
+  assert.equal(slowdownLabel({ value: 2, source: "" }), "+2× inference time");
+  assert.equal(slowdownLabel({ value: 0.5, source: "gpt-4o" }), "+0.5× inference time (from gpt-4o)");
 });
 
 test("upstreamTimeoutsLabel lists only configured timeouts", () => {
@@ -1831,4 +1893,13 @@ test("upstreamTimeoutsLabel lists only configured timeouts", () => {
     "30s per attempt · 10s to headers",
   );
   assert.equal(upstreamTimeoutsLabel({ timeout: null, response_header_timeout: 10 }), "10s to headers");
+  assert.equal(
+    upstreamTimeoutsLabel({
+      timeout: 120,
+      timeout_source: "gpt-4o",
+      response_header_timeout: 10,
+      response_header_timeout_source: "",
+    }),
+    "120s per attempt (from gpt-4o) · 10s to headers",
+  );
 });

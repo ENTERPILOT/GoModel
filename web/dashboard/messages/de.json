@@ -872,6 +872,7 @@
   "models_upstream_timeouts": "Timeouts",
   "models_timeout_per_attempt": "{value} s pro Versuch",
   "models_timeout_headers": "{value} s bis zu den Headern",
+  "models_inherited_from": "von {source}",
   "models_reasoning_effort_field": "Reasoning-Effort überschreiben",
   "models_reasoning_effort_client": "Wert des Clients",
   "models_reasoning_effort_help": "Jede Anfrage, die über dieses virtuelle Modell oder an dieses Modell weitergeleitet wird, erhält diesen Reasoning-Effort, unabhängig davon, was der Client angefragt hat. Die Einstellung eines Modells hat Vorrang vor der eines virtuellen Modells, ein inneres virtuelles Modell vor einem äußeren.",

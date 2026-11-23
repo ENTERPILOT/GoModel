@@ -81,7 +81,8 @@ redirect accepts any source string as its alias name.
   (`gpt-4o`, on every provider); the exact value wins. A more specific entry
   that leaves slowdown empty, or whose `user_paths` exclude the caller, does
   not hide a broader one, so a provider-wide access rule never turns a
-  model's slowdown off.
+  model's slowdown off. On the Models page, a model-wide value is marked
+  `(from gpt-4o)`.
 - In a [chain](/features/virtual-models#chain-virtual-models), only the
   **outer** virtual model's slowdown applies.
 - A slowdown set on a model with `user_paths` applies only to requests from

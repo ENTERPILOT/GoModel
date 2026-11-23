@@ -870,6 +870,7 @@
   "models_upstream_timeouts": "Limity czasu",
   "models_timeout_per_attempt": "{value} s na próbę",
   "models_timeout_headers": "{value} s do nagłówków",
+  "models_inherited_from": "z {source}",
   "models_reasoning_effort_field": "Nadpisanie reasoning effort",
   "models_reasoning_effort_client": "Wartość klienta",
   "models_reasoning_effort_help": "Każde żądanie wysyłane dalej przez ten model wirtualny lub do tego modelu otrzymuje ten reasoning effort, niezależnie od tego, o co prosił klient. Ustawienie modelu ma pierwszeństwo przed ustawieniem modelu wirtualnego, a wewnętrzny model wirtualny przed zewnętrznym.",
