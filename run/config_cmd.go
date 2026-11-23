@@ -24,7 +24,8 @@ Prints the configuration a gateway started now would run with as a
 config.yaml: the settings from defaults, config.yaml, and environment
 variables, and the objects saved in the dashboard. Load it as
 config/config.yaml to run the same gateway from a file. Objects with no
-config.yaml form are listed in the file's header.
+config.yaml form are listed in the file's header. Settings that are empty
+and default to empty are left out.
 
 Secrets are not printed. A secret is written as the reference it was
 configured with (${env:...}, ${file:...}, ${vault:...}), or as ${env:NAME}

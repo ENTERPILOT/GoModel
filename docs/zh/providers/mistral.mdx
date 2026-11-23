@@ -24,7 +24,7 @@ GoModel 的 `mistral` 提供商会自动将其转换为标准格式：
 
 流式（`choices[].delta`）与非流式（`choices[].message`）响应均适用此转换。无需任何客户端配置。
 没有标准聊天对应形式的分块类型（例如 Mistral 引用功能在工具调用后返回的 `reference` 分块）会保留在 `mistral_content_chunks`
-厂商成员中，因此不会丢失任何上游数据。超过 16 MiB 的 SSE 事件也会原样转发而不做转换。
+厂商成员中，因此不会丢失任何上游数据（参见[引用](#引用)）。超过 16 MiB 的 SSE 事件也会原样转发而不做转换。
 
 请使用标准的嵌套参数发送推理力度；GoModel 会将其映射为 Mistral 的扁平 `reasoning_effort`：
 
@@ -50,6 +50,33 @@ Mistral 会拒绝其模式未定义的请求成员，因此 GoModel 会调整常
 - `service_tier: "default"` 改为 `standard_only`；Mistral 不提供的层级会被丢弃。
 - `stream_options`、`user`、`logit_bias`、`store`、`verbosity` 和 `safety_identifier` 会被丢弃。流式响应仍会在最后一个分块中报告用量。
 - 消息只保留 Mistral 对其角色接受的成员：例如 `name` 只保留在工具消息上，助手回合中回传的 `refusal` 或 `annotations` 会被丢弃。
+
+## 引用
+
+当工具结果提供了参考来源时，Mistral 会在回答的文本分块之间插入 `reference` 分块来引用它们，每个分块列出您自己的来源 ID（参见 Mistral 的[引用指南](https://docs.mistral.ai/inference/conversations/citations)）。OpenAI 的引用注释需要 URL 或文件 ID，而 `reference` 分块并不携带这些信息，因此 GoModel 会原样返回这些分块，而不做转换：
+
+| API | 分块所在位置 |
+| --- | --- |
+| Chat Completions | `choices[].message` 上的 `mistral_content_chunks`；流式响应中位于该分块到达时所在的 `choices[].delta` 上 |
+| Responses | 助手 `message` 输出项上的 `extra_content.mistral.content_chunks`；流式响应中位于该项的 `response.output_item.done` 事件以及最终的 `response.completed` 输出中 |
+
+```json
+{
+  "type": "message",
+  "role": "assistant",
+  "status": "completed",
+  "content": [
+    { "type": "output_text", "text": "Paris is the capital of France.", "annotations": [] }
+  ],
+  "extra_content": {
+    "mistral": {
+      "content_chunks": [{ "type": "reference", "reference_ids": [0] }]
+    }
+  }
+}
+```
+
+分块按 Mistral 发送的顺序排列。它们在文本中的位置不会保留，`annotations` 保持为空。在 Responses 中它们位于 [`extra_content`](/zh/advanced/extra-content) 内，因为客户端会原样回传输出项，而 OpenAI 会拒绝带有未知成员的项：GoModel 会从每个请求中移除 `extra_content.mistral`，因此回传的项对任何提供商都是安全的。
 
 ## 配置
 
