@@ -106,7 +106,8 @@ w Cohere nieograniczony thinking. Te budżety to górne granice: gdy request
 ustawia `max_tokens`, budżet jest obniżany tak, by zostawić z niego 1024 tokeny
 na odpowiedź (`high` przy `max_tokens: 4000` wysyła 2976), a thinking jest
 wyłączany, gdy żaden budżet się nie mieści. Modele
-bez reasoningu ignorują każdy effort poza `none`.
+reasoningowe to `command-a-reasoning` i `command-a-plus`; pozostałe odrzucają
+włączony thinking, więc ignorują każdy effort poza `none`.
 
 Wynik thinking jest zwracany jako kompatybilne z OpenAI rozszerzenie
 `reasoning_content` zarówno w zwykłych, jak i streamingowych odpowiedziach.

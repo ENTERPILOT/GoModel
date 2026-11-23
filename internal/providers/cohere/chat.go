@@ -89,7 +89,7 @@ func toCohereChatRequest(req *core.ChatRequest, stream bool) (*chatRequest, erro
 	}
 	// Cohere's own control wins over the common effort.
 	if len(out.Thinking) == 0 {
-		out.Thinking = thinkingForEffort(req.Model, req.Reasoning, out.MaxTokens)
+		out.Thinking = thinkingForEffort(req.Model, requestedEffort(req), out.MaxTokens)
 	}
 	return out, nil
 }

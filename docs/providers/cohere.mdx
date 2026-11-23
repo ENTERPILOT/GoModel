@@ -104,8 +104,8 @@ off, and on a reasoning model `minimal` and `low` set a `token_budget` of 1024,
 of unlimited thinking. These budgets are upper bounds: when the request sets
 `max_tokens`, the budget is lowered to leave 1024 tokens of it for the answer
 (`high` with `max_tokens: 4000` sends 2976), and thinking is turned off when no
-budget fits. Models that do not
-reason ignore every effort but `none`.
+budget fits. Reasoning models are `command-a-reasoning` and `command-a-plus`; the others
+refuse thinking that is enabled, so they ignore every effort but `none`.
 
 Thinking output is returned as the OpenAI-compatible `reasoning_content`
 extension in both normal and streaming responses.

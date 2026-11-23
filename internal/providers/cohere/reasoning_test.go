@@ -32,6 +32,17 @@ func TestChatRequestTranslatesReasoningEffortToThinking(t *testing.T) {
 		{name: "max keeps the default, unlimited thinking", model: reasoner, effort: "max"},
 		{name: "a value off the scale keeps the default", model: reasoner, effort: "ultra"},
 		{name: "a model that does not reason refuses enabled thinking", model: plain, effort: "high"},
+		{name: "review request: command-a-plus thinks too", model: "command-a-plus-05-2026", effort: "low", want: `{"type":"enabled","token_budget":1024}`},
+		{
+			name: "review request: the flat chat effort", model: reasoner,
+			extras: map[string]json.RawMessage{"reasoning_effort": json.RawMessage(`"medium"`)},
+			want:   `{"type":"enabled","token_budget":8192}`,
+		},
+		{
+			name: "the reasoning object wins over the flat effort", model: reasoner, effort: "none",
+			extras: map[string]json.RawMessage{"reasoning_effort": json.RawMessage(`"high"`)},
+			want:   `{"type":"disabled"}`,
+		},
 		{name: "a budget leaves room for the answer", model: reasoner, effort: "high", maxTokens: new(4096), want: `{"type":"enabled","token_budget":3072}`},
 		{name: "thinking is off when no budget fits", model: reasoner, effort: "low", maxTokens: new(1024), want: `{"type":"disabled"}`},
 		{
