@@ -86,11 +86,7 @@ func convertGeminiNativeStream(body io.ReadCloser, out *io.PipeWriter, model str
 		_ = out.CloseWithError(err)
 		return
 	}
-	if err := state.writeFinishReasons(out); err != nil {
-		_ = out.CloseWithError(err)
-		return
-	}
-	if err := state.writeFinalUsage(out); err != nil {
+	if err := state.writeStreamEnd(out); err != nil {
 		_ = out.CloseWithError(err)
 		return
 	}
@@ -107,6 +103,9 @@ type geminiStreamState struct {
 	choices      map[int]*geminiChoiceStreamState
 	stopped      bool
 	latestUsage  map[string]any
+	// outputTokens is the latest non-zero candidatesTokenCount Gemini
+	// reported; events without usage don't reset it.
+	outputTokens int
 }
 
 type geminiChoiceStreamState struct {
@@ -115,6 +114,10 @@ type geminiChoiceStreamState struct {
 	nextToolIndex int
 	toolIDs       toolCallIDs
 	finishReason  string
+	finishMessage string
+	// wroteOutput reports whether text, tool calls, or images were written
+	// for this choice; a role-only chunk doesn't count.
+	wroteOutput bool
 }
 
 // consumeEvent converts one native event. raw is only valid for the call.
@@ -139,15 +142,6 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw []byte) error {
 		s.stopped = true
 		return writeOpenAIStreamError(out, err)
 	}
-	// Until a choice has been written the client has seen nothing, so an
-	// unusable turn can still fail as an error instead of an empty completion.
-	if len(s.choices) == 0 {
-		if err := geminiUnusableTurnError(&event, s.providerName); err != nil {
-			s.stopped = true
-			return writeOpenAIStreamError(out, err)
-		}
-	}
-
 	for i, candidate := range event.Candidates {
 		if err := s.writeCandidate(out, candidate, i); err != nil {
 			return err
@@ -156,6 +150,9 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw []byte) error {
 
 	if s.includeUsage {
 		s.latestUsage = geminiUsageMap(event.UsageMetadata)
+	}
+	if event.UsageMetadata.CandidatesTokenCount > 0 {
+		s.outputTokens = event.UsageMetadata.CandidatesTokenCount
 	}
 	return nil
 }
@@ -202,8 +199,10 @@ func (s *geminiStreamState) writeCandidate(out io.Writer, candidate geminiCandid
 			images = append(images, next)
 			i++
 		}
+		index := streamChoiceIndex(candidate, fallbackIndex)
+		s.choiceState(index).wroteOutput = true
 		choice := map[string]any{
-			"index":         streamChoiceIndex(candidate, fallbackIndex),
+			"index":         index,
 			"delta":         map[string]any{core.ChatImagesField: images},
 			"finish_reason": nil,
 		}
@@ -226,13 +225,48 @@ func (s *geminiStreamState) writeChoiceChunk(out io.Writer, choice map[string]an
 	})
 }
 
+// writeStreamEnd ends a stream that ran to completion. Gemini may report a
+// candidate's finish reason, and the usage, on any event, so only here is it
+// known whether the turn left the client anything to use. An unusable turn,
+// such as text followed by a malformed tool call, ends with its usage and a
+// 502 error instead of finish reasons, so the client retries rather than
+// taking the turn as finished, and the tokens Gemini billed are still
+// recorded.
+func (s *geminiStreamState) writeStreamEnd(out io.Writer) error {
+	if s.stopped {
+		return nil
+	}
+	if turnErr := unusableTurnError(s.turnEndings(), s.outputTokens, s.providerName); turnErr != nil {
+		if err := s.writeFinalUsage(out); err != nil {
+			return err
+		}
+		return writeOpenAIStreamError(out, turnErr)
+	}
+	if err := s.writeFinishReasons(out); err != nil {
+		return err
+	}
+	return s.writeFinalUsage(out)
+}
+
+// turnEndings returns how each streamed choice ended, in index order so the
+// reason an error reports doesn't depend on map order.
+func (s *geminiStreamState) turnEndings() []turnEnding {
+	endings := make([]turnEnding, 0, len(s.choices))
+	for _, index := range slices.Sorted(maps.Keys(s.choices)) {
+		state := s.choices[index]
+		endings = append(endings, turnEnding{
+			finishReason:  state.finishReason,
+			finishMessage: state.finishMessage,
+			hasOutput:     state.wroteOutput,
+		})
+	}
+	return endings
+}
+
 // writeFinishReasons emits one final chunk per choice. Gemini may report a
 // finish reason on several events, and parallel function calls can arrive in
 // separate events, so finish_reason is held back until the stream ends.
 func (s *geminiStreamState) writeFinishReasons(out io.Writer) error {
-	if s.stopped {
-		return nil
-	}
 	for _, index := range slices.Sorted(maps.Keys(s.choices)) {
 		state := s.choices[index]
 		finish := finishReasonFromGemini(state.finishReason, state.sawToolCalls)
@@ -252,7 +286,7 @@ func (s *geminiStreamState) writeFinishReasons(out io.Writer) error {
 }
 
 func (s *geminiStreamState) writeFinalUsage(out io.Writer) error {
-	if !s.includeUsage || s.latestUsage == nil || s.stopped {
+	if !s.includeUsage || s.latestUsage == nil {
 		return nil
 	}
 	chunk := map[string]any{
@@ -283,9 +317,11 @@ func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackI
 	content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts, &state.toolIDs, supplied)
 	if content != "" {
 		delta["content"] = content
+		state.wroteOutput = true
 	}
 	if len(toolCalls) > 0 {
 		state.sawToolCalls = true
+		state.wroteOutput = true
 		delta["tool_calls"] = streamToolCalls(toolCalls, state.nextToolIndex)
 		state.nextToolIndex += len(toolCalls)
 	}
@@ -295,6 +331,7 @@ func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackI
 
 	if finishReasonFromGemini(candidate.FinishReason, false) != "" {
 		state.finishReason = candidate.FinishReason
+		state.finishMessage = candidate.FinishMessage
 	}
 	if len(delta) == 0 {
 		return nil, false
