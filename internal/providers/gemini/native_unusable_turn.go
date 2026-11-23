@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -16,9 +17,24 @@ type turnEnding struct {
 	// finishMessage is Gemini's prose about the finish. For a malformed call
 	// it holds the call's text, which is model output.
 	finishMessage string
-	// hasOutput reports whether the candidate carried text, tool calls, or
-	// images.
+	// hasOutput reports whether any of the candidate's parts is output (see
+	// geminiPartHasOutput).
 	hasOutput bool
+}
+
+// geminiPartHasOutput reports whether part reaches the client as output:
+// text that isn't a thought, a function call, or a generated image. Thoughts
+// and signature-only parts are dropped when a turn is rendered, so a turn
+// made only of them gives the client nothing.
+func geminiPartHasOutput(part geminiPart) bool {
+	if part.Text != "" && !part.Thought {
+		return true
+	}
+	if part.functionCall() != nil {
+		return true
+	}
+	_, isImage := generatedImage(part)
+	return isImage
 }
 
 // unusableTurnError reports a turn in which no candidate carries anything a
@@ -71,7 +87,7 @@ func (resp *geminiGenerateContentResponse) turnEndings() []turnEnding {
 		endings = append(endings, turnEnding{
 			finishReason:  candidate.FinishReason,
 			finishMessage: candidate.FinishMessage,
-			hasOutput:     len(candidate.Content.Parts) > 0,
+			hasOutput:     slices.ContainsFunc(candidate.Content.Parts, geminiPartHasOutput),
 		})
 	}
 	return endings

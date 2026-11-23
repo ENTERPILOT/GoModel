@@ -53,6 +53,16 @@ func TestNativeChatResponse_UnusableTurns(t *testing.T) {
 			body: `{"candidates":[{"content":{"role":"model"},"finishReason":"MAX_TOKENS"}],"usageMetadata":{"thoughtsTokenCount":400}}`,
 		},
 		{
+			name:    "ThoughtOnlyStop",
+			body:    `{"candidates":[{"content":{"role":"model","parts":[{"text":"Planning","thought":true}]},"finishReason":"STOP"}],"usageMetadata":{"thoughtsTokenCount":40}}`,
+			wantErr: "STOP with no output",
+		},
+		{
+			name:    "SignatureOnlyStop",
+			body:    `{"candidates":[{"content":{"role":"model","parts":[{"text":"","thoughtSignature":"c2ln"}]},"finishReason":"STOP"}]}`,
+			wantErr: "STOP with no output",
+		},
+		{
 			name:     "OneUsableCandidateIsEnough",
 			body:     `{"candidates":[{"index":0,"content":{"role":"model"},"finishReason":"MALFORMED_RESPONSE"},{"index":1,"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":"STOP"}]}`,
 			wantText: "hi",
@@ -201,34 +211,61 @@ data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Done"}]},"fini
 }
 
 // Gemini bills the prompt and thinking tokens of an unusable turn, so the
-// stream still reports its usage, before the error, for the usage observer.
+// stream still reports its usage, before the error, for the usage observer,
+// even when the last event carries none. The error ends the stream: no
+// [DONE] follows it.
 func TestGeminiNativeStream_UnusableTurnReportsUsage(t *testing.T) {
-	upstream := `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Let me read the file."}]}}],"usageMetadata":{"promptTokenCount":30}}
+	tests := []struct {
+		name      string
+		upstream  string
+		wantTotal float64
+	}{
+		{
+			name: "UsageOnTheLastEvent",
+			upstream: `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Let me read the file."}]}}],"usageMetadata":{"promptTokenCount":30}}
 
 data: {"candidates":[{"content":{"role":"model"},"finishReason":"MALFORMED_FUNCTION_CALL"}],"usageMetadata":{"promptTokenCount":30,"thoughtsTokenCount":81,"totalTokenCount":111}}
 
-`
-	stream := newGeminiNativeStream(io.NopCloser(strings.NewReader(upstream)), "gemini-2.5-pro", true, "vertex")
-	defer func() { _ = stream.Close() }()
-	raw, err := io.ReadAll(stream)
-	require.NoError(t, err)
-	chunks := parseOpenAIStreamChunks(t, string(raw))
+`,
+			wantTotal: 111,
+		},
+		{
+			name: "UsageOnlyOnAnEarlierEvent",
+			upstream: `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Let me read the file."}]}}],"usageMetadata":{"promptTokenCount":30,"totalTokenCount":30}}
 
-	usageIndex, errorIndex := -1, -1
-	var usage map[string]any
-	for i, chunk := range chunks {
-		if u, ok := chunk["usage"].(map[string]any); ok {
-			usageIndex, usage = i, u
-		}
-		if _, ok := chunk["error"].(map[string]any); ok {
-			errorIndex = i
-		}
+data: {"candidates":[{"content":{"role":"model"},"finishReason":"MALFORMED_FUNCTION_CALL"}]}
+
+`,
+			wantTotal: 30,
+		},
 	}
-	require.NotEqual(t, -1, usageIndex, "chunks %v", chunks)
-	require.NotEqual(t, -1, errorIndex, "chunks %v", chunks)
-	assert.Less(t, usageIndex, errorIndex, "usage comes before the error")
-	assert.InDelta(t, 30, usage["prompt_tokens"], 0)
-	assert.InDelta(t, 111, usage["total_tokens"], 0)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := newGeminiNativeStream(io.NopCloser(strings.NewReader(tt.upstream)), "gemini-2.5-pro", true, "vertex")
+			defer func() { _ = stream.Close() }()
+			raw, err := io.ReadAll(stream)
+			require.NoError(t, err)
+			assert.NotContains(t, string(raw), "[DONE]")
+			chunks := parseOpenAIStreamChunks(t, string(raw))
+
+			usageIndex, errorIndex := -1, -1
+			var usage map[string]any
+			for i, chunk := range chunks {
+				if u, ok := chunk["usage"].(map[string]any); ok {
+					usageIndex, usage = i, u
+				}
+				if _, ok := chunk["error"].(map[string]any); ok {
+					errorIndex = i
+				}
+			}
+			require.NotEqual(t, -1, usageIndex, "chunks %v", chunks)
+			require.NotEqual(t, -1, errorIndex, "chunks %v", chunks)
+			assert.Less(t, usageIndex, errorIndex, "usage comes before the error")
+			assert.Equal(t, len(chunks)-1, errorIndex, "the error is the last chunk")
+			assert.InDelta(t, 30, usage["prompt_tokens"], 0)
+			assert.InDelta(t, tt.wantTotal, usage["total_tokens"], 0)
+		})
+	}
 }
 
 func TestUnusableTurnError(t *testing.T) {

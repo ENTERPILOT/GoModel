@@ -90,7 +90,12 @@ func convertGeminiNativeStream(body io.ReadCloser, out *io.PipeWriter, model str
 		_ = out.CloseWithError(err)
 		return
 	}
-	_, _ = io.WriteString(out, "data: [DONE]\n\n")
+	// A stream that failed in-band ends with its error, not [DONE]: a buffered
+	// response plugin rebuilds the stream from its chunks and would take
+	// [DONE] for a finished answer.
+	if !state.stopped {
+		_, _ = io.WriteString(out, "data: [DONE]\n\n")
+	}
 	_ = out.Close()
 }
 
@@ -101,8 +106,10 @@ type geminiStreamState struct {
 	created      int64
 	responseID   string
 	choices      map[int]*geminiChoiceStreamState
-	stopped      bool
-	latestUsage  map[string]any
+	// stopped is set once an in-band error has been written; nothing follows
+	// it.
+	stopped     bool
+	latestUsage map[string]any
 	// outputTokens is the latest non-zero candidatesTokenCount Gemini
 	// reported; events without usage don't reset it.
 	outputTokens int
@@ -115,9 +122,9 @@ type geminiChoiceStreamState struct {
 	toolIDs       toolCallIDs
 	finishReason  string
 	finishMessage string
-	// wroteOutput reports whether text, tool calls, or images were written
-	// for this choice; a role-only chunk doesn't count.
-	wroteOutput bool
+	// hasOutput reports whether any part streamed for this choice was output
+	// (see geminiPartHasOutput); a role-only chunk doesn't count.
+	hasOutput bool
 }
 
 // consumeEvent converts one native event. raw is only valid for the call.
@@ -149,7 +156,10 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw []byte) error {
 	}
 
 	if s.includeUsage {
-		s.latestUsage = geminiUsageMap(event.UsageMetadata)
+		// An event without usage keeps the usage an earlier event reported.
+		if usage := geminiUsageMap(event.UsageMetadata); usage != nil {
+			s.latestUsage = usage
+		}
 	}
 	if event.UsageMetadata.CandidatesTokenCount > 0 {
 		s.outputTokens = event.UsageMetadata.CandidatesTokenCount
@@ -165,6 +175,9 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw []byte) error {
 // is recorded even for an image-only candidate.
 func (s *geminiStreamState) writeCandidate(out io.Writer, candidate geminiCandidate, fallbackIndex int) error {
 	parts := candidate.Content.Parts
+	if slices.ContainsFunc(parts, geminiPartHasOutput) {
+		s.choiceState(streamChoiceIndex(candidate, fallbackIndex)).hasOutput = true
+	}
 	supplied := suppliedToolCallIDs(parts)
 	start := 0
 	// flush writes the parts before end that no image chunk took. An empty
@@ -199,10 +212,8 @@ func (s *geminiStreamState) writeCandidate(out io.Writer, candidate geminiCandid
 			images = append(images, next)
 			i++
 		}
-		index := streamChoiceIndex(candidate, fallbackIndex)
-		s.choiceState(index).wroteOutput = true
 		choice := map[string]any{
-			"index":         index,
+			"index":         streamChoiceIndex(candidate, fallbackIndex),
 			"delta":         map[string]any{core.ChatImagesField: images},
 			"finish_reason": nil,
 		}
@@ -240,6 +251,7 @@ func (s *geminiStreamState) writeStreamEnd(out io.Writer) error {
 		if err := s.writeFinalUsage(out); err != nil {
 			return err
 		}
+		s.stopped = true
 		return writeOpenAIStreamError(out, turnErr)
 	}
 	if err := s.writeFinishReasons(out); err != nil {
@@ -257,7 +269,7 @@ func (s *geminiStreamState) turnEndings() []turnEnding {
 		endings = append(endings, turnEnding{
 			finishReason:  state.finishReason,
 			finishMessage: state.finishMessage,
-			hasOutput:     state.wroteOutput,
+			hasOutput:     state.hasOutput,
 		})
 	}
 	return endings
@@ -317,11 +329,9 @@ func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackI
 	content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts, &state.toolIDs, supplied)
 	if content != "" {
 		delta["content"] = content
-		state.wroteOutput = true
 	}
 	if len(toolCalls) > 0 {
 		state.sawToolCalls = true
-		state.wroteOutput = true
 		delta["tool_calls"] = streamToolCalls(toolCalls, state.nextToolIndex)
 		state.nextToolIndex += len(toolCalls)
 	}

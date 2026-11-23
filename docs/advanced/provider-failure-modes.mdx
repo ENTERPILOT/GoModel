@@ -79,8 +79,10 @@ Gemini's finish message, so the client retries:
   default `5xx` rule. Its usage is not recorded.
 - **Streaming:** the turn is judged when the stream ends, so it fails even
   after text has streamed. The stream ends with its usage chunk, when usage
-  was requested, then an in-band `502` error event instead of a finish
-  reason. Bytes are already sent, so it does not fail over.
+  was requested, then an in-band provider error event (`"type":
+  "provider_error"`, with the same message) instead of a finish reason, and
+  no `[DONE]`. The response is already committed to `200`, so the error
+  carries no status, and it does not fail over.
 
 A turn with several candidates fails only when none of them is usable.
 
