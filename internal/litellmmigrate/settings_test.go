@@ -205,7 +205,7 @@ mcp_servers: {}
 	info := findings(result, SeverityInfo)
 	assert.Contains(t, info, "router_settings.redis_host: not needed for routing: GoModel keeps routing state in the gateway")
 	assert.Contains(t, info, "litellm_settings.drop_params: not needed: GoModel adapts parameters to each provider by default")
-	assert.Contains(t, info, "general_settings.alerting: GoModel has no built-in alerting; alert on its Prometheus metrics")
+	assert.Contains(t, info, "general_settings.alerting: not migrated: GoModel alerts on budget thresholds through a generic JSON webhook (budgets.alerts; see /features/budgets#alerts); alert on its Prometheus metrics for everything else")
 	warnings := findings(result, SeverityWarning)
 	assert.Contains(t, warnings, "guardrails (pii): not migrated, and GoModel guardrails are off by default: rebuild them before switching traffic; see /advanced/guardrails")
 	assert.Contains(t, strings.Join(info, "\n"), "general_settings.database_url: not GoModel's storage")
