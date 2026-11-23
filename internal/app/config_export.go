@@ -36,6 +36,8 @@ type ConfigExportOptions struct {
 	Environ []string
 	// Now stamps the header. Default: the current time.
 	Now time.Time
+	// IncludeDefaults also writes the settings that hold their default value.
+	IncludeDefaults bool
 }
 
 // ExportConfig renders the configuration a gateway started now would run
@@ -99,7 +101,8 @@ func ExportConfig(ctx context.Context, opts ConfigExportOptions) ([]byte, error)
 	}
 	doc.Config = &cfg
 	doc.SecretFields = append(guardrailSecretFields(cfg.Guardrails.Rules, catalog), routeSecretFields(cfg.VirtualModels, catalog)...)
-	doc.Header = configExportHeader(opts.Now)
+	doc.Header = configExportHeader(opts.Now, opts.IncludeDefaults)
+	doc.IncludeDefaults = opts.IncludeDefaults
 	return loaded.ExportYAML(doc, opts.Environ)
 }
 
@@ -147,13 +150,17 @@ func readStoredObjects(ctx context.Context, loaded *config.LoadResult) (storedOb
 	return stored, nil
 }
 
-func configExportHeader(now time.Time) string {
+func configExportHeader(now time.Time, includeDefaults bool) string {
+	defaults := "there. Settings that hold their default value are left out."
+	if includeDefaults {
+		defaults = "there."
+	}
 	return strings.Join([]string{
 		fmt.Sprintf("GoModel configuration exported %s by %s %s.", now.UTC().Format(time.RFC3339), version.App, version.Version),
 		"The settings a gateway started now would run with: defaults, config.yaml,",
 		"environment variables, and objects saved in the dashboard. Load it as",
 		"config/config.yaml; objects saved in the dashboard are then read-only",
-		"there.",
+		defaults,
 		"",
 		"Secrets are not included. A secret is written as the reference it was",
 		"configured with (env, file, or vault), or as an env reference with a",

@@ -39,6 +39,9 @@ type ExportDocument struct {
 	Secrets []string
 	// Header is written as comment lines above the document.
 	Header string
+	// IncludeDefaults also writes the settings that hold their default value.
+	// Those empty by default are left out either way.
+	IncludeDefaults bool
 }
 
 // exportRoot lays out an ExportDocument as config.yaml reads it.
@@ -80,7 +83,9 @@ const (
 // one instead: ${env:NAME} for the environment variable in environ that holds
 // it, otherwise ${env:NAME} for a variable to set, with a comment saying so,
 // which stops startup until it is set rather than loading an empty credential.
-// Any other "$" is escaped, so the document reads back what it shows.
+// Any other "$" is escaped, so the document reads back what it shows. A
+// setting that holds its default is left out, as it reads back the same;
+// doc.IncludeDefaults keeps those whose default is not empty.
 //
 // Secrets are the fields tagged `export:"secret"`, `export:"url"`, or
 // `export:"args"`, the fields in doc.SecretFields, and every string under a
@@ -134,11 +139,11 @@ func (r *LoadResult) ExportYAML(doc ExportDocument, environ []string) ([]byte, e
 	// A first pass finds the secret settings, so only what resolved into
 	// one counts as a secret wherever else it appears.
 	survey := newExporter(r.Secrets, environ, doc, r.expanded)
-	survey.survey, survey.blocks = true, blocks
-	defaults := reflect.ValueOf(exportRoot{Config: buildDefaultConfig()})
+	survey.survey, survey.blocks, survey.includeDefaults = true, blocks, doc.IncludeDefaults
+	defaults := reflect.ValueOf(exportRoot{Config: exportDefaults(&cfg)})
 	survey.walk("", value, defaults, &surveyed, exportPlain, "")
 	e := newExporter(r.Secrets, environ, doc, r.expanded)
-	e.secretPaths, e.secretValues, e.blocks = survey.secretPaths, survey.secretValues, blocks
+	e.secretPaths, e.secretValues, e.blocks, e.includeDefaults = survey.secretPaths, survey.secretValues, blocks, doc.IncludeDefaults
 	e.walk("", value, defaults, &root, exportPlain, "")
 	root.HeadComment = doc.Header
 
@@ -152,6 +157,18 @@ func (r *LoadResult) ExportYAML(doc ExportDocument, environ []string) ([]byte, e
 		return nil, fmt.Errorf("export configuration: %w", err)
 	}
 	return []byte(strings.NewReplacer(e.texts...).Replace(buf.String())), nil
+}
+
+// exportDefaults returns the settings Load gives a config.yaml that sets
+// none of them, to tell which of cfg's say something.
+func exportDefaults(cfg *Config) *Config {
+	defaults := buildDefaultConfig()
+	// As Load fills it in: the local model cache is the default only when no
+	// other is configured.
+	if cfg.Cache.Model.Redis == nil {
+		defaults.Cache.Model.Local = &LocalCacheConfig{}
+	}
+	return defaults
 }
 
 // exporter rewrites the secrets of one encoded document.
@@ -183,6 +200,9 @@ type exporter struct {
 	suggested map[string]string
 	// blocks maps the placeholders strings were encoded as to the strings.
 	blocks map[string]string
+	// includeDefaults keeps the settings that hold a default that is not
+	// empty.
+	includeDefaults bool
 }
 
 func newExporter(secrets *Secrets, environ []string, doc ExportDocument, expanded map[string]writtenScalar) *exporter {
@@ -224,10 +244,10 @@ func newExporter(secrets *Secrets, environ []string, doc ExportDocument, expande
 // class is how the field holding v is exported and envName the variable that
 // sets it, if any. A nil slice, map, or pointer under a mapping is dropped: it
 // encodes as [], {}, or null, which config.yaml does not always read as
-// unset. So is a struct field holding the zero value, as its default does:
-// it reads back the same left out. A nil value in a free-form map is kept: it is a null the
-// configuration states, such as a parameter a virtual model strips from
-// requests.
+// unset. So is a struct field holding its default (see atDefault): it reads
+// back the same left out. A nil value in a free-form map is kept: it is a
+// null the configuration states, such as a parameter a virtual model strips
+// from requests.
 func (e *exporter) walk(path string, v, def reflect.Value, node *yaml.Node, class exportClass, envName string) {
 	for v.Kind() == reflect.Pointer {
 		v = v.Elem()
@@ -286,11 +306,11 @@ func (e *exporter) walk(path string, v, def reflect.Value, node *yaml.Node, clas
 				if def.Kind() == reflect.Struct {
 					_, defChild, _ = yamlField(def, key.Value)
 				}
-				// A value environment expansion wrote is kept as written, empty
-				// or not, as is a section holding one: it reads the variable on
-				// the next load.
-				expanded := e.expandedUnder(childPath)
-				if !expanded && (isNil(child) || isEmpty(child) && isEmpty(defChild)) {
+				// A value environment expansion or a secret reference wrote is
+				// kept as written, whatever it gave, as is a section holding
+				// one: it reads the variable or the secret on the next load.
+				expanded := e.expandedUnder(childPath) || e.secrets.referencedUnder(childPath)
+				if !expanded && (isNil(child) || e.atDefault(child, defChild)) {
 					continue
 				}
 				if isNil(child) {
@@ -308,8 +328,8 @@ func (e *exporter) walk(path string, v, def reflect.Value, node *yaml.Node, clas
 					e.unresolved = append(e.unresolved, childPath)
 				}
 				e.walk(childPath, child, defChild, value, exportClassOf(field), field.Tag.Get("env"))
-				// Every field of a struct left empty is dropped too.
-				if value.Kind == yaml.MappingNode && len(value.Content) == 0 && child.Kind() == reflect.Struct && isEmpty(defChild) && !expanded {
+				// A struct with every field dropped is dropped too.
+				if value.Kind == yaml.MappingNode && len(value.Content) == 0 && child.Kind() == reflect.Struct && (isEmpty(defChild) || !e.includeDefaults) && !expanded {
 					continue
 				}
 			}
@@ -335,6 +355,16 @@ func isNil(v reflect.Value) bool {
 // retry_on_statuses: [] disables the statuses a nil list inherits.
 func isEmpty(v reflect.Value) bool {
 	return !v.IsValid() || v.IsZero()
+}
+
+// atDefault reports whether v holds the default def, so config.yaml reads it
+// back the same left out. With includeDefaults, only a default that is empty
+// counts.
+func (e *exporter) atDefault(v, def reflect.Value) bool {
+	if isEmpty(v) && isEmpty(def) {
+		return true
+	}
+	return !e.includeDefaults && def.IsValid() && reflect.DeepEqual(v.Interface(), def.Interface())
 }
 
 // walkUntyped visits a node no Go type describes. Strings under a key that
@@ -486,11 +516,17 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 	e.setSecret(path, node, head, secret, envName)
 }
 
+// pathUnder reports whether path is section or a path inside it.
+func pathUnder(path, section string) bool {
+	rest, ok := strings.CutPrefix(path, section)
+	return ok && (rest == "" || rest[0] == '.' || rest[0] == '[')
+}
+
 // expandedUnder reports whether environment expansion wrote the value at
 // path or one inside it.
 func (e *exporter) expandedUnder(path string) bool {
 	for written := range e.expanded {
-		if rest, ok := strings.CutPrefix(written, path); ok && (rest == "" || rest[0] == '.' || rest[0] == '[') {
+		if pathUnder(written, path) {
 			return true
 		}
 	}
@@ -501,7 +537,7 @@ func (e *exporter) expandedUnder(path string) bool {
 // unresolved.
 func (e *exporter) isUnresolved(path string) bool {
 	for _, section := range e.unresolved {
-		if rest, ok := strings.CutPrefix(path, section); ok && (rest == "" || rest[0] == '.' || rest[0] == '[') {
+		if pathUnder(path, section) {
 			return true
 		}
 	}
@@ -747,6 +783,22 @@ func (s *Secrets) configured(field, resolved string) (string, bool) {
 		return "", false
 	}
 	return use.original, true
+}
+
+// referencedUnder reports whether the value at path, or one inside it, was
+// configured as a secret reference.
+func (s *Secrets) referencedUnder(path string) bool {
+	if s == nil {
+		return false
+	}
+	s.rotation.mu.Lock()
+	defer s.rotation.mu.Unlock()
+	for field := range s.rotation.uses {
+		if pathUnder(field, path) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolvedSecretWhere reports whether a reference recorded for a field
