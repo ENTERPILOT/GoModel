@@ -25,12 +25,20 @@ var googleCompatRejectedFields = []string{
 	"safety_identifier", "verbosity", "web_search_options",
 }
 
+// googleCompatNullRejectedMembers are assistant message members Google's
+// OpenAI-compatible endpoint answers HTTP 400 for when they are null, as
+// "Value is not a string: null" or "Value is not a struct: null" (verified
+// November 2026). OpenAI returns refusal as null on every answer, so a
+// replayed OpenAI turn carries it.
+var googleCompatNullRejectedMembers = []string{"refusal", "audio", "function_call"}
+
 // adaptChatRequest rewrites a ChatRequest for Gemini's OpenAI-compatible
 // endpoint: members it rejects are dropped, unsigned Gemini 3+ tool calls get
 // the validator placeholder, and the reasoning effort becomes the top-level
 // "reasoning_effort" string the endpoint reads (not the nested
 // "reasoning": {"effort": "..."} object), clamped to a level the model has.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
+	req = providers.DropNullMessageMembers(req, "assistant", googleCompatNullRejectedMembers...)
 	adapted := *req
 	adapted.ExtraFields = req.ExtraFields.Without(googleCompatRejectedFields...)
 	adapted.Messages = withCompatThoughtSignatures(req.Model, req.Messages)

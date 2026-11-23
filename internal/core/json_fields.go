@@ -342,6 +342,21 @@ func (fields UnknownJSONFields) Only(keys ...string) UnknownJSONFields {
 	return fields.Without(drop...)
 }
 
+// NullMembers returns the named members whose value is null, in one pass, for
+// upstreams that read a member when it has a value but reject it as null. A
+// key stored twice counts when either occurrence is null: which of the two an
+// upstream reads is its parser's choice.
+func (fields UnknownJSONFields) NullMembers(keys ...string) []string {
+	var null []string
+	fields.forEachMember(func(name string, value gjson.Result) bool {
+		if value.Type == gjson.Null && slices.Contains(keys, name) && !slices.Contains(null, name) {
+			null = append(null, name)
+		}
+		return true
+	})
+	return null
+}
+
 // jsonFieldSet answers "is this key a known typed field?" in O(1). Use it via
 // jsonFieldSetOf for the derived struct lists (dozens of fields, checked once
 // per JSON key of every decoded request); the variadic

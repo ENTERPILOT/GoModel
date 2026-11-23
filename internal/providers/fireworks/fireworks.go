@@ -42,11 +42,19 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	})}
 }
 
-// adaptChatRequest maps GoModel's nested reasoning shape (set by the Messages
-// API's thinking and by clients sending reasoning.effort) onto the flat
-// reasoning_effort field: Fireworks rejects "reasoning" but accepts
+// rejectedAssistantMembers are members OpenAI returns on an assistant message
+// that Fireworks' message schema does not define. Replaying such a message
+// fails with 400 "Extra inputs are not permitted" (verified November 2026).
+// refusal, name and reasoning_content are accepted and stay.
+var rejectedAssistantMembers = []string{"annotations", "audio", "function_call"}
+
+// adaptChatRequest drops the members of a replayed assistant message that
+// Fireworks rejects, and maps GoModel's nested reasoning shape (set by the
+// Messages API's thinking and by clients sending reasoning.effort) onto the
+// flat reasoning_effort field: Fireworks rejects "reasoning" but accepts
 // reasoning_effort on its chat models.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
+	req = providers.DropMessageMembers(req, "assistant", rejectedAssistantMembers...)
 	if req == nil || req.Reasoning == nil {
 		return req, nil
 	}

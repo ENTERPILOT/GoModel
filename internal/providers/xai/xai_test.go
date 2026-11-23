@@ -11,6 +11,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -273,4 +274,48 @@ func TestChatCompletion_DropsEmptyReasoningObject(t *testing.T) {
 			assert.NotContains(t, sent, "reasoning_effort")
 		})
 	}
+}
+
+// xAI answers 400 "Only message of role `user` can have a name" to the name
+// OpenAI accepts on system and developer messages.
+func TestChatCompletion_DropsNameFromSystemAndDeveloperMessages(t *testing.T) {
+	const body = `{"model":"grok-4.5","messages":[` +
+		`{"role":"system","name":"example_user","content":"hello"},` +
+		`{"role":"developer","name":"ops","content":"Be brief."},` +
+		`{"role":"user","name":"alice","content":"hi"},` +
+		`{"role":"assistant","name":"bot","content":"hello","refusal":null}]}`
+	want := []any{
+		map[string]any{"role": "system", "content": "hello"},
+		map[string]any{"role": "developer", "content": "Be brief."},
+		map[string]any{"role": "user", "name": "alice", "content": "hi"},
+		map[string]any{"role": "assistant", "name": "bot", "content": "hello", "refusal": nil},
+	}
+
+	t.Run("buffered", func(t *testing.T) {
+		server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+		provider := newTestProvider(server.URL)
+		var req core.ChatRequest
+		require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+		_, err := provider.ChatCompletion(context.Background(), &req)
+		require.NoError(t, err)
+
+		assert.Equal(t, want, capture.Last(t).JSON(t)["messages"])
+		assert.True(t, req.Messages[0].ExtraFields.HasAny("name"), "the caller's request must not change")
+	})
+
+	t.Run("streaming", func(t *testing.T) {
+		server, capture := providertest.SSEServer(t, providertest.ChatChunkSSE)
+		provider := newTestProvider(server.URL)
+		var req core.ChatRequest
+		require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+		stream, err := provider.StreamChatCompletion(context.Background(), &req)
+		require.NoError(t, err)
+		_, err = io.ReadAll(stream)
+		require.NoError(t, err)
+		require.NoError(t, stream.Close())
+
+		assert.Equal(t, want, capture.Last(t).JSON(t)["messages"])
+	})
 }

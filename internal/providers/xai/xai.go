@@ -79,7 +79,14 @@ func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
 // native only to xAI's Responses API, which passes through untouched.
 // Models that do not take a configurable effort reject the parameter
 // outright, so it is dropped for them instead of forwarded.
+//
+// It also drops name from system and developer messages. OpenAI accepts the
+// member there (its few-shot examples use it), while xAI answers 400 "Only
+// message of role `user` can have a name" (verified November 2026).
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
+	for _, role := range []string{"system", "developer"} {
+		req = providers.DropMessageMembers(req, role, "name")
+	}
 	if req == nil || req.Reasoning == nil {
 		return req, nil
 	}
