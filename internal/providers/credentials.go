@@ -497,7 +497,7 @@ func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCre
 		// unreachable base_url would delay the save by the upstream's timeout x
 		// retries and, past the inbound write timeout, silently drop the
 		// response of an already-persisted save.
-		if _, err := s.registry.refreshProviderModels(refreshCtx, name, providerListingTimeout); err != nil {
+		if _, err := s.registry.refreshSavedProviderModels(refreshCtx, name); err != nil {
 			slog.Warn("provider credential saved but its model catalog refresh failed", "provider", name, "error", err)
 		}
 	}

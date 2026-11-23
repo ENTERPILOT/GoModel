@@ -313,6 +313,14 @@ export function aliasTargetLabel(alias) {
   return routing.kind ? routing.targets + " · " + routing.label : routing.targets;
 }
 
+// aliasSearchText is what the list filter matches for a virtual model: every
+// target, including the ones the row has no room to show, and the strategy.
+export function aliasSearchText(alias) {
+  if (!alias) return "";
+  const routing = aliasRouting(alias);
+  return routing.kind ? routing.all + " · " + routing.label : routing.all;
+}
+
 // ---- Routing kind of a virtual model over a real model ----
 
 // maskingRoutingKind says what a redirect whose source is a real model does

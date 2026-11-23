@@ -175,13 +175,14 @@ import {
               {aliasRoute.label}
             </span>
           {:else}
-            <Icon icon={ArrowRight} class="alias-route-icon" />
+            <span class="alias-strategy" role="img" aria-label={m.models_virtual_model()}>
+              <Icon icon={ArrowRight} class="alias-route-icon" />
+            </span>
           {/if}
-          <span
-            class="alias-targets mono"
-            aria-label={m.models_targets() + ": " + aliasRoute.all}
-            title={aliasRoute.all}
-          ><HighlightText text={aliasRoute.targets} needle={modelsStore.filter} /></span>
+          <span class="alias-targets mono" title={aliasRoute.all}>
+            <span aria-hidden="true"><HighlightText text={aliasRoute.targets} needle={modelsStore.filter} /></span>
+            <span class="alias-targets-full">{m.models_targets()}: {aliasRoute.all}</span>
+          </span>
         {/if}
       </div>
       {#if !row.is_alias && row.masking_alias}
@@ -323,6 +324,20 @@ import {
     font-size: 12px;
     color: var(--text-muted);
     white-space: nowrap;
+  }
+
+  /* The full target list, visually hidden: assistive tech reads it in place
+     of the shortened text, which a pointer user expands with the title. */
+  .alias-targets-full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   /* The targets take what is left of the line and cut off with an ellipsis

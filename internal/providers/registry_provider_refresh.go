@@ -24,13 +24,23 @@ type providerRefreshTarget struct {
 // reachable.
 func (r *ModelRegistry) RefreshProviderModels(ctx context.Context, providerSelector string) (int, error) {
 	// Callers bound a targeted refresh themselves (the on-demand refresh and
-	// the failed-provider recheck).
-	return r.refreshProviderModels(ctx, providerSelector, 0)
+	// the failed-provider recheck), and it skips a provider whose availability
+	// probe fails, so a request does not wait on a provider known to be down.
+	return r.refreshProviderModels(ctx, providerSelector, 0, true)
+}
+
+// refreshSavedProviderModels refreshes the one provider a credential save
+// installed, the way a full sweep refreshes it: its listing is bounded by
+// providerListingTimeout, and no availability probe gates it, so a provider
+// that cannot be probed (a Bedrock key without permission to list models, an
+// Ollama server that is down) still serves its configured models.
+func (r *ModelRegistry) refreshSavedProviderModels(ctx context.Context, providerName string) (int, error) {
+	return r.refreshProviderModels(ctx, providerName, providerListingTimeout, false)
 }
 
 // refreshProviderModels is RefreshProviderModels with each provider's listing
-// bounded by a positive listingTimeout, as a full sweep bounds it.
-func (r *ModelRegistry) refreshProviderModels(ctx context.Context, providerSelector string, listingTimeout time.Duration) (int, error) {
+// bounded by a positive listingTimeout, and the availability gate optional.
+func (r *ModelRegistry) refreshProviderModels(ctx context.Context, providerSelector string, listingTimeout time.Duration, requireAvailable bool) (int, error) {
 	providerSelector = strings.TrimSpace(providerSelector)
 	if providerSelector == "" {
 		return 0, core.NewInvalidRequestError("provider selector is required", nil)
@@ -50,12 +60,14 @@ func (r *ModelRegistry) refreshProviderModels(ctx context.Context, providerSelec
 		return 0, core.NewInvalidRequestError(fmt.Sprintf("no provider found for provider: %s", providerSelector), nil)
 	}
 
-	targets, err = r.availableProviderRefreshTargets(ctx, providerSelector, targets)
-	if err != nil {
-		return 0, err
-	}
-	if len(targets) == 0 {
-		return 0, core.NewProviderError(providerSelector, http.StatusServiceUnavailable, "provider is unavailable", nil)
+	if requireAvailable {
+		targets, err = r.availableProviderRefreshTargets(ctx, providerSelector, targets)
+		if err != nil {
+			return 0, err
+		}
+		if len(targets) == 0 {
+			return 0, core.NewProviderError(providerSelector, http.StatusServiceUnavailable, "provider is unavailable", nil)
+		}
 	}
 
 	configuredProviderModels, configuredProviderModelsModes := r.snapshotConfiguredProviderModels()

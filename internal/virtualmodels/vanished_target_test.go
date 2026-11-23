@@ -80,6 +80,17 @@ func TestService_StoredTargetThatVanishedDoesNotBlockWrites(t *testing.T) {
 			wantErr: "nope",
 		},
 		{
+			// Moving the provider between the provider field and the model
+			// text changes what the target may route to, so it is checked
+			// as a new target.
+			name: "respell the missing target",
+			write: func() error {
+				next := []Target{targets[0], {Model: "legacy/old-model"}}
+				return svc.Upsert(ctx, VirtualModel{Source: "cheap", Targets: next, Enabled: true})
+			},
+			wantErr: "target model not found: legacy/old-model",
+		},
+		{
 			name: "rename",
 			write: func() error {
 				return svc.Rename(ctx, "cheap", VirtualModel{Source: "budget", Targets: targets, Enabled: true})

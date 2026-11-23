@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 
@@ -58,4 +59,31 @@ func TestCredentialsService_SaveAndDeleteFetchOnlyTheSavedProvider(t *testing.T)
 	assert.Same(t, other, registry.GetProvider("shared"))
 
 	assert.Zero(t, other.listings.Load(), "saves and the delete listed another provider's models")
+}
+
+// unprobeableProvider fails its availability probe and its model listing, as
+// a Bedrock key that may invoke models but not list them does.
+type unprobeableProvider struct {
+	registryMockProvider
+}
+
+func (p *unprobeableProvider) CheckAvailability(context.Context) error {
+	return errors.New("not authorized to list models")
+}
+
+// A provider that cannot be probed still serves the models it is configured
+// with: a save must not skip them because the probe failed.
+func TestCredentialsService_SaveLoadsConfiguredModelsWhenTheProbeFails(t *testing.T) {
+	ctx := t.Context()
+	saved := &unprobeableProvider{registryMockProvider{err: errors.New("not authorized to list models")}}
+	registry := NewModelRegistry()
+	svc, err := NewCredentialsService(ctx, keyedProviderFactory(map[string]core.Provider{"sk": saved}),
+		registry, newFakeCredentialStore(), nil, config.ResilienceConfig{}, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, svc.Upsert(ctx, ManagedProviderCredential{
+		Name: "saved", Type: "test", APIKeys: []string{"sk"}, Models: []string{"configured"}, Enabled: true,
+	}))
+
+	assert.True(t, registry.Supports("saved/configured"))
 }

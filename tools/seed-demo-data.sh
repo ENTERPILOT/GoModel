@@ -932,12 +932,12 @@ outcomes AS (
       WHEN cache_type IS NOT NULL THEN 'ok'
       WHEN workflow_version_id = '${prefix}-wf-support' AND guardrail_bucket < 120 THEN 'guardrail_blocked'
       WHEN workflow_version_id = '${prefix}-wf-anthropic' AND guardrail_bucket < 180 THEN 'guardrail_blocked'
-      -- The help-desk bot runs out of its budget now and then: on the last
-      -- afternoon of a month, and again right now, so its latest requests are
-      -- the refused ones.
+      -- The help-desk bot runs out of its budget now and then: right now, so
+      -- its latest requests are the refused ones, and, while its budget is
+      -- the monthly one, on the last afternoon of a month.
       WHEN user_path = '/support/helpdesk-bot' AND (
         (day = date(${seed_utc_epoch}, 'unixepoch') AND second_of_day >= (${current_utc_second} + 1) * 9 / 10)
-        OR (strftime('%d', day, '+1 day') = '01' AND second_of_day >= 43200)
+        OR (${exceeded_budget_period} = 2592000 AND strftime('%d', day, '+1 day') = '01' AND second_of_day >= 43200)
       )
       THEN 'budget_blocked'
       -- One provider incident in the window: Groq fails most requests for an

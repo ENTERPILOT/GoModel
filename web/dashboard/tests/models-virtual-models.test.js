@@ -247,6 +247,10 @@ test("aliasRouting names two targets in the row and keeps the full list", () => 
     all: "groq/llama, gemini/flash-lite, bailian/qwen-flash, openai/gpt-luna",
   });
 
+  // The filter still finds the row by a target the row has no room to show.
+  const rows = buildDisplayModels({ models: [], aliases: [pool], virtualModelsAvailable: true });
+  assert.equal(filterDisplayModels(rows, "gpt-luna").length, 1);
+
   // A plain alias has one target and no strategy to show.
   const plain = mapRedirectView({
     source: "default",

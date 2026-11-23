@@ -15,7 +15,7 @@ import {
 import {
   aliasStateClass,
   aliasStateText,
-  aliasTargetLabel,
+  aliasSearchText,
   modelAccessSummary,
 } from "./routing.js";
 
@@ -107,7 +107,7 @@ export function buildDisplayModels({
     rows.push({
       key: "alias:" + alias.name,
       display_name: alias.name,
-      secondary_name: aliasTargetLabel(alias),
+      secondary_name: aliasSearchText(alias),
       provider_name: targetModel ? targetModel.provider_name || "" : "",
       provider_type: targetModel
         ? targetModel.provider_type || alias.provider_type || ""

@@ -648,21 +648,33 @@ func introducedTargets(vm VirtualModel, previous *VirtualModel) []Target {
 	}
 	stored := make(map[string]struct{}, len(previous.Targets))
 	for _, target := range previous.Targets {
-		if selector, err := target.selector(); err == nil {
-			stored[selector.QualifiedModel()] = struct{}{}
+		if key, ok := targetIdentity(target); ok {
+			stored[key] = struct{}{}
 		}
 	}
 	introduced := make([]Target, 0, len(vm.Targets))
 	for _, target := range vm.Targets {
-		selector, err := target.selector()
-		if err != nil {
+		key, ok := targetIdentity(target)
+		if !ok {
 			continue // selector parse errors are reported by validateRedirectStructure
 		}
-		if _, kept := stored[selector.QualifiedModel()]; !kept {
+		if _, kept := stored[key]; !kept {
 			introduced = append(introduced, target)
 		}
 	}
 	return introduced
+}
+
+// targetIdentity keys a target by what it routes to. The provider field is
+// part of it: "team/cheap" as a bare model may name another virtual model,
+// while provider "team" with model "cheap" pins a concrete one, so moving
+// between the two is a new target even though they qualify to the same text.
+func targetIdentity(target Target) (string, bool) {
+	selector, err := target.selector()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(target.Provider) + "\x00" + selector.QualifiedModel(), true
 }
 
 // validateTargetProviders checks every explicitly-named target provider against
