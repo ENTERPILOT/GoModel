@@ -39,7 +39,8 @@ func (r *ModelRegistry) refreshSavedProviderModels(ctx context.Context, provider
 }
 
 // refreshProviderModels is RefreshProviderModels with each provider's listing
-// bounded by a positive listingTimeout, and the availability gate optional.
+// bounded by listingTimeout when it is positive, and the availability gate
+// optional.
 func (r *ModelRegistry) refreshProviderModels(ctx context.Context, providerSelector string, listingTimeout time.Duration, requireAvailable bool) (int, error) {
 	providerSelector = strings.TrimSpace(providerSelector)
 	if providerSelector == "" {
