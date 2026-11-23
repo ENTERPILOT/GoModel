@@ -1,4 +1,4 @@
-// Cost, cache and savings text for the usage stat cards and request log.
+// Cost, cache and savings text for the usage stat cards and usage log.
 // Kept free of Svelte/DOM dependencies so node:test can exercise it.
 
 import { formatCost, formatNumber, formatTokensShort } from "../../lib/utils/format.js";
@@ -16,7 +16,7 @@ function usagePageCacheHits(uncachedSummary, allSummary) {
   return Number.isFinite(hits) && hits > 0 ? hits : 0;
 }
 
-// Requests over the period and filters, scoped exactly like the request log:
+// Requests over the period and filters, scoped exactly like the usage log:
 // cached rows count unless "Hide cached requests" is on.
 export function usagePageTotalRequests(uncachedSummary, allSummary, hideCached) {
   const summary = hideCached ? uncachedSummary : allSummary;

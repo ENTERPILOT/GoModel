@@ -132,6 +132,8 @@ func TestMapStopReason(t *testing.T) {
 		{"context_window_exceeded", brtypes.StopReasonModelContextWindowExceeded, false, "length"},
 		{"tool_use_with_calls", brtypes.StopReasonToolUse, true, "tool_calls"},
 		{"tool_use_no_calls", brtypes.StopReasonToolUse, false, "tool_use"},
+		{"guardrail_intervened", brtypes.StopReasonGuardrailIntervened, false, "content_filter"},
+		{"content_filtered", brtypes.StopReasonContentFiltered, false, "content_filter"},
 		{"unknown", "weird_reason", false, "weird_reason"},
 	}
 	for _, tc := range cases {
@@ -963,4 +965,37 @@ func TestConvertTools_AllowedToolsNarrowsDeclaredTools(t *testing.T) {
 	_, err = convertTools(nil, allowed("required", "tool_a"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "tool_choice.allowed_tools.tools")
+}
+
+func TestBuildConverseParts_StopSequences(t *testing.T) {
+	tests := []struct {
+		name string
+		stop string
+		want []string
+	}{
+		{name: "string", stop: `"END"`, want: []string{"END"}},
+		{name: "array", stop: `["a","b"]`, want: []string{"a", "b"}},
+		{name: "empty items dropped", stop: `["a",""]`, want: []string{"a"}},
+		{name: "null", stop: `null`, want: nil},
+		{name: "malformed", stop: `42`, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &core.ChatRequest{
+				Model:    "anthropic.claude-3-5-haiku-20241022-v1:0",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"stop": json.RawMessage(tt.stop),
+				}),
+			}
+			parts, err := buildConverseParts(req)
+			require.NoError(t, err)
+			if tt.want == nil {
+				assert.Nil(t, parts.infCfg)
+				return
+			}
+			require.NotNil(t, parts.infCfg)
+			assert.Equal(t, tt.want, parts.infCfg.StopSequences)
+		})
+	}
 }

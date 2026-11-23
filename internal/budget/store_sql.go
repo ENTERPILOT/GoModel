@@ -37,6 +37,8 @@ var sqlBudgetsSchema = `CREATE TABLE IF NOT EXISTS budgets (
 		cost_basis TEXT NOT NULL DEFAULT 'provider',
 		period_seconds ` + sqlx.TypeInt64 + ` NOT NULL,
 		amount ` + sqlx.TypeFloat + ` NOT NULL,
+		alert_thresholds TEXT NOT NULL DEFAULT '',
+		alert_revision TEXT NOT NULL DEFAULT '',
 		source TEXT NOT NULL DEFAULT '',
 		last_reset_at ` + sqlx.TypeInt64 + `,
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
@@ -53,20 +55,30 @@ var sqlRest = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_budgets_subject ON budgets(scope, subject)`,
 	`CREATE INDEX IF NOT EXISTS idx_budgets_period_seconds ON budgets(period_seconds)`,
+	sqlBudgetAlertsSchema,
+	`CREATE INDEX IF NOT EXISTS idx_budget_alerts_period_end ON budget_alerts(period_end)`,
 }
 
 // upsertBudgetSQL preserves a manually edited budget against a config re-seed:
 // a column is only overwritten when the incoming or stored row is manual, or
 // when both are config-sourced.
+//
+// alert_revision is written with a new budget and replaced only when the
+// amount or the cost basis changes, so a threshold-only edit keeps it. Every
+// CASE reads the row as it was before the statement.
 const upsertBudgetSQL = `
-	INSERT INTO budgets (scope, subject, per_child, cost_basis, period_seconds, amount, source, last_reset_at, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO budgets (scope, subject, per_child, cost_basis, period_seconds, amount, alert_thresholds, alert_revision, source, last_reset_at, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(scope, subject, period_seconds) DO UPDATE SET
 		per_child = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.per_child ELSE budgets.per_child END,
 		cost_basis = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.cost_basis ELSE budgets.cost_basis END,
 		amount = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.amount ELSE budgets.amount END,
+		alert_thresholds = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.alert_thresholds ELSE budgets.alert_thresholds END,
 		source = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.source ELSE budgets.source END,
-		updated_at = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.updated_at ELSE budgets.updated_at END
+		updated_at = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.updated_at ELSE budgets.updated_at END,
+		alert_revision = CASE WHEN (excluded.source = ? OR budgets.source = ?)
+			AND (excluded.amount <> budgets.amount OR excluded.cost_basis <> budgets.cost_basis)
+			THEN excluded.alert_revision ELSE budgets.alert_revision END
 `
 
 // NewSQLStore creates the budget tables and indexes if needed.
@@ -84,6 +96,11 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 		`ALTER TABLE budgets ADD COLUMN per_child `+sqlx.TypeBool+` NOT NULL DEFAULT FALSE`,
 		// Budgets stored before cost bases existed keep limiting provider cost.
 		`ALTER TABLE budgets ADD COLUMN cost_basis TEXT NOT NULL DEFAULT 'provider'`,
+		// Empty keeps the default alert thresholds.
+		`ALTER TABLE budgets ADD COLUMN alert_thresholds TEXT NOT NULL DEFAULT ''`,
+		// Empty until the budget's amount or cost basis next changes; see
+		// Budget.alertRevision.
+		`ALTER TABLE budgets ADD COLUMN alert_revision TEXT NOT NULL DEFAULT ''`,
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate budgets table: %w", err)
 	}
@@ -95,7 +112,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 
 func (s *SQLStore) ListBudgets(ctx context.Context) ([]Budget, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT scope, subject, per_child, cost_basis, period_seconds, amount, source, last_reset_at, created_at, updated_at
+		SELECT scope, subject, per_child, cost_basis, period_seconds, amount, alert_thresholds, alert_revision, source, last_reset_at, created_at, updated_at
 		FROM budgets
 		ORDER BY scope ASC, subject ASC, period_seconds ASC
 	`)
@@ -400,10 +417,14 @@ func upsertBudgets(ctx context.Context, q sqlx.Querier, budgets []Budget) error 
 			budget.CostBasis,
 			budget.PeriodSeconds,
 			budget.Amount,
+			encodeAlertThresholds(budget.AlertThresholds),
+			budget.Revision,
 			budget.Source,
 			sqlutil.UnixOrNil(budget.LastResetAt),
 			budget.CreatedAt.Unix(),
 			budget.UpdatedAt.Unix(),
+			SourceManual, SourceConfig,
+			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
@@ -421,6 +442,7 @@ func scanSQLBudget(scanner sqlx.Row) (Budget, error) {
 	var budget Budget
 	var lastResetAt *int64
 	var createdAt, updatedAt int64
+	var alertThresholds string
 	if err := scanner.Scan(
 		&budget.Scope,
 		&budget.Subject,
@@ -428,6 +450,8 @@ func scanSQLBudget(scanner sqlx.Row) (Budget, error) {
 		&budget.CostBasis,
 		&budget.PeriodSeconds,
 		&budget.Amount,
+		&alertThresholds,
+		&budget.Revision,
 		&budget.Source,
 		&lastResetAt,
 		&createdAt,
@@ -435,6 +459,7 @@ func scanSQLBudget(scanner sqlx.Row) (Budget, error) {
 	); err != nil {
 		return Budget{}, fmt.Errorf("scan budget: %w", err)
 	}
+	budget.AlertThresholds = decodeAlertThresholds(alertThresholds)
 	budget.LastResetAt = sqlutil.TimeFromUnixPtr(lastResetAt)
 	budget.CreatedAt = sqlutil.TimeFromUnix(createdAt)
 	budget.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)

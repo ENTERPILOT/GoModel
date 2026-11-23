@@ -168,6 +168,9 @@ func ResolveRequestModelWithAuthorizer(
 	if slowdownResolver, ok := resolver.(ModelSlowdownResolver); ok {
 		resolution.Slowdown = slowdownResolver.ResolveSlowdown(ctx, requested, resolvedSelector)
 	}
+	if timeoutsResolver, ok := resolver.(ModelTimeoutsResolver); ok {
+		resolution.Timeouts = timeoutsResolver.ResolveTimeouts(ctx, requested, resolvedSelector, route)
+	}
 	resolution.CacheDerivedSelectors()
 	return resolution, nil
 }
@@ -232,6 +235,19 @@ func ResolveExecutionSelector(
 ) (core.ModelSelector, bool, error) {
 	selector, _, aliasApplied, err := resolveExecutionRoute(ctx, provider, resolver, requested)
 	return selector, aliasApplied, err
+}
+
+// ResolveExecutionRoute is ResolveExecutionSelector that also returns the
+// virtual-model route routing took, outermost first, so per-route settings
+// such as upstream timeouts follow the target that was actually chosen.
+func ResolveExecutionRoute(
+	ctx context.Context,
+	provider core.RoutableProvider,
+	resolver ModelResolver,
+	requested core.RequestedModelSelector,
+) (core.ModelSelector, []string, error) {
+	selector, route, _, err := resolveExecutionRoute(ctx, provider, resolver, requested)
+	return selector, route, err
 }
 
 // resolveExecutionRoute is ResolveExecutionSelector that also returns the

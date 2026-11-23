@@ -42,9 +42,9 @@ type ProviderCredentialsAdmin interface {
 const redactedCredentialValue = "***********"
 
 // upsertProviderCredentialRequest is the admin upsert contract for one
-// provider credential. A value containing only three or more asterisks in
-// api_keys or the service-account fields preserves the stored value at that
-// position.
+// provider credential. A value containing only three or more asterisks in the
+// service-account fields preserves the stored value; api_keys entries follow
+// mergeRedactedAPIKeys.
 type upsertProviderCredentialRequest struct {
 	Name              string   `json:"name"`
 	Type              string   `json:"type"`
@@ -316,15 +316,9 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		return providers.ManagedProviderCredential{}, nil, providerCredentialWriteError(err)
 	}
 
-	var kept []string
-	apiKeys, err := mergeRedactedList(req.APIKeys, currentAPIKeys(current))
+	apiKeys, kept, err := mergeRedactedAPIKeys(req.APIKeys, currentAPIKeys(current))
 	if err != nil {
 		return providers.ManagedProviderCredential{}, nil, err
-	}
-	for i, value := range req.APIKeys {
-		if isRedactedCredentialValue(value) {
-			kept = append(kept, apiKeys[i])
-		}
 	}
 	serviceAccountJSON, err := mergeRedactedValue(providers.CredentialFieldServiceAccountJSON, req.ServiceAccountJSON, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ServiceAccountJSON }))
 	if err != nil {
@@ -403,29 +397,6 @@ func currentField(current *providers.ManagedProviderCredential, get func(provide
 	return get(*current)
 }
 
-// mergeRedactedList resolves all-asterisk placeholders in an ordered secret list
-// (API key rotation) positionally against the stored list. A placeholder past
-// the end of the stored list has nothing to preserve and is rejected, the
-// same rule mergeRedactedMCPHeaders applies to headers.
-func mergeRedactedList(incoming, stored []string) ([]string, error) {
-	if incoming == nil {
-		return nil, nil
-	}
-	merged := make([]string, len(incoming))
-	for i, value := range incoming {
-		if !isRedactedCredentialValue(value) {
-			merged[i] = value
-			continue
-		}
-		if i >= len(stored) {
-			return nil, core.NewInvalidRequestError("api_keys entry is redacted but has no stored value to preserve; provide the real value", nil).
-				WithParam(providers.CredentialFieldAPIKeys)
-		}
-		merged[i] = stored[i]
-	}
-	return merged, nil
-}
-
 // mergeRedactedValue resolves a single all-asterisk placeholder against the
 // stored value. field names the credential field for the error's `param`.
 func mergeRedactedValue(field, incoming, stored string) (string, error) {
@@ -500,7 +471,7 @@ func (h *Handler) providerCredentialView(cred providers.ManagedProviderCredentia
 	resp := providerCredentialViewResponse{
 		Name:               cred.Name,
 		Type:               cred.Type,
-		APIKeys:            redactList(cred.APIKeys),
+		APIKeys:            redactAPIKeys(cred.APIKeys),
 		SessionStickyKeys:  cred.SessionStickyKeys == nil || *cred.SessionStickyKeys,
 		Billable:           cred.Billable == nil || *cred.Billable,
 		BaseURL:            cred.BaseURL,
@@ -563,19 +534,6 @@ func nonZeroTime(t time.Time) *time.Time {
 		return nil
 	}
 	return &t
-}
-
-// redactList keeps the entry count (so operators can see how many keys are
-// configured) but masks every literal value; secret references are kept.
-func redactList(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	redacted := make([]string, len(values))
-	for i, value := range values {
-		redacted[i] = redactCredentialValue(value)
-	}
-	return redacted
 }
 
 // providerCredentialWriteError surfaces store/registry failures as 502,

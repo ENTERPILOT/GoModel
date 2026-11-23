@@ -184,7 +184,7 @@ func TestEnrichRequestLogEntryWithRequestedModelDoesNotPublishBodyBeforePolicy(t
 			Policy: &core.ResolvedWorkflowPolicy{
 				VersionID: "request-log-disabled",
 				Features: core.WorkflowFeatures{
-					Audit: false,
+					RequestLogs: false,
 				},
 			},
 		}

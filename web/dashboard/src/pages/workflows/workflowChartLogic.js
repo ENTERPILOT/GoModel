@@ -765,7 +765,7 @@ export function workflowAsyncNodeClass(visible, highlightPresent, current) {
 function workflowRequestLogFlushed(entry, fallback) {
   if (!entry || !entry._live) return !!fallback;
   const state = String(entry._live_state || "").trim();
-  return !!entry._request_log_flushed || state === "audit.flushed" || state === "audit.detail";
+  return !!entry._request_log_flushed || state === "request_log.flushed" || state === "request_log.detail";
 }
 
 function workflowUsageFlushed(entry, fallback) {
@@ -786,7 +786,7 @@ function workflowLiveUsagePending(entry) {
 function workflowLiveRequestLogPending(entry, runtime) {
   if (!entry || !entry._live || workflowRequestLogFlushed(entry, false)) return false;
   const state = String(entry._live_state || "").trim();
-  return state === "audit.completed" || !!(runtime && Number.isFinite(runtime.statusCode));
+  return state === "request_log.completed" || !!(runtime && Number.isFinite(runtime.statusCode));
 }
 
 function workflowLiveCurrentStep(entry, runtime, features) {
@@ -849,7 +849,7 @@ function workflowChartModel(source, runtime, options, caps) {
     runtime,
   );
   const showUsage = !!features.usage;
-  const showRequestLog = forceRequestLog || !!features.audit;
+  const showRequestLog = forceRequestLog || !!features.request_logs;
   const showAsync = !!config.forceAsync || !!(showUsage || showRequestLog);
   const showFailover = !!features.failover || workflowRuntimeUsedFailover(runtime);
   const workflowID = workflowChartWorkflowID(source, config.entry);
@@ -943,7 +943,7 @@ export function workflowRequestLogChart(entry, source, caps) {
       ? workflowSourceFeatures(source, caps)
       : {
           cache: false,
-          audit: false,
+          request_logs: false,
           usage: false,
           budget: false,
           guardrails: false,

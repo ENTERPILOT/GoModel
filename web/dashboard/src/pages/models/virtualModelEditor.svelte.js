@@ -35,6 +35,7 @@ import {
   removePrimaryTarget as removePrimaryTargetPure,
   virtualModelTargetOptions,
   vmFormParamsValid,
+  vmFormTimeoutsValid,
   vmFormPopulatedTargetCount,
   vmFormTargetCount,
   vmRoutingSummary,
@@ -320,6 +321,8 @@ class VirtualModelEditorStore {
       ).join("\n"),
       description: alias.description || "",
       slowdown: alias.slowdown ?? "",
+      timeout: alias.timeout ?? "",
+      response_header_timeout: alias.response_header_timeout ?? "",
       reasoning_effort: alias.reasoning_effort || "",
       params: formatParamsJSON(alias.params),
       default_params: formatParamsJSON(alias.default_params),
@@ -388,6 +391,8 @@ class VirtualModelEditorStore {
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
       slowdown: override && override.slowdown != null ? override.slowdown : "",
+      timeout: (override && override.timeout) ?? "",
+      response_header_timeout: (override && override.response_header_timeout) ?? "",
       reasoning_effort: (override && override.reasoning_effort) || "",
       params: formatParamsJSON(override && override.params),
       default_params: formatParamsJSON(override && override.default_params),
@@ -450,6 +455,11 @@ class VirtualModelEditorStore {
   async submitVirtualModelForm() {
     if (this.vmFormManaged) {
       this.vmFormError = m.models_managed_cannot_edit();
+      return;
+    }
+
+    if (!vmFormTimeoutsValid(this.vmForm)) {
+      this.vmFormError = m.models_timeout_invalid();
       return;
     }
 

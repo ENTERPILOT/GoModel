@@ -44,6 +44,12 @@ type upsertVirtualModelRequest struct {
 	Description string   `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
 	Slowdown *float64 `json:"slowdown,omitempty"`
+	// Timeout overrides HTTP_TIMEOUT, in seconds (1 to 86400), for every
+	// upstream attempt of a request through this row. Omitted inherits.
+	Timeout *int `json:"timeout,omitempty"`
+	// ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in
+	// seconds (1 to 86400), for every upstream attempt. Omitted inherits.
+	ResponseHeaderTimeout *int `json:"response_header_timeout,omitempty"`
 	// ReasoningEffort forces the reasoning effort sent upstream ("none",
 	// "minimal", "low", "medium", "high", "xhigh", or "max"); empty keeps the
 	// client's value.
@@ -187,19 +193,21 @@ func (h *Handler) DeleteVirtualModel(c *echo.Context) error {
 // defaults to true, preserving the existing value when omitted.
 func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelRequest) (virtualmodels.VirtualModel, error) {
 	vm := virtualmodels.VirtualModel{
-		Source:          source,
-		Strategy:        strings.TrimSpace(req.Strategy),
-		StrategyPlugin:  strings.TrimSpace(req.StrategyPlugin),
-		StrategyConfig:  req.StrategyConfig,
-		SessionAffinity: req.SessionAffinity,
-		Failover:        req.Failover,
-		UserPaths:       req.UserPaths,
-		Description:     strings.TrimSpace(req.Description),
-		Slowdown:        req.Slowdown,
-		ReasoningEffort: req.ReasoningEffort,
-		Params:          req.Params,
-		DefaultParams:   req.DefaultParams,
-		Enabled:         h.virtualModels.ResolveUpsertEnabled(source, req.OldSource, req.Enabled),
+		Source:                source,
+		Strategy:              strings.TrimSpace(req.Strategy),
+		StrategyPlugin:        strings.TrimSpace(req.StrategyPlugin),
+		StrategyConfig:        req.StrategyConfig,
+		SessionAffinity:       req.SessionAffinity,
+		Failover:              req.Failover,
+		UserPaths:             req.UserPaths,
+		Description:           strings.TrimSpace(req.Description),
+		Slowdown:              req.Slowdown,
+		Timeout:               req.Timeout,
+		ResponseHeaderTimeout: req.ResponseHeaderTimeout,
+		ReasoningEffort:       req.ReasoningEffort,
+		Params:                req.Params,
+		DefaultParams:         req.DefaultParams,
+		Enabled:               h.virtualModels.ResolveUpsertEnabled(source, req.OldSource, req.Enabled),
 	}
 
 	targets, err := buildVirtualModelTargets(req)

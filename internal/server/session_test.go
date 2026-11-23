@@ -135,7 +135,7 @@ func TestSessionCapturePublishesSessionBeforeDownstreamHandler(t *testing.T) {
 		require.Len(t, publisher.events, 1)
 		got := publisher.events[0]
 		require.Equal(t, requestlog.LiveEventRequestLogUpdated, got.eventType)
-		require.Equal(t, "session-live", got.sessionID, "live event = %#v, want audit.updated with detected session", got)
+		require.Equal(t, "session-live", got.sessionID, "live event = %#v, want request_log.updated with detected session", got)
 		require.Equal(t, "session-live", entry.SessionID)
 
 		return nil

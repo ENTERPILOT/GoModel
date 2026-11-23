@@ -372,8 +372,8 @@ export function providerCredentialModelsLabel(row) {
   return m.providers_models_count({ count: models.length });
 }
 
-// providerCredentialKeysToRows converts a stored api_keys array (usually all
-// "***********" masks) into editable {value} rows.
+// providerCredentialKeysToRows converts a stored api_keys array (usually masks
+// like "sk-pr***********7Qa#N", N naming the stored key) into editable rows.
 export function providerCredentialKeysToRows(apiKeys) {
   return (Array.isArray(apiKeys) ? apiKeys : []).map((value) => ({
     value: String(value || ""),
@@ -381,8 +381,8 @@ export function providerCredentialKeysToRows(apiKeys) {
 }
 
 // providerCredentialKeyRowsToArray flattens editor rows back into the wire
-// array. Values are NOT trimmed: an untouched "***********" mask must be sent
-// verbatim so the server preserves the stored key at that position.
+// array. Values are NOT trimmed: an untouched mask must be sent
+// verbatim so the server keeps stored key N, even after rows are removed.
 export function providerCredentialKeyRowsToArray(rows) {
   return (Array.isArray(rows) ? rows : []).map((row) =>
     String((row && row.value) || ""),

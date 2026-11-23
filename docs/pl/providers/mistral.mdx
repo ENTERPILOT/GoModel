@@ -32,7 +32,7 @@ Dostawca `mistral` w GoModel konwertuje go na standard automatycznie:
 (`choices[].message`). Nie wymaga to żadnej konfiguracji po stronie klienta. Typy fragmentów
 bez standardowego odpowiednika w czacie — na przykład fragmenty `reference` z cytowań
 Mistrala po wywołaniach narzędzi — są zachowywane w członie dostawcy `mistral_content_chunks`,
-więc żadne dane z upstreamu nie giną. Zdarzenia SSE powyżej 16 MiB są również przekazywane bez konwersji.
+więc żadne dane z upstreamu nie giną (zobacz [Cytowania](#cytowania)). Zdarzenia SSE powyżej 16 MiB są również przekazywane bez konwersji.
 
 Poziom rozumowania wyślij standardowym parametrem zagnieżdżonym; GoModel odwzorowuje go na
 płaskie `reasoning_effort` Mistrala:
@@ -69,6 +69,41 @@ popularne pola OpenAI, zamiast pozwolić, by żądanie się nie powiodło:
 - Wiadomości zachowują tylko człony, które Mistral akceptuje dla ich roli: na przykład `name`
   zostaje tylko w wiadomościach narzędzi, a odesłane w turach asystenta `refusal` czy
   `annotations` są pomijane.
+
+## Cytowania
+
+Gdy wynik narzędzia dostarcza źródła, Mistral cytuje je fragmentami `reference` umieszczonymi
+między fragmentami tekstu odpowiedzi; każdy z nich wymienia Twoje własne identyfikatory źródeł
+(zobacz [przewodnik Mistrala po cytowaniach](https://docs.mistral.ai/inference/conversations/citations)).
+Adnotacje cytowań OpenAI wymagają adresu URL albo identyfikatora pliku, których fragment
+`reference` nie zawiera, więc GoModel zwraca te fragmenty bez zmian, zamiast je konwertować:
+
+| API | Gdzie są fragmenty |
+| --- | --- |
+| Chat Completions | `mistral_content_chunks` w `choices[].message`; w strumieniu w tym `choices[].delta`, w którym dany fragment nadszedł |
+| Responses | `extra_content.mistral.content_chunks` w elemencie wyjściowym `message` asystenta; w strumieniu w zdarzeniu `response.output_item.done` tego elementu i w końcowym wyjściu `response.completed` |
+
+```json
+{
+  "type": "message",
+  "role": "assistant",
+  "status": "completed",
+  "content": [
+    { "type": "output_text", "text": "Paris is the capital of France.", "annotations": [] }
+  ],
+  "extra_content": {
+    "mistral": {
+      "content_chunks": [{ "type": "reference", "reference_ids": [0] }]
+    }
+  }
+}
+```
+
+Fragmenty są w kolejności, w jakiej wysłał je Mistral. Ich pozycja w tekście nie jest
+zachowywana, a `annotations` pozostaje puste. W Responses leżą w
+[`extra_content`](/pl/advanced/extra-content), bo klienci odsyłają elementy wyjściowe bez zmian,
+a OpenAI odrzuca element z nieznanym członem: GoModel usuwa `extra_content.mistral` z każdego
+żądania, więc odesłany element jest bezpieczny u każdego dostawcy.
 
 ## Konfiguracja
 

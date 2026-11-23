@@ -168,6 +168,21 @@ and failover both return empty increments the counter twice.
 
 Labels: `provider`, `model`, `reason`.
 
+### `gomodel_budget_alerts_fired_total`
+
+Counter, labels `scope` and `threshold`. Budget alerts this instance raised:
+a budget reached an alert threshold and this instance won the claim in
+storage. Incremented by `internal/alerts.Dispatcher.Notify`, not by a hook.
+
+### `gomodel_budget_alert_delivery_failures_total`
+
+Counter, label `destination` (`webhook`, or an `ext.AlertSink` name; the
+dispatcher refuses a sink named `webhook`, unnamed, or named like another).
+Alerts a destination did not receive: a webhook that failed after its retries,
+a sink that returned an error or panicked, a sink that had not returned 2 s
+after its context ended, every alert for that sink until the call returns, an
+alert dropped on a full queue, and one abandoned when the dispatcher closed.
+
 ## Token and Cost Metrics
 
 These do not come from the llmclient hooks: a hook sees the provider call, not

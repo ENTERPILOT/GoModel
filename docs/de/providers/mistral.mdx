@@ -29,7 +29,8 @@ Der `mistral`-Provider von GoModel konvertiert sie automatisch in die Standardfo
 – auf Streaming- (`choices[].delta`) genauso wie auf nicht-Streaming-Responses
 (`choices[].message`). Es ist keine Client-seitige Konfiguration nötig. Chunk-Typen ohne
 standardäquivalente Chat-Form — etwa Mistral-`reference`-Chunks aus Zitierungen nach Tool-Aufrufen —
-werden in einem Vendor-Member `mistral_content_chunks` erhalten, damit keine Upstream-Daten verloren gehen.
+werden in einem Vendor-Member `mistral_content_chunks` erhalten, damit keine Upstream-Daten verloren gehen
+(siehe [Zitierungen](#zitierungen)).
 SSE-Events über 16 MiB werden ebenfalls unverändert weitergeleitet, ohne konvertiert zu werden.
 
 Senden Sie den Aufwand (Effort) mit dem standardmäßigen verschachtelten Parameter; GoModel
@@ -69,6 +70,42 @@ gängige OpenAI-Felder an, statt den Request scheitern zu lassen:
 - Nachrichten behalten nur die Member, die Mistral für ihre Rolle akzeptiert: `name` bleibt zum
   Beispiel nur auf Tool-Nachrichten, und auf Assistant-Turns zurückgespielte `refusal`- oder
   `annotations`-Member werden verworfen.
+
+## Zitierungen
+
+Wenn ein Tool-Ergebnis Referenzen liefert, zitiert Mistral sie mit `reference`-Chunks zwischen
+den Text-Chunks der Antwort; jeder Chunk nennt Ihre eigenen Referenz-IDs (siehe Mistrals
+[Citations-Guide](https://docs.mistral.ai/inference/conversations/citations)). Die
+Zitat-Annotationen von OpenAI brauchen eine URL oder eine Datei-ID, die ein Reference-Chunk
+nicht enthält. GoModel gibt die Chunks deshalb unverändert zurück, statt sie umzuwandeln:
+
+| API | Wo die Chunks stehen |
+| --- | --- |
+| Chat Completions | `mistral_content_chunks` auf `choices[].message`; im Stream auf dem `choices[].delta`, in dem der jeweilige Chunk ankam |
+| Responses | `extra_content.mistral.content_chunks` auf dem Assistant-`message`-Output-Item; im Stream auf dem `response.output_item.done`-Event des Items und in der abschließenden `response.completed`-Ausgabe |
+
+```json
+{
+  "type": "message",
+  "role": "assistant",
+  "status": "completed",
+  "content": [
+    { "type": "output_text", "text": "Paris is the capital of France.", "annotations": [] }
+  ],
+  "extra_content": {
+    "mistral": {
+      "content_chunks": [{ "type": "reference", "reference_ids": [0] }]
+    }
+  }
+}
+```
+
+Die Chunks stehen in der Reihenfolge, in der Mistral sie gesendet hat. Ihre Position im Text
+bleibt nicht erhalten, und `annotations` bleibt leer. In Responses liegen sie in
+[`extra_content`](/de/advanced/extra-content), weil Clients Output-Items unverändert
+zurückspielen und OpenAI ein Item mit einem unbekannten Member ablehnt: GoModel entfernt
+`extra_content.mistral` aus jedem Request, ein zurückgespieltes Item ist also bei jedem
+Provider unproblematisch.
 
 ## Konfiguration
 

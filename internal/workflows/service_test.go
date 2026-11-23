@@ -312,7 +312,7 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 				Name:     "global",
 				Payload: Payload{
 					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false},
 				},
 			},
 			{
@@ -324,7 +324,7 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 				Name:     "provider",
 				Payload: Payload{
 					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+					Features:      FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 				},
 			},
 			{
@@ -336,7 +336,7 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 				Name:     "provider-model",
 				Payload: Payload{
 					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: false, Audit: false, Usage: true, Guardrails: false},
+					Features:      FeatureFlags{Cache: false, RequestLogs: false, Usage: true, Guardrails: false},
 				},
 			},
 			{
@@ -348,7 +348,7 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 				Name:     "path-team",
 				Payload: Payload{
 					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: false, Usage: true, Guardrails: false},
+					Features:      FeatureFlags{Cache: true, RequestLogs: false, Usage: true, Guardrails: false},
 				},
 			},
 			{
@@ -360,7 +360,7 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 				Name:     "provider-model-path",
 				Payload: Payload{
 					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: false, Audit: false, Usage: false, Guardrails: false},
+					Features:      FeatureFlags{Cache: false, RequestLogs: false, Usage: false, Guardrails: false},
 				},
 			},
 		},
@@ -443,7 +443,7 @@ func TestServiceEnsureDefaultGlobal_CreatesWhenMissing(t *testing.T) {
 		Name:     "default-global",
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+			Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false},
 		},
 	})
 	require.NoError(t, err)
@@ -472,7 +472,7 @@ func TestServiceEnsureDefaultGlobal_ReconcilesManagedDefault(t *testing.T) {
 				Description: ManagedDefaultGlobalDescription,
 				Payload: Payload{
 					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+					Features:      FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 				},
 				WorkflowHash: "stale-hash",
 			},
@@ -489,7 +489,7 @@ func TestServiceEnsureDefaultGlobal_ReconcilesManagedDefault(t *testing.T) {
 		Description: ManagedDefaultGlobalDescription,
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+			Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false},
 		},
 	})
 	require.NoError(t, err)
@@ -513,7 +513,7 @@ func TestServiceEnsureDefaultGlobal_PreservesCustomGlobal(t *testing.T) {
 				Description: "User managed",
 				Payload: Payload{
 					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+					Features:      FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 				},
 				WorkflowHash: "custom-hash",
 			},
@@ -530,7 +530,7 @@ func TestServiceEnsureDefaultGlobal_PreservesCustomGlobal(t *testing.T) {
 		Description: ManagedDefaultGlobalDescription,
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+			Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false},
 		},
 	})
 	require.NoError(t, err)
@@ -552,7 +552,7 @@ func TestServiceEnsureDefaultGlobal_LoadsPreservedCustomGlobalIntoSnapshot(t *te
 				Description: "User managed",
 				Payload: Payload{
 					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+					Features:      FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 				},
 				WorkflowHash: "custom-hash",
 			},
@@ -567,7 +567,7 @@ func TestServiceEnsureDefaultGlobal_LoadsPreservedCustomGlobalIntoSnapshot(t *te
 		Description: ManagedDefaultGlobalDescription,
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+			Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false},
 		},
 	})
 	require.NoError(t, err)
@@ -591,7 +591,7 @@ func TestServiceEnsureDefaultGlobal_ValidatesBeforeStoreMutation(t *testing.T) {
 		Description: ManagedDefaultGlobalDescription,
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+			Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false},
 		},
 	})
 	require.Error(t, err)
@@ -636,10 +636,10 @@ func TestServiceRefresh_CompiledChainsFollowChatCompleterSwap(t *testing.T) {
 				Payload: Payload{
 					SchemaVersion: 2,
 					Features: FeatureFlags{
-						Cache:      false,
-						Audit:      true,
-						Usage:      true,
-						Guardrails: true,
+						Cache:       false,
+						RequestLogs: true,
+						Usage:       true,
+						Guardrails:  true,
 					},
 					Steps: []Step{
 						{Ref: "privacy", Phase: PhasePrompt, Step: 10},
@@ -800,7 +800,7 @@ func assertChainRewrite(t *testing.T, chain *plugins.Chain, want string) {
 func TestServiceCreate_RefreshesSnapshot(t *testing.T) {
 	store := &staticStore{
 		versions: []Version{
-			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
+			globalVersionV1(FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false}),
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
@@ -814,7 +814,7 @@ func TestServiceCreate_RefreshesSnapshot(t *testing.T) {
 		Name:     "openai",
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+			Features:      FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 		},
 	})
 	require.NoError(t, err)
@@ -829,14 +829,14 @@ func TestServiceCreate_RefreshesSnapshot(t *testing.T) {
 func TestServiceListViews_IncludesEffectiveFeatures(t *testing.T) {
 	store := &staticStore{
 		versions: []Version{
-			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true}),
+			globalVersionV1(FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: true}),
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.WorkflowFeatures{
-		Cache:      false,
-		Audit:      true,
-		Usage:      true,
-		Guardrails: false,
+		Cache:       false,
+		RequestLogs: true,
+		Usage:       true,
+		Guardrails:  false,
 	}))
 	require.NoError(t, err)
 	err = service.Refresh(context.Background())
@@ -862,7 +862,7 @@ func TestServiceListViews_IncludesEffectiveFeatures(t *testing.T) {
 func TestServiceListViews_AnnotatesCompileFailuresPerRow(t *testing.T) {
 	store := &staticStore{
 		versions: []Version{
-			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
+			globalVersionV1(FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false}),
 			{
 				ID:       "provider-v1",
 				Scope:    Scope{Provider: "openai"},
@@ -872,7 +872,7 @@ func TestServiceListViews_AnnotatesCompileFailuresPerRow(t *testing.T) {
 				Name:     "broken-provider",
 				Payload: Payload{
 					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+					Features:      FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 				},
 			},
 		},
@@ -903,7 +903,7 @@ func TestServiceGetView_ReturnsCompileFailureAsView(t *testing.T) {
 			ScopeKey: "provider:openai",
 			Version:  1,
 			Name:     "stale-guardrail",
-			Payload:  Payload{SchemaVersion: 1, Features: FeatureFlags{Audit: true}},
+			Payload:  Payload{SchemaVersion: 1, Features: FeatureFlags{RequestLogs: true}},
 		}},
 	}
 	service, err := NewService(store, &versionFailingCompiler{
@@ -927,7 +927,7 @@ func TestViewScopeSpecificity_PathExceedsProvider(t *testing.T) {
 func TestServiceDeactivate_RefreshesSnapshot(t *testing.T) {
 	store := &staticStore{
 		versions: []Version{
-			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
+			globalVersionV1(FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false}),
 			{
 				ID:       "provider-v1",
 				Scope:    Scope{Provider: "openai"},
@@ -937,7 +937,7 @@ func TestServiceDeactivate_RefreshesSnapshot(t *testing.T) {
 				Name:     "openai",
 				Payload: Payload{
 					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+					Features:      FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 				},
 			},
 		},
@@ -958,7 +958,7 @@ func TestServiceDeactivate_RefreshesSnapshot(t *testing.T) {
 func TestServiceDeactivate_RejectsGlobalWorkflow(t *testing.T) {
 	store := &staticStore{
 		versions: []Version{
-			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
+			globalVersionV1(FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false}),
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
@@ -974,7 +974,7 @@ func TestServiceDeactivate_RejectsGlobalWorkflow(t *testing.T) {
 func TestServiceDeactivate_AllowsPathScopedWorkflow(t *testing.T) {
 	store := &staticStore{
 		versions: []Version{
-			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
+			globalVersionV1(FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false}),
 			{
 				ID:       "path-v1",
 				Scope:    Scope{UserPath: "/team/a"},
@@ -984,7 +984,7 @@ func TestServiceDeactivate_AllowsPathScopedWorkflow(t *testing.T) {
 				Name:     "path-only",
 				Payload: Payload{
 					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false},
 				},
 			},
 		},
@@ -1001,7 +1001,7 @@ func TestServiceDeactivate_AllowsPathScopedWorkflow(t *testing.T) {
 func TestServiceCreateWaitsForInFlightRefreshBeforePersisting(t *testing.T) {
 	store := &concurrentStore{
 		versions: []Version{
-			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
+			globalVersionV1(FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false}),
 		},
 		createCalled: make(chan struct{}, 1),
 	}
@@ -1035,7 +1035,7 @@ func TestServiceCreateWaitsForInFlightRefreshBeforePersisting(t *testing.T) {
 			Name:     "openai",
 			Payload: Payload{
 				SchemaVersion: 1,
-				Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+				Features:      FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 			},
 		})
 		createDone <- createResult{version: version, err: err}
@@ -1064,7 +1064,7 @@ func TestServiceCreateWaitsForInFlightRefreshBeforePersisting(t *testing.T) {
 func TestServiceCreateRejectsEmptyCompiledPreviewBeforePersisting(t *testing.T) {
 	store := &concurrentStore{
 		versions: []Version{
-			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
+			globalVersionV1(FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false}),
 		},
 		createCalled: make(chan struct{}, 1),
 	}
@@ -1079,7 +1079,7 @@ func TestServiceCreateRejectsEmptyCompiledPreviewBeforePersisting(t *testing.T) 
 		Name:     "openai",
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+			Features:      FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 		},
 	})
 	require.Error(t, err)
@@ -1097,7 +1097,7 @@ func TestServiceCreateRejectsEmptyCompiledPreviewBeforePersisting(t *testing.T) 
 func TestServiceCreateRefreshIgnoresRequestContextCancellationAfterPersist(t *testing.T) {
 	store := &contextCancelingStore{
 		versions: []Version{
-			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
+			globalVersionV1(FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false}),
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
@@ -1114,7 +1114,7 @@ func TestServiceCreateRefreshIgnoresRequestContextCancellationAfterPersist(t *te
 		Name:     "openai",
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+			Features:      FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 		},
 	})
 	require.NoError(t, err)
@@ -1129,7 +1129,7 @@ func TestServiceCreateRefreshIgnoresRequestContextCancellationAfterPersist(t *te
 func TestServiceCreateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testing.T) {
 	store := &refreshFailingStore{
 		versions: []Version{
-			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
+			globalVersionV1(FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false}),
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
@@ -1143,7 +1143,7 @@ func TestServiceCreateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testin
 		Name:     "openai",
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+			Features:      FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 		},
 	})
 	require.NoError(t, err)
@@ -1158,7 +1158,7 @@ func TestServiceCreateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testin
 func TestServiceDeactivateRefreshIgnoresRequestContextCancellationAfterPersist(t *testing.T) {
 	store := &contextCancelingStore{
 		versions: []Version{
-			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
+			globalVersionV1(FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false}),
 			{
 				ID:       "provider-v1",
 				Scope:    Scope{Provider: "openai"},
@@ -1168,7 +1168,7 @@ func TestServiceDeactivateRefreshIgnoresRequestContextCancellationAfterPersist(t
 				Name:     "openai",
 				Payload: Payload{
 					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+					Features:      FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 				},
 			},
 		},
@@ -1192,7 +1192,7 @@ func TestServiceDeactivateRefreshIgnoresRequestContextCancellationAfterPersist(t
 func TestServiceDeactivateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testing.T) {
 	store := &refreshFailingStore{
 		versions: []Version{
-			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
+			globalVersionV1(FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false}),
 			{
 				ID:       "provider-v1",
 				Scope:    Scope{Provider: "openai"},
@@ -1202,7 +1202,7 @@ func TestServiceDeactivateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *te
 				Name:     "openai",
 				Payload: Payload{
 					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
+					Features:      FeatureFlags{Cache: false, RequestLogs: true, Usage: true, Guardrails: false},
 				},
 			},
 		},

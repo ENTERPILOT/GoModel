@@ -195,6 +195,11 @@ export function mapRedirectView(view) {
     failover: view.failover !== false,
     description: view.description || "",
     slowdown: view.slowdown == null ? null : Number(view.slowdown),
+    timeout: view.timeout == null ? null : Number(view.timeout),
+    response_header_timeout:
+      view.response_header_timeout == null
+        ? null
+        : Number(view.response_header_timeout),
     reasoning_effort: view.reasoning_effort || "",
     params: paramsObject(view.params),
     default_params: paramsObject(view.default_params),
@@ -227,6 +232,11 @@ export function splitVirtualModelViews(views) {
         user_paths: Array.isArray(view.user_paths) ? view.user_paths : [],
         description: view.description || "",
         slowdown: view.slowdown == null ? null : Number(view.slowdown),
+        timeout: view.timeout == null ? null : Number(view.timeout),
+        response_header_timeout:
+          view.response_header_timeout == null
+            ? null
+            : Number(view.response_header_timeout),
         reasoning_effort: view.reasoning_effort || "",
         params: paramsObject(view.params),
         default_params: paramsObject(view.default_params),

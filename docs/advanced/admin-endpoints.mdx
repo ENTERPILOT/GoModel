@@ -840,7 +840,14 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   `service_account_json_base64` to a run of asterisks (`***********`), and
   mask any password in `proxy_url`. Sending back any value of three or more
   asterisks keeps the stored one, so an edit never has to repeat a secret; a
-  redacted entry with no stored value behind it returns `400`. A `proxy_url`
+  redacted entry with no stored value behind it returns `400`. A masked API
+  key shows its first 5 and last 3 characters (keys of 20 or more
+  characters) and names the stored key it stands for:
+  `sk-pr***********7Qa#2` is the second, so entries can be removed or
+  reordered. Slots refer to the stored list at save time: a mask whose
+  characters no longer match its stored key returns `400`. That check misses
+  fully masked short keys and keys that share their visible characters, so
+  reload before saving after concurrent edits. A bare mask keeps the stored key at its own position. A `proxy_url`
   sent back with its password still masked (`xxxxx`) keeps the stored
   password, also when the scheme, host, port, or username changes. A value
   made only of secret references is shown as is.
@@ -868,6 +875,13 @@ available when budget management is enabled.
 These operations are not global per period. For the path-scoped `PUT` and
 `DELETE` routes, URL-encode `user_path`; see [Budgets](/features/budgets) for
 the request shape.
+
+`GET /admin/budgets` returns each budget with its status and, once 5% of its
+period has elapsed, `projected_spend`. `projected_exhaustion_at` is added only
+while the budget is projected to run out before the period ends and is not yet
+spent; a per-child template has neither field. The top-level `alerts` object reports whether [budget alerts](/features/budgets#alerts)
+are `enabled` and their `default_thresholds`; a budget with its own carries
+`alert_thresholds`, which `PUT` accepts.
 
 See [Budgets](/features/budgets) for request examples and enforcement behavior.
 
@@ -1117,9 +1131,24 @@ The persisted request-log and usage tables remain the source of truth. If the
 browser's cursor falls outside the replay buffer, the stream sends a reset event
 and the dashboard reloads from the normal REST endpoints.
 
+Request log events are named `request_log.started`, `request_log.updated`,
+`request_log.stream`, `request_log.completed`, `request_log.failed`,
+`request_log.flushed` and `request_log.removed`, and usage events `usage.*`.
+The `types` query parameter picks the kinds a stream receives:
+`types=request_log,usage`.
+
+Request log events were named `audit.*` before the request log was renamed.
+Those names are deprecated but still served. A stream that lists `request_log`
+in `types` gets the new names. A stream that lists only the old `audit` alias,
+or passes no `types`, keeps getting `audit.*` (as the SSE event name, in the
+`type` field and in the payload's `_live_state`) until the deprecated names are
+removed; no removal date is set yet. Pass `types=request_log,usage` to move to
+the new names.
+
 With more than one replica on a shared database, the stream also carries the
-requests the other replicas served, as `audit.flushed` and `usage.flushed`
-events once those replicas have persisted them, typically within 7 seconds.
+requests the other replicas served, as `request_log.flushed` (`audit.flushed` on
+a stream that still gets the old names) and `usage.flushed` events once those
+replicas have persisted them, typically within 7 seconds.
 Their payload carries `_remote_written_at`, the writing replica's stamp in unix
 microseconds. `GET /admin/request-logs`, `/admin/request-logs/sessions` and
 `/admin/usage/log` return `as_of`, when the server read the page on the same

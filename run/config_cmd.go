@@ -18,13 +18,17 @@ const configCommand = "config"
 
 func configUsage(productName string) string {
 	return fmt.Sprintf(`Usage:
-  %[1]s config export > gomodel-export.yaml
+  %[1]s config export [--include-defaults] > gomodel-export.yaml
 
 Prints the configuration a gateway started now would run with as a
 config.yaml: the settings from defaults, config.yaml, and environment
 variables, and the objects saved in the dashboard. Load it as
 config/config.yaml to run the same gateway from a file. Objects with no
 config.yaml form are listed in the file's header.
+
+Settings that hold their default value are left out, so the file shows only
+what differs from the defaults. --include-defaults writes them too, except
+those empty by default.
 
 Secrets are not printed. A secret is written as the reference it was
 configured with (${env:...}, ${file:...}, ${vault:...}), or as ${env:NAME}
@@ -38,43 +42,51 @@ config.yaml it reads: the shell empties that file before the command starts.
 `, productName)
 }
 
-// parseConfigArgs parses `config <action> ...`. It reports false with a nil
+// configExportOptions holds the flags of `config export`.
+type configExportOptions struct {
+	// IncludeDefaults also writes the settings that hold their default value.
+	IncludeDefaults bool
+}
+
+// parseConfigArgs parses `config <action> ...`. It returns nil with a nil
 // error when help was printed.
-func parseConfigArgs(productName string, args []string, stdout, stderr io.Writer) (bool, error) {
+func parseConfigArgs(productName string, args []string, stdout, stderr io.Writer) (*configExportOptions, error) {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, configUsage(productName))
-		return false, errors.New("config: missing action (export)")
+		return nil, errors.New("config: missing action (export)")
 	}
 	switch args[0] {
 	case "export":
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, configUsage(productName))
-		return false, nil
+		return nil, nil
 	default:
 		fmt.Fprint(stderr, configUsage(productName))
-		return false, fmt.Errorf("config: unknown action %q (export)", args[0])
+		return nil, fmt.Errorf("config: unknown action %q (export)", args[0])
 	}
 
 	flags := flag.NewFlagSet(productName+" config export", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() { fmt.Fprint(stderr, configUsage(productName)) }
+	var opts configExportOptions
+	flags.BoolVar(&opts.IncludeDefaults, "include-defaults", false, "Also write the settings that hold their default value")
 	if err := flags.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return false, nil
+			return nil, nil
 		}
-		return false, err
+		return nil, err
 	}
 	if flags.NArg() > 0 {
-		return false, fmt.Errorf("config export: unexpected arguments: %v", flags.Args())
+		return nil, fmt.Errorf("config export: unexpected arguments: %v", flags.Args())
 	}
-	return true, nil
+	return &opts, nil
 }
 
 // runConfigExport loads the configuration the way a gateway start does,
 // including the distribution's SetupConfig hook (which may register secret
 // schemes and a key wrapper), then prints the export to stdout. Logs go to
 // stderr, so the output can be redirected to a file as is.
-func runConfigExport(ctx context.Context, opts Options) error {
+func runConfigExport(ctx context.Context, opts Options, export configExportOptions) error {
 	// By now the shell has emptied a config file redirected onto: exporting
 	// it would print defaults in place of the configuration it held.
 	if f, ok := opts.Stdout.(*os.File); ok {
@@ -106,9 +118,10 @@ func runConfigExport(ctx context.Context, opts Options) error {
 		return fmt.Errorf("failed to resolve secret references: %w", err)
 	}
 	data, err := app.ExportConfig(ctx, app.ConfigExportOptions{
-		Config:     result,
-		Factory:    defaultProviderFactory(result.Config),
-		Extensions: opts.Extensions,
+		Config:          result,
+		Factory:         defaultProviderFactory(result.Config),
+		Extensions:      opts.Extensions,
+		IncludeDefaults: export.IncludeDefaults,
 	})
 	if err != nil {
 		return fmt.Errorf("config export: %w", err)
