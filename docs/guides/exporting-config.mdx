@@ -1,20 +1,25 @@
 ---
 title: "Exporting Your Configuration"
-description: "Export the configuration a GoModel gateway runs with as one config.yaml, from the binary, Docker Compose, or docker, and why the dashboard has no export button."
+description: "Export the configuration a GoModel gateway started now would run with as one config.yaml, from the binary, Docker Compose, or docker, and why the dashboard has no export button."
 icon: "file-output"
 keywords: ["config export", "config.yaml", "backup", "docker", "docker compose", "dashboard", "secrets"]
 ---
 
-`gomodel config export` prints everything a gateway is configured with as one
-`config.yaml`: your `config.yaml`, environment variables, and the objects saved
-in the dashboard, such as providers, virtual models, users, and budgets. Use it
-to review a setup, keep it in Git, or start another instance from it.
+`gomodel config export` prints the configuration a gateway started now would
+run with as one `config.yaml`: your `config.yaml`, environment variables, and
+the objects saved in the dashboard, such as providers, virtual models, users,
+and budgets. Use it to review a setup, keep it in Git, or start another
+instance from it.
 
 ## Export
 
 Run the command where the gateway runs, so it reads the same files,
 environment, and database. It is safe while the gateway is running. Logs go to
 stderr, so the file holds only the configuration.
+
+It reads the files and environment afresh, not the running gateway. If you
+edited `config.yaml` and the gateway rejected the reload, the export shows the
+edited file, or fails with the same error.
 
 <Tabs>
   <Tab title="Binary">
@@ -74,6 +79,14 @@ Review it before sharing the file.
 Save it as `config/config.yaml` on the target instance, set the variables it
 references, and start the gateway. Objects that came from the dashboard are now
 declared in the file, so they are read-only in the dashboard.
+
+<Note>
+  Not everything has a `config.yaml` form. Managed API keys, workflows,
+  guardrails created in the dashboard, model pricing overrides, runtime
+  settings, disabled provider credentials, and MCP server display names are
+  not exported, and are listed in the file's header. They stay in the database:
+  [back it up](/guides/updating#1-back-up-the-database) to move them.
+</Note>
 
 ## Why the dashboard has no export button
 
