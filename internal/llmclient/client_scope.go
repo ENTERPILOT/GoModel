@@ -108,19 +108,24 @@ func (c *Client) finishRequest(scope requestScope, statusCode int, err error) {
 	if breaker != nil {
 		circuitState = breaker.State()
 	}
+	modelCircuitState := ""
+	if scope.breaker != nil && scope.breaker != c.circuitBreaker {
+		modelCircuitState = scope.breaker.State()
+	}
 	c.config.Hooks.OnRequestEnd(scope.ctx, ResponseInfo{
-		Provider:        c.config.ProviderName,
-		ProviderType:    scope.requestInfo.ProviderType,
-		Model:           scope.requestInfo.Model,
-		Operation:       scope.requestInfo.Operation,
-		Endpoint:        scope.requestInfo.Endpoint,
-		Method:          scope.requestInfo.Method,
-		StatusCode:      statusCode,
-		Duration:        time.Since(scope.startedAt),
-		Stream:          scope.requestInfo.Stream,
-		StreamUncertain: scope.requestInfo.StreamUncertain,
-		Error:           err,
-		CircuitState:    circuitState,
+		Provider:          c.config.ProviderName,
+		ProviderType:      scope.requestInfo.ProviderType,
+		Model:             scope.requestInfo.Model,
+		Operation:         scope.requestInfo.Operation,
+		Endpoint:          scope.requestInfo.Endpoint,
+		Method:            scope.requestInfo.Method,
+		StatusCode:        statusCode,
+		Duration:          time.Since(scope.startedAt),
+		Stream:            scope.requestInfo.Stream,
+		StreamUncertain:   scope.requestInfo.StreamUncertain,
+		Error:             err,
+		CircuitState:      circuitState,
+		ModelCircuitState: modelCircuitState,
 	})
 }
 
