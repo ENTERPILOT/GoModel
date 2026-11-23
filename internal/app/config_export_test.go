@@ -176,7 +176,6 @@ func TestExportConfig(t *testing.T) {
 	assert.Equal(t, []config.TaggingHeaderConfig{{Header: "X-Team", Delimiter: ","}, {Header: "X-Cost-Center", Prefix: "cc-", Delimiter: ","}}, doc.Tagging.Headers)
 	// The amount edited in the dashboard wins over config.yaml's, as at start.
 	assert.Equal(t, []config.BudgetUserPathConfig{{Path: "/team", Limits: []config.BudgetLimitConfig{{Period: "daily", PeriodSeconds: budget.PeriodDailySeconds, Amount: 99, CostBasis: "provider"}}}}, doc.Budgets.UserPaths)
-	assert.True(t, doc.Budgets.ProviderBilledCacheHits, "settings beside the budgets keep their value")
 	// Without billed budgets, enforced on provider cost; see TestExportBudgets.
 	assert.Equal(t, []config.BudgetLabelConfig{{Label: "mobile", Limits: []config.BudgetLimitConfig{{PeriodSeconds: 7200, Amount: 3, CostBasis: "provider"}}}}, doc.Budgets.Labels)
 
@@ -191,6 +190,7 @@ func TestExportConfig(t *testing.T) {
 	assert.Equal(t, "mk-do-not-leak", reloaded.Config.Server.MasterKey)
 	assert.Equal(t, "${env:EXPORT_TEST_MASTER_KEY}", reloaded.Config.Users[1].Description)
 	assert.Equal(t, "Bearer lin-new", reloaded.Config.MCP.Servers["linear"].Headers["Authorization"])
+	assert.True(t, reloaded.Config.Budgets.ProviderBilledCacheHits, "settings beside the budgets keep their value")
 }
 
 func TestExportConfigKeepsVirtualModelParams(t *testing.T) {

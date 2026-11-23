@@ -26,10 +26,11 @@ func TestParseConfigArgs(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    []string
-		want    bool
+		want    *configExportOptions
 		wantErr string
 	}{
-		{name: "export", args: []string{"export"}, want: true},
+		{name: "export", args: []string{"export"}, want: &configExportOptions{}},
+		{name: "export with defaults", args: []string{"export", "--include-defaults"}, want: &configExportOptions{IncludeDefaults: true}},
 		{name: "help", args: []string{"help"}},
 		{name: "export help", args: []string{"export", "-h"}},
 		{name: "missing action", args: nil, wantErr: "missing action"},
@@ -78,6 +79,20 @@ func TestRunConfigExport(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal(stdout.Bytes(), &doc), "stdout holds the document alone")
 	assert.Equal(t, "${env:GOMODEL_MASTER_KEY}", doc.Server.MasterKey)
 	assert.NotContains(t, stdout.String()+stderr.String(), "cli-master-do-not-leak")
+}
+
+func TestRunConfigExportIncludeDefaults(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("STORAGE_TYPE", "sqlite")
+	t.Setenv("SQLITE_PATH", filepath.Join(t.TempDir(), "export.db"))
+	export := func(args ...string) string {
+		var stdout, stderr bytes.Buffer
+		require.NoError(t, Run(context.Background(), Options{Args: args, Stdout: &stdout, Stderr: &stderr}), stderr.String())
+		return stdout.String()
+	}
+
+	assert.NotContains(t, export("config", "export"), "retention_days:", "a setting at its default is left out")
+	assert.Contains(t, export("config", "export", "--include-defaults"), "retention_days: 30")
 }
 
 func TestRunConfigExportRefusesItsInput(t *testing.T) {

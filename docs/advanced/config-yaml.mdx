@@ -228,15 +228,26 @@ running gateway holds. When the current files no longer load, it fails with
 the same error. A few objects have no `config.yaml` form and are left out; see
 the end of this section.
 
-Settings that are empty (`""`, `0`, `false`, unset, or a section with every
-setting empty) and whose default is empty too are left out, since they load
-the same way. An empty setting whose default is not, such as
-`enable_passthrough_routes: false`, is kept, as is an explicit empty list such
-as `retry_on_statuses: []`, and a `${VAR}` expansion that expands to empty.
-
 ```bash
 gomodel config export > gomodel-export.yaml
 docker exec my-gateway /gomodel config export > gomodel-export.yaml
+```
+
+Settings that hold their default value are left out, since they load the same
+way, so the file shows only what differs from the defaults. A setting that
+differs is kept even when empty, such as `enable_passthrough_routes: false`
+or an explicit empty list such as `retry_on_statuses: []`, and so is a
+`${VAR}` expansion, whatever it expands to. A gateway with nothing configured
+exports `{}`. Defaults that depend on where the gateway runs, such as
+`storage.sqlite.path`, are left out too, so the instance that loads the file
+uses its own.
+
+Pass `--include-defaults` to also write the defaults, for a file that keeps
+its values when a later version changes one. Settings that are empty by
+default (`""`, `0`, `false`, unset) are left out either way.
+
+```bash
+gomodel config export --include-defaults > gomodel-export.yaml
 ```
 
 <Warning>

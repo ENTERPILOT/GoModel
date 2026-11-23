@@ -362,21 +362,69 @@ func stringish(t reflect.Type) bool {
 	return t.Kind() == reflect.String
 }
 
-func TestExportYAMLSkipsEmptyDefaults(t *testing.T) {
+func TestExportYAMLSkipsDefaults(t *testing.T) {
 	cfg := buildDefaultConfig()
+	cfg.Server.Port = "9090"
 	cfg.Server.EnablePassthroughRoutes = false
 	cfg.Guardrails.Rules = []GuardrailRuleConfig{{Name: "safety", Type: "system_prompt"}}
 	providers := map[string]RawProviderConfig{"ollama": {Type: "ollama", BaseURL: "http://localhost:11434/v1"}}
 
 	out := exportYAML(t, NewSecrets(), cfg, providers, nil)
 
+	assert.Equal(t, `server:
+  port: "9090"
+  enable_passthrough_routes: false
+guardrails:
+  rules:
+    - name: safety
+      type: system_prompt
+providers:
+  ollama:
+    type: ollama
+    base_url: http://localhost:11434/v1
+`, out)
+}
+
+func TestExportYAMLOfDefaultsIsEmpty(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	loaded := loadYAML(t, nil)
+
+	out, err := loaded.ExportYAML(ExportDocument{Config: loaded.Config}, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "{}\n", string(out))
+	assert.Equal(t, loaded.Config, loadYAML(t, out).Config)
+}
+
+func TestExportYAMLKeepsLocalModelCacheBesideRedis(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	// Left out, the local cache would be: it is the default only alone.
+	loaded := loadYAML(t, []byte("cache:\n  model:\n    local: {}\n    redis:\n      url: redis://cache:6379\n"))
+
+	out, err := loaded.ExportYAML(ExportDocument{Config: loaded.Config}, nil)
+
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "local: {}")
+	assert.Equal(t, loaded.Config, loadYAML(t, out).Config)
+}
+
+func TestExportYAMLIncludeDefaults(t *testing.T) {
+	cfg := buildDefaultConfig()
+	cfg.Server.EnablePassthroughRoutes = false
+	cfg.Guardrails.Rules = []GuardrailRuleConfig{{Name: "safety", Type: "system_prompt"}}
+
+	exported, err := (&LoadResult{Secrets: NewSecrets()}).ExportYAML(ExportDocument{Config: cfg, IncludeDefaults: true}, nil)
+	require.NoError(t, err)
+	out := string(exported)
+
+	assert.Equal(t, "8080", exportedValue(t, out, "server", "port"), "a default that is not empty is kept")
+	assert.Contains(t, out, "retention_days: 30")
+	assert.Contains(t, out, "enable_passthrough_routes: false")
+	assert.Equal(t, "safety", exportedValue(t, out, "guardrails", "rules", "0", "name"))
+	// Those empty by default are left out all the same.
 	for _, empty := range []string{`: ""`, ": 0\n", ": {}", "master_key_disabled:", "body_size_limit:", "opentelemetry:", "mongodb:", "api_key:", "workload_identity:", "order:"} {
 		assert.NotContains(t, out, empty)
 	}
-	assert.Contains(t, out, "enable_passthrough_routes: false", "an empty value whose default is not empty is kept")
-	assert.Equal(t, "8080", exportedValue(t, out, "server", "port"))
-	assert.Equal(t, "ollama", exportedValue(t, out, "providers", "ollama", "type"))
-	assert.Equal(t, "safety", exportedValue(t, out, "guardrails", "rules", "0", "name"))
 }
 
 func TestExportYAMLKeepsExplicitEmptyLists(t *testing.T) {

@@ -128,6 +128,19 @@ cache:
 	assert.Equal(t, first.Config.Storage.MongoDB, second.Config.Storage.MongoDB)
 }
 
+func TestExportYAMLKeepsExpansionThatIsTheDefault(t *testing.T) {
+	// An expansion that gives the default here may not on the next instance.
+	clearAllConfigEnvVars(t)
+	t.Setenv("GOMODEL_TEST_PORT", "8080")
+	loaded := loadYAML(t, []byte("server:\n  port: \"${GOMODEL_TEST_PORT}\"\n"))
+	require.Equal(t, "8080", loaded.Config.Server.Port)
+
+	out, err := loaded.ExportYAML(ExportDocument{Config: loaded.Config}, os.Environ())
+
+	require.NoError(t, err)
+	assert.Equal(t, "server:\n  port: \"${GOMODEL_TEST_PORT}\"\n", string(out))
+}
+
 func TestExportYAMLRedactsCredentialsOutsideSecretFields(t *testing.T) {
 	var ext yaml.Node
 	require.NoError(t, yaml.Unmarshal([]byte("auth: ext-auth\ncookie: ext-cookie\npass: ext-pass\nregion: eu\n"), &ext))
