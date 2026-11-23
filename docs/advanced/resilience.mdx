@@ -297,6 +297,13 @@ while model discovery still succeeds — this catches upstreams that list
 models fine but fail real calls, e.g. with misreported `4xx` errors that
 deliberately never trip the breaker.
 
+A model that has its own breaker (under `scope: model`, or because it runs on
+a [per-model timeout](/features/virtual-models#set-upstream-timeouts)) shows
+that breaker's state next to its name in the card's **Models (Recent
+Traffic)** list while it is `Open` or `Half-open`. An open model breaker also
+marks the provider `Degraded`. Like the provider's, the state is the one seen
+by the model's most recent request.
+
 Request-health signals only ever worsen the discovery-based status, never
 improve it, and the tracking is in-memory per gateway process. The breaker
 still recovers on its own within `timeout` (default 30s) once the provider

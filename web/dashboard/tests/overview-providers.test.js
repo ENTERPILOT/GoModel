@@ -29,6 +29,9 @@ import {
   providerBreakerState,
   providerBreakerStateLabel,
   providerBreakerStateClass,
+  providerHealthModelBreakerClass,
+  providerHealthModelBreakerLabel,
+  providerHealthModelBreakerState,
   providerRecentTrafficSummary,
   providerHealthModels,
   providerHealthModelStats,
@@ -263,6 +266,21 @@ test("request health helpers summarize windowed traffic and breaker state", () =
     "HTTP 400: Error from provider",
   );
   assert.equal(providerHealthModelTitle(provider.request_health.models[1]), "");
+});
+
+test("a model's own breaker shows only when it is not closed", () => {
+  const cases = [
+    { model: { model: "a", circuit_state: "open" }, state: "open", label: "Open", cls: "is-unhealthy" },
+    { model: { model: "b", circuit_state: "half-open" }, state: "half-open", label: "Half-open", cls: "is-degraded" },
+    { model: { model: "c", circuit_state: "closed" }, state: "", label: "", cls: "is-healthy" },
+    { model: { model: "d" }, state: "", label: "", cls: "is-healthy" },
+    { model: null, state: "", label: "", cls: "is-healthy" },
+  ];
+  for (const { model, state, label, cls } of cases) {
+    assert.equal(providerHealthModelBreakerState(model), state);
+    assert.equal(providerHealthModelBreakerLabel(model), label);
+    assert.equal(providerHealthModelBreakerClass(model), cls);
+  }
 });
 
 test("request health helpers tolerate providers without request health", () => {

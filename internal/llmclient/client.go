@@ -48,6 +48,10 @@ type ResponseInfo struct {
 	// disabled. It reflects the moment of completion, so metrics built from it
 	// update as traffic flows.
 	CircuitState string
+	// ModelCircuitState is the state of the model's own breaker after this
+	// request completed. It is set only when the request ran on one: under
+	// scope "model", or on a per-model timeout under scope "provider".
+	ModelCircuitState string
 }
 
 // Hooks defines observability callbacks for request lifecycle events.

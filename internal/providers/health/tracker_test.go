@@ -374,6 +374,35 @@ func TestErrorMessageTruncationIsRuneSafe(t *testing.T) {
 	assert.True(t, utf8.ValidString(message), "truncated message is not valid UTF-8: %q", message)
 }
 
+func TestTrackerReportsModelCircuitState(t *testing.T) {
+	tracker, _ := newTestTracker(time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC))
+	record := func(model, modelState string) {
+		tracker.Record(llmclient.ResponseInfo{
+			Provider: "openai", Model: model, StatusCode: 200,
+			CircuitState: "closed", ModelCircuitState: modelState,
+		})
+	}
+	// "shared" runs on the provider breaker; "fast" has its own, which opens.
+	// "steady" drops back to the provider breaker after running on its own.
+	record("shared", "")
+	record("shared", "")
+	record("fast", "closed")
+	record("fast", "open")
+	record("steady", "half-open")
+	record("steady", "")
+
+	snapshot := tracker.Snapshot()["openai"]
+	assert.Equal(t, "closed", snapshot.CircuitState, "the provider breaker is reported apart from model breakers")
+	require.Len(t, snapshot.Models, 3)
+	assert.Equal(t, ModelHealth{Model: "fast", Requests: 2, CircuitState: "open"}, snapshot.Models[0], "open circuits sort first")
+	states := map[string]string{}
+	for _, model := range snapshot.Models {
+		states[model.Model] = model.CircuitState
+	}
+	assert.Equal(t, map[string]string{"fast": "open", "shared": "", "steady": ""}, states)
+	assert.Equal(t, []string{"fast"}, snapshot.OpenCircuitModels())
+}
+
 func TestProviderHealthFlaggedModels(t *testing.T) {
 	snapshot := ProviderHealth{Models: []ModelHealth{
 		{Model: "a", Flagged: true},

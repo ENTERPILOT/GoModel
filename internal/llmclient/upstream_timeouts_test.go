@@ -117,9 +117,10 @@ func TestClient_ModelTimeoutTripsOnlyItsModelBreaker(t *testing.T) {
 	cfg := DefaultConfig("test", server.URL)
 	cfg.Retry.MaxRetries = 0
 	cfg.CircuitBreaker.FailureThreshold = 1
-	var reported []string
+	var reported, reportedModel []string
 	cfg.Hooks.OnRequestEnd = func(_ context.Context, info ResponseInfo) {
 		reported = append(reported, info.CircuitState)
+		reportedModel = append(reportedModel, info.ModelCircuitState)
 	}
 	client := NewWithHTTPClient(httpclient.NewHTTPClient(&httpCfg), cfg, nil)
 	short := workflowWithTimeouts(core.UpstreamTimeouts{Timeout: 50 * time.Millisecond})
@@ -136,6 +137,7 @@ func TestClient_ModelTimeoutTripsOnlyItsModelBreaker(t *testing.T) {
 	require.NoError(t, request(context.Background(), "fast"), "other models keep serving")
 	require.ErrorIs(t, request(short, "slow"), ErrCircuitOpen, "the model's own breaker is open")
 	assert.Equal(t, []string{"closed", "closed", "closed"}, reported, "the provider's reported circuit stays closed")
+	assert.Equal(t, []string{"open", "", "open"}, reportedModel, "the model's own breaker state is reported apart")
 }
 
 func TestBreakerForRequestScope(t *testing.T) {
