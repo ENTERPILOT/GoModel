@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"maps"
 	"mime"
 	"net/http"
@@ -857,7 +858,7 @@ func geminiGenerationConfig(req *core.ChatRequest) map[string]any {
 	// models) answers HTTP 400 "Penalty is not enabled for this model", and
 	// Google's Gemini 4 migration guide lists both among the parameters to
 	// remove because they error.
-	copyStopSequences(req.ExtraFields.Lookup("stop"), cfg)
+	copyStopSequences(req.Model, req.ExtraFields.Lookup("stop"), cfg)
 	copyResponseFormat(req.ExtraFields.Lookup("response_format"), cfg)
 	copyGoogleThinkingConfig(req.ExtraFields.Lookup("extra_body"), cfg)
 	if effort := nativeReasoningEffort(req); effort != "" {
@@ -948,7 +949,13 @@ func copyJSONNumber(raw json.RawMessage, cfg map[string]any, key string) {
 	}
 }
 
-func copyStopSequences(raw json.RawMessage, cfg map[string]any) {
+// maxStopSequences is the longest stop list Gemini accepts, on the native
+// generateContent API and the OpenAI-compatible endpoint alike: a sixth entry
+// answers HTTP 400 "the number of stop_sequences must not exceed 5". A longer
+// client list is truncated rather than failed upstream.
+const maxStopSequences = 5
+
+func copyStopSequences(model string, raw json.RawMessage, cfg map[string]any) {
 	if len(raw) == 0 {
 		return
 	}
@@ -959,6 +966,14 @@ func copyStopSequences(raw json.RawMessage, cfg map[string]any) {
 	}
 	var many []string
 	if err := json.Unmarshal(raw, &many); err == nil && len(many) > 0 {
+		if len(many) > maxStopSequences {
+			// Same message as providers.CapStopSequences, which caps the
+			// OpenAI-compatible mode: the dropped stops stay visible to
+			// operators, without logging the sequences themselves.
+			slog.Warn("truncated stop sequences to the provider limit",
+				"model", model, "limit", maxStopSequences, "requested", len(many))
+			many = many[:maxStopSequences]
+		}
 		cfg["stopSequences"] = many
 	}
 }
