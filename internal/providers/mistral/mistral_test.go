@@ -541,16 +541,23 @@ func TestStreamChatCompletion_MapsModelLengthFinishReason(t *testing.T) {
 	assert.Contains(t, out, "data: [DONE]")
 }
 
-// JSON allows an escaped underscore (\u005f) inside "model_length"; the byte
-// fast path must not let it through unmapped.
-func TestMapFinishReasons_UnicodeEscapedValue(t *testing.T) {
-	in := []byte(`{"choices":[{"index":0,"finish_reason":"model\u005flength"}]}`)
-	out, changed := mapFinishReasons(in)
-	require.True(t, changed)
-	assert.Contains(t, string(out), `"finish_reason":"length"`)
-
-	untouched := []byte(`{"choices":[{"index":0,"finish_reason":"stop"}]}`)
-	got, changed := mapFinishReasons(untouched)
-	assert.False(t, changed)
-	assert.Equal(t, untouched, got)
+// Only a finish_reason of "model_length" is rewritten: other reasons, and text
+// that merely mentions the value, are relayed byte for byte.
+func TestMapFinishReasons_LeavesOtherPayloadsUntouched(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{name: "stop", in: `{"choices":[{"index":0,"delta":{"content":"line\n"},"finish_reason":"stop"}]}`},
+		{name: "length", in: `{"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}`},
+		{name: "value only in content", in: `{"choices":[{"index":0,"delta":{"content":"model_length"},"finish_reason":null}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := []byte(tt.in)
+			out, changed := mapFinishReasons(in)
+			assert.False(t, changed)
+			assert.Equal(t, in, out)
+		})
+	}
 }
