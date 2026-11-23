@@ -594,6 +594,7 @@
   "overview_api_version": "API-Version",
   "overview_recent_requests": "Letzte Anfragen",
   "overview_breaker_state": "Circuit-Breaker-Status",
+  "overview_model_breaker_title": "Eigener Circuit Breaker dieses Modells",
   "overview_models_recent_traffic": "Modelle (letzter Traffic)",
   "overview_configured_models": "Konfigurierte Modelle",
   "overview_retry": "Retry",

@@ -10,6 +10,8 @@
 //   extractResponseText      response body -> assistant text (non-streaming)
 //   createStreamAccumulator  SSE events    -> assistant text + assembled body
 
+import { qualifyTarget } from "../models/modelIdentity.js";
+
 export const ENDPOINTS = [
   { id: "chat", path: "/v1/chat/completions" },
   { id: "responses", path: "/v1/responses" },
@@ -329,22 +331,90 @@ export function playgroundModelOptions(inventory, modes = TEXT_MODES) {
   return [...seen.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
+// Virtual models (the redirect rows of /admin/virtual-models, as the Models
+// page maps them: {name, targets, enabled, valid, user_paths}) that answer
+// requests for their name, by trimmed name. A disabled one, or one without an
+// available target, does not: the gateway falls through to the literal model.
+function answeringVirtualModels(virtualModels) {
+  const byName = new Map();
+  for (const virtualModel of Array.isArray(virtualModels) ? virtualModels : []) {
+    const name = String(virtualModel?.name || "").trim();
+    if (!name || byName.has(name)) continue;
+    if (virtualModel.enabled === false || !virtualModel.valid) continue;
+    byName.set(name, virtualModel);
+  }
+  return byName;
+}
+
+// Answering virtual models -> [{id, label, provider: "", virtual: true}],
+// sorted. One is left out of a mode only when every target is an inventory
+// model that advertises other modes; a target the inventory does not know (a
+// chained virtual model, a bare model name) might support the mode.
+export function playgroundVirtualModelOptions(virtualModels, inventory, modes = TEXT_MODES) {
+  const advertised = new Map();
+  for (const entry of Array.isArray(inventory) ? inventory : []) {
+    const id = String(entry?.selector || entry?.model?.id || "").trim();
+    const list = entry?.model?.metadata?.modes;
+    if (id && Array.isArray(list) && list.length) advertised.set(id, list);
+  }
+  const targetQualifies = (target) => {
+    const list = advertised.get(qualifyTarget(target));
+    return !list || list.some((mode) => modes.has(mode));
+  };
+  const options = [];
+  for (const [id, virtualModel] of answeringVirtualModels(virtualModels)) {
+    const targets = Array.isArray(virtualModel.targets) ? virtualModel.targets : [];
+    if (targets.length && !targets.some(targetQualifies)) continue;
+    options.push({ id, label: id, provider: "", virtual: true });
+  }
+  return options.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+// Picker options for one mode: virtual models first (the picker caps how many
+// options it renders, and a handful of them would otherwise sink below a large
+// inventory), then `modelOptions`, the inventory options of that mode. A
+// virtual model named like an inventory model answers requests for that name,
+// so the inventory option is dropped in every mode, also in one the virtual
+// model cannot serve.
+export function playgroundPickerOptions(virtualModels, inventory, modelOptions, modes = TEXT_MODES) {
+  const answering = answeringVirtualModels(virtualModels);
+  return [
+    ...playgroundVirtualModelOptions(virtualModels, inventory, modes),
+    ...modelOptions.filter((option) => !answering.has(option.id)),
+  ];
+}
+
+// The model a fresh playground starts on: the first inventory model, so the
+// default does not change when virtual models are listed above it. A virtual
+// model is the default only once the inventory has loaded without a match;
+// "" means there is nothing to pick yet.
+export function defaultPlaygroundModel(options, inventoryLoading = false) {
+  const list = Array.isArray(options) ? options : [];
+  const concrete = list.find((option) => !option.virtual);
+  if (concrete) return concrete.id;
+  return inventoryLoading ? "" : list[0]?.id || "";
+}
+
 // --- User-path picker --------------------------------------------------------
 
 // Header name the gateway reads user paths from unless USER_PATH_HEADER is
 // customized server-side.
 const DEFAULT_USER_PATH_HEADER = "X-GoModel-User-Path";
 
-// User paths the selected inventory entry is restricted to
-// (access.user_paths), as { value, label } objects; empty when the model is
-// unknown or unrestricted. The playground sends the chosen path on the
-// user-path header so a restricted model can be exercised from the picker.
-export function playgroundUserPathOptions(inventory, selector) {
+// User paths the selected model is restricted to, as { value, label }
+// objects; empty when the model is unknown or unrestricted. A virtual model
+// that answers the name decides alone, restricted or not; only without one do
+// the inventory entry's access.user_paths apply. The playground sends the
+// chosen path on the user-path header so a restricted model can be exercised
+// from the picker.
+export function playgroundUserPathOptions(inventory, selector, virtualModels = []) {
   const id = String(selector || "").trim();
+  const virtualModel = answeringVirtualModels(virtualModels).get(id);
   const entry = (Array.isArray(inventory) ? inventory : []).find(
     (item) => String(item?.selector || item?.model?.id || "").trim() === id,
   );
-  const paths = entry?.access && Array.isArray(entry.access.user_paths) ? entry.access.user_paths : [];
+  const source = virtualModel ? virtualModel.user_paths : entry?.access?.user_paths;
+  const paths = Array.isArray(source) ? source : [];
   return paths
     .filter((path) => typeof path === "string" && path.trim() !== "")
     .map((path) => {
@@ -354,8 +424,15 @@ export function playgroundUserPathOptions(inventory, selector) {
 }
 
 // First allowed user path of the selected model, or "" when unrestricted.
-export function defaultUserPathForModel(inventory, selector) {
-  return playgroundUserPathOptions(inventory, selector)[0]?.value || "";
+export function defaultUserPathForModel(inventory, selector, virtualModels = []) {
+  return playgroundUserPathOptions(inventory, selector, virtualModels)[0]?.value || "";
+}
+
+// The user path to show after the model lists changed: the path the user
+// entered, while there is one, otherwise the selected model's current default.
+export function syncedUserPath(current, userEntered, modelDefault) {
+  const path = String(current || "");
+  return userEntered && path ? path : String(modelDefault || "");
 }
 
 // Effective user-path header name: the server-configured USER_PATH_HEADER

@@ -324,9 +324,13 @@ jobs:
         with:
           node-version: '22'
 
+      # Pinned: a bare `npx mint` installs the release published last, and a
+      # mint release reaches npm a few minutes before the @mintlify/cli version
+      # it depends on, so a run in that window fails with ETARGET. Dependabot
+      # does not see this pin; bump it by hand.
       - name: Validate docs.json
         if: steps.changes.outputs.docs == 'true'
-        run: npx mint validate
+        run: npx mint@4.3.37 validate
         working-directory: docs
 
   # Compiling the binary doesn't depend on tests passing, so this runs in

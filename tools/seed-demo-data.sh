@@ -5,9 +5,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 db_path="${SQLITE_PATH:-data/gomodel.db}"
 days="${DEMO_DAYS:-90}"
 end_date="${DEMO_END_DATE:-}"
-avg_requests="${DEMO_AVG_REQUESTS_PER_DAY:-2000}"
-max_requests="${DEMO_MAX_REQUESTS_PER_DAY:-3800}"
-token_scale="${DEMO_TOKEN_SCALE:-3}"
+avg_requests="${DEMO_AVG_REQUESTS_PER_DAY:-600}"
+max_requests="${DEMO_MAX_REQUESTS_PER_DAY:-1500}"
+token_scale="${DEMO_TOKEN_SCALE:-1}"
 exact_cache_pct="${DEMO_EXACT_CACHE_PCT:-12}"
 semantic_cache_pct="${DEMO_SEMANTIC_CACHE_PCT:-7}"
 prompt_cache_pct="${DEMO_PROMPT_CACHE_PCT:-28}"
@@ -25,9 +25,9 @@ Environment:
   SQLITE_PATH                     SQLite DB path (default: data/gomodel.db)
   DEMO_DAYS                       Rolling day count (default: 90)
   DEMO_END_DATE                   End date YYYY-MM-DD (default: today UTC)
-  DEMO_AVG_REQUESTS_PER_DAY       Average daily request count (default: 2000)
-  DEMO_MAX_REQUESTS_PER_DAY       Upper slot cap per day (default: 3800)
-  DEMO_TOKEN_SCALE                Token volume multiplier (default: 3)
+  DEMO_AVG_REQUESTS_PER_DAY       Requests on an average weekday (default: 600)
+  DEMO_MAX_REQUESTS_PER_DAY       Upper slot cap per day (default: 1500)
+  DEMO_TOKEN_SCALE                Token volume multiplier (default: 1)
   DEMO_EXACT_CACHE_PCT            Local exact cache hit percentage (default: 12)
   DEMO_SEMANTIC_CACHE_PCT         Local semantic cache hit percentage (default: 7)
   DEMO_PROMPT_CACHE_PCT           Provider prompt-cache percentage (default: 28)
@@ -107,13 +107,13 @@ command -v openssl >/dev/null 2>&1 || {
   exit 127
 }
 
-demo_key_secret_team1="$(openssl rand -hex 24)"
+demo_key_secret_support="$(openssl rand -hex 24)"
 demo_key_secret_engineering="$(openssl rand -hex 24)"
 demo_key_secret_sales="$(openssl rand -hex 24)"
-demo_key_hash_team1="$(printf '%s' "$demo_key_secret_team1" | openssl dgst -sha256 -r | awk '{print $1}')"
+demo_key_hash_support="$(printf '%s' "$demo_key_secret_support" | openssl dgst -sha256 -r | awk '{print $1}')"
 demo_key_hash_engineering="$(printf '%s' "$demo_key_secret_engineering" | openssl dgst -sha256 -r | awk '{print $1}')"
 demo_key_hash_sales="$(printf '%s' "$demo_key_secret_sales" | openssl dgst -sha256 -r | awk '{print $1}')"
-demo_key_redacted_team1="sk_gom_...${demo_key_secret_team1: -4}"
+demo_key_redacted_support="sk_gom_...${demo_key_secret_support: -4}"
 demo_key_redacted_engineering="sk_gom_...${demo_key_secret_engineering: -4}"
 demo_key_redacted_sales="sk_gom_...${demo_key_secret_sales: -4}"
 
@@ -123,8 +123,9 @@ demo_key_redacted_sales="sk_gom_...${demo_key_secret_sales: -4}"
 demo_audio_mp3_base64="$(tr -d '\r\n' < "$script_dir/fixtures/demo-prompt-caching.mp3.base64")"
 demo_audio_mp3_bytes="$(printf '%s' "$demo_audio_mp3_base64" | openssl base64 -d -A | wc -c | awk '{print $1}')"
 
-# Real provider types and names with the model lists those providers
-# returned, so the Models page shows catalog pricing. Keys are placeholders;
+# Real provider types and names with a short, current selection of the models
+# each provider lists, so the Models page stays readable and shows catalog
+# pricing. Keys are placeholders;
 # make demo sets CONFIGURED_PROVIDER_MODELS_MODE=allowlist so the gateway
 # serves these lists without calling the upstream /models endpoints.
 demo_providers_json="$(tr -d '\r\n' < "$script_dir/fixtures/demo-providers.json")"
@@ -139,7 +140,7 @@ guardrail_config_pii='{"rules":"[\\w.%+-]+@[\\w.-]+\\.[A-Za-z]{2,} => [redacted-
 guardrail_config_blocked_terms='{"rules":"(project|codename)[ -]nightingale => \nunreleased pricing sheet => ","mode":"regex","case_insensitive":true,"roles":["user"],"on_match":"block","message":"This request mentions material that may not leave the tenant. Remove it and try again.","block_status":403}'
 guardrail_config_sales_tone='{"mode":"decorator","content":"Answer as a concise sales engineer. Never invent pricing, quote only figures present in the context, and end with one clear next step."}'
 guardrail_config_headers='{"response_add":"X-GoModel-Demo: true","upstream_set":"X-Tenant: gomodel-demo","response_remove":"X-Powered-By"}'
-guardrail_config_injection_judge='{"model":"openai/gpt-5-nano-2025-08-07","target":"last_user","action":"block","message":"This prompt was rejected as a prompt-injection attempt.","block_status":400,"on_unclear":"warn","max_tokens":128,"temperature":0}'
+guardrail_config_injection_judge='{"model":"openai/gpt-6-luna","target":"last_user","action":"block","message":"This prompt was rejected as a prompt-injection attempt.","block_status":400,"on_unclear":"warn","max_tokens":128,"temperature":0}'
 guardrail_config_quality_judge='{"model":"groq/llama-3.1-8b-instant","action":"warn","message":"The answer did not cite the retrieved context.","on_unclear":"allow","max_tokens":128,"temperature":0}'
 guardrail_config_normalizer='{"model":"groq/llama-3.1-8b-instant","roles":["user"],"max_tokens":2048,"prompt":"Rewrite the message as one self-contained question. Keep every fact, identifier, and instruction, and return only the rewritten text."}'
 
@@ -154,7 +155,7 @@ guardrail_config_normalizer='{"model":"groq/llama-3.1-8b-instant","roles":["user
 workflow_payload_baseline_v1='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":false,"failover":true}}'
 workflow_payload_baseline='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"@@pii-redaction","phase":"prompt","step":0},{"ref":"@@gateway-headers","phase":"prompt","step":1},{"ref":"@@pii-redaction","phase":"response","step":0},{"ref":"@@gateway-headers","phase":"response","step":1}]}'
 workflow_payload_sales='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"@@pii-redaction","phase":"prompt","step":0},{"ref":"@@sales-assistant-tone","phase":"prompt","step":1},{"ref":"@@answer-quality-judge","phase":"response","step":0}]}'
-workflow_payload_agents='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"@@prompt-normalizer","phase":"prompt","step":0},{"ref":"@@blocked-terms","phase":"prompt","step":1}]}'
+workflow_payload_support='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"@@prompt-normalizer","phase":"prompt","step":0},{"ref":"@@blocked-terms","phase":"prompt","step":1}]}'
 workflow_payload_batch='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":false},"steps":[{"ref":"@@prompt-normalizer","phase":"prompt","step":0},{"ref":"@@pii-redaction","phase":"prompt","step":1}]}'
 workflow_payload_anthropic='{"schema_version":2,"features":{"cache":false,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"@@prompt-injection-judge","phase":"prompt","step":0},{"ref":"@@pii-redaction","phase":"prompt","step":1},{"ref":"@@pii-redaction","phase":"response","step":0}]}'
 
@@ -170,16 +171,25 @@ payload_hash() {
 workflow_payload_baseline_v1="$(expand_refs "$workflow_payload_baseline_v1")"
 workflow_payload_baseline="$(expand_refs "$workflow_payload_baseline")"
 workflow_payload_sales="$(expand_refs "$workflow_payload_sales")"
-workflow_payload_agents="$(expand_refs "$workflow_payload_agents")"
+workflow_payload_support="$(expand_refs "$workflow_payload_support")"
 workflow_payload_batch="$(expand_refs "$workflow_payload_batch")"
 workflow_payload_anthropic="$(expand_refs "$workflow_payload_anthropic")"
 
 workflow_hash_baseline_v1="$(payload_hash "$workflow_payload_baseline_v1")"
 workflow_hash_baseline="$(payload_hash "$workflow_payload_baseline")"
 workflow_hash_sales="$(payload_hash "$workflow_payload_sales")"
-workflow_hash_agents="$(payload_hash "$workflow_payload_agents")"
+workflow_hash_support="$(payload_hash "$workflow_payload_support")"
 workflow_hash_batch="$(payload_hash "$workflow_payload_batch")"
 workflow_hash_anthropic="$(payload_hash "$workflow_payload_anthropic")"
+
+# The period of the one budget seeded as exceeded: the month, unless it has
+# only just begun, when so little was spent that the amount would look absurd;
+# then the week.
+if (( 10#$(date -u +%d) >= 4 )); then
+  exceeded_budget_period=2592000
+else
+  exceeded_budget_period=604800
+fi
 
 mkdir -p "$(dirname "$db_path")"
 
@@ -550,24 +560,24 @@ WITH RECURSIVE days(day_idx, day) AS (
   SELECT day_idx + 1, date(day, '+1 day') FROM days WHERE day_idx < ${days} - 1
 ),
 daily_random AS (
+  -- The daily volume is meant to be read at a glance: quiet weekends, a
+  -- steady growth trend across the window, and only a little noise on top.
   SELECT
     day_idx,
     day,
-    CASE WHEN strftime('%w', day) IN ('0', '6') THEN 0.68 ELSE 1.0 END AS weekday_factor,
-    0.84 + (day_idx * 0.32 / max(1, ${days} - 1)) AS trend_factor,
-    0.90 + ((day_idx % 14) * 0.018) AS seasonal_factor,
-    0.82 + ((abs(random()) % 3900) / 10000.0) AS noise_factor
+    CASE WHEN strftime('%w', day) IN ('0', '6') THEN 0.45 ELSE 1.0 END AS weekday_factor,
+    0.75 + (day_idx * 0.50 / max(1, ${days} - 1)) AS trend_factor,
+    0.94 + ((abs(random()) % 1200) / 10000.0) AS noise_factor
   FROM days
 )
+-- The count is always for a full day. Today's requests are spread over the
+-- whole day like any other and the ones that have not happened yet are
+-- dropped below, so a partly elapsed day follows the same daily curve.
 SELECT
   day_idx,
   day,
   CAST(max(25, min(${max_requests}, round(
-    ${avg_requests} * weekday_factor * trend_factor * seasonal_factor * noise_factor *
-    CASE WHEN day = date(${seed_utc_epoch}, 'unixepoch')
-      THEN max(0.02, (${current_utc_second} + 1) / 86400.0)
-      ELSE 1.0
-    END
+    ${avg_requests} * weekday_factor * trend_factor * noise_factor
   ))) AS INTEGER) AS request_count
 FROM daily_random;
 
@@ -580,25 +590,42 @@ WITH RECURSIVE slots(slot_idx) AS (
 )
 INSERT INTO demo_slots SELECT slot_idx FROM slots;
 
+-- Three teams, two or three members each: people and service accounts. Every
+-- path has its own share of the traffic and its own model mix (demo_mix), so
+-- the usage charts rank clearly instead of showing ten near-identical bars.
 DROP TABLE IF EXISTS temp.demo_paths;
 CREATE TEMP TABLE demo_paths(min_bucket INTEGER, max_bucket INTEGER, user_path TEXT);
 INSERT INTO demo_paths VALUES
-  (0, 1100, '/agents/team1'),
-  (1100, 1800, '/agents/team1/research'),
-  (1800, 2850, '/agents/team2'),
-  (2850, 3400, '/agents/team2/ops'),
-  (3400, 4600, '/engineering/ai/mike'),
-  (4600, 5750, '/engineering/ai/mike/evals'),
-  (5750, 7050, '/sales/john'),
-  (7050, 7650, '/sales/john/prospects'),
-  (7650, 9100, '/engineering/ai/bot'),
-  (9100, 10000, '/engineering/ai/bot/batch');
+  (0, 2600, '/support/helpdesk-bot'),
+  (2600, 4800, '/engineering/alice'),
+  (4800, 6600, '/engineering/ci-bot'),
+  (6600, 8200, '/sales/john'),
+  (8200, 9200, '/engineering/evals'),
+  (9200, 10000, '/support/maria');
+
+-- Share of a day's requests per UTC hour: a working-day curve over a low
+-- overnight floor of automated traffic.
+DROP TABLE IF EXISTS temp.demo_hours;
+CREATE TEMP TABLE demo_hours AS
+WITH weights(hour, weight) AS (
+  VALUES
+    (0, 18), (1, 14), (2, 12), (3, 12), (4, 14), (5, 20), (6, 32), (7, 50),
+    (8, 72), (9, 88), (10, 96), (11, 100), (12, 92), (13, 96), (14, 100), (15, 96),
+    (16, 86), (17, 72), (18, 58), (19, 48), (20, 40), (21, 34), (22, 28), (23, 22)
+),
+cumulative AS (
+  SELECT hour,
+    sum(weight) OVER (ORDER BY hour) - weight AS before,
+    sum(weight) OVER (ORDER BY hour) AS upto,
+    sum(weight) OVER () AS total
+  FROM weights
+)
+SELECT hour, before * 10000 / total AS min_bucket, upto * 10000 / total AS max_bucket
+FROM cumulative;
 
 DROP TABLE IF EXISTS temp.demo_templates;
 CREATE TEMP TABLE demo_templates(
-  min_bucket INTEGER,
-  max_bucket INTEGER,
-  label TEXT,
+  label TEXT PRIMARY KEY,
   endpoint TEXT,
   provider TEXT,
   provider_name TEXT,
@@ -612,16 +639,126 @@ CREATE TEMP TABLE demo_templates(
   local_cache_eligible INTEGER,
   prompt_cache_eligible INTEGER
 );
+-- Prices are the catalog's, in USD per million tokens.
 INSERT INTO demo_templates VALUES
-  (0,    1700, 'chat-openai',      '/v1/chat/completions',    'openai',    'openai',    'gpt-5-nano-2025-08-07',      800,  6500,  120, 1800, 0.050, 0.400, 1, 1),
-  (1700, 3150, 'chat-groq',        '/v1/chat/completions',    'groq',      'groq',      'llama-3.1-8b-instant',       600,  4800,   90, 1300, 0.030, 0.220, 1, 1),
-  (3150, 4450, 'chat-gemini',      '/v1/chat/completions',    'gemini',    'gemini',    'gemini-2.5-flash-lite',      900,  7200,  100, 1600, 0.040, 0.300, 1, 1),
-  (4450, 5650, 'chat-bailian',     '/v1/chat/completions',    'bailian',   'bailian',   'qwen-flash',                 700,  5600,  100, 1500, 0.035, 0.260, 1, 1),
-  (5650, 6850, 'responses',        '/v1/responses',           'bailian',   'bailian',   'qwen-flash',                1200,  8200,  180, 2100, 0.035, 0.260, 1, 1),
-  (6850, 7850, 'messages',         '/v1/messages',            'anthropic', 'anthropic', 'claude-haiku-4-5-20251001', 1000,  9000,  150, 2200, 0.250, 1.250, 1, 1),
-  (7850, 8550, 'embeddings',       '/v1/embeddings',          'openai',    'openai',    'text-embedding-3-small',     300,  2400,    0,    1, 0.020, 0.000, 0, 0),
-  (8550, 9250, 'stt',              '/v1/audio/transcriptions','openai',    'openai',    'gpt-4o-transcribe',         600,  5200,   60,  500, 2.500, 0.000, 0, 0),
-  (9250, 10000,'tts',              '/v1/audio/speech',        'openai',    'openai',    'tts-1',                     120,  1200,    0,    1, 2.000, 0.000, 0, 0);
+  ('chat-openai',  '/v1/chat/completions',     'openai',    'openai',    'gpt-6-luna',              9000, 27000, 1500, 5400, 0.100,  0.500, 1, 1),
+  ('chat-groq',    '/v1/chat/completions',     'groq',      'groq',      'llama-3.1-8b-instant',    7000, 21000, 1200, 4200, 0.050,  0.080, 1, 1),
+  ('chat-gemini',  '/v1/chat/completions',     'gemini',    'gemini',    'gemini-3.5-flash-lite',   9000, 27000, 1300, 4800, 0.300,  2.500, 1, 1),
+  ('chat-bailian', '/v1/chat/completions',     'bailian',   'bailian',   'qwen3.8-flash',           8000, 25000, 1300, 4800, 0.150,  0.470, 1, 1),
+  ('responses',    '/v1/responses',            'openai',    'openai',    'gpt-6.1-sol',            13000, 31000, 2100, 6600, 2.000, 10.000, 1, 1),
+  ('messages',     '/v1/messages',             'anthropic', 'anthropic', 'claude-sonnet-5-5',      12000, 36000, 1800, 7200, 2.000, 10.000, 1, 1),
+  ('embeddings',   '/v1/embeddings',           'openai',    'openai',    'text-embedding-3-small',  2400,  9600,    0,    1, 0.020,  0.000, 0, 0),
+  ('stt',          '/v1/audio/transcriptions', 'openai',    'openai',    'gpt-4o-transcribe',       4800, 14400,  480, 1900, 2.500, 10.000, 0, 0),
+  ('tts',          '/v1/audio/speech',         'openai',    'openai',    'gpt-4o-mini-tts',          900,  3600,  600, 2400, 0.600, 12.000, 0, 0);
+
+-- What each path sends, in percent. A path with a model allowlist (see the
+-- users table below) draws only from templates its policy permits, so the
+-- generated history never shows a request the gateway would have rejected.
+DROP TABLE IF EXISTS temp.demo_mix;
+CREATE TEMP TABLE demo_mix AS
+WITH weights(user_path, label, weight) AS (
+  VALUES
+    -- A chatbot with a voice channel, on the fast low-cost models.
+    ('/support/helpdesk-bot', 'chat-gemini', 40),
+    ('/support/helpdesk-bot', 'chat-groq', 25),
+    ('/support/helpdesk-bot', 'chat-openai', 15),
+    ('/support/helpdesk-bot', 'stt', 10),
+    ('/support/helpdesk-bot', 'tts', 10),
+    -- An engineer's coding assistant, mostly on Claude.
+    ('/engineering/alice', 'messages', 45),
+    ('/engineering/alice', 'chat-openai', 25),
+    ('/engineering/alice', 'responses', 20),
+    ('/engineering/alice', 'embeddings', 10),
+    -- Automated jobs pinned to the cheapest models.
+    ('/engineering/ci-bot', 'chat-groq', 45),
+    ('/engineering/ci-bot', 'chat-bailian', 35),
+    ('/engineering/ci-bot', 'embeddings', 20),
+    -- Sales stays on OpenAI: drafting, call transcripts, account search.
+    ('/sales/john', 'chat-openai', 45),
+    ('/sales/john', 'responses', 25),
+    ('/sales/john', 'stt', 15),
+    ('/sales/john', 'embeddings', 10),
+    ('/sales/john', 'tts', 5),
+    -- The evaluation harness compares every chat model.
+    ('/engineering/evals', 'chat-openai', 20),
+    ('/engineering/evals', 'chat-groq', 20),
+    ('/engineering/evals', 'chat-gemini', 20),
+    ('/engineering/evals', 'chat-bailian', 20),
+    ('/engineering/evals', 'messages', 20),
+    -- A support agent's assistant.
+    ('/support/maria', 'chat-openai', 60),
+    ('/support/maria', 'chat-gemini', 30),
+    ('/support/maria', 'embeddings', 10)
+),
+numbered AS (
+  SELECT *, row_number() OVER () AS rn FROM weights
+)
+SELECT
+  user_path,
+  label,
+  (sum(weight) OVER (PARTITION BY user_path ORDER BY rn) - weight) * 100 AS min_bucket,
+  sum(weight) OVER (PARTITION BY user_path ORDER BY rn) * 100 AS max_bucket
+FROM numbered;
+
+-- A few realistic exchanges per path, so an opened request reads like the
+-- work that path does.
+DROP TABLE IF EXISTS temp.demo_prompts;
+CREATE TEMP TABLE demo_prompts(prompt_path TEXT, variant INTEGER, system_text TEXT, user_text TEXT, reply_text TEXT);
+INSERT INTO demo_prompts VALUES
+  ('/support/helpdesk-bot', 0, 'You are the help-center assistant. Answer from the knowledge base and keep replies short.',
+    'I was charged twice for my subscription this month. Can you check what happened?',
+    'I can see two charges on the same day; the second one is a duplicate. I have opened a refund for it, and it should reach your account within five business days.'),
+  ('/support/helpdesk-bot', 1, 'You are the help-center assistant. Answer from the knowledge base and keep replies short.',
+    'How do I move my workspace to another region without losing the audit history?',
+    'Open Settings, choose Region, and start a migration. The audit history moves with the workspace, and the old region stays readable for 30 days.'),
+  ('/support/helpdesk-bot', 2, 'You are the help-center assistant. Answer from the knowledge base and keep replies short.',
+    'The mobile app logs me out every time I switch networks. Is that expected?',
+    'It is not expected. Update to the latest version, which keeps the session across network changes, and tell me if it still happens.'),
+  ('/engineering/alice', 0, 'You are a senior Go reviewer. Point out bugs first, then style.',
+    'Review this retry helper: it sleeps with a fixed one-second delay and retries on every error.',
+    'Two problems: it retries errors that can never succeed, such as a 400, and the fixed delay makes all clients retry in step. Retry only on 429 and 5xx, and add exponential backoff with jitter.'),
+  ('/engineering/alice', 1, 'You are a senior Go reviewer. Point out bugs first, then style.',
+    'Why does this test pass on its own and fail when the whole package runs?',
+    'The test reads a package-level map that another test changes. Give each test its own copy, or build the map in a helper, and the order stops mattering.'),
+  ('/engineering/alice', 2, 'You are a senior Go reviewer. Point out bugs first, then style.',
+    'Write a table-driven test for a function that parses durations such as 90s, 5m, and 1h30m.',
+    'Here is a table with the valid forms, an empty string, a missing unit, and a negative value, each with the expected duration or error.'),
+  ('/engineering/ci-bot', 0, 'You label build failures. Reply with one category and one sentence.',
+    'Classify this failure: "dial tcp 10.0.4.17:5432: connect: connection refused" in the integration job.',
+    'infrastructure: the database container was not ready when the job connected.'),
+  ('/engineering/ci-bot', 1, 'You label build failures. Reply with one category and one sentence.',
+    'Classify this failure: "expected 200, got 502" in test_checkout_flow, three runs out of ten.',
+    'flaky-test: the upstream stub answers late under load, so the request times out intermittently.'),
+  ('/engineering/ci-bot', 2, 'You write release notes from merged pull request titles.',
+    'Summarize these 14 merged pull requests for the weekly changelog.',
+    'Highlights: faster provider saves, a clearer empty state on the overview charts, and three fixes to budget resets.'),
+  ('/sales/john', 0, 'You help account executives write clear, honest follow-ups.',
+    'Draft a follow-up to a prospect who asked about SSO and a 99.9% uptime commitment.',
+    'Thanks for the call today. SSO is included in the plan we discussed, and the uptime commitment is part of the standard agreement. Shall I send the security overview before Thursday?'),
+  ('/sales/john', 1, 'You help account executives write clear, honest follow-ups.',
+    'Summarize this discovery call: 40 engineers, two providers today, no cost visibility per team.',
+    'A 40-person engineering team on two providers with no per-team cost view. They want budgets per team and one place to audit requests. Next step: a pilot with the platform team.'),
+  ('/sales/john', 2, 'You help account executives write clear, honest follow-ups.',
+    'Which of my open opportunities have had no activity for two weeks?',
+    'Three have been quiet for two weeks or more. The largest is the renewal that is waiting on a security review.'),
+  ('/engineering/evals', 0, 'Answer the question. Reply with the answer only.',
+    'Evaluation item 118: which HTTP status means the client sent too many requests?',
+    '429'),
+  ('/engineering/evals', 1, 'Answer the question. Reply with the answer only.',
+    'Evaluation item 245: extract the invoice total from "Subtotal 1,180.00, tax 94.40, total 1,274.40".',
+    '1,274.40'),
+  ('/engineering/evals', 2, 'Answer the question. Reply with the answer only.',
+    'Evaluation item 302: translate "the request was rate limited" into German.',
+    'Die Anfrage wurde ratenbegrenzt.'),
+  ('/support/maria', 0, 'You help a support agent reply to customers. Suggest a reply the agent can edit.',
+    'Suggest a reply: the customer asks for an invoice with their VAT number added.',
+    'Happy to help. I have added your VAT number to the account, and the corrected invoice is attached. Future invoices will include it automatically.'),
+  ('/support/maria', 1, 'You help a support agent reply to customers. Suggest a reply the agent can edit.',
+    'Summarize this ticket thread of 23 messages for the handover to the next shift.',
+    'The customer cannot export reports larger than 50 MB. Engineering confirmed a limit in the export job, and a fix ships Tuesday. The customer has a workaround and expects an update then.'),
+  ('/support/maria', 2, 'You help a support agent reply to customers. Suggest a reply the agent can edit.',
+    'Is a refund allowed 45 days after purchase under the current policy?',
+    'The policy allows refunds within 30 days. After that it needs a team lead to approve an exception, which is usually granted for billing errors.');
 
 DROP TABLE IF EXISTS temp.demo_random;
 CREATE TEMP TABLE demo_random AS
@@ -641,67 +778,34 @@ SELECT
   abs(random()) % 10000 AS normalize_bucket,
   abs(random()) % 10000 AS outcome_bucket,
   abs(random()) % 10000 AS alias_bucket,
-  abs(random()) % 10000 AS retarget_bucket,
-  abs(random()) % CASE WHEN d.day = date(${seed_utc_epoch}, 'unixepoch')
-    THEN ${current_utc_second} + 1
-    ELSE 86400
-  END AS second_of_day,
+  abs(random()) % 10000 AS hour_bucket,
+  abs(random()) % 3600 AS second_of_hour,
   abs(random()) AS token_noise
 FROM demo_days d
 JOIN demo_slots s ON s.slot_idx < d.request_count;
 
 DROP TABLE IF EXISTS temp.demo_generated;
 CREATE TEMP TABLE demo_generated AS
-WITH pathed AS (
+WITH timed AS (
+  SELECT
+    b.*,
+    h.hour * 3600 + b.second_of_hour AS second_of_day
+  FROM demo_random b
+  JOIN demo_hours h ON b.hour_bucket >= h.min_bucket AND b.hour_bucket < h.max_bucket
+),
+pathed AS (
   SELECT
     b.*,
     p.user_path,
     p.min_bucket AS path_min
-  FROM demo_random b
+  FROM timed b
   JOIN demo_paths p ON b.path_bucket >= p.min_bucket AND b.path_bucket < p.max_bucket
-),
--- Paths that carry a model allowlist (see the users table below) draw only
--- from the templates their policy permits, so the generated history never
--- shows a request the gateway would have rejected. A node's allowlist bounds
--- its whole subtree, which is why the two group rules apply to every path
--- under them. Offsets land inside the template ranges declared above.
-routed AS (
-  SELECT
-    *,
-    CASE
-      -- gemini/ and openai/gpt-5-nano-2025-08-07: the two chat templates.
-      WHEN user_path = '/agents/team1/research' THEN
-        CASE retarget_bucket % 2
-          WHEN 0 THEN template_bucket % 1700           -- chat-openai
-          ELSE 3150 + (template_bucket % 1300)         -- chat-gemini
-        END
-      -- groq/llama-3.1-8b-instant and qwen-flash, which both bailian
-      -- templates serve.
-      WHEN user_path = '/engineering/ai/bot/batch' THEN
-        CASE retarget_bucket % 3
-          WHEN 0 THEN 1700 + (template_bucket % 1450)  -- chat-groq
-          WHEN 1 THEN 4450 + (template_bucket % 1200)  -- chat-bailian
-          ELSE 5650 + (template_bucket % 1200)         -- responses
-        END
-      -- /agents allows every provider except anthropic.
-      WHEN user_path GLOB '/agents*' AND template_bucket >= 6850 AND template_bucket < 7850 THEN
-        1700 + (template_bucket % 1450)                -- chat-groq
-      -- /sales allows openai/ and anthropic/claude-haiku-4-5-20251001.
-      WHEN user_path GLOB '/sales*' AND template_bucket >= 1700 AND template_bucket < 6850 THEN
-        CASE retarget_bucket % 4
-          WHEN 0 THEN template_bucket % 1700           -- chat-openai
-          WHEN 1 THEN 6850 + (template_bucket % 1000)  -- messages
-          WHEN 2 THEN 7850 + (template_bucket % 700)   -- embeddings
-          ELSE 8550 + (template_bucket % 1400)         -- stt and tts
-        END
-      ELSE template_bucket
-    END AS routed_template_bucket
-  FROM pathed
+  -- Today's requests that have not happened yet.
+  WHERE b.day != date(${seed_utc_epoch}, 'unixepoch') OR b.second_of_day <= ${current_utc_second}
 ),
 chosen AS (
   SELECT
     b.*,
-    t.min_bucket AS template_min,
     t.label,
     t.endpoint,
     t.provider,
@@ -720,15 +824,17 @@ chosen AS (
     -- provider scope, then the global baseline.
     CASE
       WHEN b.user_path GLOB '/sales*' THEN '${prefix}-wf-sales'
-      WHEN b.user_path GLOB '/agents/team1*' THEN '${prefix}-wf-agents'
-      WHEN b.user_path GLOB '/engineering/ai/bot/batch*' THEN '${prefix}-wf-batch'
-      WHEN b.user_path GLOB '/engineering/ai/mike*' THEN '${prefix}-wf-evals'
+      WHEN b.user_path GLOB '/support/helpdesk-bot*' THEN '${prefix}-wf-support'
+      WHEN b.user_path GLOB '/engineering/ci-bot*' THEN '${prefix}-wf-batch'
+      WHEN b.user_path GLOB '/engineering/evals*' THEN '${prefix}-wf-evals'
       WHEN t.provider = 'anthropic' THEN '${prefix}-wf-anthropic'
       ELSE '${prefix}-wf-global-v2'
     END AS workflow_version_id,
-    CASE WHEN b.user_path GLOB '/engineering/ai/mike*' THEN 0 ELSE 1 END AS workflow_guardrails
-  FROM routed b
-  JOIN demo_templates t ON b.routed_template_bucket >= t.min_bucket AND b.routed_template_bucket < t.max_bucket
+    CASE WHEN b.user_path GLOB '/engineering/evals*' THEN 0 ELSE 1 END AS workflow_guardrails
+  FROM pathed b
+  JOIN demo_mix x ON x.user_path = b.user_path
+    AND b.template_bucket >= x.min_bucket AND b.template_bucket < x.max_bucket
+  JOIN demo_templates t ON t.label = x.label
 ),
 tokens AS (
   SELECT
@@ -790,7 +896,7 @@ prompt_parts AS (
     END AS prompt_cache_write_tokens
   FROM rewrite_decisions
 ),
--- Conversational requests in the same six-hour window on the same day, user
+-- Conversational requests in the same three-hour window on the same day, user
 -- path, and endpoint share a session key. Grouping by endpoint (rather than
 -- provider/model) lets a conversation retain its thread when a virtual model
 -- routes a later turn elsewhere. The key stays below 2^31 so the hex mixing
@@ -798,7 +904,7 @@ prompt_parts AS (
 session_keys AS (
   SELECT
     *,
-    (((day_idx * 7 + (second_of_day / 21600)) * 131071 + path_min) * 8191 +
+    (((day_idx * 11 + (second_of_day / 10800)) * 131071 + path_min) * 8191 +
       CASE endpoint
         WHEN '/v1/chat/completions' THEN 1
         WHEN '/v1/responses' THEN 2
@@ -824,11 +930,25 @@ outcomes AS (
     *,
     CASE
       WHEN cache_type IS NOT NULL THEN 'ok'
-      WHEN workflow_version_id = '${prefix}-wf-agents' AND guardrail_bucket < 120 THEN 'guardrail_blocked'
+      WHEN workflow_version_id = '${prefix}-wf-support' AND guardrail_bucket < 120 THEN 'guardrail_blocked'
       WHEN workflow_version_id = '${prefix}-wf-anthropic' AND guardrail_bucket < 180 THEN 'guardrail_blocked'
-      WHEN user_path IN ('/agents/team2/ops', '/sales/john/prospects') AND outcome_bucket < 250 THEN 'budget_blocked'
-      WHEN abs(token_noise / 131) % 1000 >= 994 THEN 'provider_error'
-      WHEN abs(token_noise / 131) % 1000 >= 985 THEN 'rate_limited'
+      -- The help-desk bot runs out of its budget now and then: right now, so
+      -- its latest requests are the refused ones, and, while its budget is
+      -- the monthly one, on the last afternoon of a month.
+      WHEN user_path = '/support/helpdesk-bot' AND (
+        (day = date(${seed_utc_epoch}, 'unixepoch') AND second_of_day >= (${current_utc_second} + 1) * 9 / 10)
+        OR (${exceeded_budget_period} = 2592000 AND strftime('%d', day, '+1 day') = '01' AND second_of_day >= 43200)
+      )
+      THEN 'budget_blocked'
+      -- One provider incident in the window: Groq fails most requests for an
+      -- afternoon on a Tuesday one to two weeks back, so the status chart
+      -- shows one clear spike and the request log a run of failovers.
+      WHEN provider = 'groq' AND day = date(${seed_utc_epoch}, 'unixepoch', '-13 days', 'weekday 2')
+        AND second_of_day >= 43200 AND second_of_day < 61200
+        AND outcome_bucket < 7000
+      THEN 'provider_error'
+      WHEN abs(token_noise / 131) % 1000 >= 997 THEN 'provider_error'
+      WHEN abs(token_noise / 131) % 1000 >= 992 THEN 'rate_limited'
       ELSE 'ok'
     END AS request_outcome
   FROM session_turns
@@ -836,6 +956,11 @@ outcomes AS (
 SELECT
   *,
   CASE WHEN request_outcome IN ('budget_blocked', 'guardrail_blocked') THEN 0 ELSE 1 END AS usage_recorded,
+  -- The period of the budget that stopped a request (see demo_budgets).
+  CASE
+    WHEN day = date(${seed_utc_epoch}, 'unixepoch') AND ${exceeded_budget_period} = 604800 THEN 'weekly'
+    ELSE 'monthly'
+  END AS budget_period,
   -- Prompt-phase guardrail effects. The prompt phase runs before the cache
   -- lookup and the budget check, so a cached or budget-stopped request still
   -- carries the steps that ran; a step that comes after a blocking one in its
@@ -848,7 +973,7 @@ SELECT
     ELSE 0
   END AS guardrail_warned,
   CASE
-    WHEN workflow_version_id IN ('${prefix}-wf-agents', '${prefix}-wf-batch')
+    WHEN workflow_version_id IN ('${prefix}-wf-support', '${prefix}-wf-batch')
       AND normalize_bucket >= 3300
     THEN 1
     ELSE 0
@@ -865,32 +990,19 @@ SELECT
   -- Roughly a fifth of conversational traffic asks for a virtual model
   -- instead of a concrete one. The alias is drawn from those whose target
   -- pool contains the resolved provider, so requested and resolved models
-  -- stay consistent; 'quality' is scoped to engineering and agents.
+  -- stay consistent; 'smart' is scoped to engineering.
   CASE
     WHEN label NOT IN ('chat-openai', 'chat-groq', 'chat-gemini', 'chat-bailian', 'responses', 'messages') THEN NULL
     WHEN alias_bucket >= 2200 THEN NULL
-    WHEN provider = 'anthropic' THEN CASE
-      WHEN (user_path GLOB '/engineering*' OR user_path GLOB '/agents*') AND alias_bucket % 2 = 0 THEN 'quality'
-      ELSE 'smart'
-    END
-    WHEN provider = 'groq' THEN CASE alias_bucket % 3
-      WHEN 0 THEN 'fast'
-      WHEN 1 THEN 'cheap'
+    WHEN provider = 'anthropic' THEN CASE WHEN user_path GLOB '/engineering*' THEN 'smart' ELSE NULL END
+    WHEN label = 'responses' THEN CASE WHEN user_path GLOB '/engineering*' THEN 'smart' ELSE NULL END
+    WHEN provider = 'openai' THEN CASE alias_bucket % 2
+      WHEN 0 THEN 'cheap'
       ELSE 'resilient'
     END
-    WHEN provider = 'openai' THEN CASE alias_bucket % 4
-      WHEN 0 THEN 'smart'
+    ELSE CASE alias_bucket % 3
+      WHEN 0 THEN 'fast'
       WHEN 1 THEN 'cheap'
-      WHEN 2 THEN 'normal'
-      ELSE CASE
-        WHEN user_path GLOB '/engineering*' OR user_path GLOB '/agents*' THEN 'quality'
-        ELSE 'resilient'
-      END
-    END
-    ELSE CASE alias_bucket % 4
-      WHEN 0 THEN 'smart'
-      WHEN 1 THEN 'fast'
-      WHEN 2 THEN 'cheap'
       ELSE 'resilient'
     END
   END AS alias_source,
@@ -942,14 +1054,14 @@ SELECT
   user_path,
   session_id,
   cache_type,
-  -- Request labels as extracted from tagging headers: roughly two thirds of
-  -- traffic is labelled, some with two labels, the rest unlabelled (NULL).
+  -- Request labels as extracted from tagging headers: most traffic carries
+  -- its environment, a little carries two labels, and the rest is unlabelled
+  -- (NULL).
   CASE
-    WHEN label_bucket < 2500 THEN json_array('env:prod')
-    WHEN label_bucket < 4000 THEN json_array('env:staging')
-    WHEN label_bucket < 5200 THEN json_array('env:prod', 'batch')
-    WHEN label_bucket < 6000 THEN json_array('experiment:rag-v2')
-    WHEN label_bucket < 6600 THEN json_array('env:prod', 'priority:high')
+    WHEN label_bucket < 5000 THEN json_array('env:prod')
+    WHEN label_bucket < 6400 THEN json_array('env:staging')
+    WHEN label_bucket < 7200 THEN json_array('experiment:rag-v2')
+    WHEN label_bucket < 7800 THEN json_array('env:prod', 'priority:high')
     ELSE NULL
   END AS labels,
   input_tokens,
@@ -1019,9 +1131,9 @@ SELECT
   '',
   -- Same key attribution as the request log rows below.
   CASE
-    WHEN user_path GLOB '/agents/team1*' THEN '${prefix}-key-team1'
-    WHEN user_path GLOB '/engineering/ai*' THEN '${prefix}-key-engineering'
-    WHEN user_path GLOB '/sales/john*' AND provider = 'openai' THEN '${prefix}-key-sales'
+    WHEN user_path GLOB '/support*' THEN '${prefix}-key-support'
+    WHEN user_path IN ('/engineering/alice', '/engineering/ci-bot') THEN '${prefix}-key-engineering'
+    WHEN user_path GLOB '/sales/john*' THEN '${prefix}-key-sales'
     ELSE NULL
   END
 -- Requests stopped by a budget or a prompt guardrail never reach a provider,
@@ -1085,13 +1197,13 @@ SELECT
     'tokens_saved', rewrite_tokens_saved,
     'body', json_object(
       'model', coalesce(alias_source, provider_name || '/' || model),
-      'input', 'Compressed context for ' || user_path || ': retain gateway totals, cache behavior, budget risk, and action items.',
+      'input', 'Earlier turns condensed to the facts the next answer needs.',
       'metadata', json_object('demo', json('true'), 'rewritten', json('true'))
     ),
     'detail', json_object(
       'strategy', 'context-compression',
       'tokens_saved_estimate', rewrite_tokens_saved,
-      'preserved_sections', json_array('usage', 'cache', 'budget', 'actions')
+      'preserved_sections', json_array('facts', 'identifiers', 'open questions')
     )
   ) AS revision
 FROM chain
@@ -1109,7 +1221,7 @@ SELECT
       'model', coalesce(alias_source, provider_name || '/' || model),
       'messages', json_array(json_object(
         'role', 'user',
-        'content', 'Normalized turn ' || session_turn || ' for ' || user_path || ': one self-contained question with the run identifiers kept.'
+        'content', 'Turn ' || session_turn || ' restated as one self-contained question, with every identifier it refers to kept.'
       ))
     ),
     'detail', json_object('phase', 'prompt', 'action', 'allow')
@@ -1167,7 +1279,7 @@ SELECT
   audit_id,
   6,
   json_object(
-    'rewriter', CASE WHEN workflow_version_id = '${prefix}-wf-agents' THEN '${prefix}-blocked-terms' ELSE '${prefix}-prompt-injection-judge' END,
+    'rewriter', CASE WHEN workflow_version_id = '${prefix}-wf-support' THEN '${prefix}-blocked-terms' ELSE '${prefix}-prompt-injection-judge' END,
     'bytes_before', bytes_normalized,
     'bytes_after', bytes_normalized,
     'no_change', json('true'),
@@ -1176,7 +1288,7 @@ SELECT
       'action', 'block',
       'code', 'guardrail_blocked',
       'message', CASE
-        WHEN workflow_version_id = '${prefix}-wf-agents'
+        WHEN workflow_version_id = '${prefix}-wf-support'
           THEN 'This request mentions material that may not leave the tenant. Remove it and try again.'
         ELSE 'This prompt was rejected as a prompt-injection attempt.'
       END
@@ -1213,7 +1325,7 @@ SELECT
   -- Requests stopped early are fast, and a cache hit skips the provider.
   CASE
     WHEN request_outcome = 'budget_blocked' THEN 900000 + (token_noise % 2200000)
-    WHEN request_outcome = 'guardrail_blocked' AND workflow_version_id = '${prefix}-wf-agents'
+    WHEN request_outcome = 'guardrail_blocked' AND workflow_version_id = '${prefix}-wf-support'
       THEN 1400000 + (token_noise % 3600000)
     WHEN request_outcome = 'guardrail_blocked' THEN 190000000 + (token_noise % 520000000)
     WHEN cache_type IS NOT NULL THEN 8000000 + (token_noise % 12000000)
@@ -1241,26 +1353,23 @@ SELECT
   CASE request_outcome
     WHEN 'budget_blocked' THEN 429
     WHEN 'guardrail_blocked' THEN
-      CASE WHEN workflow_version_id = '${prefix}-wf-agents' THEN 403 ELSE 400 END
+      CASE WHEN workflow_version_id = '${prefix}-wf-support' THEN 403 ELSE 400 END
     WHEN 'rate_limited' THEN 429
     WHEN 'provider_error' THEN 500
     ELSE 200
   END,
   request_id,
-  -- The generated demo keys own the traffic of their user paths, except where
-  -- a key could not have made the request: the sales key allows only openai/,
-  -- so its path's other providers were reached with the master key.
+  -- The generated demo keys own the traffic of their user paths. The
+  -- evaluation harness has no key of its own and runs on the master key.
   CASE
-    WHEN user_path GLOB '/agents/team1*' THEN '${prefix}-key-team1'
-    WHEN user_path GLOB '/engineering/ai*' THEN '${prefix}-key-engineering'
-    WHEN user_path GLOB '/sales/john*' AND provider = 'openai' THEN '${prefix}-key-sales'
+    WHEN user_path GLOB '/support*' THEN '${prefix}-key-support'
+    WHEN user_path IN ('/engineering/alice', '/engineering/ci-bot') THEN '${prefix}-key-engineering'
+    WHEN user_path GLOB '/sales/john*' THEN '${prefix}-key-sales'
     ELSE NULL
   END,
   CASE
-    WHEN user_path GLOB '/agents/team1*'
-      OR user_path GLOB '/engineering/ai*'
-      OR (user_path GLOB '/sales/john*' AND provider = 'openai') THEN 'api_key'
-    ELSE 'master_key'
+    WHEN user_path = '/engineering/evals' THEN 'master_key'
+    ELSE 'api_key'
   END,
   '10.42.' || (abs(token_noise / 7) % 6) || '.' || ((abs(token_noise / 13) % 250) + 2),
   'POST',
@@ -1301,10 +1410,10 @@ SELECT
       ELSE NULL
     END,
     'error_message', CASE request_outcome
-      WHEN 'budget_blocked' THEN 'daily budget for ' || user_path || ' exceeded'
+      WHEN 'budget_blocked' THEN 'budget exceeded for ' || user_path || ' ' || budget_period || ' limit'
       WHEN 'guardrail_blocked' THEN
         CASE
-          WHEN workflow_version_id = '${prefix}-wf-agents'
+          WHEN workflow_version_id = '${prefix}-wf-support'
             THEN 'This request mentions material that may not leave the tenant. Remove it and try again.'
           ELSE 'This prompt was rejected as a prompt-injection attempt.'
         END
@@ -1328,10 +1437,10 @@ SELECT
       WHEN request_outcome = 'provider_error' AND workflow_version_id != '${prefix}-wf-batch'
       THEN json_object('target_model', CASE provider
         WHEN 'openai' THEN 'groq/llama-3.1-8b-instant'
-        WHEN 'groq' THEN 'gemini/gemini-2.5-flash-lite'
+        WHEN 'groq' THEN 'gemini/gemini-3.5-flash-lite'
         WHEN 'gemini' THEN 'groq/llama-3.1-8b-instant'
         WHEN 'bailian' THEN 'groq/llama-3.1-8b-instant'
-        ELSE 'openai/gpt-5-nano-2025-08-07'
+        ELSE 'openai/gpt-6-luna'
       END)
       ELSE 'null'
     END),
@@ -1350,10 +1459,8 @@ SELECT
         'model', coalesce(alias_source, provider_name || '/' || model),
         'session_id', session_id,
         'messages', json_array(
-          json_object('role', 'system', 'content', 'You are a concise assistant for internal demo traffic. Respect the user path and return actionable JSON when useful.'),
-          json_object('role', 'user', 'content', 'Summarize daily gateway usage for ' || user_path || ' and call out cache savings, error spikes, and next actions.'),
-          json_object('role', 'assistant', 'content', 'I will compare current traffic against the recent baseline and identify cost or latency anomalies.'),
-          json_object('role', 'user', 'content', 'Continue session turn ' || session_turn || ' for ' || user_path || '; include provider ' || provider_name || '.')
+          json_object('role', 'system', 'content', system_text),
+          json_object('role', 'user', 'content', user_text)
         ),
         'temperature', round(0.15 + ((token_noise % 70) / 100.0), 2),
         'max_tokens', output_tokens,
@@ -1368,10 +1475,9 @@ SELECT
         'model', coalesce(alias_source, provider_name || '/' || model),
         'session_id', session_id,
         'input', json_array(
-          json_object('role', 'system', 'content', 'You are GoModel demo analysis worker.'),
-          json_object('role', 'user', 'content', 'Create a short incident-style report for ' || user_path || ' on session turn ' || session_turn || ' using token totals and cache telemetry.')
+          json_object('role', 'user', 'content', user_text)
         ),
-        'instructions', 'Return sections named summary, observations, and recommendation.',
+        'instructions', system_text,
         'stream', CASE WHEN slot_idx % 5 = 0 THEN json('true') ELSE json('false') END,
         'previous_response_id', CASE
           WHEN previous_session_slot_idx IS NOT NULL THEN '${prefix}-response-' || day_idx || '-' || previous_session_slot_idx
@@ -1383,10 +1489,10 @@ SELECT
       WHEN label = 'messages' THEN json_object(
         'model', coalesce(alias_source, provider_name || '/' || model),
         'session_id', session_id,
-        'system', 'You help the engineering and sales teams reason about AI gateway telemetry.',
+        'system', system_text,
         'messages', json_array(
           json_object('role', 'user', 'content', json_array(
-            json_object('type', 'text', 'text', 'Continue weekly update turn ' || session_turn || ' for ' || user_path || ' with token volume, model mix, cache behavior, and budget risk.')
+            json_object('type', 'text', 'text', user_text)
           ))
         ),
         'max_tokens', output_tokens,
@@ -1395,11 +1501,7 @@ SELECT
       )
       WHEN label = 'embeddings' THEN json_object(
         'model', provider_name || '/' || model,
-        'input', json_array(
-          'gateway usage dashboard prompt cache overview for ' || user_path,
-          'semantic cache hit investigation request ' || request_id,
-          'budget variance notes for provider ' || provider_name
-        ),
+        'input', json_array(user_text, reply_text),
         'encoding_format', 'float'
       )
       WHEN label = 'stt' THEN json_object(
@@ -1429,7 +1531,7 @@ SELECT
     'response_body', json(CASE
       WHEN request_outcome = 'budget_blocked' THEN json_object(
         'error', json_object(
-          'message', 'daily budget for ' || user_path || ' exceeded',
+          'message', 'budget exceeded for ' || user_path || ' ' || budget_period || ' limit',
           'type', 'rate_limit_error',
           'code', 'budget_exceeded',
           'param', NULL
@@ -1438,7 +1540,7 @@ SELECT
       WHEN request_outcome = 'guardrail_blocked' THEN json_object(
         'error', json_object(
           'message', CASE
-            WHEN workflow_version_id = '${prefix}-wf-agents'
+            WHEN workflow_version_id = '${prefix}-wf-support'
               THEN 'This request mentions material that may not leave the tenant. Remove it and try again.'
             ELSE 'This prompt was rejected as a prompt-injection attempt.'
           END,
@@ -1473,7 +1575,7 @@ SELECT
           'finish_reason', 'stop',
           'message', json_object(
             'role', 'assistant',
-            'content', 'Session turn ' || session_turn || ' for ' || user_path || ' is healthy. Total tokens were ' || total_tokens || ', with cache mode ' || coalesce(cache_type, CASE WHEN prompt_cache_hit = 1 THEN 'prompt-cache' ELSE 'uncached' END) || '.'
+            'content', reply_text
           )
         )),
         'usage', json_object(
@@ -1494,7 +1596,7 @@ SELECT
           'role', 'assistant',
           'content', json_array(json_object(
             'type', 'output_text',
-            'text', 'Turn ' || session_turn || ': ' || user_path || ' generated ' || total_tokens || ' tokens. Observation: cache savings were ' || CASE WHEN cache_type IS NOT NULL OR prompt_cache_hit = 1 THEN 'visible' ELSE 'not present' END || '. Recommendation: keep monitoring budget drift.'
+            'text', reply_text
           ))
         )),
         'usage', json_object(
@@ -1511,7 +1613,7 @@ SELECT
         'model', provider_name || '/' || model,
         'content', json_array(json_object(
           'type', 'text',
-          'text', 'Weekly update turn ' || session_turn || ' for ' || user_path || ': model usage is balanced, semantic cache checks are active, and budget burn is within demo limits.'
+          'text', reply_text
         )),
         'stop_reason', 'end_turn',
         'usage', json_object(
@@ -1526,8 +1628,7 @@ SELECT
         'model', provider_name || '/' || model,
         'data', json_array(
           json_object('object', 'embedding', 'index', 0, 'embedding', json_array(0.012, -0.034, 0.087, 0.003)),
-          json_object('object', 'embedding', 'index', 1, 'embedding', json_array(-0.021, 0.045, 0.016, -0.008)),
-          json_object('object', 'embedding', 'index', 2, 'embedding', json_array(0.005, 0.019, -0.042, 0.071))
+          json_object('object', 'embedding', 'index', 1, 'embedding', json_array(-0.021, 0.045, 0.016, -0.008))
         ),
         'usage', json_object('prompt_tokens', input_tokens, 'total_tokens', total_tokens)
       )
@@ -1556,7 +1657,9 @@ SELECT
       ELSE json_object('id', '${prefix}-response-' || day_idx || '-' || slot_idx, 'object', label)
     END)
   )
-FROM demo_generated LEFT JOIN demo_revision_arrays USING (audit_id);
+FROM demo_generated
+JOIN demo_prompts ON prompt_path = user_path AND variant = (session_key + session_turn) % 3
+LEFT JOIN demo_revision_arrays USING (audit_id);
 
 -- Attempt trails feed the request drawer's failover pips. Failed entries show
 -- a primary attempt plus a cross-provider failover that also failed (the
@@ -1581,10 +1684,10 @@ SELECT
   CASE provider WHEN 'openai' THEN 'groq' WHEN 'groq' THEN 'gemini' WHEN 'gemini' THEN 'groq' WHEN 'bailian' THEN 'groq' ELSE 'openai' END,
   CASE provider
     WHEN 'openai' THEN 'llama-3.1-8b-instant'
-    WHEN 'groq' THEN 'gemini-2.5-flash-lite'
+    WHEN 'groq' THEN 'gemini-3.5-flash-lite'
     WHEN 'gemini' THEN 'llama-3.1-8b-instant'
     WHEN 'bailian' THEN 'llama-3.1-8b-instant'
-    ELSE 'gpt-5-nano-2025-08-07'
+    ELSE 'gpt-6-luna'
   END,
   500, 0, 'provider_error', 'upstream_error',
   'Synthetic failover attempt also failed upstream for demo inspection.',
@@ -1668,7 +1771,7 @@ VALUES
   ),
   (
     '${prefix}-prompt-normalizer', 'llm_based_altering',
-    '${prefix}: rewrites agent and batch prompts into self-contained questions',
+    '${prefix}: rewrites help-desk and batch prompts into self-contained questions',
     NULL, '${guardrail_config_normalizer}', 'open', 8000,
     ${seed_utc_epoch} - 2160000, ${seed_utc_epoch} - 172800
   );
@@ -1685,8 +1788,8 @@ UPDATE workflow_versions
 SET active = FALSE
 WHERE active = TRUE
   AND scope_key IN (
-    'global', 'path:/sales', 'path:/agents/team1',
-    'path:/engineering/ai/bot/batch', 'path:/engineering/ai/mike', 'provider:anthropic'
+    'global', 'path:/sales', 'path:/support/helpdesk-bot',
+    'path:/engineering/ci-bot', 'path:/engineering/evals', 'provider:anthropic'
   );
 
 INSERT INTO workflow_versions (
@@ -1723,18 +1826,18 @@ INSERT INTO workflow_versions (
   id, scope_provider, scope_model, scope_user_path, scope_key, version,
   active, managed_default, name, description, workflow_payload, workflow_hash, created_at
 )
-SELECT '${prefix}-wf-agents', NULL, NULL, '/agents/team1', 'path:/agents/team1',
-  (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'path:/agents/team1') + 1,
-  TRUE, FALSE, 'Agent research',
-  'Normalizes long agent prompts and rejects confidential program names',
-  '${workflow_payload_agents}', '${workflow_hash_agents}', ${seed_utc_epoch} - 2160000;
+SELECT '${prefix}-wf-support', NULL, NULL, '/support/helpdesk-bot', 'path:/support/helpdesk-bot',
+  (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'path:/support/helpdesk-bot') + 1,
+  TRUE, FALSE, 'Help-desk bot',
+  'Normalizes customer messages and rejects confidential program names',
+  '${workflow_payload_support}', '${workflow_hash_support}', ${seed_utc_epoch} - 2160000;
 
 INSERT INTO workflow_versions (
   id, scope_provider, scope_model, scope_user_path, scope_key, version,
   active, managed_default, name, description, workflow_payload, workflow_hash, created_at
 )
-SELECT '${prefix}-wf-batch', NULL, NULL, '/engineering/ai/bot/batch', 'path:/engineering/ai/bot/batch',
-  (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'path:/engineering/ai/bot/batch') + 1,
+SELECT '${prefix}-wf-batch', NULL, NULL, '/engineering/ci-bot', 'path:/engineering/ci-bot',
+  (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'path:/engineering/ci-bot') + 1,
   TRUE, FALSE, 'Batch jobs',
   'Prompt normalization and redaction for batch traffic, failover off',
   '${workflow_payload_batch}', '${workflow_hash_batch}', ${seed_utc_epoch} - 1296000;
@@ -1743,8 +1846,8 @@ INSERT INTO workflow_versions (
   id, scope_provider, scope_model, scope_user_path, scope_key, version,
   active, managed_default, name, description, workflow_payload, workflow_hash, created_at
 )
-SELECT '${prefix}-wf-evals', NULL, NULL, '/engineering/ai/mike', 'path:/engineering/ai/mike',
-  (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'path:/engineering/ai/mike') + 1,
+SELECT '${prefix}-wf-evals', NULL, NULL, '/engineering/evals', 'path:/engineering/evals',
+  (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'path:/engineering/evals') + 1,
   TRUE, FALSE, 'Evaluation harness',
   'Guardrails off so evaluation prompts reach the model exactly as written',
   '${workflow_payload_baseline_v1}', '${workflow_hash_baseline_v1}', ${seed_utc_epoch} - 1036800;
@@ -1759,69 +1862,91 @@ SELECT '${prefix}-wf-anthropic', 'anthropic', NULL, NULL, 'provider:anthropic',
   'Judges prompts for injection and redacts both sides; response cache off',
   '${workflow_payload_anthropic}', '${workflow_hash_anthropic}', ${seed_utc_epoch} - 864000;
 
-DROP TABLE IF EXISTS temp.demo_budget_paths;
-CREATE TEMP TABLE demo_budget_paths(user_path TEXT, daily_amount REAL, weekly_amount REAL, monthly_amount REAL);
-INSERT INTO demo_budget_paths VALUES
-  ('/', 420.00, 2500.00, 9500.00),
-  ('/agents/team1', 82.00, 510.00, 1900.00),
-  ('/agents/team1/research', 38.00, 225.00, 850.00),
-  ('/agents/team2', 74.00, 455.00, 1700.00),
-  ('/agents/team2/ops', 30.00, 180.00, 690.00),
-  ('/engineering', 160.00, 980.00, 3700.00),
-  ('/engineering/ai', 140.00, 850.00, 3200.00),
-  ('/engineering/ai/mike', 92.00, 570.00, 2100.00),
-  ('/engineering/ai/mike/evals', 54.00, 320.00, 1200.00),
-  ('/engineering/ai/bot', 105.00, 650.00, 2450.00),
-  ('/engineering/ai/bot/batch', 68.00, 420.00, 1600.00),
-  ('/sales', 95.00, 585.00, 2200.00),
-  ('/sales/john', 58.00, 355.00, 1350.00),
-  ('/sales/john/prospects', 28.00, 165.00, 620.00);
+-- A handful of budgets, one per state worth seeing: comfortable, filling up,
+-- close to the limit, and exceeded, across the daily, weekly, and monthly
+-- periods and both scopes (user path and request label).
+--
+-- Amounts follow the generated spend, so the page shows these states whenever
+-- the seed runs. A budget is sized so that what its subject spent in the
+-- current period is used_pct of it, but never below typical_factor times what
+-- the subject spends in a typical period: early in a period the bar is then
+-- honestly short instead of the amount being absurdly small. The help-desk
+-- bot's budget is the exceeded one (no floor), matching the requests the
+-- generator stopped with budget_exceeded. last_reset_at stays NULL so a
+-- budget counts its whole current period, not just the time since the seed.
+DROP TABLE IF EXISTS temp.demo_budgets;
+CREATE TEMP TABLE demo_budgets(
+  scope TEXT, subject TEXT, period_seconds INTEGER, used_pct REAL, typical_factor REAL
+);
+INSERT INTO demo_budgets VALUES
+  ('user_path', '/', 2592000, 44, 0.9),
+  ('user_path', '/engineering', 2592000, 61, 0.9),
+  ('user_path', '/engineering/alice', 86400, 80, 1.25),
+  ('user_path', '/support', 604800, 37, 0.9),
+  ('user_path', '/support/helpdesk-bot', ${exceeded_budget_period}, 103, 0),
+  ('user_path', '/sales', 604800, 72, 0.9),
+  ('label', 'env:prod', 2592000, 52, 0.9),
+  ('label', 'experiment:rag-v2', 604800, 88, 0.9);
 
-WITH budget_rows AS (
-  SELECT user_path, 86400 AS period_seconds, daily_amount AS amount FROM demo_budget_paths
-  UNION ALL
-  SELECT user_path, 604800 AS period_seconds, weekly_amount AS amount FROM demo_budget_paths
-  UNION ALL
-  SELECT user_path, 2592000 AS period_seconds, monthly_amount AS amount FROM demo_budget_paths
+-- Spend per budget subject and day; a usage row counts once for every budget
+-- whose subject covers it.
+DROP TABLE IF EXISTS temp.demo_budget_spend;
+CREATE TEMP TABLE demo_budget_spend AS
+SELECT b.scope, b.subject, b.period_seconds, substr(u.timestamp, 1, 10) AS day, sum(u.total_cost) AS cost
+FROM demo_budgets b
+JOIN usage u ON u.id GLOB '${prefix}-*'
+  AND CASE b.scope
+    WHEN 'label' THEN EXISTS (SELECT 1 FROM json_each(u.labels) WHERE value = b.subject)
+    ELSE b.subject = '/' OR u.user_path = b.subject OR u.user_path GLOB b.subject || '/*'
+  END
+GROUP BY 1, 2, 3, 4;
+
+WITH periods AS (
+  SELECT
+    b.*,
+    CASE b.period_seconds
+      WHEN 86400 THEN date(${seed_utc_epoch}, 'unixepoch')
+      -- Weeks reset on Monday and months on the 1st (see budget_settings).
+      WHEN 604800 THEN date(${seed_utc_epoch}, 'unixepoch', '-6 days', 'weekday 1')
+      ELSE date(${seed_utc_epoch}, 'unixepoch', 'start of month')
+    END AS period_start,
+    b.period_seconds / 86400 AS period_days
+  FROM demo_budgets b
+),
+spent AS (
+  SELECT
+    p.*,
+    (
+      SELECT coalesce(sum(cost), 0) FROM demo_budget_spend s
+      WHERE s.scope = p.scope AND s.subject = p.subject AND s.period_seconds = p.period_seconds
+        AND s.day >= p.period_start
+    ) AS period_spend,
+    -- A typical day is the average of the complete days seeded.
+    (
+      SELECT coalesce(sum(cost), 0) / max(1, ${days} - 1) FROM demo_budget_spend s
+      WHERE s.scope = p.scope AND s.subject = p.subject AND s.period_seconds = p.period_seconds
+        AND s.day < date(${seed_utc_epoch}, 'unixepoch')
+    ) AS typical_day
+  FROM periods p
 )
 INSERT INTO budgets (scope, subject, per_child, period_seconds, amount, source, last_reset_at, created_at, updated_at)
 SELECT
-  'user_path',
-  user_path,
+  scope,
+  subject,
   0,
   period_seconds,
-  amount,
+  max(0.01, round(max(
+    period_spend * 100.0 / used_pct,
+    -- Nothing spent in the current period (a seed that ends in the past):
+    -- every budget falls back to its typical period.
+    typical_day * period_days * CASE WHEN period_spend > 0 THEN typical_factor ELSE 0.9 END
+  ), 2)),
   '${prefix}',
-  strftime('%s', CASE
-    WHEN '${end_date}' = '' THEN date(${seed_utc_epoch}, 'unixepoch')
-    ELSE date('${end_date}')
-  END),
+  NULL,
   ${seed_utc_epoch},
   ${seed_utc_epoch}
-FROM budget_rows
+FROM spent
 WHERE true
-ON CONFLICT(scope, subject, period_seconds) DO UPDATE SET
-  per_child = excluded.per_child,
-  amount = excluded.amount,
-  source = excluded.source,
-  last_reset_at = excluded.last_reset_at,
-  updated_at = excluded.updated_at;
-
--- Label-scoped budgets cap spend for one request label (as seeded on usage
--- rows) across all user paths. Per-child quota templates are not seeded: they
--- require a GoModel Pro entitlement, and the gateway refuses to start when a
--- per-child budget exists without it.
-INSERT INTO budgets (scope, subject, per_child, period_seconds, amount, source, last_reset_at, created_at, updated_at)
-VALUES
-  ('label', 'env:prod', 0, 86400, 260.00, '${prefix}',
-    strftime('%s', CASE WHEN '${end_date}' = '' THEN date(${seed_utc_epoch}, 'unixepoch') ELSE date('${end_date}') END),
-    ${seed_utc_epoch}, ${seed_utc_epoch}),
-  ('label', 'env:prod', 0, 2592000, 6800.00, '${prefix}',
-    strftime('%s', CASE WHEN '${end_date}' = '' THEN date(${seed_utc_epoch}, 'unixepoch') ELSE date('${end_date}') END),
-    ${seed_utc_epoch}, ${seed_utc_epoch}),
-  ('label', 'experiment:rag-v2', 0, 604800, 120.00, '${prefix}',
-    strftime('%s', CASE WHEN '${end_date}' = '' THEN date(${seed_utc_epoch}, 'unixepoch') ELSE date('${end_date}') END),
-    ${seed_utc_epoch}, ${seed_utc_epoch})
 ON CONFLICT(scope, subject, period_seconds) DO UPDATE SET
   per_child = excluded.per_child,
   amount = excluded.amount,
@@ -1851,22 +1976,15 @@ CREATE TEMP TABLE demo_rate_limits(
   max_requests INTEGER,
   max_tokens INTEGER
 );
+-- One rule of each kind: per-minute, hourly, and daily windows, a concurrency
+-- cap (period 0), and the three scopes.
 INSERT INTO demo_rate_limits VALUES
-  ('user_path', '/agents/team1', 60, 900, 12000000),
-  ('user_path', '/agents/team1', 0, 24, NULL),
-  ('user_path', '/agents/team2', 3600, 8000, 80000000),
-  ('user_path', '/engineering/ai', 86400, 30000, 420000000),
-  ('user_path', '/engineering/ai/bot', 0, 48, NULL),
-  ('user_path', '/sales', 60, 600, 5000000),
+  ('user_path', '/support/helpdesk-bot', 60, 600, 2000000),
+  ('user_path', '/engineering/ci-bot', 0, 8, NULL),
+  ('user_path', '/sales', 86400, 5000, 60000000),
   ('provider', 'openai', 60, 1500, 30000000),
-  ('provider', 'openai', 0, 80, NULL),
-  ('provider', 'groq', 60, 2400, 40000000),
   ('provider', 'anthropic', 3600, 7500, 120000000),
-  ('provider', 'gemini', 86400, 40000, 600000000),
-  ('provider', 'bailian', 60, 1800, 25000000),
-  ('model', 'openai/gpt-5-nano-2025-08-07', 60, 800, 16000000),
-  ('model', 'anthropic/claude-haiku-4-5-20251001', 3600, 5000, 90000000),
-  ('model', 'qwen-flash', 60, 1200, 18000000);
+  ('model', 'groq/llama-3.1-8b-instant', 60, 800, 16000000);
 
 -- Do not take ownership of a rule the user already created for the same key.
 INSERT OR IGNORE INTO rate_limits (
@@ -1936,24 +2054,24 @@ INSERT INTO auth_keys (
 )
 VALUES
   (
-    '${prefix}-key-team1',
-    'Agents Team 1',
-    'Demo key for interactive agent and research requests.',
-    '/agents/team1',
-    json_array('env:demo', 'team:agents-1'),
+    '${prefix}-key-support',
+    'Support',
+    'Demo key for the help-desk bot and the support agents.',
+    '/support',
+    json_array('env:demo', 'team:support'),
     NULL,
     0,
-    '${demo_key_redacted_team1}',
-    '${demo_key_hash_team1}',
+    '${demo_key_redacted_support}',
+    '${demo_key_hash_support}',
     1, NULL, NULL,
     strftime('%s', 'now'), strftime('%s', 'now')
   ),
   (
     '${prefix}-key-engineering',
-    'Engineering AI',
-    'Demo key for engineering evaluations and automated jobs.',
-    '/engineering/ai',
-    json_array('env:demo', 'team:engineering', 'priority:high'),
+    'Engineering',
+    'Demo key for engineers and their automated jobs.',
+    '/engineering',
+    json_array('env:demo', 'team:engineering'),
     NULL,
     1,
     '${demo_key_redacted_engineering}',
@@ -1964,7 +2082,7 @@ VALUES
   (
     '${prefix}-key-sales',
     'Sales John',
-    'Demo key for CRM summaries and sales-assistant traffic.',
+    'Demo key for sales drafting and call summaries.',
     '/sales/john',
     json_array('env:demo', 'team:sales'),
     json_array('openai/'),
@@ -1981,21 +2099,9 @@ VALUES
 -- "provider/model", and model-wide "model". An empty list keeps the node
 -- unrestricted while still carrying a description. INSERT OR IGNORE leaves
 -- operator-created policies for the same path untouched. The generated
--- traffic is routed to respect every list here (see the routed CTE above).
+-- traffic respects every list here (see demo_mix above).
 INSERT OR IGNORE INTO users (user_path, allowed_models, description, created_at, updated_at)
 VALUES
-  (
-    '/agents',
-    json_array('openai/', 'groq/', 'gemini/', 'bailian/'),
-    '${prefix}: agent teams stay on fast, low-cost chat providers',
-    strftime('%s', 'now'), strftime('%s', 'now')
-  ),
-  (
-    '/agents/team1/research',
-    json_array('gemini/', 'openai/gpt-5-nano-2025-08-07'),
-    '${prefix}: research narrows its group allowlist to evaluation models',
-    strftime('%s', 'now'), strftime('%s', 'now')
-  ),
   (
     '/engineering',
     '[]',
@@ -2003,15 +2109,21 @@ VALUES
     strftime('%s', 'now'), strftime('%s', 'now')
   ),
   (
-    '/engineering/ai/bot/batch',
-    json_array('groq/llama-3.1-8b-instant', 'qwen-flash'),
-    '${prefix}: batch jobs are pinned to the cheapest chat models',
+    '/engineering/ci-bot',
+    json_array('groq/llama-3.1-8b-instant', 'qwen3.8-flash', 'openai/text-embedding-3-small'),
+    '${prefix}: automated jobs are pinned to the cheapest models',
+    strftime('%s', 'now'), strftime('%s', 'now')
+  ),
+  (
+    '/support',
+    json_array('openai/', 'gemini/', 'groq/'),
+    '${prefix}: support stays on fast, low-cost providers',
     strftime('%s', 'now'), strftime('%s', 'now')
   ),
   (
     '/sales',
-    json_array('openai/', 'anthropic/claude-haiku-4-5-20251001'),
-    '${prefix}: sales uses OpenAI plus Claude Haiku for summaries',
+    json_array('openai/', 'anthropic/claude-sonnet-5-5'),
+    '${prefix}: sales uses OpenAI plus Claude Sonnet for long summaries',
     strftime('%s', 'now'), strftime('%s', 'now')
   );
 
@@ -2024,40 +2136,22 @@ VALUES (
   strftime('%s', 'now')
 );
 
--- Named virtual models demonstrate aliases plus cost- and latency-oriented
--- target pools. Existing operator-owned aliases with these names win. Session
--- affinity stays on its default (sticky) except for 'cheap', which opts out so
--- the editor's "Session keeping" checkbox shows both states.
+-- Named virtual models, one per routing idea: a weighted latency pool, a
+-- lowest-cost pool, and a pool only one team may use. Existing operator-owned
+-- aliases with these names win. Session affinity stays on its default (sticky)
+-- except for 'cheap', which opts out so the editor's "Session keeping"
+-- checkbox shows both states.
 INSERT OR IGNORE INTO virtual_models (
   source, targets, strategy, session_affinity, provider_name, model, user_paths,
   description, enabled, created_at, updated_at
 )
 VALUES
   (
-    'smart',
-    json_array(
-      json_object('provider', 'openai', 'model', 'gpt-5-nano-2025-08-07', 'weight', 1),
-      json_object('provider', 'anthropic', 'model', 'claude-haiku-4-5-20251001', 'weight', 1),
-      json_object('provider', 'gemini', 'model', 'gemini-2.5-flash-lite', 'weight', 1),
-      json_object('provider', 'bailian', 'model', 'qwen-flash', 'weight', 1)
-    ),
-    'cost', '', '', '', '[]',
-    '${prefix}: balanced cost-aware model pool',
-    1, strftime('%s', 'now'), strftime('%s', 'now')
-  ),
-  (
-    'normal',
-    json_array(json_object('provider', 'openai', 'model', 'gpt-5-nano-2025-08-07', 'weight', 1)),
-    'round_robin', '', '', '', '[]',
-    '${prefix}: stable default model alias',
-    1, strftime('%s', 'now'), strftime('%s', 'now')
-  ),
-  (
     'fast',
     json_array(
       json_object('provider', 'groq', 'model', 'llama-3.1-8b-instant', 'weight', 3),
-      json_object('provider', 'gemini', 'model', 'gemini-2.5-flash-lite', 'weight', 2),
-      json_object('provider', 'bailian', 'model', 'qwen-flash', 'weight', 2)
+      json_object('provider', 'gemini', 'model', 'gemini-3.5-flash-lite', 'weight', 2),
+      json_object('provider', 'bailian', 'model', 'qwen3.8-flash', 'weight', 2)
     ),
     'round_robin', '', '', '', '[]',
     '${prefix}: latency-oriented weighted model pool',
@@ -2066,23 +2160,23 @@ VALUES
   (
     'cheap',
     json_array(
-      json_object('provider', 'openai', 'model', 'gpt-5-nano-2025-08-07', 'weight', 1),
       json_object('provider', 'groq', 'model', 'llama-3.1-8b-instant', 'weight', 1),
-      json_object('provider', 'gemini', 'model', 'gemini-2.5-flash-lite', 'weight', 1),
-      json_object('provider', 'bailian', 'model', 'qwen-flash', 'weight', 1)
+      json_object('provider', 'gemini', 'model', 'gemini-3.5-flash-lite', 'weight', 1),
+      json_object('provider', 'bailian', 'model', 'qwen3.8-flash', 'weight', 1),
+      json_object('provider', 'openai', 'model', 'gpt-6-luna', 'weight', 1)
     ),
     'cost', 'false', '', '', '[]',
     '${prefix}: lowest-cost available target',
     1, strftime('%s', 'now'), strftime('%s', 'now')
   ),
   (
-    'quality',
+    'smart',
     json_array(
-      json_object('provider', 'anthropic', 'model', 'claude-haiku-4-5-20251001', 'weight', 2),
-      json_object('provider', 'openai', 'model', 'gpt-5-nano-2025-08-07', 'weight', 1)
+      json_object('provider', 'anthropic', 'model', 'claude-sonnet-5-5', 'weight', 2),
+      json_object('provider', 'openai', 'model', 'gpt-6.1-sol', 'weight', 1)
     ),
-    'round_robin', '', '', '', json_array('/engineering', '/agents'),
-    '${prefix}: quality-oriented pool scoped to engineering and agents',
+    'round_robin', '', '', '', json_array('/engineering'),
+    '${prefix}: quality-oriented pool scoped to engineering',
     1, strftime('%s', 'now'), strftime('%s', 'now')
   );
 
@@ -2097,10 +2191,10 @@ VALUES
   (
     'resilient',
     json_array(
-      json_object('provider', 'openai', 'model', 'gpt-5-nano-2025-08-07'),
+      json_object('provider', 'openai', 'model', 'gpt-6-luna'),
       json_object('provider', 'groq', 'model', 'llama-3.1-8b-instant'),
-      json_object('provider', 'gemini', 'model', 'gemini-2.5-flash-lite'),
-      json_object('provider', 'bailian', 'model', 'qwen-flash')
+      json_object('provider', 'gemini', 'model', 'gemini-3.5-flash-lite'),
+      json_object('provider', 'bailian', 'model', 'qwen3.8-flash')
     ),
     'failover', '', '', '', '[]',
     '${prefix}: priority-ordered failover pool',
@@ -2127,6 +2221,19 @@ SELECT
   json_extract(value, '$.models'),
   1, strftime('%s', 'now'), strftime('%s', 'now')
 FROM json_each('${demo_providers_json}');
+
+-- A reseed refreshes the model lists of the providers an earlier seed created,
+-- recognised by the placeholder key (Bedrock: by its unresolvable endpoint).
+UPDATE provider_credentials
+SET models = fixture.models, updated_at = strftime('%s', 'now')
+FROM (
+  SELECT json_extract(value, '$.name') AS name, json_extract(value, '$.models') AS models
+  FROM json_each('${demo_providers_json}')
+) AS fixture
+WHERE provider_credentials.name = fixture.name
+  AND provider_credentials.models != fixture.models
+  AND (provider_credentials.api_keys = json_array('demo-placeholder-key')
+    OR provider_credentials.base_url LIKE '%.demo.invalid%');
 
 COMMIT;
 
@@ -2203,9 +2310,9 @@ Seeded demo data into: $db_path
 Prefix: $prefix
 
 Generated demo API keys (replaced on every seed):
-  /agents/team1    sk_gom_${demo_key_secret_team1}
-  /engineering/ai sk_gom_${demo_key_secret_engineering}
-  /sales/john      sk_gom_${demo_key_secret_sales}
+  /support      sk_gom_${demo_key_secret_support}
+  /engineering  sk_gom_${demo_key_secret_engineering}
+  /sales/john   sk_gom_${demo_key_secret_sales}
 
 Open the dashboard and use a recent 90-day date range. To replace this generated
 dataset, rerun the script with the same DEMO_SEED_PREFIX. To keep multiple
@@ -2224,14 +2331,16 @@ gateway with GUARDRAILS_ENABLED=true (make demo does) to see the Guardrails
 and Plugins pages live; the two model-backed guardrails fail open, so a
 gateway without those provider keys keeps serving traffic.
 
-The Users page shows per-user-path model allowlists (groups bound their
-subtrees; /agents/team1/research and /engineering/ai/bot/batch narrow their
-groups), and the Sales key carries a per-key allowlist on top of the /sales
-policy. Budgets include label-scoped examples (env:prod, experiment:rag-v2)
-next to plain user-path limits.
+Traffic comes from three teams (/support, /engineering, /sales), each member
+with its own model mix. The Users page shows their model allowlists
+(/engineering/ci-bot narrows its group), and the Sales key carries a per-key
+allowlist on top of the /sales policy. Budgets show one state each, from
+comfortable to exceeded, across periods and both scopes; the help-desk bot's
+budget is the exceeded one, and its latest requests are refused.
 
 The Providers and Models pages list OpenAI, Anthropic, Bedrock, DeepSeek,
-Gemini, Groq, Bailian, and xAI with their real model lists and catalog prices.
+Gemini, Groq, Bailian, and xAI with a short selection of their models and
+catalog prices.
 Their keys are placeholders and Bedrock points at an unresolvable endpoint, so
 requests to them fail upstream without spending anything; a provider of
 the same name in config, env, or the store keeps its own settings.

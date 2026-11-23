@@ -522,6 +522,7 @@
   "overview_api_version": "API 版本",
   "overview_recent_requests": "最近的请求",
   "overview_breaker_state": "熔断状态",
+  "overview_model_breaker_title": "该模型自身的熔断器",
   "overview_models_recent_traffic": "模型（近期流量）",
   "overview_configured_models": "已配置的模型",
   "overview_retry": "重试",

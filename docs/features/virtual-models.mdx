@@ -456,9 +456,14 @@ its targets, and it cannot be deleted or renamed until they are repointed.
 
 Chains must be acyclic (`a -> b -> a` is rejected, with the cycle spelled out)
 and at most 8 virtual models deep. Both rules are enforced when saving from the
-dashboard and at startup for declarative entries. A target must exist when it is
-saved — create the inner virtual model first — and a virtual model that others
-chain through cannot be deleted or renamed until they are repointed.
+dashboard and at startup for declarative entries. A target added from the
+dashboard or the admin API must exist at that moment — create the inner virtual
+model first — and a virtual model that others chain through cannot be deleted
+or renamed until they are repointed.
+
+A target that disappears later, because its model was retired or its provider
+removed, does not block saving: you can still disable, rename, or edit the
+virtual model, and requests skip the missing target until you remove it.
 
 ## Rename or repoint a redirect
 

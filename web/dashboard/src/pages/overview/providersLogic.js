@@ -287,17 +287,41 @@ export function providerLastErrorText(provider) {
   return m.overview_last_error_breaker_open({ error });
 }
 
-export function providerBreakerStateLabel(provider) {
-  const state = providerBreakerState(provider);
+function breakerStateLabel(state) {
   if (!state) return "";
   return state.charAt(0).toUpperCase() + state.slice(1);
 }
 
-export function providerBreakerStateClass(provider) {
-  const state = providerBreakerState(provider);
+function breakerStateClass(state) {
   if (state === "open") return "is-unhealthy";
   if (state === "half-open") return "is-degraded";
   return "is-healthy";
+}
+
+export function providerBreakerStateLabel(provider) {
+  return breakerStateLabel(providerBreakerState(provider));
+}
+
+export function providerBreakerStateClass(provider) {
+  return breakerStateClass(providerBreakerState(provider));
+}
+
+// A model's own breaker state, when it has one and it is not closed: under
+// scope "model", or for a model running on its own upstream timeout. Such a
+// breaker pauses only that model. For a per-model timeout the provider's
+// state never shows it; under scope "model" the provider's state is that of
+// whichever model was requested last.
+export function providerHealthModelBreakerState(model) {
+  const state = String((model && model.circuit_state) || "").trim();
+  return state === "closed" ? "" : state;
+}
+
+export function providerHealthModelBreakerLabel(model) {
+  return breakerStateLabel(providerHealthModelBreakerState(model));
+}
+
+export function providerHealthModelBreakerClass(model) {
+  return breakerStateClass(providerHealthModelBreakerState(model));
 }
 
 export function providerRecentTrafficSummary(provider) {
