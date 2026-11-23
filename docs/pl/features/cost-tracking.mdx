@@ -227,7 +227,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":
 | `/v1/responses`        | `response.completed` lub `response.incomplete` | `response.usage.cost` |
 | `/v1/messages`         | `message_delta`                               | `usage.cost`          |
 
-Każdy inny event przechodzi bez zmian, chyba że zawiera pole kosztu, które jest usuwane (patrz „Koszty upstreamów” niżej). Provider, który raportuje usage w kilku chunkach, dostaje `usage.cost` w każdym z nich. Wartość jest skumulowana dla dotychczasowego requestu, jak liczby tokenów w tym samym obiekcie: używaj ostatniej i nigdy ich nie sumuj. Ostatnia to koszt z wiersza użycia. Stream bez usage nie niesie kosztu: GoModel domyślnie prosi providerów o usage (`ENFORCE_RETURNING_USAGE_DATA`).
+Każdy inny event przechodzi bez zmian, chyba że zawiera pole kosztu, które jest usuwane (patrz „Koszty upstreamów” niżej). Provider, który raportuje usage w kilku chunkach, dostaje `usage.cost` w każdym z nich, który GoModel potrafi wycenić. Wartość jest skumulowana dla dotychczasowego requestu, jak liczby tokenów w tym samym obiekcie: odczytaj ją z ostatniego eventu z usage i nigdy tych wartości nie sumuj. Ta wartość to koszt z wiersza użycia. Gdy ostatni event z usage nie ma `usage.cost`, wartość z wcześniejszego eventu dotyczy tylko wcześniejszych liczb tokenów (patrz „Zakres i limity”). Stream bez usage nie niesie kosztu: GoModel domyślnie prosi providerów o usage (`ENFORCE_RETURNING_USAGE_DATA`).
 
 ### Nieznany to nie zero
 
@@ -285,6 +285,7 @@ Przy wyłączonym ustawieniu odpowiedzi są dokładnie takie jak bez niego, łą
 Pozostałe limity:
 
 - Przekazywany obiekt JSON powyżej 8 MiB nie jest wyceniany: nie niesie nagłówka ani `usage.cost`, a koszty upstreamu i tak są usuwane. GoModel dowiaduje się, że jest za duży, dopiero po odczytaniu pierwszych 8 MiB, więc te są wysyłane razem, a reszta jest przekazywana w miarę napływu.
+- Przekazywana odpowiedź jest odczytywana tylko wtedy, gdy jej Content-Type to JSON (`application/json` albo typ `+json`) lub `text/event-stream`. Odpowiedź wysłana jako cokolwiek innego, np. NDJSON albo zwykły tekst, oraz body JSON zaczynające się od znacznika BOM, jest przekazywana tak, jak przyszła: nie niesie kosztu i zachowuje każde pole kosztu, z narzutami i bez nich.
 - Event streamu powyżej 64 MiB jest przekazywany bez odczytu, więc nie dostaje kosztu i zachowuje każde pole kosztu, które umieścił w nim upstream. Żaden provider nie wysyła usage w tak dużych eventach.
 - Event streamu jest czyszczony tylko wtedy, gdy jego payload jest poprawnym JSON-em; event, którego payload się nie parsuje, jest przekazywany tak, jak przyszedł.
 - Body JSON jest edytowane w trakcie przekazywania, bez wcześniejszej walidacji, bo ta wymagałaby wstrzymania całego body. Kompletny obiekt usage jest przepisywany także wtedy, gdy dalsza część body okaże się błędna lub urwana. Body urwane w środku obiektu usage zachowuje ten niepełny obiekt tak, jak przyszedł; przy narzutach stojące przed nim pole kosztu providera w korzeniu jest już wtedy usunięte.

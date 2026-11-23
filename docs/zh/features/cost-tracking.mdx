@@ -223,7 +223,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":
 | `/v1/responses`        | `response.completed` 或 `response.incomplete` | `response.usage.cost` |
 | `/v1/messages`         | `message_delta`                               | `usage.cost`          |
 
-其他事件原样透传，除非其中含有会被移除的成本字段（见下文“上游成本”）。在多个 chunk 中报告 usage 的供应商，每个这样的 chunk 都会带上 `usage.cost`。该值与同一对象中的 token 数一样，是截至当前的累计值：以最后一个为准，不要相加。最后一个值就是用量记录中的成本。没有 usage 的流不携带成本：GoModel 默认会向供应商请求 usage（`ENFORCE_RETURNING_USAGE_DATA`）。
+其他事件原样透传，除非其中含有会被移除的成本字段（见下文“上游成本”）。在多个 chunk 中报告 usage 的供应商，每个 GoModel 能够计价的这类 chunk 都会带上 `usage.cost`。该值与同一对象中的 token 数一样，是截至当前的累计值：请从最后一个带 usage 的事件中读取，不要相加。这个值就是用量记录中的成本。如果最后一个 usage 事件没有 `usage.cost`，更早事件中的值只对应更早的 token 数（见“覆盖范围与限制”）。没有 usage 的流不携带成本：GoModel 默认会向供应商请求 usage（`ENFORCE_RETURNING_USAGE_DATA`）。
 
 ### 未知不等于零
 
@@ -281,6 +281,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":
 其余限制：
 
 - 超过 8 MiB 的转发 JSON 对象不定价：既没有响应头也没有 `usage.cost`，上游的成本仍会被移除。GoModel 读完前 8 MiB 才知道它过大，因此这部分会一并发送，其余部分边收边转发。
+- 只有内容类型为 JSON（`application/json` 或 `+json` 类型）或 `text/event-stream` 的转发响应才会被读取。以其他类型发送的响应（例如 NDJSON 或纯文本），以及以字节顺序标记（BOM）开头的 JSON 响应体，会原样转发：不带成本，并保留每个成本字段，无论是否启用加价。
 - 超过 64 MiB 的流事件不经读取直接转发，因此不带成本，并保留上游写入的任何成本字段。没有供应商会在这么大的事件中发送 usage。
 - 流事件只有在 payload 是格式正确的 JSON 时才会被清理；payload 无法解析的事件按收到的原样转发。
 - JSON 响应体在转发过程中被编辑，不会事先校验，因为校验意味着要暂存整个响应体。完整的 usage 对象即使其后的响应体格式错误或被截断，也会被改写。在 usage 对象中间被截断的响应体会原样保留这个不完整的对象；启用加价时，位于它之前的根级供应商成本字段此时已被移除。

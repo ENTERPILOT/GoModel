@@ -230,7 +230,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":
 | `/v1/responses`        | `response.completed` oder `response.incomplete` | `response.usage.cost` |
 | `/v1/messages`         | `message_delta`                               | `usage.cost`          |
 
-Alle anderen Events bleiben unverändert, sofern sie kein Kostenfeld enthalten, das entfernt wird (siehe „Kosten von Upstreams“ unten). Meldet ein Provider Usage in mehreren Chunks, erhält jeder davon `usage.cost`. Der Wert ist kumuliert für den bisherigen Request, wie die Token-Zahlen im selben Objekt: Maßgeblich ist der letzte, addieren Sie sie nie. Der letzte entspricht den Kosten in der Nutzungszeile. Ein Stream ohne Usage trägt keine Kosten: GoModel fordert Usage standardmäßig bei den Providern an (`ENFORCE_RETURNING_USAGE_DATA`).
+Alle anderen Events bleiben unverändert, sofern sie kein Kostenfeld enthalten, das entfernt wird (siehe „Kosten von Upstreams“ unten). Meldet ein Provider Usage in mehreren Chunks, erhält jeder davon `usage.cost`, den GoModel bepreisen kann. Der Wert ist kumuliert für den bisherigen Request, wie die Token-Zahlen im selben Objekt: Lesen Sie ihn aus dem letzten Event, das Usage trägt, und addieren Sie die Werte nie. Dieser Wert entspricht den Kosten in der Nutzungszeile. Hat das letzte Usage-Event kein `usage.cost`, gilt ein Wert aus einem früheren Event nur für die früheren Token-Zahlen (siehe „Abdeckung und Grenzen“). Ein Stream ohne Usage trägt keine Kosten: GoModel fordert Usage standardmäßig bei den Providern an (`ENFORCE_RETURNING_USAGE_DATA`).
 
 ### Unbekannt ist nicht null
 
@@ -288,6 +288,7 @@ Bei deaktivierter Einstellung sind Antworten genau so, wie sie ohne sie wären, 
 Die übrigen Grenzen:
 
 - Ein weitergeleitetes JSON-Objekt über 8 MiB bleibt unbepreist: Es trägt keinen Header und kein `usage.cost`, und die Kosten eines Upstreams werden trotzdem entfernt. Dass es zu groß ist, weiß GoModel erst nach dem Lesen der ersten 8 MiB; diese werden daher zusammen gesendet, der Rest wird beim Eintreffen weitergeleitet.
+- Eine weitergeleitete Antwort wird nur gelesen, wenn ihr Content-Type JSON (`application/json` oder ein `+json`-Typ) oder `text/event-stream` ist. Eine Antwort mit anderem Typ, etwa NDJSON oder Klartext, und ein JSON-Body, der mit einer Byte Order Mark beginnt, wird wie empfangen weitergeleitet: Sie trägt keine Kosten und behält jedes Kostenfeld, mit oder ohne Aufschläge.
 - Ein Stream-Event über 64 MiB wird ungelesen weitergeleitet, erhält also keine Kosten und behält jedes Kostenfeld, das der Upstream hineingeschrieben hat. Kein Provider sendet Usage in so großen Events.
 - Ein Stream-Event wird nur bereinigt, wenn sein Payload wohlgeformtes JSON ist; lässt er sich nicht parsen, wird das Event so weitergeleitet, wie es eintraf.
 - Ein JSON-Body wird beim Durchleiten bearbeitet und nicht vorab validiert, denn dafür müsste er vollständig zurückgehalten werden. Ein vollständiges Usage-Objekt wird auch dann umgeschrieben, wenn sich der Body danach als fehlerhaft oder abgeschnitten erweist. Bricht ein Body mitten in seinem Usage-Objekt ab, bleibt dieses unvollständige Objekt, wie es eintraf; mit Aufschlägen ist ein davor stehendes Kostenfeld des Providers auf Wurzelebene dann bereits entfernt.
