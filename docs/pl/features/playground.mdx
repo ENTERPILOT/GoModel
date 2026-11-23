@@ -19,7 +19,8 @@ co każdy inny klient gatewaya.
 Lista wyboru modelu pokazuje najpierw
 [modele wirtualne](/pl/features/virtual-models), oznaczone jako
 **Model wirtualny**, a potem modele Twoich providerów. Model wirtualny jest na
-liście, gdy jest włączony i ma dostępny model docelowy. Możesz też wpisać dowolną
+liście, gdy jest włączony i ma dostępny model docelowy. Model wirtualny zastępuje
+na liście model providera o tej samej nazwie. Możesz też wpisać dowolną
 nazwę modelu. Klucz dashboardu przypisany do ścieżki użytkownika nie widzi
 modeli wirtualnych na liście; wpisz wtedy ich nazwę.
 
@@ -29,11 +30,7 @@ Przełącznik **Tryb** nad selektorem modelu pozwala testować także modele mul
 wywołuje odpowiedni endpoint gatewaya kompatybilny z OpenAI i wyświetla na początku listy modele,
 których metadane deklarują dany tryb; nadal możesz wpisać dowolny model lub alias.
 Model wirtualny jest ukrywany w danym trybie tylko wtedy, gdy każdy jego model docelowy
-jest znanym modelem, który deklaruje inne tryby. Model providera o tej samej nazwie co włączony
-model wirtualny z dostępnym modelem docelowym nie jest oferowany w żadnym trybie, bo requesty
-z tą nazwą obsługuje model wirtualny. Gdy model wirtualny jest wyłączony albo nie ma dostępnego
-modelu docelowego, model providera zostaje na liście. Zostaje też przy kluczu dashboardu
-przypisanym do ścieżki użytkownika, który nie widzi modeli wirtualnych.
+jest znanym modelem, który deklaruje inne tryby.
 
 | Tryb | Endpoint | Wejście | Wynik |
 | --- | --- | --- | --- |

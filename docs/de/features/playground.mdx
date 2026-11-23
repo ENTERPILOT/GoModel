@@ -21,10 +21,11 @@ Guardrails und dasselbe Request-Logging wie für jeden anderen Client des Gatewa
 Die Modellauswahl listet zuerst Ihre
 [virtuellen Modelle](/de/features/virtual-models) auf, gekennzeichnet mit
 **Virtuelles Modell**, danach die Modelle Ihrer Provider. Ein virtuelles Modell
-wird aufgeführt, wenn es aktiviert ist und ein verfügbares Ziel hat. Sie können
-auch einen beliebigen Modellnamen eingeben. Einem Dashboard-Key, der an einen User-Path
-gebunden ist, werden keine virtuellen Modelle angezeigt; geben Sie deren Namen
-stattdessen ein.
+wird aufgeführt, wenn es aktiviert ist und ein verfügbares Ziel hat. Ein
+virtuelles Modell ersetzt in der Auswahl ein Provider-Modell mit demselben
+Namen. Sie können auch einen beliebigen Modellnamen eingeben. Einem
+Dashboard-Key, der an einen User-Path gebunden ist, werden keine virtuellen
+Modelle angezeigt; geben Sie deren Namen stattdessen ein.
 
 ## Bild, Sprachausgabe, Transkription und Embeddings
 
@@ -33,12 +34,7 @@ testen. Jeder Modus ruft den OpenAI-kompatiblen Endpunkt des Gateways auf und
 listet Modelle, deren Metadaten diesen Modus ausweisen, zuerst auf; Sie können
 weiterhin jedes beliebige Modell oder jeden Alias eingeben. Ein virtuelles
 Modell wird in einem Modus nur dann ausgeblendet, wenn jedes seiner Ziele ein
-bekanntes Modell ist, das andere Modi ausweist. Ein Provider-Modell, das wie ein
-aktiviertes virtuelles Modell mit verfügbarem Ziel heißt, wird in keinem Modus
-angeboten, weil das virtuelle Modell Requests für diesen Namen beantwortet. Ist
-das virtuelle Modell deaktiviert oder hat es kein verfügbares Ziel, bleibt das
-Provider-Modell in der Auswahl. Das gilt auch für einen Dashboard-Key, der an
-einen User-Path gebunden ist: Ihm werden keine virtuellen Modelle angezeigt.
+bekanntes Modell ist, das andere Modi ausweist.
 
 | Modus | Endpunkt | Eingabe | Ergebnis |
 | --- | --- | --- | --- |

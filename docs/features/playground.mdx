@@ -18,8 +18,9 @@ as any other client of the gateway.
 
 The model picker lists your [virtual models](/features/virtual-models) first,
 tagged **Virtual model**, then the models of your providers. A virtual model is
-listed when it is enabled and has an available target. You can also type any
-model name. With a dashboard key bound to a user path, the picker lists provider
+listed when it is enabled and has an available target. A virtual model replaces
+a provider model of the same name in the picker. You can also type any model
+name. With a dashboard key bound to a user path, the picker lists provider
 models only; type a virtual model's name instead.
 
 ## Image, speech, transcription, and embeddings
@@ -28,11 +29,7 @@ The **Mode** switch above the model picker tests media models too. Each mode
 calls the gateway's OpenAI-compatible endpoint and lists models whose metadata
 advertises that mode first; you can still type any model or alias. A virtual
 model is hidden in a mode only when every one of its targets is a known model
-that advertises other modes. A provider model named like a virtual model that is
-enabled and has an available target is not offered in any mode, because the
-virtual model answers requests for that name. A disabled virtual model, or one
-without an available target, leaves the provider model in the picker. So does a
-dashboard key bound to a user path, which is shown no virtual models.
+that advertises other modes.
 
 | Mode | Endpoint | Input | Result |
 | --- | --- | --- | --- |
