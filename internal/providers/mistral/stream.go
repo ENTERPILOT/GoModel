@@ -98,8 +98,9 @@ func (s *thinkingChunkStream) emit(raw streaming.RawEvent) {
 		s.out = append(s.out, raw.Raw...)
 		return
 	}
-	converted, changed := flattenThinkingChunks(raw.Data)
-	if !changed {
+	converted, flattened := flattenThinkingChunks(raw.Data)
+	converted, mapped := mapFinishReasons(converted)
+	if !flattened && !mapped {
 		s.out = append(s.out, raw.Raw...)
 		return
 	}

@@ -501,3 +501,63 @@ func TestChatCompletion_AdaptsRequest_Noop(t *testing.T) {
 	assert.NotContains(t, wire, "reasoning")
 	assert.NotContains(t, wire, "stream_options")
 }
+
+// Mistral reports a completion cut off by the model's context window as
+// finish_reason "model_length". Clients only know the OpenAI "length" value,
+// so it must be mapped on both the buffered and the streamed path.
+func TestChatCompletion_MapsModelLengthFinishReason(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{"id":"cmpl-1","object":"chat.completion","created":1,"model":"mistral-large-4-0","choices":[{"index":0,"message":{"role":"assistant","content":"cut"},"finish_reason":"model_length"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	provider := newTestProvider(server)
+
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "mistral-large-4-0",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 1)
+	assert.Equal(t, "length", resp.Choices[0].FinishReason)
+}
+
+func TestStreamChatCompletion_MapsModelLengthFinishReason(t *testing.T) {
+	server, _ := providertest.SSEServer(t, "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"cut\"},\"finish_reason\":null}]}\n\n"+
+		"data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"model_length\"}]}\n\n"+
+		"data: [DONE]\n\n")
+	provider := newTestProvider(server)
+
+	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "mistral-large-4-0",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Stream:   true,
+	})
+	require.NoError(t, err)
+	body, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	require.NoError(t, stream.Close())
+
+	out := string(body)
+	assert.Contains(t, out, `"finish_reason":"length"`)
+	assert.NotContains(t, out, "model_length")
+	assert.Contains(t, out, `"content":"cut"`)
+	assert.Contains(t, out, "data: [DONE]")
+}
+
+// Only a finish_reason of "model_length" is rewritten: other reasons, and text
+// that merely mentions the value, are relayed byte for byte.
+func TestMapFinishReasons_LeavesOtherPayloadsUntouched(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{name: "stop", in: `{"choices":[{"index":0,"delta":{"content":"line\n"},"finish_reason":"stop"}]}`},
+		{name: "length", in: `{"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}`},
+		{name: "value only in content", in: `{"choices":[{"index":0,"delta":{"content":"model_length"},"finish_reason":null}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := []byte(tt.in)
+			out, changed := mapFinishReasons(in)
+			assert.False(t, changed)
+			assert.Equal(t, in, out)
+		})
+	}
+}
