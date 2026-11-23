@@ -909,8 +909,13 @@ des Knotens leer ist. `configured` ist `false` für Knoten, die sich nur aus Key
 oder Nachfahren ergeben; `managed: true` kennzeichnet in der Konfiguration deklarierte Richtlinien,
 die hier schreibgeschützt sind (`409`, Code `user_managed`).
 
-`PUT /admin/users` akzeptiert `{"user_path": "/acme/eng", "allowed_models": ["anthropic/*"], "description": "..."}`
-und gibt den aktualisierten Baum zurück. Selektoren werden gegen die konfigurierten
+`PUT /admin/users` akzeptiert `{"user_path": "/acme/eng", "allowed_models": ["anthropic/*"], "default_model": "anthropic/claude-sonnet-4-6", "max_reasoning_effort": "medium", "max_output_tokens": 8000, "description": "..."}`
+und gibt den aktualisierten Baum zurück. Der Aufruf ersetzt die gesamte Richtlinie des Knotens: Ein ausgelassenes Feld
+wird geleert, senden Sie also jedes Feld, das der Knoten behalten soll. `default_model`,
+`max_reasoning_effort` und `max_output_tokens` sind die Request-Policy des Knotens; ein Knoten in
+`GET /admin/users` trägt in diesen Feldern seine eigenen Werte und in `request_policy` die Werte, die nach dem
+Zusammenführen mit seinen Vorfahren gelten, jeweils mit dem Pfad, von dem sie stammen (zum Beispiel
+`max_output_tokens_from`). Selektoren werden gegen die konfigurierten
 Provider validiert. Die Abgleichsregeln finden Sie unter [Benutzer](/de/features/users).
 
 ### GET /admin/models

@@ -175,7 +175,10 @@ dziecku niczego nie zmienia. Efforty używają skali `none`, `minimal`, `low`,
 `medium`, `high`, `xhigh`, `max`. Limit tokenów obejmuje `max_tokens`,
 `max_completion_tokens` i `max_output_tokens` w pisowni użytej przez klienta, a
 request bez limitu dostaje limit jako swój limit, w polu, którego oczekuje
-model upstream. Limit wysłany tylko w pisowni, której endpoint nie ma
+model upstream. Gdy katalog modeli zna własne maksimum tokenów wyjściowych
+modelu i jest ono niższe od limitu, taki request dostaje to maksimum, bo model
+odrzuciłby limit; dla modelu bez znanego maksimum ustaw limit nie wyżej, niż
+model przyjmuje. Limit wysłany tylko w pisowni, której endpoint nie ma
 (`max_output_tokens` w Chat Completions, `max_tokens` w Responses API), jest
 przenoszony do własnego pola endpointu, a wartość, która nie jest liczbą
 całkowitą równą co najmniej 1, jest zastępowana limitem. Limit, którego nazwa
@@ -253,10 +256,10 @@ limitami, więc odpowiedź zapisana w cache'u przed ustawieniem lub zmianą limi
 nie jest zwracana pod nowym.
 
 <Warning>
-Batche i passthrough providera pod `/p/` **nie** są ograniczane: ich body
-trafiają upstream bez zmian. Ograniczony klucz, który może też używać batchy
-albo `/p/`, może obejść politykę, więc zablokuj te endpointy kluczom, które
-ograniczasz. Provider [ChatGPT](/pl/providers/chatgpt) nie przyjmuje limitu
+Batche, sesje Realtime (`/v1/realtime`) i passthrough providera pod `/p/`
+**nie** są ograniczane: ich body trafiają upstream bez zmian. Ograniczony
+klucz, który może też ich używać, może obejść politykę, więc zablokuj te
+endpointy kluczom, które ograniczasz. Provider [ChatGPT](/pl/providers/chatgpt) nie przyjmuje limitu
 tokenów wyjściowych, więc `max_output_tokens` nie jest egzekwowany na jego
 modelach.
 </Warning>

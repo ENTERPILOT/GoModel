@@ -184,7 +184,11 @@ eine höhere Obergrenze am Kind ändert nichts. Efforts nutzen die Skala `none`,
 `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Die Token-Obergrenze deckt
 `max_tokens`, `max_completion_tokens` und `max_output_tokens` ab, in der
 Schreibweise, die der Client verwendet hat, und ein Request ohne Limit erhält
-die Obergrenze als Limit, in dem Feld, das das Upstream-Modell erwartet. Ein
+die Obergrenze als Limit, in dem Feld, das das Upstream-Modell erwartet. Kennt
+der Modellkatalog das eigene Ausgabe-Maximum des Modells und liegt es unter der
+Obergrenze, erhält ein solcher Request dieses Maximum als Limit, da das Modell
+die Obergrenze ablehnen würde; bei einem Modell ohne bekanntes Maximum sollte
+die Obergrenze höchstens so hoch sein, wie das Modell akzeptiert. Ein
 Limit, das nur in einer Schreibweise gesendet wird, die der Endpunkt nicht
 kennt (`max_output_tokens` bei Chat Completions, `max_tokens` bei der Responses
 API), wird in das eigene Feld des Endpunkts übernommen, und ein Wert, der keine
@@ -266,10 +270,10 @@ gebunden: Eine Antwort, die vor dem Setzen oder Ändern einer Obergrenze
 gecacht wurde, wird unter der neuen nicht ausgeliefert.
 
 <Warning>
-Batches und Provider-Passthrough unter `/p/` werden **nicht** begrenzt: Ihre
-Bodys gehen unverändert upstream. Ein begrenzter Key, der auch Batches oder
-`/p/` nutzen darf, kann die Policy umgehen; sperren Sie diese Endpunkte daher
-für Keys, die Sie begrenzen. Der Provider [ChatGPT](/de/providers/chatgpt)
+Batches, Realtime-Sessions (`/v1/realtime`) und Provider-Passthrough unter
+`/p/` werden **nicht** begrenzt: Ihre Bodys gehen unverändert upstream.
+Ein begrenzter Key, der sie ebenfalls nutzen darf, kann die Policy umgehen;
+sperren Sie diese Endpunkte daher für Keys, die Sie begrenzen. Der Provider [ChatGPT](/de/providers/chatgpt)
 akzeptiert kein Ausgabe-Token-Limit, daher wird `max_output_tokens` bei seinen
 Modellen nicht durchgesetzt.
 </Warning>

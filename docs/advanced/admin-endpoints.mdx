@@ -934,9 +934,16 @@ lists intersect to nothing. `configured` is `false` for nodes implied only by ke
 or descendants; `managed: true` marks policies declared in configuration,
 which are read-only here (`409`, code `user_managed`).
 
-`PUT /admin/users` takes `{"user_path": "/acme/eng", "allowed_models": ["anthropic/*"], "description": "..."}`
-and returns the updated tree. Selectors are validated against the configured
-providers. See [Users](/features/users) for the matching rules.
+`PUT /admin/users` takes `{"user_path": "/acme/eng", "allowed_models": ["anthropic/*"], "default_model": "anthropic/claude-sonnet-4-6", "max_reasoning_effort": "medium", "max_output_tokens": 8000, "description": "..."}`
+and returns the updated tree. It replaces the node's whole policy: a field left
+out is cleared, so send every field the node should keep. `default_model`,
+`max_reasoning_effort`, and `max_output_tokens` are the node's
+[request policy](/features/users#request-policy); a node in
+`GET /admin/users` carries its own values in those fields and, in
+`request_policy`, the values in force once its ancestors' are combined, each
+with the path it comes from (`max_output_tokens_from`, for example). Selectors
+are validated against the configured providers. See [Users](/features/users)
+for the matching rules.
 
 ### GET /admin/models
 

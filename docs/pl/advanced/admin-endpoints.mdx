@@ -905,8 +905,13 @@ nie mają części wspólnej. `configured` ma wartość `false` dla węzłów wy
 lub potomków; `managed: true` oznacza polityki zadeklarowane w konfiguracji,
 które są tu tylko do odczytu (`409`, kod `user_managed`).
 
-`PUT /admin/users` przyjmuje `{"user_path": "/acme/eng", "allowed_models": ["anthropic/*"], "description": "..."}`
-i zwraca zaktualizowane drzewo. Selektory są walidowane względem skonfigurowanych
+`PUT /admin/users` przyjmuje `{"user_path": "/acme/eng", "allowed_models": ["anthropic/*"], "default_model": "anthropic/claude-sonnet-4-6", "max_reasoning_effort": "medium", "max_output_tokens": 8000, "description": "..."}`
+i zwraca zaktualizowane drzewo. Wywołanie zastępuje całą politykę węzła: pominięte pole
+jest czyszczone, więc wyślij każde pole, które węzeł ma zachować. `default_model`,
+`max_reasoning_effort` i `max_output_tokens` to polityka requestów węzła; węzeł w
+`GET /admin/users` ma w tych polach własne wartości, a w `request_policy` wartości obowiązujące po
+połączeniu z przodkami, każdą ze ścieżką, z której pochodzi (np. `max_output_tokens_from`).
+Selektory są walidowane względem skonfigurowanych
 providerów. Reguły dopasowania opisuje strona [Użytkownicy](/pl/features/users).
 
 ### GET /admin/models
