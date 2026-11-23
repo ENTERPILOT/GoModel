@@ -28,7 +28,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/klauspost/compress v1.20.4
 	github.com/labstack/echo-opentelemetry v0.0.4
-	github.com/labstack/echo/v5 v5.4.5
+	github.com/labstack/echo/v5 v5.4.6
 	github.com/lmittmann/tint v1.2.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/prometheus/client_golang v1.25.0
@@ -38,7 +38,7 @@ require (
 	// v1.5.1+ switch back to echo/v4. Also ignored in .github/dependabot.yml.
 	github.com/swaggo/echo-swagger v1.5.0
 	github.com/swaggo/swag/v2 v2.0.0-rc6
-	github.com/tidwall/gjson v1.20.2
+	github.com/tidwall/gjson v1.20.3
 	go.mongodb.org/mongo-driver/v2 v2.10.0
 	go.opentelemetry.io/contrib/propagators/b3 v1.47.0
 	go.opentelemetry.io/contrib/propagators/jaeger v1.47.0
