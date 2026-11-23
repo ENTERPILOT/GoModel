@@ -44,9 +44,11 @@ func EqualRealtimeIntent(a, b string) bool {
 }
 
 // RealtimeTarget describes the upstream websocket a provider exposes for realtime
-// sessions. Realtime is a transport concern, not a translation concern: the
-// provider's event schema is the wire format, so the gateway only needs the dial
-// URL and the credential headers to inject. Headers must never be logged.
+// sessions. For providers that speak the OpenAI realtime event schema, realtime
+// is a transport concern, not a translation concern: the provider's schema is
+// the wire format, so the gateway only needs the dial URL and the credential
+// headers to inject. A provider with its own websocket protocol adds a
+// Translator. Headers must never be logged.
 type RealtimeTarget struct {
 	URL          string
 	Headers      http.Header
@@ -76,11 +78,33 @@ type RealtimeTarget struct {
 	// top of it would double-count the session. Session types that always
 	// report their own usage leave it false and are never metered.
 	MeterInputAudio bool
+	// Translator, when set, converts the session between the OpenAI realtime
+	// event schema the client speaks and the provider's own websocket protocol.
+	// It holds the state of one session, so a provider returns a fresh one with
+	// every target. Nil relays frames verbatim.
+	Translator RealtimeTranslator
 }
 
-// RealtimeProvider is implemented by providers that expose an OpenAI-compatible
-// realtime websocket endpoint. It is optional, like AudioProvider, so providers
-// without realtime support simply omit it.
+// RealtimeTranslator converts one realtime session between the OpenAI realtime
+// event schema and a provider's native websocket protocol, so a client written
+// against the OpenAI schema reaches a provider that does not speak it. The
+// relay calls ClientEvent and ProviderEvent from different goroutines, so an
+// implementation guards the state the two share.
+type RealtimeTranslator interface {
+	// ClientEvent translates one client event. It returns the provider messages
+	// to send upstream and the events to answer the client with directly:
+	// acknowledgements and errors for events the provider has no counterpart
+	// for. Either may be empty.
+	ClientEvent(frame []byte) (upstream, replies [][]byte)
+	// ProviderEvent translates one provider message into the events the client
+	// receives. It returns none for a message the client has no use for.
+	ProviderEvent(frame []byte) [][]byte
+}
+
+// RealtimeProvider is implemented by providers that expose a realtime websocket
+// endpoint: an OpenAI-compatible one, or a native one behind a Translator. It is
+// optional, like AudioProvider, so providers without realtime support simply
+// omit it.
 type RealtimeProvider interface {
 	RealtimeTarget(ctx context.Context, req *RealtimeRequest) (*RealtimeTarget, error)
 }

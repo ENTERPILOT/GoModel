@@ -302,3 +302,77 @@ func TestProxyObservesClientFrames(t *testing.T) {
 	_, _, err = c.Read(ctx)
 	require.NoError(t, err)
 }
+
+// prefixTranslator is a stand-in for a provider protocol: it fans one client
+// frame out to two upstream frames plus a direct reply, and drops the second
+// upstream frame on the way back.
+type prefixTranslator struct{}
+
+func (prefixTranslator) ClientEvent(frame []byte) (upstream, replies [][]byte) {
+	return [][]byte{
+			append([]byte("up1:"), frame...),
+			append([]byte("up2:"), frame...),
+		}, [][]byte{
+			append([]byte("reply:"), frame...),
+		}
+}
+
+func (prefixTranslator) ProviderEvent(frame []byte) [][]byte {
+	if bytes.HasPrefix(frame, []byte("up2:")) {
+		return nil
+	}
+	return [][]byte{append([]byte("down:"), frame...)}
+}
+
+func TestProxyTranslatesFrames(t *testing.T) {
+	// A translated session converts every frame instead of relaying it: the
+	// upstream sees only translated frames, the client sees the translator's
+	// direct reply and the translated upstream frames, and a frame the
+	// translator drops reaches nobody. The taps see the client's own schema on
+	// both sides: the frame the client sent, and the frames it receives.
+	upstream := echoServer(t)
+	defer upstream.Close()
+
+	var mu sync.Mutex
+	var clientTap, serverTap []string
+	retc := make(chan error, 1)
+	proxy := hookedProxyServer(t, wsURL(upstream.URL), realtime.Hooks{
+		OnClientFrame: func(frame []byte) {
+			mu.Lock()
+			defer mu.Unlock()
+			clientTap = append(clientTap, string(frame))
+		},
+		OnServerFrame: func(frame []byte) {
+			mu.Lock()
+			defer mu.Unlock()
+			serverTap = append(serverTap, string(frame))
+		},
+		Translator: prefixTranslator{},
+	}, retc)
+	defer proxy.Close()
+
+	client, ctx, cancel := dialClient(t, proxy.URL)
+	defer cancel()
+	// A binary client frame still produces text frames: translated events are JSON.
+	err := client.Write(ctx, websocket.MessageBinary, []byte("hello"))
+	require.NoError(t, err)
+
+	var got []string
+	for range 2 {
+		typ, data, err := client.Read(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, websocket.MessageText, typ)
+		got = append(got, string(data))
+	}
+	// The reply and the translated echo are written by different loops, so only
+	// their set is fixed, not their order.
+	assert.ElementsMatch(t, []string{"reply:hello", "down:up1:hello"}, got)
+
+	client.Close(websocket.StatusNormalClosure, "")
+	require.NoError(t, waitProxy(t, retc))
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"hello"}, clientTap)
+	assert.Equal(t, []string{"down:up1:hello"}, serverTap)
+}
