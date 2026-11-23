@@ -1848,7 +1848,7 @@ test("rowUpstreamTimeouts shows the masking redirect's timeouts, else the model'
   }
 });
 
-test("rowSlowdown prefers the masking redirect, then the exact and model-wide policies", () => {
+test("rowSlowdown shows the masking redirect's slowdown, else the model's policies", () => {
   const modelPolicy = { source: "gpt-4o", slowdown: 0.5 };
   const cases = [
     { name: "alias row", row: { is_alias: true, alias: { slowdown: 2 } }, want: { value: 2, source: "" } },
@@ -1856,6 +1856,11 @@ test("rowSlowdown prefers the masking redirect, then the exact and model-wide po
       name: "masking redirect",
       row: { masking_alias: { slowdown: 1 }, access: { override: { slowdown: 2 } } },
       want: { value: 1, source: "" },
+    },
+    {
+      name: "a masking redirect replaces the model's own policies",
+      row: { masking_alias: {}, access: { override: { slowdown: 2 }, model_policy: modelPolicy } },
+      want: { value: null, source: "" },
     },
     {
       name: "exact policy",

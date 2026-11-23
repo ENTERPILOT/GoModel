@@ -533,11 +533,16 @@ export function modelOverrideEditButtonLabel(subject, hasOverride) {
     : m.models_edit_action({ subject: value });
 }
 
-// modelRowPolicies lists the policies a model row takes per-model values
-// from, most specific first: its exact policy, then the model-wide one
-// (source "gpt-4o"), which the gateway applies field by field wherever the
-// exact policy leaves a value unset.
-function modelRowPolicies(row) {
+// rowPolicySources lists the rows a table row takes per-model values
+// (slowdown, upstream timeouts) from, most specific first. An alias row shows
+// its own. A model row replaced by a masking redirect shows the redirect's,
+// since requests never reach the model's own policies. Any other model row
+// shows its exact policy, then the model-wide one (source "gpt-4o"), which
+// the gateway applies field by field wherever the exact policy leaves a
+// value unset.
+function rowPolicySources(row) {
+  if (row && row.is_alias) return [row.alias];
+  if (row && row.masking_alias) return [row.masking_alias];
   const access = (row && row.access) || {};
   return [access.override, access.model_policy];
 }
@@ -563,14 +568,11 @@ function inheritedSuffix(source) {
   return source ? " (" + m.models_inherited_from({ source }) + ")" : "";
 }
 
-// rowSlowdown resolves the slowdown factor a row shows: an alias row shows
-// its own; a model row prefers a masking redirect's, then its policies. The
-// source names the model-wide policy an inherited value comes from.
+// rowSlowdown resolves the slowdown factor a row shows (see
+// rowPolicySources). The source names the model-wide policy an inherited
+// value comes from.
 export function rowSlowdown(row) {
-  const sources = row && row.is_alias
-    ? [row.alias]
-    : [row && row.masking_alias, ...modelRowPolicies(row)];
-  return pickPolicyValue(row, sources, "slowdown");
+  return pickPolicyValue(row, rowPolicySources(row), "slowdown");
 }
 
 // slowdownLabel renders a row's slowdown factor, or "" when none is active.
@@ -583,17 +585,10 @@ export function slowdownLabel(slowdown) {
 }
 
 // rowUpstreamTimeouts resolves the per-attempt upstream timeouts a row shows,
-// field by field: an alias row shows its own; a model row replaced by a
-// masking redirect shows the redirect's, since requests never reach the
-// model's own policy; any other model row shows its policies'. Null means
-// the gateway default; a *_source names the model-wide policy an inherited
-// value comes from.
+// field by field (see rowPolicySources). Null means the gateway default; a
+// *_source names the model-wide policy an inherited value comes from.
 export function rowUpstreamTimeouts(row) {
-  const sources = row && row.is_alias
-    ? [row.alias]
-    : row && row.masking_alias
-      ? [row.masking_alias]
-      : modelRowPolicies(row);
+  const sources = rowPolicySources(row);
   const timeout = pickPolicyValue(row, sources, "timeout");
   const headers = pickPolicyValue(row, sources, "response_header_timeout");
   return {
