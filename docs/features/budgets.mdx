@@ -511,8 +511,9 @@ and threshold:
 - A period that has ended is evaluated for another two intervals plus 30 s, so
   a threshold reached in its last moments still alerts. That alert has a
   `period_end` earlier than its `timestamp`: the budget is already in its next
-  period. A budget changed or reset since the period ended is not evaluated
-  for it.
+  period. A budget saved or reset since the period ended is not evaluated for
+  it: any edit counts, one of only its thresholds included, and so does a
+  restart for a budget declared in configuration.
 
 Delivery is at-most-once, not guaranteed. The record is written before
 delivery and an alert is never raised a second time, so a gateway stopped

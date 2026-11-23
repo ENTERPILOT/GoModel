@@ -153,12 +153,14 @@ func (a *Alerter) Evaluate(ctx context.Context) error {
 //
 // Without it a threshold first reached after the last pass of a period would
 // never be alerted, although enforcement may have rejected requests over it:
-// the next pass reads only the new period. A budget created, changed, or reset
-// since the period ended is left out, because what it is now says nothing
-// about that period.
+// the next pass reads only the new period. A budget saved or reset since the
+// period ended is left out, because what it is now may say nothing about that
+// period. Any edit is a save, and so is the re-seed of a configured budget at
+// startup.
 func (a *Alerter) justEnded(budgets []Budget, now time.Time, settings Settings) map[time.Time][]Budget {
 	ended := make(map[time.Time][]Budget)
 	for _, budget := range budgets {
+		// The period the budget is in starts where its previous one ended.
 		end, _ := PeriodBounds(now, budget.PeriodSeconds, settings)
 		if now.Sub(end) < a.endedFor && budget.UpdatedAt.Before(end) {
 			ended[end] = append(ended[end], budget)

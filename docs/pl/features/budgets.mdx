@@ -522,8 +522,9 @@ requestu. Alert jest wysyłany raz dla każdej rewizji budżetu, okresu i progu:
 - Zakończony okres jest oceniany jeszcze przez dwa interwały plus 30 s, więc
   próg osiągnięty w jego ostatnich chwilach nadal wywołuje alert. Taki alert
   ma `period_end` wcześniejsze niż `timestamp`: budżet jest już w kolejnym
-  okresie. Budżet zmieniony lub zresetowany po zakończeniu okresu nie jest dla
-  niego oceniany.
+  okresie. Budżet zapisany lub zresetowany po zakończeniu okresu nie jest dla
+  niego oceniany: liczy się każda zmiana, także samych progów, oraz restart w
+  przypadku budżetu zadeklarowanego w konfiguracji.
 
 Dostarczenie następuje najwyżej raz i nie jest gwarantowane. Zapis następuje
 przed dostarczeniem, a alert nigdy nie jest zgłaszany po raz drugi: gateway

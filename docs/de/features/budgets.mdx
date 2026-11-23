@@ -547,8 +547,10 @@ Zeitraum und Schwelle einmal ausgelöst:
   sodass ein Schwellenwert, der in seinen letzten Augenblicken erreicht wurde,
   trotzdem eine Warnung auslöst. Bei dieser Warnung liegt `period_end` vor
   `timestamp`: Das Budget befindet sich bereits im nächsten Zeitraum. Ein
-  Budget, das seit dem Ende des Zeitraums geändert oder zurückgesetzt wurde,
-  wird für ihn nicht ausgewertet.
+  Budget, das seit dem Ende des Zeitraums gespeichert oder zurückgesetzt wurde,
+  wird für ihn nicht ausgewertet: Jede Änderung zählt, auch eine nur an den
+  Schwellenwerten, ebenso ein Neustart bei einem in der Konfiguration
+  deklarierten Budget.
 
 Die Zustellung erfolgt höchstens einmal und ist nicht garantiert. Der Eintrag
 wird vor der Zustellung geschrieben, und eine Warnung wird nie ein zweites Mal
