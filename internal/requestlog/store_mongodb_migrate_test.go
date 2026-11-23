@@ -27,6 +27,17 @@ func writeLegacyDocument(t *testing.T, db *mongo.Database, id string, statusCode
 	require.NoError(t, err)
 }
 
+// startMongoStore starts a store and waits for it to finish moving what an
+// older release left in audit_logs.
+func startMongoStore(t *testing.T, db *mongo.Database) *MongoDBStore {
+	t.Helper()
+	store, err := NewMongoDBStore(db, 0)
+	require.NoError(t, err)
+	store.absorb.Wait()
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
 func mongoEntry(t *testing.T, db *mongo.Database, id string) *LogEntry {
 	t.Helper()
 	reader, err := NewMongoDBReader(db)
@@ -55,9 +66,7 @@ func TestNewMongoDBStoreRenamesLegacyCollection(t *testing.T) {
 
 		// Twice: the second start finds the work done.
 		for range 2 {
-			store, err := NewMongoDBStore(db, 0)
-			require.NoError(t, err)
-			assert.Equal(t, requestLogCollectionName, store.collection.Name())
+			assert.Equal(t, requestLogCollectionName, startMongoStore(t, db).collection.Name())
 		}
 
 		assert.Equal(t, []string{requestLogCollectionName}, collectionNames(t, db))
@@ -67,20 +76,18 @@ func TestNewMongoDBStoreRenamesLegacyCollection(t *testing.T) {
 
 // A replica still on v0.2.5, or a binary rolled back to it, keeps inserting
 // into audit_logs, which MongoDB creates again. The next start moves those
-// entries over.
+// entries over, in the background.
 func TestNewMongoDBStoreAbsorbsARecreatedLegacyCollection(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		ctx := context.Background()
-		store, err := NewMongoDBStore(db, 0)
-		require.NoError(t, err)
+		store := startMongoStore(t, db)
 		at := time.Unix(1700000000, 0).UTC()
 		require.NoError(t, store.WriteBatch(ctx, []*LogEntry{testLogEntry("written-before", at), testLogEntry("in-both", at)}))
 
 		writeLegacyDocument(t, db, "written-by-older-replica", 200)
 		writeLegacyDocument(t, db, "in-both", 500)
 
-		_, err = NewMongoDBStore(db, 0)
-		require.NoError(t, err)
+		startMongoStore(t, db)
 
 		assert.Equal(t, []string{requestLogCollectionName}, collectionNames(t, db))
 		for _, id := range []string{"written-before", "written-by-older-replica", "in-both"} {
@@ -96,15 +103,13 @@ func TestNewMongoDBStoreAbsorbsARecreatedLegacyCollection(t *testing.T) {
 func TestNewMongoDBStoreFinishesAnInterruptedAbsorb(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		ctx := context.Background()
-		_, err := NewMongoDBStore(db, 0)
-		require.NoError(t, err)
+		startMongoStore(t, db)
 
 		writeLegacyDocument(t, db, "staged", 200)
 		require.NoError(t, renameCollection(ctx, db, legacyCollectionName, legacyStagingPrefix+"interrupted"))
 		writeLegacyDocument(t, db, "written-since", 200)
 
-		_, err = NewMongoDBStore(db, 0)
-		require.NoError(t, err)
+		startMongoStore(t, db)
 
 		assert.Equal(t, []string{requestLogCollectionName}, collectionNames(t, db))
 		require.NotNil(t, mongoEntry(t, db, "staged"))
@@ -113,12 +118,31 @@ func TestNewMongoDBStoreFinishesAnInterruptedAbsorb(t *testing.T) {
 }
 
 // With request logging turned off no store is created, and the reader still
-// has to find what an older release logged.
-func TestMongoDBReaderFindsLegacyCollectionWithoutAStore(t *testing.T) {
+// has to find what an older release logged. It reads the legacy collection
+// where it is: renaming it is the store's job.
+func TestMongoDBReaderReadsTheLegacyCollectionInPlace(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		writeLegacyDocument(t, db, "written-before", 200)
 		require.NotNil(t, mongoEntry(t, db, "written-before"))
+		assert.Equal(t, []string{legacyCollectionName}, collectionNames(t, db))
+
+		startMongoStore(t, db)
+		require.NotNil(t, mongoEntry(t, db, "written-before"))
 		assert.Equal(t, []string{requestLogCollectionName}, collectionNames(t, db))
+	})
+}
+
+// A reader created while an older release's entries wait in a recreated
+// audit_logs reads the request log, not those entries.
+func TestMongoDBReaderPrefersTheRequestLogCollection(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store := startMongoStore(t, db)
+		require.NoError(t, store.WriteBatch(ctx, []*LogEntry{testLogEntry("written-before", time.Unix(1700000000, 0).UTC())}))
+		writeLegacyDocument(t, db, "written-by-older-replica", 200)
+
+		require.NotNil(t, mongoEntry(t, db, "written-before"))
+		assert.Nil(t, mongoEntry(t, db, "written-by-older-replica"))
 	})
 }
 
@@ -138,11 +162,10 @@ func TestRenameCollectionReportsRaces(t *testing.T) {
 
 // Replicas starting together each set the legacy collection aside under a
 // name of their own, so one finishing late cannot drop what another staged.
-func TestAdoptLegacyCollectionStagesUnderAUniqueName(t *testing.T) {
+func TestAbsorbLegacyCollectionsStagesUnderAUniqueName(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		ctx := context.Background()
-		_, err := NewMongoDBStore(db, 0)
-		require.NoError(t, err)
+		startMongoStore(t, db)
 
 		// Replica A sets a batch aside and merges it, then stalls before its drop.
 		writeLegacyDocument(t, db, "staged-by-a", 200)
@@ -152,13 +175,13 @@ func TestAdoptLegacyCollectionStagesUnderAUniqueName(t *testing.T) {
 
 		// An older replica writes again, and replica B runs the whole move.
 		writeLegacyDocument(t, db, "written-since", 200)
-		require.NoError(t, adoptLegacyCollection(ctx, db))
+		require.NoError(t, absorbLegacyCollections(ctx, db))
 
 		// The older replica writes once more, then A's drop arrives. It can
 		// only remove A's own collection, not the batch a later move stages.
 		writeLegacyDocument(t, db, "written-last", 200)
 		require.NoError(t, stagedByA.Drop(ctx))
-		require.NoError(t, adoptLegacyCollection(ctx, db))
+		require.NoError(t, absorbLegacyCollections(ctx, db))
 
 		assert.Equal(t, []string{requestLogCollectionName}, collectionNames(t, db))
 		for _, id := range []string{"staged-by-a", "written-since", "written-last"} {

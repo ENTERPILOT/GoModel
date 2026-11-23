@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -72,6 +73,11 @@ func isIndexNotFound(err error) bool {
 type MongoDBStore struct {
 	collection    *mongo.Collection
 	retentionDays int
+
+	// absorb moves what an older release wrote to audit_logs after the rename
+	// into the collection; see absorbLegacyCollections.
+	cancelAbsorb context.CancelFunc
+	absorb       sync.WaitGroup
 }
 
 // NewMongoDBStore creates a new MongoDB request log store.
@@ -82,13 +88,13 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 		return nil, fmt.Errorf("database is required")
 	}
 
-	collection, err := requestLogCollection(database)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	collection, err := adoptLegacyCollection(ctx, database)
 	if err != nil {
 		return nil, err
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 
 	// Create indexes for common queries
 	indexes := []mongo.IndexModel{
@@ -188,10 +194,22 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 		slog.Warn("failed to create some MongoDB indexes", "error", err)
 	}
 
-	return &MongoDBStore{
+	store := &MongoDBStore{
 		collection:    collection,
 		retentionDays: retentionDays,
-	}, nil
+	}
+	// Not when the rename was refused: audit_logs is then the live collection.
+	if collection.Name() == requestLogCollectionName {
+		absorbCtx, cancel := context.WithCancel(context.Background())
+		store.cancelAbsorb = cancel
+		store.absorb.Go(func() {
+			if err := absorbLegacyCollections(absorbCtx, database); err != nil && absorbCtx.Err() == nil {
+				slog.Warn("requestlog: could not move the audit_logs entries of an older release into request_logs; a later start tries again",
+					"error", err)
+			}
+		})
+	}
+	return store, nil
 }
 
 // WriteBatch writes multiple log entries to MongoDB using InsertMany.
@@ -245,7 +263,12 @@ func (s *MongoDBStore) Flush(_ context.Context) error {
 	return nil
 }
 
-// Close is a no-op for MongoDB as the client is managed by the storage layer.
+// Close stops the move of an older release's entries, if it is still running.
+// The client is managed by the storage layer.
 func (s *MongoDBStore) Close() error {
+	if s.cancelAbsorb != nil {
+		s.cancelAbsorb()
+	}
+	s.absorb.Wait()
 	return nil
 }

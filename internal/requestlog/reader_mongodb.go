@@ -90,7 +90,9 @@ func NewMongoDBReader(database *mongo.Database) (*MongoDBReader, error) {
 	if database == nil {
 		return nil, fmt.Errorf("database is required")
 	}
-	collection, err := requestLogCollection(database)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	collection, err := existingRequestLogCollection(ctx, database)
 	if err != nil {
 		return nil, err
 	}

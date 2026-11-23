@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
-	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -24,89 +23,78 @@ const (
 	legacyStagingPrefix  = "audit_logs_absorbing_"
 )
 
-// legacyAdoptTimeout bounds the move at startup. A rename is immediate; the
-// budget is for merging what an older release wrote after it, which a long
-// rollback can make large. A merge cut short keeps what it copied and is
-// finished by a later start.
-const (
-	legacyAdoptTimeout    = 2 * time.Minute
-	legacyRecoveryTimeout = 10 * time.Second
-)
-
 // MongoDB server error codes the migration expects from a concurrent start.
 const (
 	mongoNamespaceNotFound = 26
 	mongoNamespaceExists   = 48
 )
 
-// requestLogCollection returns the request log collection, after moving a
-// database written by v0.2.5 or older onto its name (adoptLegacyCollection).
-//
-// A deployment that cannot rename the collection — a role without the
-// privilege, a sharded collection on an older server — keeps its request log
-// under the legacy name rather than failing to start. When it cannot be told
-// which collection holds the request log, that is an error: guessing could
-// hide every existing entry.
-func requestLogCollection(database *mongo.Database) (*mongo.Collection, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), legacyAdoptTimeout)
-	defer cancel()
-	err := adoptLegacyCollection(ctx, database)
-	if err == nil {
-		return database.Collection(requestLogCollectionName), nil
-	}
-	// A fresh deadline: the move may have failed by running out of its own.
-	ctx, cancel = context.WithTimeout(context.Background(), legacyRecoveryTimeout)
-	defer cancel()
-	names, listErr := requestLogCollectionNames(ctx, database)
-	if listErr != nil {
-		return nil, fmt.Errorf("failed to move the audit_logs collection to request_logs: %w", err)
+// existingRequestLogCollection returns the collection that holds the request
+// log: request_logs, or audit_logs on a database a release up to v0.2.5 wrote
+// and nothing has renamed yet. The readers use it as it is. They move nothing,
+// so a role that can only read is enough for them, and they agree with a store
+// that had to stay on audit_logs.
+func existingRequestLogCollection(ctx context.Context, database *mongo.Database) (*mongo.Collection, error) {
+	names, err := requestLogCollectionNames(ctx, database)
+	if err != nil {
+		return nil, err
 	}
 	if slices.Contains(names, legacyCollectionName) && !slices.Contains(names, requestLogCollectionName) {
-		slog.Warn("requestlog: could not rename the audit_logs collection to request_logs; the request log stays in audit_logs",
-			"error", err)
 		return database.Collection(legacyCollectionName), nil
 	}
-	slog.Warn("requestlog: could not move the audit_logs collection into request_logs; its entries stay out of the request log until a later start",
-		"error", err)
 	return database.Collection(requestLogCollectionName), nil
 }
 
-// adoptLegacyCollection moves a database written by v0.2.5 or older onto the
-// request_logs collection. It runs on every start and does nothing once the
-// legacy collection is gone.
+// adoptLegacyCollection returns the collection the store writes, after
+// renaming a legacy audit_logs collection to request_logs. The rename is
+// immediate and keeps the indexes.
 //
-// A legacy collection is renamed, which keeps its indexes. When request_logs
-// exists as well, a binary on the older release wrote after the rename — a
-// replica not upgraded yet, or a rollback — and MongoDB recreated the legacy
-// collection for it. Those documents are moved over: the collection is first
-// renamed aside, so a replica that is still writing starts a new one instead
-// of losing documents to the drop, and each later start picks that one up.
+// A deployment that cannot rename the collection — a role without the
+// privilege, a sharded collection on an older server — keeps its request log
+// under the legacy name rather than failing to start.
+func adoptLegacyCollection(ctx context.Context, database *mongo.Database) (*mongo.Collection, error) {
+	collection, err := existingRequestLogCollection(ctx, database)
+	if err != nil || collection.Name() == requestLogCollectionName {
+		return collection, err
+	}
+	err = renameCollection(ctx, database, legacyCollectionName, requestLogCollectionName)
+	switch {
+	case err == nil:
+		slog.Info("requestlog: renamed the audit_logs collection to request_logs")
+	case isMongoError(err, mongoNamespaceNotFound), isMongoError(err, mongoNamespaceExists):
+		// Another replica renamed it first.
+	default:
+		// Whichever collection holds the request log now: the rename may have
+		// been refused, or have gone through without its reply arriving.
+		collection, listErr := existingRequestLogCollection(ctx, database)
+		if listErr != nil {
+			return nil, fmt.Errorf("failed to rename the audit_logs collection to request_logs: %w", err)
+		}
+		slog.Warn("requestlog: could not rename the audit_logs collection to request_logs",
+			"error", err, "collection", collection.Name())
+		return collection, nil
+	}
+	return database.Collection(requestLogCollectionName), nil
+}
+
+// absorbLegacyCollections moves into request_logs what a binary on the older
+// release wrote after the rename — a replica not upgraded yet, or a rollback —
+// for which MongoDB created audit_logs again. The collection is first renamed
+// aside, so a replica that is still writing starts a new one instead of losing
+// documents to the drop, and a later start picks that one up.
+//
+// The store runs this off the startup path, since the merge takes as long as
+// what was written is large. It must not run while audit_logs is the store's
+// own collection.
 //
 // Replicas starting together may run this at once. Each sets the legacy
 // collection aside under a name of its own, and nothing writes to a collection
 // once it is set aside, so whoever drops one has merged all of it.
-func adoptLegacyCollection(ctx context.Context, database *mongo.Database) error {
+func absorbLegacyCollections(ctx context.Context, database *mongo.Database) error {
 	names, err := requestLogCollectionNames(ctx, database)
 	if err != nil {
 		return err
 	}
-	legacy := slices.Contains(names, legacyCollectionName)
-
-	if legacy && !slices.Contains(names, requestLogCollectionName) {
-		err := renameCollection(ctx, database, legacyCollectionName, requestLogCollectionName)
-		switch {
-		case err == nil:
-			slog.Info("requestlog: renamed the audit_logs collection to request_logs")
-			legacy = false
-		case isMongoError(err, mongoNamespaceNotFound):
-			legacy = false // another replica renamed it first
-		case isMongoError(err, mongoNamespaceExists):
-			// Another replica renamed it first and an older one has written since.
-		default:
-			return err
-		}
-	}
-
 	// Staging collections are left over from a start that was interrupted, or
 	// belong to a replica doing this right now.
 	for _, name := range names {
@@ -116,7 +104,7 @@ func adoptLegacyCollection(ctx context.Context, database *mongo.Database) error 
 			}
 		}
 	}
-	if !legacy {
+	if !slices.Contains(names, legacyCollectionName) {
 		return nil
 	}
 	staging := legacyStagingPrefix + bson.NewObjectID().Hex()
