@@ -178,7 +178,7 @@ version keep reading and writing the request log during a rolling upgrade, and a
 rolled-back version still starts (it logs index-creation warnings, since it
 cannot index a view); point your own queries at `request_logs`. On
 SQLite and MongoDB an older version that runs after the rename starts a new,
-empty `audit_logs`, and the next start of a current version moves what it logged
+empty `audit_logs`, and the next start of a current version with request logging on moves what it logged
 into `request_logs`. If MongoDB refuses the rename, for example because the
 role lacks the privilege, the gateway logs a warning and keeps using
 `audit_logs`.

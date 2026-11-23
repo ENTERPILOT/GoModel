@@ -188,7 +188,7 @@ sie auf einer View keinen Index anlegen kann); richten Sie eigene Abfragen auf
 `request_logs`. Bei
 SQLite und MongoDB legt eine ältere Version, die nach der Umbenennung läuft, ein
 neues, leeres `audit_logs` an, und der nächste Start einer aktuellen Version
-verschiebt deren Einträge nach `request_logs`. Verweigert MongoDB die
+mit aktiviertem Request-Logging verschiebt deren Einträge nach `request_logs`. Verweigert MongoDB die
 Umbenennung, etwa weil der Rolle das Privileg fehlt, protokolliert das Gateway
 eine Warnung und verwendet weiterhin `audit_logs`.
 
