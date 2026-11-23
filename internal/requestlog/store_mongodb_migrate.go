@@ -27,6 +27,9 @@ const (
 const (
 	mongoNamespaceNotFound = 26
 	mongoNamespaceExists   = 48
+	// An index build on the collection, or in its database, holds up a rename.
+	mongoBackgroundOperationForDatabase  = 12586
+	mongoBackgroundOperationForNamespace = 12587
 )
 
 // existingRequestLogCollection returns the collection that holds the request
@@ -74,13 +77,15 @@ func adoptLegacyCollection(ctx context.Context, database *mongo.Database) (*mong
 }
 
 // renameRefused reports whether the server answered a rename with an error of
-// its own, rather than the command failing to reach it or to finish in time. A
-// start that fails for the latter reasons is retried; one that settled on
-// audit_logs because of them would keep writing there after another replica
-// renamed the collection.
+// its own, rather than the command failing to reach it, to finish in time or
+// to get past an index build. A start that fails for the latter reasons is
+// retried; one that settled on audit_logs because of them would keep writing
+// there after another replica renamed the collection.
 func renameRefused(err error) bool {
 	var commandErr mongo.CommandError
-	return errors.As(err, &commandErr) && !mongo.IsNetworkError(err) && !mongo.IsTimeout(err)
+	return errors.As(err, &commandErr) && !mongo.IsNetworkError(err) && !mongo.IsTimeout(err) &&
+		!commandErr.HasErrorCode(mongoBackgroundOperationForDatabase) &&
+		!commandErr.HasErrorCode(mongoBackgroundOperationForNamespace)
 }
 
 // absorbLegacyCollections moves into request_logs what a binary on the older

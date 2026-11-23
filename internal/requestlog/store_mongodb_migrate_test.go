@@ -172,6 +172,7 @@ func TestRenameRefused(t *testing.T) {
 	assert.True(t, renameRefused(mongo.CommandError{Code: 13, Name: "Unauthorized"}))
 	assert.False(t, renameRefused(mongo.CommandError{Code: 6, Labels: []string{"NetworkError"}}))
 	assert.False(t, renameRefused(mongo.CommandError{Code: 50, Name: "MaxTimeMSExpired"}))
+	assert.False(t, renameRefused(mongo.CommandError{Code: 12587, Name: "BackgroundOperationInProgressForNamespace"}))
 	assert.False(t, renameRefused(context.DeadlineExceeded))
 }
 
