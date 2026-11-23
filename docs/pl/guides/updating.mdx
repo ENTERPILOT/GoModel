@@ -170,7 +170,7 @@ i właśnie dlatego kierunek odwrotny wymaga ostrożności.
 
 Po v0.2.5 storage logu requestów zmienił nazwę z `audit_logs` na `request_logs`: tabele w SQLite
 i PostgreSQL, kolekcja w MongoDB. Zmiana nazwy odbywa się w miejscu i nie kopiuje żadnych wierszy;
-indeksy zachowują nazwy `idx_audit_`. W PostgreSQL stare nazwy zostają jako widoki, więc repliki działające jeszcze na
+w SQLite i PostgreSQL indeksy zachowują nazwy `idx_audit_`. W PostgreSQL stare nazwy zostają jako widoki, więc repliki działające jeszcze na
 starszej wersji nadal czytają i zapisują log requestów podczas rolling upgrade'u, a wycofana wersja
 nadal się uruchamia (loguje ostrzeżenia o tworzeniu indeksów, bo nie może założyć indeksu na
 widoku); własne zapytania kieruj do `request_logs`. W SQLite i MongoDB starsza wersja

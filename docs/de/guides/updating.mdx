@@ -179,7 +179,8 @@ weshalb die Rückwärtsrichtung Sorgfalt erfordert.
 Nach v0.2.5 wurde der Speicher des Request-Logs von `audit_logs` in
 `request_logs` umbenannt: die Tabellen bei SQLite und PostgreSQL, die
 Collection bei MongoDB. Die Umbenennung geschieht an Ort und Stelle und kopiert
-keine Zeilen; die Indizes behalten ihre `idx_audit_`-Namen. Bei PostgreSQL bleiben die alten Namen als
+keine Zeilen; bei SQLite und PostgreSQL behalten die Indizes ihre
+`idx_audit_`-Namen. Bei PostgreSQL bleiben die alten Namen als
 Views erhalten, sodass Replicas mit der älteren Version das Request-Log während
 eines Rolling Upgrades weiter lesen und schreiben und eine zurückgerollte
 Version weiterhin startet (sie protokolliert Warnungen zur Indexerstellung, da

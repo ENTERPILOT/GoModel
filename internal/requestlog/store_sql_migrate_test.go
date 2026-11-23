@@ -432,6 +432,8 @@ func TestNewSQLStoreAbsorbWaitsForALegacyWriter(t *testing.T) {
 		case err := <-written:
 			require.NoError(t, err)
 			t.Fatal("the legacy writer finished before it was released")
+		case <-time.After(30 * time.Second):
+			t.Fatal("the legacy writer never inserted")
 		}
 
 		started := make(chan error, 1)
