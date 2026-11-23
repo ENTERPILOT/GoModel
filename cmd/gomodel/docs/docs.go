@@ -14303,7 +14303,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "audit": {
-                    "type": "boolean"
+                    "description": "Deprecated alias of request_logs, which was named audit through v0.2.5. Always equal to request_logs.",
+                    "type": "boolean",
+                    "x-deprecated": true
                 },
                 "budget": {
                     "type": "boolean"
@@ -14315,6 +14317,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "guardrails": {
+                    "type": "boolean"
+                },
+                "request_logs": {
                     "type": "boolean"
                 },
                 "usage": {

@@ -36,13 +36,29 @@ func (e *PartialWriteError) Unwrap() error {
 	return ErrPartialWrite
 }
 
-// Prometheus metric for request log partial write failures
-var requestLogPartialWriteFailures = promauto.NewCounter(
-	prometheus.CounterOpts{
-		Name: "gomodel_audit_log_partial_write_failures_total",
-		Help: "Total number of partial write failures when inserting request logs to MongoDB",
-	},
+// Prometheus metrics for request log partial write failures. The counter was
+// named for the audit log before the request log was renamed; that name still
+// counts alongside the new one, so existing dashboards and alerts keep working.
+var (
+	requestLogPartialWriteFailures = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "gomodel_request_log_partial_write_failures_total",
+			Help: "Total number of partial write failures when inserting request logs to MongoDB",
+		},
+	)
+	legacyRequestLogPartialWriteFailures = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "gomodel_audit_log_partial_write_failures_total",
+			Help: "Deprecated: use gomodel_request_log_partial_write_failures_total. Total number of partial write failures when inserting request logs to MongoDB",
+		},
+	)
 )
+
+// countPartialWriteFailure counts one partial write under both metric names.
+func countPartialWriteFailure() {
+	requestLogPartialWriteFailures.Inc()
+	legacyRequestLogPartialWriteFailures.Inc()
+}
 
 // MongoDBStore implements LogStore for MongoDB.
 const legacyExecutionPlanIndex = "execution_plan_version_id_1"
@@ -210,7 +226,7 @@ func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*LogEntry) erro
 				"succeeded", len(entries)-failedCount,
 			)
 			// Increment metric for operators to detect data loss
-			requestLogPartialWriteFailures.Inc()
+			countPartialWriteFailure()
 			// Return distinguishable error so callers know insert was partial
 			return &PartialWriteError{
 				TotalEntries: len(entries),

@@ -10,6 +10,11 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
+// MistralContentChunksField is the assistant message member the mistral
+// provider fills with the content chunks that have no standard chat
+// equivalent, such as the "reference" chunks that cite a tool result.
+const MistralContentChunksField = "mistral_content_chunks"
+
 // ResponsesFunctionCallCallID returns the call id if present or generates one.
 func ResponsesFunctionCallCallID(callID string) string {
 	if strings.TrimSpace(callID) != "" {
@@ -153,7 +158,10 @@ func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputI
 	}
 	contentItems := buildResponsesMessageContent(msg.Content)
 	images := imageGenerationCallItems(msg.ExtraFields)
-	if len(contentItems) > 0 || (len(msg.ToolCalls) == 0 && len(images) == 0) {
+	// Content chunks need a message item to ride on, even in a turn that has
+	// no text next to its tool calls.
+	messageExtra := messageItemExtraFields(msg.ExtraFields)
+	if len(contentItems) > 0 || !messageExtra.IsEmpty() || (len(msg.ToolCalls) == 0 && len(images) == 0) {
 		if len(contentItems) == 0 {
 			contentItems = []core.ResponsesContentItem{
 				{
@@ -164,11 +172,12 @@ func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputI
 			}
 		}
 		output = append(output, core.ResponsesOutputItem{
-			ID:      "msg_" + uuid.New().String(),
-			Type:    "message",
-			Role:    "assistant",
-			Status:  "completed",
-			Content: contentItems,
+			ID:          "msg_" + uuid.New().String(),
+			Type:        "message",
+			Role:        "assistant",
+			Status:      "completed",
+			Content:     contentItems,
+			ExtraFields: messageExtra,
 		})
 	}
 	output = append(output, images...)
@@ -229,6 +238,45 @@ func imageGenerationCallFields(image core.ContentPart) (map[string]json.RawMessa
 		fields[core.ExtraContentField] = raw
 	}
 	return fields, true
+}
+
+// messageItemExtraFields returns the extra fields of a Responses message item:
+// the MistralContentChunksField member of the chat message, moved to
+// extra_content.mistral. The other unknown message members stay off the item.
+func messageItemExtraFields(fields core.UnknownJSONFields) core.UnknownJSONFields {
+	chunks := fields.Lookup(MistralContentChunksField)
+	if core.IsJSONNull(chunks) {
+		return core.UnknownJSONFields{}
+	}
+	return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		core.ExtraContentField: withMistralContentChunks(nil, chunks),
+	})
+}
+
+// withMistralContentChunks returns extraContent with chunks set at
+// mistral.content_chunks, keeping every other vendor.
+//
+// Responses has no standard member for these chunks: an annotation needs a
+// URL or a file id, and a reference chunk carries only the caller's own
+// reference ids. They go in extra_content rather than in a member of their
+// own because clients replay output items as they came and OpenAI rejects an
+// item with an unknown member; the router already drops extra_content
+// vendors before a request reaches a provider that does not own them. The
+// chunks are copied as the mistral adapter left them, never interpreted.
+func withMistralContentChunks(extraContent, chunks json.RawMessage) json.RawMessage {
+	value, err := json.Marshal(map[string]json.RawMessage{core.ContentChunksField: chunks})
+	if err != nil {
+		return extraContent
+	}
+	var fields core.UnknownJSONFields
+	if len(extraContent) > 0 {
+		fields = core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{core.ExtraContentField: extraContent})
+	}
+	merged, err := fields.WithExtraContent(core.ExtraContentVendorMistral, value)
+	if err != nil {
+		return extraContent
+	}
+	return merged.Lookup(core.ExtraContentField)
 }
 
 // toolCallExtraContent isolates the extra_content member of a chat tool call

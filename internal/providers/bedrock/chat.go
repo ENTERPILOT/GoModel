@@ -560,6 +560,8 @@ func mapStopReason(sr brtypes.StopReason, hasToolCalls bool) string {
 			return "tool_calls"
 		}
 		return string(sr)
+	case brtypes.StopReasonGuardrailIntervened, brtypes.StopReasonContentFiltered:
+		return "content_filter"
 	case "":
 		return "stop"
 	default:

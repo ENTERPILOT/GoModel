@@ -11,7 +11,7 @@ import (
 
 // This file is the enrichment API handlers use to attach data to the live
 // request log entry stored on the request context. Every context-based Enrich*
-// helper publishes an audit.updated live event so connected dashboards see
+// helper publishes an request_log.updated live event so connected dashboards see
 // the entry evolve in realtime; the EnrichLogEntry* variants mutate an entry
 // directly for executors that run outside Echo middleware state.
 
@@ -41,7 +41,7 @@ func publishLiveRequestLogUpdate(c *echo.Context, entry *LogEntry) {
 
 // EnrichEntryWithSessionID makes the detected session visible to realtime
 // request log subscribers as soon as SessionCapture resolves it. Request log middleware
-// starts outside authentication/session middleware, so audit.started cannot
+// starts outside authentication/session middleware, so request_log.started cannot
 // carry the final scoped ID.
 func EnrichEntryWithSessionID(c *echo.Context, sessionID string) {
 	sessionID = strings.TrimSpace(sessionID)
@@ -526,12 +526,12 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 	}
 	if workflow.Policy != nil {
 		ensureLogData(entry).WorkflowFeatures = &WorkflowFeaturesSnapshot{
-			Cache:      workflow.Policy.Features.Cache,
-			Audit:      workflow.Policy.Features.Audit,
-			Usage:      workflow.Policy.Features.Usage,
-			Budget:     workflow.Policy.Features.Budget,
-			Guardrails: workflow.Policy.Features.Guardrails,
-			Failover:   workflow.Policy.Features.Failover,
+			Cache:       workflow.Policy.Features.Cache,
+			RequestLogs: workflow.Policy.Features.RequestLogs,
+			Usage:       workflow.Policy.Features.Usage,
+			Budget:      workflow.Policy.Features.Budget,
+			Guardrails:  workflow.Policy.Features.Guardrails,
+			Failover:    workflow.Policy.Features.Failover,
 		}
 	}
 }

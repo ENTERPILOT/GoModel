@@ -23,7 +23,7 @@ func TestCompilerCompile_Guardrails(t *testing.T) {
 		Name:    "global",
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true},
+			Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: true},
 			Guardrails: []GuardrailStep{
 				{Ref: "policy-system", Step: 20},
 			},
@@ -76,11 +76,11 @@ func TestCompilerCompile_PhasesFromV2Steps(t *testing.T) {
 func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
 	failoverEnabled := true
 	compiled, err := NewCompilerWithFeatureCaps(nil, core.WorkflowFeatures{
-		Cache:      false,
-		Audit:      true,
-		Usage:      false,
-		Guardrails: false,
-		Failover:   false,
+		Cache:       false,
+		RequestLogs: true,
+		Usage:       false,
+		Guardrails:  false,
+		Failover:    false,
 	}).Compile(Version{
 		ID:      "workflow-1",
 		Scope:   Scope{},
@@ -88,7 +88,7 @@ func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
 		Name:    "global",
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true, Failover: &failoverEnabled},
+			Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: true, Failover: &failoverEnabled},
 			Guardrails: []GuardrailStep{
 				{Ref: "policy-system", Step: 10},
 			},
@@ -98,7 +98,7 @@ func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
 	require.NotNil(t, compiled)
 	require.NotNil(t, compiled.Policy)
 	require.False(t, compiled.Policy.Features.Cache)
-	require.True(t, compiled.Policy.Features.Audit)
+	require.True(t, compiled.Policy.Features.RequestLogs)
 	require.False(t, compiled.Policy.Features.Usage)
 	require.False(t, compiled.Policy.Features.Guardrails)
 	require.False(t, compiled.Policy.Features.Failover)
@@ -115,7 +115,7 @@ func TestCompilerCompile_DefaultsFailoverEnabledWhenUnset(t *testing.T) {
 		Name:    "global",
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+			Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false},
 		},
 	})
 	require.NoError(t, err)

@@ -813,7 +813,16 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   und maskieren ein Passwort in `proxy_url`. Wird ein Wert aus drei oder mehr
   Sternchen zurückgesendet, bleibt der gespeicherte Wert erhalten, sodass eine
   Bearbeitung ein Secret nie wiederholen muss; ein maskierter Eintrag, hinter
-  dem kein gespeicherter Wert steht, liefert `400`. Ein Wert, der nur aus
+  dem kein gespeicherter Wert steht, liefert `400`. Ein maskierter API-Key
+  zeigt seine ersten 5 und letzten 3 Zeichen (Keys ab 20 Zeichen) und nennt
+  den gespeicherten Key, für den er steht (`sk-pr***********7Qa#2` ist der
+  zweite), sodass Einträge entfernt oder umsortiert werden können. Die Nummern
+  beziehen sich auf die beim Speichern gespeicherte Liste: Eine Maske, deren
+  Zeichen nicht mehr zu ihrem Key passen, liefert `400`. Diese Prüfung
+  erfasst weder vollständig maskierte kurze Keys noch Keys mit denselben
+  sichtbaren Zeichen, daher nach gleichzeitigen Änderungen vor dem Speichern
+  neu laden. Eine Maske ohne Nummer behält den gespeicherten Key an ihrer
+  Position. Ein Wert, der nur aus
   Secret-Referenzen besteht, wird unverändert angezeigt.
 - `billable: false` kennzeichnet einen Provider, dessen Kosten der Aufrufer
   Ihnen nicht schuldet; siehe
@@ -1089,6 +1098,20 @@ Netzwerkunterbrechungen aufholen können.
 Die persistierten Request-Log- und Nutzungstabellen bleiben die maßgebliche Datenquelle. Fällt der
 Cursor des Browsers aus dem Wiederholungspuffer heraus, sendet der Stream ein Reset-Event,
 und das Dashboard lädt die Daten neu über die normalen REST-Endpunkte.
+
+Request-Log-Events heißen `request_log.started`, `request_log.updated`,
+`request_log.stream`, `request_log.completed`, `request_log.failed`,
+`request_log.flushed` und `request_log.removed`, Nutzungs-Events `usage.*`.
+Der Query-Parameter `types` wählt die Arten aus, die ein Stream erhält:
+`types=request_log,usage`.
+
+Vor der Umbenennung des Request-Logs hießen diese Events `audit.*`. Diese Namen
+sind veraltet, werden aber weiterhin ausgeliefert. Ein Stream, der `request_log`
+in `types` nennt, erhält die neuen Namen. Ein Stream, der nur den alten Alias
+`audit` nennt oder kein `types` übergibt, erhält weiterhin `audit.*` (als
+SSE-Eventname, im Feld `type` und im `_live_state` der Nutzlast), bis die
+veralteten Namen entfernt werden; ein Entfernungsdatum steht noch nicht fest.
+Mit `types=request_log,usage` wechseln Sie zu den neuen Namen.
 
 ## Admin-Features deaktivieren
 

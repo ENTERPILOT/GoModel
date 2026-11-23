@@ -177,6 +177,7 @@ func TestExportYAMLRoundTrips(t *testing.T) {
 server:
   master_key: ${env:GOMODEL_TEST_MASTER}
   body_size_limit: 20M
+  enable_passthrough_routes: false
 cache:
   model:
     redis:
@@ -359,4 +360,44 @@ func stringish(t reflect.Type) bool {
 		t = t.Elem()
 	}
 	return t.Kind() == reflect.String
+}
+
+func TestExportYAMLSkipsEmptyDefaults(t *testing.T) {
+	cfg := buildDefaultConfig()
+	cfg.Server.EnablePassthroughRoutes = false
+	cfg.Guardrails.Rules = []GuardrailRuleConfig{{Name: "safety", Type: "system_prompt"}}
+	providers := map[string]RawProviderConfig{"ollama": {Type: "ollama", BaseURL: "http://localhost:11434/v1"}}
+
+	out := exportYAML(t, NewSecrets(), cfg, providers, nil)
+
+	for _, empty := range []string{`: ""`, ": 0\n", ": {}", "master_key_disabled:", "body_size_limit:", "opentelemetry:", "mongodb:", "api_key:", "workload_identity:", "order:"} {
+		assert.NotContains(t, out, empty)
+	}
+	assert.Contains(t, out, "enable_passthrough_routes: false", "an empty value whose default is not empty is kept")
+	assert.Equal(t, "8080", exportedValue(t, out, "server", "port"))
+	assert.Equal(t, "ollama", exportedValue(t, out, "providers", "ollama", "type"))
+	assert.Equal(t, "safety", exportedValue(t, out, "guardrails", "rules", "0", "name"))
+}
+
+func TestExportYAMLKeepsExplicitEmptyLists(t *testing.T) {
+	// An empty list disables the statuses a nil list inherits.
+	providers := map[string]RawProviderConfig{"openai": {Type: "openai", Resilience: &RawResilienceConfig{
+		Retry:          &RawRetryConfig{RetryOnStatuses: []string{}},
+		CircuitBreaker: &RawCircuitBreakerConfig{FailureOnStatuses: []string{}},
+	}}}
+
+	out := exportYAML(t, NewSecrets(), buildDefaultConfig(), providers, nil)
+
+	var doc struct {
+		Providers map[string]RawProviderConfig `yaml:"providers"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc), out)
+	resilience := doc.Providers["openai"].Resilience
+	require.NotNil(t, resilience, out)
+	require.NotNil(t, resilience.Retry, out)
+	require.NotNil(t, resilience.CircuitBreaker, out)
+	assert.NotNil(t, resilience.Retry.RetryOnStatuses, out)
+	assert.Empty(t, resilience.Retry.RetryOnStatuses)
+	assert.NotNil(t, resilience.CircuitBreaker.FailureOnStatuses, out)
+	assert.Empty(t, resilience.CircuitBreaker.FailureOnStatuses)
 }
