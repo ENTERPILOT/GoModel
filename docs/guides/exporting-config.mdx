@@ -31,10 +31,11 @@ edited file, or fails with the same error.
   </Tab>
   <Tab title="Docker Compose">
     ```bash
-    docker compose exec gomodel /gomodel config export > gomodel-export.yaml
+    docker compose exec -T gomodel /gomodel config export > gomodel-export.yaml
     ```
 
-    `gomodel` is the service name in your `docker-compose.yaml`.
+    `gomodel` is the service name in your `docker-compose.yaml`. `-T` turns
+    off terminal allocation, so the file gets the output unchanged.
   </Tab>
   <Tab title="docker">
     ```bash
@@ -51,11 +52,13 @@ edited file, or fails with the same error.
 </Warning>
 
 Settings at their default value are left out, so the file shows only what you
-changed. Add `--include-defaults` to write the defaults too.
+changed. Add `--include-defaults` to write the defaults too, except settings
+that are empty by default.
 
 ## Secrets
 
-The file holds no secret. Each one is written as a reference:
+Secret settings, such as API keys, are written as references, never as
+values:
 
 ```yaml
 providers:
@@ -71,13 +74,15 @@ A key typed into the dashboard gets a `# secret not exported` comment naming
 the variable to set. A gateway loading the file does not start until that
 variable is set.
 
-Free-form text, such as a description, is only checked for credential shapes.
-Review it before sharing the file.
+Free-form text, such as a description, is only checked for credential shapes,
+so a token pasted into one can end up in the file. Review such text before
+sharing it.
 
 ## Use the export
 
-Save it as `config/config.yaml` on the target instance, set the variables it
-references, and start the gateway. Objects that came from the dashboard are now
+Save it as `config/config.yaml` on the target instance (in Docker, mount it at
+`/app/config/config.yaml`), set the variables it references, and start the
+gateway. Objects that came from the dashboard are now
 declared in the file, so they are read-only in the dashboard.
 
 <Note>
