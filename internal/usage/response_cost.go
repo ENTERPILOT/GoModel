@@ -64,10 +64,23 @@ func StampBilling(logger LoggerInterface, entry *UsageEntry) {
 // CostReport carries the cost of the request being served from the code that
 // records its usage to the code that writes its response. It is safe for
 // concurrent use; the latest recorded entry wins.
+//
+// A stream delivered later than it is read (streaming.NewSlowdownStream) has
+// its usage recorded ahead of the events the response writes. Such a stream
+// captures the cost after each chunk it reads and restores it when it
+// delivers the chunk, and from the first capture on Cost returns the cost
+// restored last: the cost as of the events delivered, not of the ones read.
 type CostReport struct {
 	billed bool
 
-	mu     sync.Mutex
+	mu        sync.Mutex
+	recorded  reportedCost
+	delivered reportedCost
+	delayed   bool // Cost returns delivered
+}
+
+// reportedCost is a cost, or none while it is not known.
+type reportedCost struct {
 	amount float64
 	known  bool
 }
@@ -119,7 +132,7 @@ func (r *CostReport) Record(logger LoggerInterface, entry *UsageEntry) {
 	}
 	amount, known := ResponseCost(entry, r.billed)
 	r.mu.Lock()
-	r.amount, r.known = amount, known
+	r.recorded = reportedCost{amount: amount, known: known}
 	r.mu.Unlock()
 }
 
@@ -131,7 +144,7 @@ func (r *CostReport) Forget() {
 		return
 	}
 	r.mu.Lock()
-	r.amount, r.known = 0, false
+	r.recorded = reportedCost{}
 	r.mu.Unlock()
 }
 
@@ -142,5 +155,27 @@ func (r *CostReport) Cost() (float64, bool) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.amount, r.known
+	cost := r.recorded
+	if r.delayed {
+		cost = r.delivered
+	}
+	return cost.amount, cost.known
+}
+
+// Capture returns the recorded cost for a stream that delivers what it reads
+// later, and makes Cost return what Restore was given last, nothing until
+// then. It implements streaming.DeliveryState.
+func (r *CostReport) Capture() any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.delayed = true
+	return r.recorded
+}
+
+// Restore makes a captured cost the one Cost returns.
+func (r *CostReport) Restore(state any) {
+	cost, _ := state.(reportedCost)
+	r.mu.Lock()
+	r.delivered = cost
+	r.mu.Unlock()
 }

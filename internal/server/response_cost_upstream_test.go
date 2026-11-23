@@ -314,33 +314,64 @@ func TestResponseCost_CRLFStreams(t *testing.T) {
 
 // A provider that reports usage on every chunk gets the cost on every such
 // event. Each carries the cost of the usage so far, cumulative like the token
-// counts beside it, and the last one is the cost the usage log records.
+// counts beside it, and the last one is the cost the usage log records. A
+// slowed-down stream is read, and its usage recorded, ahead of what is
+// delivered: each event still carries the cost of its own usage.
 func TestResponseCost_UsageOnEveryChunk(t *testing.T) {
 	chunk := func(delta, usage string) string {
 		return `data: {"id":"chatcmpl-1","object":"chat.completion.chunk","model":"gpt-4o-mini","choices":[` + delta + `],"usage":{` + usage + "}}\n\n"
 	}
-	provider := costChatProvider()
-	provider.streamData = chunk(`{"index":0,"delta":{"content":"Hi"},"finish_reason":null}`, `"prompt_tokens":10,"completion_tokens":1,"total_tokens":11`) +
+	stream := chunk(`{"index":0,"delta":{"content":"Hi"},"finish_reason":null}`, `"prompt_tokens":10,"completion_tokens":1,"total_tokens":11`) +
 		chunk(`{"index":0,"delta":{"content":"!"},"finish_reason":null}`, `"prompt_tokens":10,"completion_tokens":3,"total_tokens":13`) +
 		chunk(`{"index":0,"delta":{},"finish_reason":"stop"}`, pricedUsage) +
 		"data: [DONE]\n\n"
-	srv, logger := costGateway(t, provider, returnCosts)
+	slowedDown := func(cfg *Config) { cfg.ModelResolver = &audioSlowdownResolver{factor: 0.01} }
+	deliveries := map[string][]func(*Config){
+		"as it arrives":                   {returnCosts},
+		"delivered later than it is read": {returnCosts, slowedDown},
+	}
+	for name, configure := range deliveries {
+		t.Run(name, func(t *testing.T) {
+			provider := costChatProvider()
+			provider.streamData = stream
+			srv, logger := costGateway(t, provider, configure...)
 
-	rec := postJSON(t, srv, "/v1/chat/completions", streamedCostRequests[0].body)
+			rec := postJSON(t, srv, "/v1/chat/completions", streamedCostRequests[0].body)
+
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			var amounts []gjson.Result
+			for line := range strings.SplitSeq(rec.Body.String(), "\n") {
+				if data, ok := strings.CutPrefix(line, "data: "); ok && gjson.Get(data, "usage").Exists() {
+					amounts = append(amounts, gjson.Get(data, "usage.cost"))
+				}
+			}
+			require.Len(t, amounts, 3, rec.Body.String())
+			for i, want := range []string{"0.000012", "0.000016", responseCostAmount} {
+				assert.Equal(t, want, amounts[i].Raw, "event %d carries the cost so far", i)
+			}
+			require.Len(t, logger.entries, 1)
+			assert.Equal(t, formatResponseCost(*logger.entries[0].TotalCost), amounts[2].Raw, "the last cost is the logged one")
+		})
+	}
+}
+
+// The usage reader takes a stream's usage from a member spelled "usage" in
+// those bytes. One spelled with escapes is not read, so it is not priced: it
+// loses the upstream's cost and carries none, never the cost of the usage
+// event before it.
+func TestResponseCost_EscapedUsageNameCarriesNoCostOfAnEarlierEvent(t *testing.T) {
+	stream := "data: {\"choices\":[],\"usage\":{" + pricedUsage + "}}\n\n" +
+		`data: {"choices":[],"us\u0061ge":{"prompt_tokens":10,"completion_tokens":5000,"total_tokens":5010,"cost":9}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	srv, _ := costGateway(t, costPassthroughProvider(sseHeader(), strings.NewReader(stream)), returnCosts)
+
+	rec := postJSON(t, srv, passthroughChatPath, passthroughStreamBody)
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	var amounts []gjson.Result
-	for line := range strings.SplitSeq(rec.Body.String(), "\n") {
-		if data, ok := strings.CutPrefix(line, "data: "); ok && gjson.Get(data, "usage").Exists() {
-			amounts = append(amounts, gjson.Get(data, "usage.cost"))
-		}
-	}
-	require.Len(t, amounts, 3, rec.Body.String())
-	for i, want := range []string{"0.000012", "0.000016", responseCostAmount} {
-		assert.Equal(t, want, amounts[i].Raw, "event %d carries the cost so far", i)
-	}
-	require.Len(t, logger.entries, 1)
-	assert.Equal(t, formatResponseCost(*logger.entries[0].TotalCost), amounts[2].Raw, "the last cost is the logged one")
+	events := strings.Split(rec.Body.String(), "\n\n")
+	require.GreaterOrEqual(t, len(events), 2, rec.Body.String())
+	assert.Equal(t, responseCostAmount, gjson.Get(strings.TrimPrefix(events[0], "data: "), "usage.cost").Raw)
+	assert.Equal(t, `data: {"choices":[],"us\u0061ge":{"prompt_tokens":10,"completion_tokens":5000,"total_tokens":5010}}`, events[1])
 }
 
 // failsOnceReader reads lead, fails once with err and then reports a clean
