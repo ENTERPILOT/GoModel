@@ -114,7 +114,10 @@ stream as a `stream_error`.
 all `5xx` responses as failures. One exhausted retry sequence counts as one
 failure; individual HTTP retries do not increment the breaker. A successful
 sequence records success. Client cancellation is ignored; local client
-timeouts count as failures.
+timeouts count as failures. That includes a shorter
+[per-model timeout](/features/virtual-models#set-upstream-timeouts): with
+`scope: provider`, repeated timeouts on one model open the breaker for the
+whole provider, so prefer `scope: model` there.
 
 **Model discovery and availability probes** bypass the breaker. A failing
 `/models` endpoint does not open the circuit, so a listing outage cannot pause

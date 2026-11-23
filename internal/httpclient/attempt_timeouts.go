@@ -11,7 +11,9 @@ import (
 // attempt made with a context. A zero field inherits the client's setting.
 // Operators set these per virtual model; they never come from callers.
 type AttemptTimeouts struct {
-	// Timeout bounds one attempt end to end, like http.Client.Timeout.
+	// Timeout bounds one attempt end to end, like http.Client.Timeout. One
+	// longer than the client's response-header timeout extends that wait as
+	// well, unless ResponseHeaderTimeout is set.
 	Timeout time.Duration
 	// ResponseHeaderTimeout bounds the wait for response headers, like
 	// http.Transport.ResponseHeaderTimeout.
@@ -43,9 +45,18 @@ func AttemptTimeoutsFromContext(ctx context.Context) AttemptTimeouts {
 	return timeouts
 }
 
-func responseHeaderTimeoutOverride(ctx context.Context) (time.Duration, bool) {
-	timeout := AttemptTimeoutsFromContext(ctx).ResponseHeaderTimeout
-	return timeout, timeout > 0
+// responseHeaderTimeoutOverride returns the response-header timeout an
+// attempt needs when it differs from the configured one. An overall timeout
+// longer than the configured header wait extends that wait too, unless a
+// header override is set: a non-streaming call sends its headers only once
+// the answer is ready, so the shorter limit would cut the longer attempt off.
+func responseHeaderTimeoutOverride(ctx context.Context, configured time.Duration) (time.Duration, bool) {
+	timeouts := AttemptTimeoutsFromContext(ctx)
+	timeout := timeouts.ResponseHeaderTimeout
+	if timeout <= 0 && configured > 0 && timeouts.Timeout > configured {
+		timeout = timeouts.Timeout
+	}
+	return timeout, timeout > 0 && timeout != configured
 }
 
 // Do sends req with client, applying the request context's overall timeout

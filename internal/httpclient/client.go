@@ -231,7 +231,7 @@ func (d *dynamicTransport) bound(state *trustState) *boundTransport {
 func (d *dynamicTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	state := trust.Load()
 	b := d.bound(state)
-	if headerTimeout, ok := responseHeaderTimeoutOverride(req.Context()); ok && headerTimeout != d.config.ResponseHeaderTimeout {
+	if headerTimeout, ok := responseHeaderTimeoutOverride(req.Context(), d.config.ResponseHeaderTimeout); ok {
 		return b.headerVariants.get(headerTimeout, func() *http.Transport {
 			cfg := d.config
 			cfg.ResponseHeaderTimeout = headerTimeout

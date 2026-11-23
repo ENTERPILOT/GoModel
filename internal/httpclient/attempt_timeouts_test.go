@@ -90,6 +90,37 @@ func TestDoAppliesTimeoutOverride(t *testing.T) {
 	}
 }
 
+func TestLongerTimeoutExtendsHeaderWait(t *testing.T) {
+	server, _ := slowHeadersServer(t, 150*time.Millisecond)
+
+	tests := []struct {
+		name     string
+		override AttemptTimeouts
+		wantErr  bool
+	}{
+		{name: "longer timeout extends the header wait", override: AttemptTimeouts{Timeout: 2 * time.Second}},
+		{
+			name:     "an explicit header timeout still applies",
+			override: AttemptTimeouts{Timeout: 2 * time.Second, ResponseHeaderTimeout: 50 * time.Millisecond},
+			wantErr:  true,
+		},
+		{name: "a shorter timeout keeps the header wait", override: AttemptTimeouts{Timeout: 40 * time.Millisecond}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := testClient(50*time.Millisecond, 50*time.Millisecond)
+			err := sendWithTimeouts(t, client, server.URL, tt.override)
+			if tt.wantErr {
+				var netErr net.Error
+				require.ErrorAs(t, err, &netErr)
+				assert.True(t, netErr.Timeout(), "want a timeout, got %v", err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestResponseHeaderTimeoutOverride(t *testing.T) {
 	server, _ := slowHeadersServer(t, 150*time.Millisecond)
 

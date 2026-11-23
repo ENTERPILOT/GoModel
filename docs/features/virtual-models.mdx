@@ -252,10 +252,10 @@ virtual_models:
   - source: extract
     target: anthropic/claude-sonnet-4-6
     timeout: 1800
-    response_header_timeout: 900
   # A policy on the model itself applies to every request for it.
   - source: openai/gpt-4o
     timeout: 120
+    response_header_timeout: 30
 ```
 
 - Each value applies to **each upstream attempt**. Retries and failover legs
@@ -264,9 +264,17 @@ virtual_models:
   streamed response body, so a short `timeout` on a streaming chat model cuts
   long streams off. To bound only the wait for the first byte, set
   `response_header_timeout` instead.
+- A `timeout` longer than the inherited response-header timeout also extends
+  the wait for headers: a non-streaming call sends its headers only when the
+  answer is ready. Set `response_header_timeout` to keep a shorter limit.
 - An attempt that times out is not retried on the same provider; it counts as
   failed and moves on to the next [failover](/features/failover) target, as
   the failover policy allows.
+- A timed-out attempt also counts as a
+  [circuit breaker](/advanced/resilience#what-counts-as-a-failure) failure.
+  With the default `scope: provider`, a short timeout on one model can open
+  the breaker for every model on that provider. Use `scope: model` on
+  providers where you set short timeouts.
 - Each field resolves on its own: the redirects that route the request come
   first (outermost first), then the resolved model's exact policy
   (`openai/gpt-4o`), then its model-wide policy (`gpt-4o`), then the
