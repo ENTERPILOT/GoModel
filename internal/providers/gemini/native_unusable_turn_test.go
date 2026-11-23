@@ -1,7 +1,6 @@
 package gemini
 
 import (
-	"errors"
 	"net/http"
 	"testing"
 
@@ -65,7 +64,7 @@ func TestNativeChatResponse_UnusableTurns(t *testing.T) {
 			resp, err := nativeChatResponse(&core.ChatRequest{Model: "gemini-3.1-pro-preview"}, &geminiResp, "vertex")
 			if tt.wantErr != "" {
 				var gatewayErr *core.GatewayError
-				require.True(t, errors.As(err, &gatewayErr), "got %v", err)
+				require.ErrorAs(t, err, &gatewayErr)
 				assert.Equal(t, http.StatusBadGateway, gatewayErr.StatusCode)
 				assert.Equal(t, "vertex", gatewayErr.Provider)
 				assert.Contains(t, gatewayErr.Message, tt.wantErr)
