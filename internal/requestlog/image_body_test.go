@@ -263,13 +263,20 @@ func TestBuildImageResponseBody_KeepsItemErrorsSizesAndRequestID(t *testing.T) {
 	assert.Equal(t, "trace", body.Meta["request_id"])
 }
 
+// TestBuildImageResponseBody_CapsItemError bounds the provider-returned error
+// message. The leading one-byte rune puts the limit in the middle of a
+// two-byte rune, which must be dropped whole rather than split.
 func TestBuildImageResponseBody_CapsItemError(t *testing.T) {
-	long := strings.Repeat("é", imageItemDetailMaxBytes) // 2 bytes per rune
+	long := "a" + strings.Repeat("é", imageItemDetailMaxBytes)
 	body := BuildImageResponseBody(nil, &core.ImageGenerationResponse{
 		Data: []core.ImageData{{Error: &core.ImageItemError{Code: "1027", Message: long}}},
 	})
 
+	require.Len(t, body.Items, 1)
+	require.NotNil(t, body.Items[0].Error)
+	assert.Equal(t, "1027", body.Items[0].Error.Code)
 	kept := body.Items[0].Error.Message
-	assert.LessOrEqual(t, len(kept), imageItemDetailMaxBytes)
+	assert.Equal(t, "a"+strings.Repeat("é", (imageItemDetailMaxBytes-1)/2), kept)
+	assert.Len(t, kept, imageItemDetailMaxBytes-1)
 	assert.True(t, utf8.ValidString(kept))
 }

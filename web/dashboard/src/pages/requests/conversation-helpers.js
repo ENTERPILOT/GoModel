@@ -847,7 +847,7 @@ function renderImageItem(item) {
             + '<div class="request-log-image-icon" aria-hidden="true">⚠️</div>'
             + caption
             + '<div class="request-log-image-note">' + escapeHTML(failure) + '</div>'
-            + '</figure>';
+            + revised + '</figure>';
     }
     const mediaId = item.stored ? sanitizeMediaId(item.media_id) : '';
     if (mediaId) {

@@ -128,18 +128,37 @@ func TestCreateH3ImageKeepsImagesBesideEmptyItem(t *testing.T) {
 func TestH3ImageModel(t *testing.T) {
 	tests := []struct {
 		model string
-		want  bool
+		want  string
 	}{
-		{"MiniMax-H3-Image", true},
-		{"MiniMax-H3-Image-Highspeed", true},
-		{" minimax-h3-image ", true},
-		{"image-01", false},
-		{"image-01-live", false},
-		{"MiniMax-H3", false},
+		{"MiniMax-H3-Image", "MiniMax-H3-Image"},
+		{"MiniMax-H3-Image-Highspeed", "MiniMax-H3-Image-Highspeed"},
+		{" minimax-h3-image ", "MiniMax-H3-Image"},
+		{"MINIMAX-H3-IMAGE-HIGHSPEED", "MiniMax-H3-Image-Highspeed"},
+		{"image-01", ""},
+		{"image-01-live", ""},
+		{"MiniMax-H3", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
-			assert.Equal(t, tt.want, h3ImageModel(tt.model))
+			got, ok := h3ImageModel(tt.model)
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.want != "", ok)
 		})
 	}
+}
+
+// A loosely spelled H3 model is routed to H3, so MiniMax must receive the
+// model ID it knows rather than the client's spelling.
+func TestCreateH3ImageSendsCanonicalModel(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"created":1792308678,"data":[{"url":"https://example.com/image.jpg"}]}`)
+	p := newTestProvider("test-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+	req := &core.ImageGenerationRequest{Model: " minimax-h3-image-highspeed ", Prompt: "A lighthouse"}
+
+	_, err := p.CreateImage(t.Context(), req)
+
+	require.NoError(t, err)
+	sent := capture.Last(t)
+	assert.Equal(t, "/v1/images/generations", sent.Path)
+	assert.Equal(t, "MiniMax-H3-Image-Highspeed", sent.JSON(t)["model"])
+	assert.Equal(t, " minimax-h3-image-highspeed ", req.Model, "the caller's request is not mutated")
 }
