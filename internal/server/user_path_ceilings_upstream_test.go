@@ -184,7 +184,29 @@ func TestCeilingReplacesProviderSpecificReasoningControls(t *testing.T) {
 			upstream: "cohere",
 			userPath: "/off",
 			body:     `{"model":"cohere/command-a-reasoning",` + hiMessages + `,"thinking":{"type":"enabled","token_budget":31999}}`,
-			absent:   []string{"thinking"},
+			check: func(t *testing.T, sent map[string]any) {
+				// Cohere thinks unless told not to: dropping the control would
+				// leave thinking on.
+				assert.Equal(t, map[string]any{"type": "disabled"}, sent["thinking"])
+			},
+		},
+		{
+			name:     "review request: Cohere thinking budget under a low ceiling",
+			upstream: "cohere",
+			userPath: "/low",
+			body:     `{"model":"cohere/command-a-reasoning",` + hiMessages + `,"thinking":{"type":"enabled","token_budget":31999}}`,
+			check: func(t *testing.T, sent map[string]any) {
+				assert.Equal(t, map[string]any{"type": "enabled", "token_budget": float64(1024)}, sent["thinking"])
+			},
+		},
+		{
+			name:     "Cohere thinking that is off stays as sent",
+			upstream: "cohere",
+			userPath: "/low",
+			body:     `{"model":"cohere/command-a-reasoning",` + hiMessages + `,"thinking":{"type":"disabled"}}`,
+			check: func(t *testing.T, sent map[string]any) {
+				assert.Equal(t, map[string]any{"type": "disabled"}, sent["thinking"])
+			},
 		},
 		{
 			name:     "OpenAI-compatible verbatim controls under a low ceiling",

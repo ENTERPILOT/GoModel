@@ -90,6 +90,8 @@ Cohere 推理模型默认启用思考。如需控制 Cohere 原生的推理行�
 }
 ```
 
+当请求没有自带 `thinking` 对象时，`reasoning_effort`（或 `reasoning.effort`）会被翻译为同一个控制项：`none` 关闭思考；在推理模型上，`minimal` 和 `low` 把 `token_budget` 设为 1024，`medium` 设为 8192，`high` 和 `xhigh` 设为 24576，而 `max` 保留 Cohere 默认的不限量思考。预算会为回答保留 `max_tokens` 中的 1024 个 token；没有预算放得下时则关闭思考。不具备推理能力的模型会忽略除 `none` 之外的所有 effort。
+
 无论是普通响应还是流式响应，思考输出都以兼容 OpenAI 的 `reasoning_content`
 扩展字段返回。
 

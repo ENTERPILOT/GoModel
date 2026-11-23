@@ -98,6 +98,14 @@ reasoningiem Cohere, dołącz jego obiekt `thinking` jako rozszerzenie:
 }
 ```
 
+`reasoning_effort` (albo `reasoning.effort`) jest tłumaczony na to samo
+sterowanie, gdy request nie niesie własnego obiektu `thinking`: `none` wyłącza
+thinking, a w modelu reasoningowym `minimal` i `low` ustawiają `token_budget`
+1024, `medium` 8192, a `high` i `xhigh` 24576, natomiast `max` zostawia domyślny
+w Cohere nieograniczony thinking. Budżet zostawia 1024 tokeny z `max_tokens` na
+odpowiedź, a thinking jest wyłączany, gdy żaden budżet się nie mieści. Modele
+bez reasoningu ignorują każdy effort poza `none`.
+
 Wynik thinking jest zwracany jako kompatybilne z OpenAI rozszerzenie
 `reasoning_content` zarówno w zwykłych, jak i streamingowych odpowiedziach.
 
