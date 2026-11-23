@@ -38,7 +38,11 @@ type Meta struct {
 
 	// WorkflowVersionID identifies the workflow version in effect.
 	WorkflowVersionID string
-	// Features lists workflow feature flags in effect.
+	// Features lists workflow feature flags in effect: cache, request_logs,
+	// usage, budget, guardrails and failover.
+	//
+	// Deprecated key: audit carries the same value as request_logs, which was
+	// named audit through v0.2.5. Read request_logs.
 	Features map[string]bool
 	// Stream reports whether the client asked for a streaming response.
 	Stream bool

@@ -180,7 +180,7 @@ func TestMiddlewarePublishesWorkflowUpdateWithCapturedRequestBody(t *testing.T) 
 			Policy: &core.ResolvedWorkflowPolicy{
 				VersionID: "request-log-enabled",
 				Features: core.WorkflowFeatures{
-					Audit: true,
+					RequestLogs: true,
 				},
 			},
 		})
@@ -227,7 +227,7 @@ func TestMiddlewareDoesNotPublishRequestBodyForRequestLogDisabledWorkflow(t *tes
 			Policy: &core.ResolvedWorkflowPolicy{
 				VersionID: "request-log-disabled",
 				Features: core.WorkflowFeatures{
-					Audit: false,
+					RequestLogs: false,
 				},
 			},
 		}

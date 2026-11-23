@@ -20,7 +20,7 @@ class RequestWorkflowsStore {
   workflowFeatureCaps() {
     return {
       cache: runtimeConfig.cacheVisible(),
-      audit: runtimeConfig.requestLogsVisible(),
+      request_logs: runtimeConfig.requestLogsVisible(),
       usage: runtimeConfig.usageVisible(),
       budget: runtimeConfig.budgetsVisible(),
       guardrails: runtimeConfig.guardrailsVisible(),
