@@ -3,10 +3,14 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,10 +66,17 @@ func NewSQLite(cfg SQLiteConfig) (SQLiteStorage, error) {
 		cfg.Path = DefaultSQLitePath()
 	}
 
-	// Ensure directory exists
-	dir := filepath.Dir(cfg.Path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create directory %s: %w", dir, err)
+	// Ensure directory exists. The database holds provider credentials and
+	// request content, so a directory created here is private to its owner.
+	// An existing one keeps its mode: the operator may share it on purpose.
+	if file, onDisk := sqliteFilePath(cfg.Path); onDisk {
+		dir := filepath.Dir(file)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+		if err := ensurePrivateSQLiteFile(file); err != nil {
+			return nil, err
+		}
 	}
 
 	// Open database with WAL mode and busy timeout
@@ -97,6 +108,58 @@ func NewSQLite(cfg SQLiteConfig) (SQLiteStorage, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	return &sqliteStorage{db: db, maintenanceCtx: ctx, stopMaintenance: cancel}, nil
+}
+
+// sqliteFilePath returns the file a SQLite path or file: URI names, and false
+// for an in-memory database.
+func sqliteFilePath(path string) (string, bool) {
+	file, isURI := strings.CutPrefix(path, "file:")
+	if !isURI {
+		if path == ":memory:" {
+			return "", false
+		}
+		return path, true
+	}
+	file, query, _ := strings.Cut(file, "?")
+	if file == "" || file == ":memory:" || strings.Contains(query, "mode=memory") {
+		return "", false
+	}
+	return file, true
+}
+
+// ensurePrivateSQLiteFile creates a missing database file readable and
+// writable by its owner only, before SQLite would create it with the process
+// umask. SQLite gives the WAL and shared-memory files the mode of the database
+// file, so they follow. An existing file keeps its mode, because another user
+// may read it on purpose; a warning reports one, or a leftover WAL or
+// shared-memory file, that other users can access.
+func ensurePrivateSQLiteFile(path string) error {
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		// Without O_EXCL a concurrent creator, or a dangling symlink, is
+		// opened rather than skipped, so its mode is checked below.
+		file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+		if err != nil {
+			return fmt.Errorf("failed to create SQLite database %s: %w", path, err)
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+	}
+	// Windows reports no POSIX permission bits to check.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		info, err := os.Stat(name)
+		if err != nil || info.Mode().Perm()&0o077 == 0 {
+			continue
+		}
+		slog.Warn("SQLite database file is accessible to other users; it stores provider credentials and request content",
+			"path", name,
+			"mode", info.Mode().Perm().String(),
+			"hint", "run `chmod 600` on the database file and its -wal and -shm files unless another user has to read them")
+	}
+	return nil
 }
 
 func (s *sqliteStorage) DB() *sql.DB {
