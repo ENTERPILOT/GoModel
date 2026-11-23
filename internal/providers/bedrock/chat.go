@@ -168,6 +168,10 @@ func buildConverseParts(req *core.ChatRequest) (converseParts, error) {
 		infCfg.TopP = awssdk.Float32(float32(topP))
 		hasInfCfg = true
 	}
+	if stop := stopSequencesFromExtra(req.ExtraFields); len(stop) > 0 {
+		infCfg.StopSequences = stop
+		hasInfCfg = true
+	}
 	if hasInfCfg {
 		parts.infCfg = infCfg
 	}
@@ -588,4 +592,36 @@ func bedrockUsageExtras(u *brtypes.TokenUsage) map[string]any {
 		return nil
 	}
 	return out
+}
+
+// stopSequencesFromExtra maps the OpenAI-compatible stop field (a string or an
+// array of strings, carried in the request's extra fields) to Converse
+// inferenceConfig.stopSequences. Empty or malformed values yield no sequences.
+func stopSequencesFromExtra(extraFields core.UnknownJSONFields) []string {
+	raw := strings.TrimSpace(string(extraFields.Lookup("stop")))
+	if raw == "" || raw == "null" {
+		return nil
+	}
+	switch raw[0] {
+	case '"':
+		var single string
+		if err := json.Unmarshal([]byte(raw), &single); err != nil || single == "" {
+			return nil
+		}
+		return []string{single}
+	case '[':
+		var list []string
+		if err := json.Unmarshal([]byte(raw), &list); err != nil {
+			return nil
+		}
+		sequences := make([]string, 0, len(list))
+		for _, item := range list {
+			if item != "" {
+				sequences = append(sequences, item)
+			}
+		}
+		return sequences
+	default:
+		return nil
+	}
 }
