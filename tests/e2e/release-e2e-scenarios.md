@@ -611,7 +611,7 @@ run_release_budget_enforcement() {
   local req2="qa-budget-$artifact_prefix-$QA_SUFFIX-2"
   local budget_json_file="$QA_RUN_DIR/$artifact_prefix.budget.json"
   local usage_json_file="$QA_RUN_DIR/$artifact_prefix.usage.json"
-  local audit_json_file="$QA_RUN_DIR/$artifact_prefix.audit.json"
+  local request_log_json_file="$QA_RUN_DIR/$artifact_prefix.request-log.json"
   local headers_file="$QA_RUN_DIR/$artifact_prefix.headers"
   local body_file="$QA_RUN_DIR/$artifact_prefix.body"
 
@@ -647,17 +647,17 @@ run_release_budget_enforcement() {
   jq -e '.error.type == "rate_limit_error" and .error.code == "budget_exceeded" and (.error.message | test("budget exceeded"))' "$body_file" >/dev/null
 
   for _ in $(seq 1 10); do
-    curl -fsS "$base_url/admin/request-logs?search=$req2&limit=5" > "$audit_json_file"
+    curl -fsS "$base_url/admin/request-logs?search=$req2&limit=5" > "$request_log_json_file"
     if jq -e --arg request_id "$req2" --arg user_path "$leaf_path" '
       any(.entries[]?; .request_id == $request_id and .user_path == $user_path and .status_code == 429 and .error_type == "rate_limit_error")
-    ' "$audit_json_file" >/dev/null; then
+    ' "$request_log_json_file" >/dev/null; then
       break
     fi
     sleep 1
   done
   jq -e --arg request_id "$req2" --arg user_path "$leaf_path" '
     any(.entries[]?; .request_id == $request_id and .user_path == $user_path and .status_code == 429 and .error_type == "rate_limit_error")
-  ' "$audit_json_file" >/dev/null
+  ' "$request_log_json_file" >/dev/null
 
   curl -fsS -X POST "$base_url/admin/budgets/reset-one" \
     -H 'Content-Type: application/json' \
@@ -994,7 +994,7 @@ waits for it to be flushed before anchoring.
 if ! curl -fsS "$BASE_URL/admin/request-logs?limit=1" | jq -e '.entries | length >= 1' >/dev/null; then
   curl -fsS "$BASE_URL/v1/chat/completions" \
     -H 'Content-Type: application/json' \
-    -d '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly QA_AUDIT_SEED_OK"}],"max_tokens":20}' >/dev/null
+    -d '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly QA_REQUEST_LOG_SEED_OK"}],"max_tokens":20}' >/dev/null
   for _ in $(seq 1 10); do
     if curl -fsS "$BASE_URL/admin/request-logs?limit=1" | jq -e '.entries | length >= 1' >/dev/null; then
       break
@@ -1002,9 +1002,9 @@ if ! curl -fsS "$BASE_URL/admin/request-logs?limit=1" | jq -e '.entries | length
     sleep 1
   done
 fi
-AUDIT_ID=$(curl -fsS "$BASE_URL/admin/request-logs?limit=1" | jq -er '.entries[0].id')
-curl -fsS "$BASE_URL/admin/request-logs/conversation?log_id=$AUDIT_ID&limit=5" \
-  | jq -e --arg audit_id "$AUDIT_ID" '.anchor_id == $audit_id and (.entries | type == "array" and length >= 1)' >/dev/null
+REQUEST_LOG_ID=$(curl -fsS "$BASE_URL/admin/request-logs?limit=1" | jq -er '.entries[0].id')
+curl -fsS "$BASE_URL/admin/request-logs/conversation?log_id=$REQUEST_LOG_ID&limit=5" \
+  | jq -e --arg log_id "$REQUEST_LOG_ID" '.anchor_id == $log_id and (.entries | type == "array" and length >= 1)' >/dev/null
 ```
 
 ### S12 Alias list endpoint
@@ -1736,9 +1736,9 @@ jq '.' "$BODY_FILE"
 grep -Eiq '^HTTP/.* 404 ' "$HEADERS_FILE"
 jq -e '.error.type == "not_found_error" and .error.code == "model_not_found"' "$BODY_FILE" >/dev/null
 sleep 6
-AUDIT_JSON_FILE="$QA_RUN_DIR/s61.audit.json"
-curl -fsS "$BASE_URL/admin/request-logs?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
-jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,requested_model,resolved_model,provider,status_code,error_type}))}' "$AUDIT_JSON_FILE"
+REQUEST_LOG_JSON_FILE="$QA_RUN_DIR/s61.request-log.json"
+curl -fsS "$BASE_URL/admin/request-logs?search=$REQUEST_ID&limit=5" > "$REQUEST_LOG_JSON_FILE"
+jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,requested_model,resolved_model,provider,status_code,error_type}))}' "$REQUEST_LOG_JSON_FILE"
 jq -e --arg request_id "$REQUEST_ID" '
     any(.entries[]?;
       .request_id == $request_id
@@ -1747,7 +1747,7 @@ jq -e --arg request_id "$REQUEST_ID" '
       and .status_code == 404
       and .error_type == "not_found_error"
     )
-  ' "$AUDIT_JSON_FILE" >/dev/null
+  ' "$REQUEST_LOG_JSON_FILE" >/dev/null
 ```
 
 ### S62 Unsupported passthrough provider is still visible in request log search
@@ -1767,9 +1767,9 @@ jq '.' "$BODY_FILE"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
 jq -e '.error.type == "invalid_request_error"' "$BODY_FILE" >/dev/null
 sleep 6
-AUDIT_JSON_FILE="$QA_RUN_DIR/s62.audit.json"
-curl -fsS "$BASE_URL/admin/request-logs?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
-jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,requested_model,provider,status_code,error_type}))}' "$AUDIT_JSON_FILE"
+REQUEST_LOG_JSON_FILE="$QA_RUN_DIR/s62.request-log.json"
+curl -fsS "$BASE_URL/admin/request-logs?search=$REQUEST_ID&limit=5" > "$REQUEST_LOG_JSON_FILE"
+jq --arg request_id "$REQUEST_ID" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,path,requested_model,provider,status_code,error_type}))}' "$REQUEST_LOG_JSON_FILE"
 jq -e --arg request_id "$REQUEST_ID" '
     any(.entries[]?;
       .request_id == $request_id
@@ -1779,7 +1779,7 @@ jq -e --arg request_id "$REQUEST_ID" '
       and .status_code == 400
       and .error_type == "invalid_request_error"
     )
-  ' "$AUDIT_JSON_FILE" >/dev/null
+  ' "$REQUEST_LOG_JSON_FILE" >/dev/null
 ```
 
 ## 12. Authenticated runtime features
@@ -1951,11 +1951,11 @@ if ! AUTH_KEY_ID=$(jq -er '.id' "$QA_AUTH_KEY_JSON"); then
   exit 1
 fi
 WORKFLOW_ID=$(<"$QA_WORKFLOW_ID_FILE")
-AUDIT_JSON_FILE="$QA_RUN_DIR/s70.audit.json"
+REQUEST_LOG_JSON_FILE="$QA_RUN_DIR/s70.request-log.json"
 curl -fsS "$AUTH_BASE_URL/admin/request-logs?search=$QA_AUTH_REQ2&limit=5" \
   -H "$ADMIN_AUTH_HEADER" \
-  > "$AUDIT_JSON_FILE"
-jq --arg request_id "$QA_AUTH_REQ2" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,status_code,auth_method,auth_key_id,user_path,workflow_version_id,cache_type,bodies_omitted}))}' "$AUDIT_JSON_FILE"
+  > "$REQUEST_LOG_JSON_FILE"
+jq --arg request_id "$QA_AUTH_REQ2" '{total:(.entries|map(select(.request_id==$request_id))|length),entries:(.entries|map(select(.request_id==$request_id))|map({request_id,status_code,auth_method,auth_key_id,user_path,workflow_version_id,cache_type,bodies_omitted}))}' "$REQUEST_LOG_JSON_FILE"
 jq -e \
     --arg request_id "$QA_AUTH_REQ2" \
     --arg auth_key_id "$AUTH_KEY_ID" \
@@ -1971,10 +1971,10 @@ jq -e \
       and .cache_type == null
       and .bodies_omitted == true
     )
-  ' "$AUDIT_JSON_FILE" >/dev/null
-AUDIT_ID=$(jq -er --arg request_id "$QA_AUTH_REQ2" '[.entries[] | select(.request_id == $request_id)][0].id' "$AUDIT_JSON_FILE")
+  ' "$REQUEST_LOG_JSON_FILE" >/dev/null
+REQUEST_LOG_ID=$(jq -er --arg request_id "$QA_AUTH_REQ2" '[.entries[] | select(.request_id == $request_id)][0].id' "$REQUEST_LOG_JSON_FILE")
 DETAIL_JSON_FILE="$QA_RUN_DIR/s70.detail.json"
-curl -fsS "$AUTH_BASE_URL/admin/request-logs/detail?log_id=$AUDIT_ID" \
+curl -fsS "$AUTH_BASE_URL/admin/request-logs/detail?log_id=$REQUEST_LOG_ID" \
   -H "$ADMIN_AUTH_HEADER" \
   > "$DETAIL_JSON_FILE"
 jq -e '.data.response_body.choices[0].message.content == "QA_AUTH_CACHE_OFF_OK"' "$DETAIL_JSON_FILE" >/dev/null
@@ -2379,7 +2379,7 @@ Subscribes with a future cursor (no replay), waits past one heartbeat interval, 
 
 ```bash
 LIVE_OUT="$QA_RUN_DIR/s91.live.sse"
-curl -sS --no-buffer -N "$AUTH_BASE_URL/admin/live/logs?types=audit,usage&cursor=999999999" \
+curl -sS --no-buffer -N "$AUTH_BASE_URL/admin/live/logs?types=request_log,usage&cursor=999999999" \
   -H "$ADMIN_AUTH_HEADER" \
   --max-time 20 > "$LIVE_OUT" || true
 grep -cE '^event: reset' "$LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
@@ -2388,15 +2388,20 @@ grep -cE '^event: heartbeat' "$LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
 
 ### S92 Live preview emits request log + usage events for a fresh chat
 
-Opens an SSE subscription, triggers one chat completion with a unique request id, then asserts the captured stream contains an `audit.*` event whose JSON payload references that request id and at least one `usage.*` event.
+Opens an SSE subscription, triggers one chat completion with a unique request id, then asserts the captured stream contains a `request_log.*` event whose JSON payload references that request id and at least one `usage.*` event. A second subscription uses the deprecated `types=audit` alias and must get the same events under their old `audit.*` names.
 
 ```bash
 LIVE_OUT="$QA_RUN_DIR/s92.live.sse"
+LEGACY_LIVE_OUT="$QA_RUN_DIR/s92.live.legacy.sse"
 RID="qa-live-preview-$QA_SUFFIX"
-curl -sS --no-buffer -N "$AUTH_BASE_URL/admin/live/logs?types=audit,usage" \
+curl -sS --no-buffer -N "$AUTH_BASE_URL/admin/live/logs?types=request_log,usage" \
   -H "$ADMIN_AUTH_HEADER" \
   --max-time 18 > "$LIVE_OUT" &
 LIVE_PID=$!
+curl -sS --no-buffer -N "$AUTH_BASE_URL/admin/live/logs?types=audit,usage" \
+  -H "$ADMIN_AUTH_HEADER" \
+  --max-time 18 > "$LEGACY_LIVE_OUT" &
+LEGACY_LIVE_PID=$!
 sleep 1
 curl -fsS "$AUTH_BASE_URL/v1/chat/completions" \
   -H "$ADMIN_AUTH_HEADER" \
@@ -2405,11 +2410,21 @@ curl -fsS "$AUTH_BASE_URL/v1/chat/completions" \
   -d '{"model":"openai/gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly QA_LIVE_PREVIEW_OK"}],"max_tokens":20}' \
   > "$QA_RUN_DIR/s92.chat.json"
 sleep 8
-kill "$LIVE_PID" 2>/dev/null || true
-wait "$LIVE_PID" 2>/dev/null || true
+kill "$LIVE_PID" "$LEGACY_LIVE_PID" 2>/dev/null || true
+wait "$LIVE_PID" "$LEGACY_LIVE_PID" 2>/dev/null || true
 assert_chat_response_contains "$QA_RUN_DIR/s92.chat.json" "openai" "QA_LIVE_PREVIEW_OK"
-grep -cE '^event: audit\.' "$LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
+grep -cE '^event: request_log\.' "$LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
 grep -cE '^event: usage\.' "$LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
+if grep -qE '"audit\.[a-z]+"' "$LIVE_OUT"; then
+  echo "error: a types=request_log subscriber received a legacy audit.* name" >&2
+  exit 1
+fi
+grep -cE '^event: audit\.' "$LEGACY_LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
+grep -cE '"_live_state":"audit\.[a-z]+"' "$LEGACY_LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
+if grep -qE '^event: request_log\.|"_live_state":"request_log\.' "$LEGACY_LIVE_OUT"; then
+  echo "error: a types=audit subscriber received a request_log.* name" >&2
+  exit 1
+fi
 grep '^data: {' "$LIVE_OUT" | sed 's/^data: //' \
   | jq -e --arg rid "$RID" 'select(.. | strings? | tostring | contains($rid)) | .seq | type == "number"' \
   | head -n1 >/dev/null
@@ -2417,7 +2432,7 @@ grep '^data: {' "$LIVE_OUT" | sed 's/^data: //' \
 
 ### S93 Live preview type filter excludes off-list categories
 
-Subscribes with `types=usage` only, fires another chat, and asserts the captured stream contains `usage.*` events with no `audit.*` events leaking through.
+Subscribes with `types=usage` only, fires another chat, and asserts the captured stream contains `usage.*` events with no request log events leaking through, under either their `request_log.*` or their deprecated `audit.*` names.
 
 ```bash
 LIVE_OUT="$QA_RUN_DIR/s93.live.sse"
@@ -2438,8 +2453,8 @@ kill "$LIVE_PID" 2>/dev/null || true
 wait "$LIVE_PID" 2>/dev/null || true
 assert_chat_response_contains "$QA_RUN_DIR/s93.chat.json" "openai" "QA_LIVE_FILTER_OK"
 grep -cE '^event: usage\.' "$LIVE_OUT" | jq -R -e 'tonumber >= 1' >/dev/null
-if grep -qE '^event: audit\.' "$LIVE_OUT"; then
-  echo "error: audit.* event leaked through types=usage filter" >&2
+if grep -qE '^event: (request_log|audit)\.' "$LIVE_OUT"; then
+  echo "error: a request log event leaked through types=usage filter" >&2
   exit 1
 fi
 ```
@@ -2471,9 +2486,9 @@ timeout 0.4 curl -sS --no-buffer "$BASE_URL/v1/chat/completions" \
   -d '{"model":"gpt-4.1-mini","stream":true,"messages":[{"role":"user","content":"Write a 200 word poem about caches."}],"max_tokens":256}' \
   > "$QA_RUN_DIR/s95.partial.sse" 2>/dev/null || true
 sleep 6
-AUDIT_JSON_FILE="$QA_RUN_DIR/s95.audit.json"
-curl -fsS "$BASE_URL/admin/request-logs?search=$RID&limit=5" > "$AUDIT_JSON_FILE"
-jq --arg rid "$RID" '{entries:(.entries|map(select(.request_id==$rid))|map({request_id,status_code,stream,error_type,path}))}' "$AUDIT_JSON_FILE"
+REQUEST_LOG_JSON_FILE="$QA_RUN_DIR/s95.request-log.json"
+curl -fsS "$BASE_URL/admin/request-logs?search=$RID&limit=5" > "$REQUEST_LOG_JSON_FILE"
+jq --arg rid "$RID" '{entries:(.entries|map(select(.request_id==$rid))|map({request_id,status_code,stream,error_type,path}))}' "$REQUEST_LOG_JSON_FILE"
 jq -e --arg rid "$RID" '
     any(.entries[]?;
       .request_id == $rid
@@ -2481,7 +2496,7 @@ jq -e --arg rid "$RID" '
       and .stream == true
       and .error_type == "client_disconnected"
     )
-  ' "$AUDIT_JSON_FILE" >/dev/null
+  ' "$REQUEST_LOG_JSON_FILE" >/dev/null
 ```
 
 ## 18. Anthropic Messages API ingress
@@ -2735,25 +2750,25 @@ Checks that a `/v1/messages` request is recorded in the request log under the
 `/v1/messages` path and is searchable by request ID.
 
 ```bash
-REQUEST_ID="qa-messages-audit-$QA_SUFFIX"
+REQUEST_ID="qa-messages-request-log-$QA_SUFFIX"
 RESP_FILE="$QA_RUN_DIR/s109.messages.json"
 curl -fsS "$BASE_URL/v1/messages" \
   -H 'Content-Type: application/json' \
   -H "X-Request-ID: $REQUEST_ID" \
-  -d '{"model":"gpt-4.1-mini","max_tokens":24,"messages":[{"role":"user","content":"Reply with exactly QA_MESSAGES_AUDIT_OK"}]}' \
+  -d '{"model":"gpt-4.1-mini","max_tokens":24,"messages":[{"role":"user","content":"Reply with exactly QA_MESSAGES_REQUEST_LOG_OK"}]}' \
   > "$RESP_FILE"
-jq -e 'any(.content[]; .type == "text" and (.text | contains("QA_MESSAGES_AUDIT_OK")))' "$RESP_FILE" >/dev/null
+jq -e 'any(.content[]; .type == "text" and (.text | contains("QA_MESSAGES_REQUEST_LOG_OK")))' "$RESP_FILE" >/dev/null
 sleep 6
-AUDIT_JSON_FILE="$QA_RUN_DIR/s109.audit.json"
-curl -fsS "$BASE_URL/admin/request-logs?search=$REQUEST_ID&limit=5" > "$AUDIT_JSON_FILE"
-jq --arg rid "$REQUEST_ID" '{entries:(.entries|map(select(.request_id==$rid))|map({request_id,path,requested_model,provider,status_code,error_type}))}' "$AUDIT_JSON_FILE"
+REQUEST_LOG_JSON_FILE="$QA_RUN_DIR/s109.request-log.json"
+curl -fsS "$BASE_URL/admin/request-logs?search=$REQUEST_ID&limit=5" > "$REQUEST_LOG_JSON_FILE"
+jq --arg rid "$REQUEST_ID" '{entries:(.entries|map(select(.request_id==$rid))|map({request_id,path,requested_model,provider,status_code,error_type}))}' "$REQUEST_LOG_JSON_FILE"
 jq -e --arg rid "$REQUEST_ID" '
     any(.entries[]?;
       .request_id == $rid
       and .path == "/v1/messages"
       and .status_code == 200
     )
-  ' "$AUDIT_JSON_FILE" >/dev/null
+  ' "$REQUEST_LOG_JSON_FILE" >/dev/null
 ```
 
 ### S110 Text-to-speech returns binary audio
@@ -3548,25 +3563,25 @@ The request log entry for a labelled request carries the extracted labels in
 
 ```bash
 AUD_HDR="X-Qa-Audit-$QA_SUFFIX"
-RID="qa-tag-audit-$QA_SUFFIX"
+RID="qa-tag-request-log-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
   -H 'Content-Type: application/json' \
   -d "{\"headers\":[{\"header\":\"$AUD_HDR\",\"prefix\":\"aud-\"}]}" >/dev/null
 curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
   -H "X-Request-ID: $RID" \
   -H "$AUD_HDR: aud-billing, aud-experiment" \
-  -d '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly QA_TAG_AUDIT_OK"}],"max_tokens":20}' >/dev/null
-AUDIT_FILE="$QA_RUN_DIR/s144.audit.json"
+  -d '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Reply with exactly QA_TAG_REQUEST_LOG_OK"}],"max_tokens":20}' >/dev/null
+REQUEST_LOG_FILE="$QA_RUN_DIR/s144.request-log.json"
 for _ in $(seq 1 15); do
-  curl -fsS "$BASE_URL/admin/request-logs?search=$RID&limit=3" > "$AUDIT_FILE"
-  if jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r)' "$AUDIT_FILE" >/dev/null; then
+  curl -fsS "$BASE_URL/admin/request-logs?search=$RID&limit=3" > "$REQUEST_LOG_FILE"
+  if jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r)' "$REQUEST_LOG_FILE" >/dev/null; then
     break
   fi
   sleep 1
 done
 jq -e --arg r "$RID" '
   any(.entries[]?; .request_id == $r and .data.labels == ["billing","experiment"])
-' "$AUDIT_FILE" >/dev/null
+' "$REQUEST_LOG_FILE" >/dev/null
 curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
   -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
 ```
@@ -4331,42 +4346,42 @@ SID=$(mcp_initialize "$BASE_URL/mcp" "$HEADERS_FILE" "$INIT_FILE")
 grep -Eiq '^x-content-type-options: *nosniff' "$HEADERS_FILE"
 mcp_initialized "$BASE_URL/mcp" "$SID"
 
-REQ_ID="qa-mcp-audit-$QA_SUFFIX"
+REQ_ID="qa-mcp-request-log-$QA_SUFFIX"
 CALL_HEADERS="$QA_RUN_DIR/s167.call.headers"
 mcp_post "$BASE_URL/mcp" "$SID" \
-  "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_ALPHA_SLUG}_echo\",\"arguments\":{\"marker\":\"QA_MCP_AUDIT_BODY_OK\"}}}" \
+  "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"${QA_MCP_ALPHA_SLUG}_echo\",\"arguments\":{\"marker\":\"QA_MCP_REQUEST_LOG_BODY_OK\"}}}" \
   -H "X-Request-ID: $REQ_ID" \
   -D "$CALL_HEADERS" \
   > "$QA_RUN_DIR/s167.call.json"
 grep -Eiq '^x-content-type-options: *nosniff' "$CALL_HEADERS"
 
-AUDIT_FILE="$QA_RUN_DIR/s167.audit.json"
+REQUEST_LOG_FILE="$QA_RUN_DIR/s167.request-log.json"
 FOUND=0
 for _ in $(seq 1 15); do
-  curl -fsS "$BASE_URL/admin/request-logs?search=$REQ_ID&limit=5" > "$AUDIT_FILE"
+  curl -fsS "$BASE_URL/admin/request-logs?search=$REQ_ID&limit=5" > "$REQUEST_LOG_FILE"
   if jq -e --arg rid "$REQ_ID" --arg tool "${QA_MCP_ALPHA_SLUG}_echo" '
     any(.entries[]?;
       .request_id == $rid
       and .provider == "mcp"
       and .requested_model == $tool
       and .status_code == 200)
-  ' "$AUDIT_FILE" >/dev/null; then
+  ' "$REQUEST_LOG_FILE" >/dev/null; then
     FOUND=1
     break
   fi
   sleep 1
 done
 if [ "$FOUND" -ne 1 ]; then
-  jq '.' "$AUDIT_FILE" >&2 || true
+  jq '.' "$REQUEST_LOG_FILE" >&2 || true
   echo "error: MCP request log entry was not flushed for $REQ_ID" >&2
   exit 1
 fi
-AUDIT_ID=$(jq -er --arg rid "$REQ_ID" '[.entries[] | select(.request_id == $rid)][0].id' "$AUDIT_FILE")
+REQUEST_LOG_ID=$(jq -er --arg rid "$REQ_ID" '[.entries[] | select(.request_id == $rid)][0].id' "$REQUEST_LOG_FILE")
 DETAIL_FILE="$QA_RUN_DIR/s167.detail.json"
-curl -fsS "$BASE_URL/admin/request-logs/detail?log_id=$AUDIT_ID" > "$DETAIL_FILE"
+curl -fsS "$BASE_URL/admin/request-logs/detail?log_id=$REQUEST_LOG_ID" > "$DETAIL_FILE"
 jq -e '
-  ((.data.request_body | tojson) | contains("QA_MCP_AUDIT_BODY_OK"))
-  and ((.data.response_body | tojson) | (contains("echo:") and contains("QA_MCP_AUDIT_BODY_OK")))
+  ((.data.request_body | tojson) | contains("QA_MCP_REQUEST_LOG_BODY_OK"))
+  and ((.data.response_body | tojson) | (contains("echo:") and contains("QA_MCP_REQUEST_LOG_BODY_OK")))
 ' "$DETAIL_FILE" >/dev/null
 ```
 
@@ -5977,16 +5992,16 @@ jq -e --arg request_id "$REQUEST_ID" '
     and (.model | test("gpt-image-1-mini")))
 ' "$USAGE_FILE" >/dev/null
 
-AUDIT_FILE="$QA_RUN_DIR/s215.audit.json"
+REQUEST_LOG_FILE="$QA_RUN_DIR/s215.request-log.json"
 DETAIL_FILE="$QA_RUN_DIR/s215.detail.json"
 for _ in $(seq 1 15); do
-  curl -fsS "$BASE_URL/admin/request-logs?search=$REQUEST_ID&limit=5" > "$AUDIT_FILE"
-  if jq -e --arg request_id "$REQUEST_ID" 'any(.entries[]?; .request_id == $request_id)' "$AUDIT_FILE" >/dev/null; then
+  curl -fsS "$BASE_URL/admin/request-logs?search=$REQUEST_ID&limit=5" > "$REQUEST_LOG_FILE"
+  if jq -e --arg request_id "$REQUEST_ID" 'any(.entries[]?; .request_id == $request_id)' "$REQUEST_LOG_FILE" >/dev/null; then
     break
   fi
   sleep 1
 done
-LOG_ID=$(jq -er --arg request_id "$REQUEST_ID" 'first(.entries[]? | select(.request_id == $request_id) | .id)' "$AUDIT_FILE")
+LOG_ID=$(jq -er --arg request_id "$REQUEST_ID" 'first(.entries[]? | select(.request_id == $request_id) | .id)' "$REQUEST_LOG_FILE")
 curl -fsS "$BASE_URL/admin/request-logs/detail?log_id=$LOG_ID" > "$DETAIL_FILE"
 jq '{path,status_code,response_images:.data.response_body.images}' "$DETAIL_FILE"
 jq -e '
@@ -6754,22 +6769,22 @@ curl -fsS -X PUT "$BASE_URL/admin/model-pricing-overrides" -H 'Content-Type: app
 curl -fsS -X PUT "$BASE_URL/admin/model-pricing-overrides" -H 'Content-Type: application/json' \
   -d "{\"selector\":\"$PROVIDER_SELECTOR\",\"pricing\":{\"input_per_mtok\":1,\"output_per_mtok\":1}}" >/dev/null
 
-RID="qa-s1-audit-$QA_SUFFIX"
+RID="qa-s1-request-log-$QA_SUFFIX"
 ANSWER_FILE="$QA_RUN_DIR/s237.answer.json"
 curl -fsS "$BASE_URL/v1/systemone" -H 'Content-Type: application/json' -H "X-Request-ID: $RID" \
   -d "{\"model\":\"jev/jev-latest\",\"state\":\"audit me\",\"questions\":$QA_SYSTEMONE_QUESTIONS}" > "$ANSWER_FILE"
 IN=$(jq -er '.usage.input_tokens' "$ANSWER_FILE")
 OUT=$(jq -er '.usage.output_tokens' "$ANSWER_FILE")
 
-AUDIT_FILE="$QA_RUN_DIR/s237.audit.json"
-wait_log_entry "$BASE_URL" audit "$RID" "$AUDIT_FILE"
+REQUEST_LOG_FILE="$QA_RUN_DIR/s237.request-log.json"
+wait_log_entry "$BASE_URL" audit "$RID" "$REQUEST_LOG_FILE"
 jq -e --arg rid "$RID" '
   any(.entries[]; .request_id == $rid
     and .path == "/v1/systemone" and .method == "POST" and .status_code == 200
     and .requested_model == "jev/jev-latest" and .resolved_model == "jev/jev-latest"
     and .provider == "jev" and .provider_name == "jev"
     and ([.data.attempts[]? | {kind, provider_name, success}] == [{"kind":"primary","provider_name":"jev","success":true}]))
-' "$AUDIT_FILE" >/dev/null
+' "$REQUEST_LOG_FILE" >/dev/null
 
 curl -fsS "$BASE_URL/admin/request-logs?search=$RID&limit=5&exclude_operation=systemone" \
   | jq -e '(.entries // []) | length == 0' >/dev/null
@@ -6845,16 +6860,16 @@ CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" -H 'Content-T
 assert_http_status 200 "$CODE" "$F"
 jq -e '.model == "kev-4b-e2e" and .mock.upstream == "kev" and .mock.received_model == "kev-latest"' "$F" >/dev/null
 
-AUDIT_FILE="$QA_RUN_DIR/s238.audit.json"
-wait_log_entry "$BASE_URL" audit "$RID" "$AUDIT_FILE"
-jq -c --arg rid "$RID" '.entries[] | select(.request_id == $rid) | [.data.attempts[] | {kind, provider_name, status_code, success}]' "$AUDIT_FILE"
+REQUEST_LOG_FILE="$QA_RUN_DIR/s238.request-log.json"
+wait_log_entry "$BASE_URL" audit "$RID" "$REQUEST_LOG_FILE"
+jq -c --arg rid "$RID" '.entries[] | select(.request_id == $rid) | [.data.attempts[] | {kind, provider_name, status_code, success}]' "$REQUEST_LOG_FILE"
 jq -e --arg rid "$RID" --arg fo "$FO" '
   any(.entries[]; .request_id == $rid
     and .requested_model == $fo and .resolved_model == "jev-kev/kev-latest" and .provider_name == "jev-kev"
     and .data.failover != null
     and ([.data.attempts[] | .provider_name] == ["jev-down","jev-kev"])
     and .data.attempts[0].success == false and .data.attempts[1].kind == "failover" and .data.attempts[1].success == true)
-' "$AUDIT_FILE" >/dev/null
+' "$REQUEST_LOG_FILE" >/dev/null
 
 USAGE_FILE="$QA_RUN_DIR/s238.usage.json"
 wait_log_entry "$BASE_URL" usage "$RID" "$USAGE_FILE"
@@ -6876,10 +6891,10 @@ CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/v1/systemone" -H 'Content-T
   -H "X-Request-ID: $RID422" \
   -d "{\"model\":\"$FO422\",\"state\":\"x\",\"questions\":{\"q\":{\"type\":\"maybe\",\"instructions\":\"?\"}}}")
 assert_http_status 422 "$CODE" "$F"
-wait_log_entry "$BASE_URL" audit "$RID422" "$AUDIT_FILE"
+wait_log_entry "$BASE_URL" audit "$RID422" "$REQUEST_LOG_FILE"
 jq -e --arg rid "$RID422" '
   any(.entries[]; .request_id == $rid and .status_code == 422 and ([.data.attempts[] | .provider_name] == ["jev-kev"]))
-' "$AUDIT_FILE" >/dev/null
+' "$REQUEST_LOG_FILE" >/dev/null
 ```
 
 ### S239 Identical System One requests hit the exact response cache
@@ -6922,9 +6937,9 @@ for n in 3 4; do
   jq -e --argjson seq "$SEQ1" '.mock.request_seq > $seq' "$QA_RUN_DIR/s239.$n.json" >/dev/null
 done
 
-AUDIT_FILE="$QA_RUN_DIR/s239.audit.json"
-wait_log_entry "$AUTH_BASE_URL" audit "$RID2" "$AUDIT_FILE" -H "$ADMIN_AUTH_HEADER"
-jq -e --arg rid "$RID2" 'any(.entries[]; .request_id == $rid and .cache_type == "exact" and .status_code == 200 and .path == "/v1/systemone")' "$AUDIT_FILE" >/dev/null
+REQUEST_LOG_FILE="$QA_RUN_DIR/s239.request-log.json"
+wait_log_entry "$AUTH_BASE_URL" audit "$RID2" "$REQUEST_LOG_FILE" -H "$ADMIN_AUTH_HEADER"
+jq -e --arg rid "$RID2" 'any(.entries[]; .request_id == $rid and .cache_type == "exact" and .status_code == 200 and .path == "/v1/systemone")' "$REQUEST_LOG_FILE" >/dev/null
 
 USAGE_FILE="$QA_RUN_DIR/s239.usage.json"
 wait_log_entry "$AUTH_BASE_URL" usage "$RID1" "$USAGE_FILE" -H "$ADMIN_AUTH_HEADER"
@@ -8559,10 +8574,10 @@ jq -e --arg path "$SCOPE_PATH/agent/guardrails/$JUDGE" '
   any(.entries[]; .endpoint == "/v1/decisions" and .provider_name == "jev" and .user_path == $path and .input_tokens > 0)
 ' "$USAGE_FILE" >/dev/null
 
-AUDIT_FILE="$QA_RUN_DIR/s264.audit.json"
+REQUEST_LOG_FILE="$QA_RUN_DIR/s264.request-log.json"
 for _ in $(seq 1 20); do
-  curl -fsS "$GR_BASE_URL/admin/request-logs?search=$RID&limit=10" > "$AUDIT_FILE"
-  if jq -e '[.entries[]? | .path] | (index("/v1/decisions") != null and index("/v1/chat/completions") != null)' "$AUDIT_FILE" >/dev/null; then
+  curl -fsS "$GR_BASE_URL/admin/request-logs?search=$RID&limit=10" > "$REQUEST_LOG_FILE"
+  if jq -e '[.entries[]? | .path] | (index("/v1/decisions") != null and index("/v1/chat/completions") != null)' "$REQUEST_LOG_FILE" >/dev/null; then
     break
   fi
   sleep 1
@@ -8570,7 +8585,7 @@ done
 jq -e '
   any(.entries[]; .path == "/v1/decisions" and .status_code == 200 and .requested_model == "jev/jev-latest")
   and any(.entries[]; .path == "/v1/chat/completions" and .status_code == 400)
-' "$AUDIT_FILE" >/dev/null
+' "$REQUEST_LOG_FILE" >/dev/null
 
 # 0.93 is below a 0.95 threshold: the prompt reaches the chat model.
 put_judge 0.95

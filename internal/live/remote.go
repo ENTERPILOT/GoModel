@@ -23,9 +23,10 @@ import (
 // no subscriber it issues no query at all.
 //
 // Remote entries arrive only once persisted, so a dashboard sees them as
-// completed requests (audit.flushed, usage.flushed), up to the peer's flush
-// interval plus remoteInterval after they finish, and never their in-flight
-// or per-chunk stream events.
+// completed requests (request_log.flushed, or audit.flushed on a stream still
+// on the legacy names, and usage.flushed), up to the peer's flush interval
+// plus remoteInterval after they finish, and never their in-flight or
+// per-chunk stream events.
 const (
 	// remoteInterval is how often the feed polls while subscribed.
 	remoteInterval = 2 * time.Second

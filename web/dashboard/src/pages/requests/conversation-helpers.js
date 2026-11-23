@@ -591,7 +591,7 @@ export function conversationEntryIsLatest(entries, entryID) {
 }
 
 export function shouldHydrateConversation(eventType, changedEntryID, selectedAnchorID) {
-    return String(eventType || '').trim() === 'audit.flushed' &&
+    return String(eventType || '').trim() === 'request_log.flushed' &&
         String(changedEntryID || '').trim() !== '' &&
         String(changedEntryID || '').trim() === String(selectedAnchorID || '').trim();
 }

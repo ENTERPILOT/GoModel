@@ -959,9 +959,9 @@ func TestBrokerReplayAfterBufferWrap(t *testing.T) {
 }
 
 // benchRequestLogLifecycle publishes the request log events one non-streaming chat
-// request emits with body and header capture on: audit.started, the
-// audit.updated events handlers raise while enriching the entry, then
-// audit.completed and audit.flushed. It is the per-request broker cost on
+// request emits with body and header capture on: request_log.started, the
+// request_log.updated events handlers raise while enriching the entry, then
+// request_log.completed and request_log.flushed. It is the per-request broker cost on
 // every request, whether or not a dashboard is connected.
 func benchRequestLogLifecycle(b *testing.B, subscribe bool) {
 	// The subscriber buffer is far larger than the default so a drain
@@ -1071,10 +1071,10 @@ func TestBrokerRequestLogActiveSnapshotKeepsEarlierFields(t *testing.T) {
 	require.Len(t, sub.Replay, 1)
 
 	payload := eventPayload(t, sub.Replay[0])
-	assert.Equal(t, "POST", payload["method"], "method from audit.started")
+	assert.Equal(t, "POST", payload["method"], "method from request_log.started")
 	assert.Equal(t, "/v1/chat/completions", payload["path"])
 	assert.Equal(t, true, payload["stream"])
-	assert.Equal(t, float64(200), payload["status_code"], "status code from audit.completed")
+	assert.Equal(t, float64(200), payload["status_code"], "status code from request_log.completed")
 	assert.Equal(t, EventRequestLogCompleted, payload["_live_state"], "the newest event names the state")
 
 	data, ok := payload["data"].(map[string]any)

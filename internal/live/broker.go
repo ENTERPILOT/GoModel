@@ -879,7 +879,7 @@ func compactRequestLogPreviewForRetention(preview requestLogPreview) requestLogP
 }
 
 // PublishRemoteRequestLogEntry publishes a request log entry another replica persisted,
-// as the audit.flushed event that replica's own dashboards received, marked
+// as the request_log.flushed event that replica's own dashboards received, marked
 // with its write stamp. The preview carries no bodies, only whether each was
 // captured, so remote traffic costs the stream only the compact preview; the
 // dashboard loads them from the stored entry.
@@ -980,7 +980,7 @@ type requestLogPreviewData struct {
 	RequestBodyTooBigToHandle  bool                                 `json:"request_body_too_big_to_handle,omitempty"`
 	ResponseBodyTooBigToHandle bool                                 `json:"response_body_too_big_to_handle,omitempty"`
 	// ResponseBodyPartial marks a response body still being reconstructed from
-	// a running stream (audit.stream events). Set only on fan-out copies; the
+	// a running stream (request_log.stream events). Set only on fan-out copies; the
 	// flag is cleared when bodies are stripped for retention so it cannot go
 	// stale in merged active snapshots.
 	ResponseBodyPartial bool `json:"response_body_partial,omitempty"`
@@ -1083,7 +1083,7 @@ func requestLogPreviewIncludesLiveRequestBody(eventType string) bool {
 }
 
 // requestLogPreviewIncludesLiveResponseBody reports event types that carry the
-// in-flight partial response body. Deliberately not audit.updated: metadata
+// in-flight partial response body. Deliberately not request_log.updated: metadata
 // updates would otherwise fan out heavy handler-set bodies (e.g. audio)
 // mid-request that completion events deliver anyway.
 func requestLogPreviewIncludesLiveResponseBody(eventType string) bool {

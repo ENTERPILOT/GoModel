@@ -21,7 +21,37 @@ import { consumeEventStream } from "../../lib/api/eventStream.js";
 import { requestEntryTypeVisible } from "./request-operations.js";
 import * as m from "../../lib/paraglide/messages.js";
 
-const LIVE_LOGS_STREAM_PATH = "/admin/live/logs?types=audit,usage";
+// A gateway names request log events request_log.* for a stream that asks for
+// request_log. A replica still on v0.2.5 knows them only as audit, and this
+// page can be loaded from one replica and streamed from another, so the stream
+// asks for both: the old replica ignores the name it does not know and sends
+// audit.*, which normalizeLiveLogEvent maps back.
+const LIVE_LOGS_STREAM_PATH = "/admin/live/logs?types=request_log,audit,usage";
+
+const LEGACY_REQUEST_LOG_EVENT_PREFIX = "audit.";
+
+function requestLogEventName(name) {
+    const text = String(name || '').trim();
+    return text.indexOf(LEGACY_REQUEST_LOG_EVENT_PREFIX) === 0
+        ? 'request_log.' + text.slice(LEGACY_REQUEST_LOG_EVENT_PREFIX.length)
+        : text;
+}
+
+// normalizeLiveLogEvent returns the event with a request log event's legacy
+// audit.* name, and the _live_state its data carries, spelled request_log.*.
+// It is the one place the old names are known; everything past it compares
+// against the new ones.
+export function normalizeLiveLogEvent(event) {
+    if (!event || typeof event !== 'object') return event;
+    const type = requestLogEventName(event.type);
+    if (type === String(event.type || '').trim()) return event;
+    const normalized = { ...event, type };
+    const data = event.data;
+    if (data && typeof data === 'object' && typeof data._live_state === 'string') {
+        normalized.data = { ...data, _live_state: requestLogEventName(data._live_state) };
+    }
+    return normalized;
+}
 
 // liveInsertIndex is where a live entry new to a list goes so the list stays
 // newest first, as the server orders it. Local events arrive in request order
@@ -83,7 +113,7 @@ export function requestLogLivePauseMessage(reason) {
 }
 
 // liveLogsStreamPath builds the stream path with the replay cursor:
-// '/admin/live/logs?types=audit,usage[&cursor=N]'.
+// '/admin/live/logs?types=request_log,audit,usage[&cursor=N]'.
 export function liveLogsStreamPath(lastSeq) {
     let url = LIVE_LOGS_STREAM_PATH;
     const seq = Number(lastSeq || 0);
@@ -101,6 +131,7 @@ export function liveLogsMethods() {
 
         applyLiveLogEvent(event) {
             if (!event || typeof event !== 'object') return;
+            event = normalizeLiveLogEvent(event);
             const seq = Number(event.seq || 0);
             if (Number.isFinite(seq) && seq > this.liveLogsLastSeq) {
                 this.liveLogsLastSeq = seq;
@@ -111,11 +142,11 @@ export function liveLogsMethods() {
                 this.reloadLiveLogSources();
                 return;
             }
-            if (type === 'audit.removed') {
+            if (type === 'request_log.removed') {
                 this.removeLiveRequestEntry(event.data);
                 return;
             }
-            if (type.indexOf('audit.') === 0) {
+            if (type.indexOf('request_log.') === 0) {
                 this.mergeLiveRequestEntry(event.data || {}, type);
                 return;
             }
@@ -173,7 +204,7 @@ export function liveLogsMethods() {
             const previous = index >= 0 ? currentEntries[index] || {} : {};
             // A detail event IS the fetched detail: re-triggering the detail
             // fetch for it would loop.
-            const isDetail = eventType === 'audit.detail';
+            const isDetail = eventType === 'request_log.detail';
             const patch = isDetail
                 // The detail entry carries the full payload, so the slim-list
                 // marker must not survive the merge from the previous row.
@@ -237,7 +268,7 @@ export function liveLogsMethods() {
             // still-running stream; the flag drops once a settled state
             // delivers the real body. Other events leave the previous flag
             // untouched.
-            if (eventType === 'audit.stream') {
+            if (eventType === 'request_log.stream') {
                 patch._response_partial = true;
             } else if (this.liveRequestLogStateSettled(eventType)) {
                 patch._response_partial = false;
@@ -275,7 +306,7 @@ export function liveLogsMethods() {
 
         // regroupLiveRequestLogHead folds a list row into another on-screen head of
         // the same session after an in-place merge. This is how a live row
-        // inserted sessionless (audit.started fires before session detection
+        // inserted sessionless (request_log.started fires before session detection
         // stamps the context) joins its thread once a later event delivers the
         // session id: the NEWEST of the two rows becomes the thread head — the
         // event that happens to complete last is not necessarily the newest
@@ -441,7 +472,7 @@ export function liveLogsMethods() {
         fetchExpandedRequestLogDetailIfReady(entry) {
             if (!entry || !this.isRequestEntryExpanded || !this.isRequestEntryExpanded(entry)) return;
             const state = String(entry._live_state || '').trim();
-            if (state !== 'audit.flushed' && !entry._request_log_flushed) return;
+            if (state !== 'request_log.flushed' && !entry._request_log_flushed) return;
             if (typeof this.fetchRequestEntryDetail === 'function') {
                 this.fetchRequestEntryDetail(entry);
             }
@@ -449,16 +480,16 @@ export function liveLogsMethods() {
 
         liveRequestLogStateRank(state) {
             switch (String(state || '').trim()) {
-            case 'audit.started':
+            case 'request_log.started':
                 return 10;
-            case 'audit.updated':
-            case 'audit.stream':
+            case 'request_log.updated':
+            case 'request_log.stream':
                 return 20;
-            case 'audit.completed':
+            case 'request_log.completed':
                 return 30;
-            case 'audit.failed':
-            case 'audit.flushed':
-            case 'audit.detail':
+            case 'request_log.failed':
+            case 'request_log.flushed':
+            case 'request_log.detail':
                 return 40;
             default:
                 return 0;
@@ -472,15 +503,15 @@ export function liveLogsMethods() {
         },
 
         // liveRequestLogStateSettled reports whether a live state already carries
-        // its final response (audit.completed or later); below that the
+        // its final response (request_log.completed or later); below that the
         // request is still in flight.
         liveRequestLogStateSettled(state) {
-            return this.liveRequestLogStateRank(state) >= this.liveRequestLogStateRank('audit.completed');
+            return this.liveRequestLogStateRank(state) >= this.liveRequestLogStateRank('request_log.completed');
         },
 
         liveRequestLogEventFlushed(state) {
             const normalized = String(state || '').trim();
-            return normalized === 'audit.failed' || normalized === 'audit.flushed' || normalized === 'audit.detail';
+            return normalized === 'request_log.failed' || normalized === 'request_log.flushed' || normalized === 'request_log.detail';
         },
 
         removeLiveRequestEntry(incoming) {
@@ -793,8 +824,8 @@ export function liveLogsMethods() {
         requestEntryLiveDetailPending(entry) {
             if (!entry || !entry._live) return false;
             const state = String(entry._live_state || '').trim();
-            if (state === 'audit.failed') return true;
-            return !entry._request_log_flushed && state !== 'audit.flushed' && state !== 'audit.detail';
+            if (state === 'request_log.failed') return true;
+            return !entry._request_log_flushed && state !== 'request_log.flushed' && state !== 'request_log.detail';
         },
 
         requestEntryNeedsPersistedLiveDetail(entry) {

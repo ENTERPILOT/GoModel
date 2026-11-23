@@ -11,7 +11,7 @@ test("slim and replayed records cannot erase captured interaction bodies", () =>
   const full = {
     id: "request-log-1",
     _live: true,
-    _live_state: "audit.completed",
+    _live_state: "request_log.completed",
     data: {
       request_body: { messages: [{ role: "user", content: "Hello" }] },
       response_body: { choices: [{ message: { role: "assistant", content: "Hi" } }] },
@@ -26,27 +26,27 @@ test("slim and replayed records cannot erase captured interaction bodies", () =>
 
   assert.deepEqual(merged.data.request_body, full.data.request_body);
   assert.deepEqual(merged.data.response_body, full.data.response_body);
-  assert.equal(merged._live_state, "audit.completed");
+  assert.equal(merged._live_state, "request_log.completed");
   assert.equal(merged.bodies_omitted, false);
 });
 
 test("record lifecycle and full-detail state are monotonic", () => {
   const merged = mergeRequestLogRecord({
     id: "request-log-1",
-    _live_state: "audit.flushed",
+    _live_state: "request_log.flushed",
     _request_log_flushed: true,
     _detail_loaded: true,
     bodies_omitted: false,
     data: { request_body: { input: "hello" } },
   }, {
     id: "request-log-1",
-    _live_state: "audit.updated",
+    _live_state: "request_log.updated",
     _live_pending: true,
     bodies_omitted: true,
     data: { workflow_features: { cache: true } },
   });
 
-  assert.equal(merged._live_state, "audit.flushed");
+  assert.equal(merged._live_state, "request_log.flushed");
   assert.equal(merged._request_log_flushed, true);
   assert.equal(merged._live_pending, false);
   assert.equal(merged._detail_loaded, true);
@@ -56,14 +56,14 @@ test("record lifecycle and full-detail state are monotonic", () => {
 
 test("batched record changes are consumed without dropping intermediate events", () => {
   const changes = [
-    { version: 7, key: "older", eventType: "audit.flushed" },
-    { version: 8, key: "newer", eventType: "audit.updated" },
-    { version: 9, key: "newer", eventType: "audit.flushed" },
+    { version: 7, key: "older", eventType: "request_log.flushed" },
+    { version: 8, key: "newer", eventType: "request_log.updated" },
+    { version: 9, key: "newer", eventType: "request_log.flushed" },
   ];
   assert.deepEqual(requestLogRecordChangesAfter(changes, 7), changes.slice(1));
   assert.deepEqual(requestLogRecordChangesAfter(changes, 9), []);
   assert.equal(isLiveRequestLogRecordChange(changes[1]), true);
-  assert.equal(isLiveRequestLogRecordChange({ eventType: "audit.list" }), false);
+  assert.equal(isLiveRequestLogRecordChange({ eventType: "request_log.list" }), false);
 });
 
 test("slim revision metadata cannot erase loaded rewrite bodies", () => {

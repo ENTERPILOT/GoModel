@@ -1099,6 +1099,20 @@ Die persistierten Request-Log- und Nutzungstabellen bleiben die maßgebliche Dat
 Cursor des Browsers aus dem Wiederholungspuffer heraus, sendet der Stream ein Reset-Event,
 und das Dashboard lädt die Daten neu über die normalen REST-Endpunkte.
 
+Request-Log-Events heißen `request_log.started`, `request_log.updated`,
+`request_log.stream`, `request_log.completed`, `request_log.failed`,
+`request_log.flushed` und `request_log.removed`, Nutzungs-Events `usage.*`.
+Der Query-Parameter `types` wählt die Arten aus, die ein Stream erhält:
+`types=request_log,usage`.
+
+Vor der Umbenennung des Request-Logs hießen diese Events `audit.*`. Diese Namen
+sind veraltet, werden aber weiterhin ausgeliefert. Ein Stream, der `request_log`
+in `types` nennt, erhält die neuen Namen. Ein Stream, der nur den alten Alias
+`audit` nennt oder kein `types` übergibt, erhält weiterhin `audit.*` (als
+SSE-Eventname, im Feld `type` und im `_live_state` der Nutzlast), bis die
+veralteten Namen entfernt werden; ein Entfernungsdatum steht noch nicht fest.
+Mit `types=request_log,usage` wechseln Sie zu den neuen Namen.
+
 ## Admin-Features deaktivieren
 
 So deaktivieren Sie alle Admin-Features:
