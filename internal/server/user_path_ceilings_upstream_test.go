@@ -211,9 +211,9 @@ func TestCeilingReplacesProviderSpecificReasoningControls(t *testing.T) {
 			name:     "a repeated member cannot hide a second value",
 			upstream: "openai",
 			userPath: "/low",
-			body:     `{"model":"openai/gpt-4o",` + hiMessages + `,"reasoning_effort":"low","reasoning_effort":"max"}`,
+			body:     `{"model":"openai/gpt-5.1",` + hiMessages + `,"reasoning_effort":"low","reasoning_effort":"max"}`,
 			check: func(t *testing.T, sent map[string]any) {
-				assert.NotEqual(t, "max", sent["reasoning_effort"])
+				assert.Equal(t, "low", openAIEffort(sent))
 			},
 		},
 	}

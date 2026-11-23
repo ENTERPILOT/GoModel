@@ -170,6 +170,9 @@ func TestXHighCeilingSendsHighToAModelWithoutThatLevel(t *testing.T) {
 		{name: "messages, lowered by the translated pipeline", path: "/v1/messages", body: `{"model":"anthropic/claude-opus-4-6","max_tokens":512,"output_config":{"effort":"max"},` + hiMessages + `}`, want: "high"},
 		{name: "messages, lowered in a native-only body", path: "/v1/messages", body: `{"model":"anthropic/claude-opus-4-6","max_tokens":512,"output_config":{"effort":"max"},` + serverToolHistory + `}`, want: "high"},
 		{name: "messages within the ceiling", path: "/v1/messages", body: `{"model":"anthropic/claude-opus-4-6","max_tokens":512,"output_config":{"effort":"high"},` + hiMessages + `}`, want: "high"},
+		{name: "sonnet 4.6, chat completions", path: "/v1/chat/completions", body: `{"model":"anthropic/claude-sonnet-4-6","reasoning_effort":"max",` + hiMessages + `}`, want: "high"},
+		{name: "sonnet 4.6, messages lowered by the translated pipeline", path: "/v1/messages", body: `{"model":"anthropic/claude-sonnet-4-6","max_tokens":512,"output_config":{"effort":"max"},` + hiMessages + `}`, want: "high"},
+		{name: "sonnet 4.6, messages lowered in a native-only body", path: "/v1/messages", body: `{"model":"anthropic/claude-sonnet-4-6","max_tokens":512,"output_config":{"effort":"max"},` + serverToolHistory + `}`, want: "high"},
 		{name: "a model with the level gets it", path: "/v1/chat/completions", body: `{"model":"anthropic/claude-opus-5","reasoning_effort":"max",` + hiMessages + `}`, want: "xhigh"},
 		{name: "a model with the level gets it in a native-only body", path: "/v1/messages", body: `{"model":"anthropic/claude-opus-5","max_tokens":512,"output_config":{"effort":"max"},` + serverToolHistory + `}`, want: "xhigh"},
 	}

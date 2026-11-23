@@ -1589,7 +1589,7 @@
   "users_max_reasoning_effort": "Maksymalny reasoning effort",
   "users_max_reasoning_effort_help": "Wyższy reasoning effort jest obniżany do tego poziomu, także gdy wymusza go model wirtualny. Model, który nie potrafi rozumować poniżej minimalnego poziomu, zachowuje to minimum. Request bez effortu pozostaje bez zmian. Obowiązuje najniższy limit tej ścieżki i jej rodziców.",
   "users_max_output_tokens": "Maksymalna liczba tokenów wyjściowych",
-  "users_max_output_tokens_help": "Wyższy limit tokenów wyjściowych (max_tokens, max_completion_tokens lub max_output_tokens) jest obniżany do tej wartości. Request bez limitu dostaje tę wartość. Obowiązuje najniższy limit tej ścieżki i jej rodziców.",
+  "users_max_output_tokens_help": "Wyższy limit tokenów wyjściowych (max_tokens, max_completion_tokens lub max_output_tokens) jest obniżany do tej wartości. Request bez limitu dostaje tę wartość albo własne maksimum modelu, gdy jest znane i niższe. Obowiązuje najniższy limit tej ścieżki i jej rodziców.",
   "users_max_output_tokens_invalid": "Maksymalna liczba tokenów wyjściowych musi być dodatnią liczbą całkowitą.",
   "users_edit_action": "Edytuj politykę dla {path}",
   "users_delete_action": "Usuń politykę dla {path}",

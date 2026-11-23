@@ -92,6 +92,22 @@ func TestCapChatTokens(t *testing.T) {
 			absent:     []string{"max_output_tokens"},
 		},
 		{
+			name:       "review request: a limit in another spelling equal to the ceiling is the client's",
+			extras:     map[string]json.RawMessage{"max_output_tokens": json.RawMessage(`100`)},
+			limit:      100,
+			model:      50,
+			wantTokens: new(100),
+			absent:     []string{"max_output_tokens"},
+		},
+		{
+			name:       "a value in another spelling that is no limit gets what a request without one gets",
+			extras:     map[string]json.RawMessage{"max_output_tokens": json.RawMessage(`-1`)},
+			limit:      100,
+			model:      50,
+			wantTokens: new(50),
+			absent:     []string{"max_output_tokens"},
+		},
+		{
 			name:       "a re-cased limit below the model's maximum lowers what is filled in",
 			extras:     map[string]json.RawMessage{"MAX_TOKENS": json.RawMessage(`20`)},
 			limit:      200000,

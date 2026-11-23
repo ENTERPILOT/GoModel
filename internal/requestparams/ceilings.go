@@ -143,14 +143,29 @@ func lowestTokenLimit(fields core.UnknownJSONFields, limit int, keys []string) i
 
 // filledTokenLimit returns the limit written to a request that sets none in
 // its endpoint's own member: the lowest it carries under keys within limit,
-// or, when it carries none below limit, what the ceilings fill in. limit is
-// the token ceiling, lowered already by a limit the request spells in another
+// or, when it carries none there, what the ceilings fill in. limit is the
+// token ceiling, lowered already by a limit the request spells in another
 // letter case.
 func filledTokenLimit(fields core.UnknownJSONFields, limit int, ceilings Ceilings, keys []string) int {
-	if carried := lowestTokenLimit(fields, limit, keys); carried < limit {
-		return carried
+	if carriesTokenLimitWithin(fields, limit, keys) {
+		return lowestTokenLimit(fields, limit, keys)
 	}
 	return min(limit, ceilings.filledOutputTokens())
+}
+
+// carriesTokenLimitWithin reports whether fields carry a limit within limit
+// under one of keys: a whole number from 1 to limit, which is the client's
+// own limit and stays. Anything else there is no limit (see
+// boundedTokenLimit).
+func carriesTokenLimitWithin(fields core.UnknownJSONFields, limit int, keys []string) bool {
+	for _, key := range keys {
+		for _, raw := range fields.LookupAll(key) {
+			if n, err := strconv.Atoi(string(bytes.TrimSpace(raw))); err == nil && n >= 1 && n <= limit {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // forcedTokenLimit is the parameter set that writes limit as the request's
