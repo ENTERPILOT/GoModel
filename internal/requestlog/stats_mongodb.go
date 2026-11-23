@@ -81,7 +81,7 @@ func (r *MongoDBReader) GetRequestStats(ctx context.Context, params RequestStats
 		}}},
 	}
 
-	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	cursor, err := r.logs(ctx).Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, fmt.Errorf("failed to aggregate request log stats: %w", err)
 	}

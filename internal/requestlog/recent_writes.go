@@ -228,7 +228,7 @@ func (r *MongoDBReader) RecentWrites(ctx context.Context, since int64, excludeWr
 		SetSort(bson.D{{Key: "written_at", Value: -1}}).
 		SetLimit(int64(limit)).
 		SetProjection(bson.D{{Key: "_id", Value: 1}, {Key: "written_at", Value: 1}})
-	cursor, err := r.collection.Find(ctx, filter, opts)
+	cursor, err := r.logs(ctx).Find(ctx, filter, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query recent request log writes: %w", err)
 	}
@@ -256,7 +256,7 @@ func (r *MongoDBReader) PreviewsByID(ctx context.Context, ids []string) ([]Entry
 	captured := func(field string) bson.D {
 		return bson.D{{Key: "$ne", Value: bson.A{bson.D{{Key: "$type", Value: field}}, "missing"}}}
 	}
-	cursor, err := r.collection.Aggregate(ctx, mongo.Pipeline{
+	cursor, err := r.logs(ctx).Aggregate(ctx, mongo.Pipeline{
 		{{Key: "$match", Value: bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}}}},
 		{{Key: "$addFields", Value: bson.D{
 			{Key: "_request_body_captured", Value: captured("$data.request_body")},

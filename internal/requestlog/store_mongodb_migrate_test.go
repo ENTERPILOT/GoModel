@@ -132,6 +132,25 @@ func TestMongoDBReaderReadsTheLegacyCollectionInPlace(t *testing.T) {
 	})
 }
 
+// A replica with request logging turned off may create its reader before a
+// store on another replica renames the collection. The reader follows it.
+func TestMongoDBReaderFollowsTheRename(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		writeLegacyDocument(t, db, "written-before", 200)
+		reader, err := NewMongoDBReader(db)
+		require.NoError(t, err)
+		entry, err := reader.GetLogByID(ctx, "written-before")
+		require.NoError(t, err)
+		require.NotNil(t, entry)
+
+		startMongoStore(t, db)
+		entry, err = reader.GetLogByID(ctx, "written-before")
+		require.NoError(t, err)
+		require.NotNil(t, entry, "the reader kept reading audit_logs after the rename")
+	})
+}
+
 // A reader created while an older release's entries wait in a recreated
 // audit_logs reads the request log, not those entries.
 func TestMongoDBReaderPrefersTheRequestLogCollection(t *testing.T) {
@@ -144,6 +163,15 @@ func TestMongoDBReaderPrefersTheRequestLogCollection(t *testing.T) {
 		require.NotNil(t, mongoEntry(t, db, "written-before"))
 		assert.Nil(t, mongoEntry(t, db, "written-by-older-replica"))
 	})
+}
+
+// Only an error the server answered with keeps the store on audit_logs. A
+// command that did not get through fails the start, which is retried.
+func TestRenameRefused(t *testing.T) {
+	assert.True(t, renameRefused(mongo.CommandError{Code: 13, Name: "Unauthorized"}))
+	assert.False(t, renameRefused(mongo.CommandError{Code: 6, Labels: []string{"NetworkError"}}))
+	assert.False(t, renameRefused(mongo.CommandError{Code: 50, Name: "MaxTimeMSExpired"}))
+	assert.False(t, renameRefused(context.DeadlineExceeded))
 }
 
 func TestRenameCollectionReportsRaces(t *testing.T) {
@@ -160,9 +188,10 @@ func TestRenameCollectionReportsRaces(t *testing.T) {
 	})
 }
 
-// Replicas starting together each set the legacy collection aside under a
-// name of their own, so one finishing late cannot drop what another staged.
-func TestAbsorbLegacyCollectionsStagesUnderAUniqueName(t *testing.T) {
+// Two replicas moving the legacy collection at once: one that drops its
+// staging collection late removes nothing the other staged or an older replica
+// wrote since.
+func TestAbsorbLegacyCollectionsSurvivesAnotherReplicasLateDrop(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		ctx := context.Background()
 		startMongoStore(t, db)

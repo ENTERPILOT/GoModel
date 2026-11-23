@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -16,7 +17,24 @@ import (
 
 // MongoDBReader implements Reader for MongoDB.
 type MongoDBReader struct {
-	collection *mongo.Collection
+	database   *mongo.Database
+	collection atomic.Pointer[mongo.Collection]
+}
+
+// logs returns the collection to query. A reader that started on audit_logs
+// looks again each time: a store on another replica renames the collection
+// when it starts, and from then on the old name holds nothing.
+func (r *MongoDBReader) logs(ctx context.Context) *mongo.Collection {
+	collection := r.collection.Load()
+	if collection.Name() == requestLogCollectionName {
+		return collection
+	}
+	// A failure to list leaves the query to report what is wrong.
+	if found, err := existingRequestLogCollection(ctx, r.database); err == nil {
+		collection = found
+		r.collection.Store(found)
+	}
+	return collection
 }
 
 type mongoLogRow struct {
@@ -96,7 +114,9 @@ func NewMongoDBReader(database *mongo.Database) (*MongoDBReader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &MongoDBReader{collection: collection}, nil
+	reader := &MongoDBReader{database: database}
+	reader.collection.Store(collection)
+	return reader, nil
 }
 
 func mongoUserPathMatchFilter(userPath string) bson.E {
@@ -162,7 +182,7 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 		}},
 	}}})
 
-	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	cursor, err := r.logs(ctx).Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, fmt.Errorf("failed to aggregate request logs: %w", err)
 	}
@@ -365,7 +385,7 @@ func firstNonEmpty(values ...string) string {
 func (r *MongoDBReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error) {
 	var row mongoLogRow
 
-	err := r.collection.FindOne(ctx, bson.D{{Key: "_id", Value: id}}).Decode(&row)
+	err := r.logs(ctx).FindOne(ctx, bson.D{{Key: "_id", Value: id}}).Decode(&row)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, nil
@@ -385,7 +405,7 @@ func (r *MongoDBReader) GetInteractionParent(ctx context.Context, id string) (*I
 		{Key: "user_path", Value: 1},
 		{Key: "session_id", Value: 1},
 	})
-	if err := r.collection.FindOne(ctx, bson.D{{Key: "_id", Value: id}}, opts).Decode(&row); err != nil {
+	if err := r.logs(ctx).FindOne(ctx, bson.D{{Key: "_id", Value: id}}, opts).Decode(&row); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, nil
 		}
@@ -441,7 +461,7 @@ func (r *MongoDBReader) findConversationEntry(ctx context.Context, filter bson.D
 
 	var row mongoLogRow
 
-	if err := r.collection.FindOne(ctx, filter, opts).Decode(&row); err != nil {
+	if err := r.logs(ctx).FindOne(ctx, filter, opts).Decode(&row); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, nil
 		}

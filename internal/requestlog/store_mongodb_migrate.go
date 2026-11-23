@@ -32,8 +32,8 @@ const (
 // existingRequestLogCollection returns the collection that holds the request
 // log: request_logs, or audit_logs on a database a release up to v0.2.5 wrote
 // and nothing has renamed yet. The readers use it as it is. They move nothing,
-// so a role that can only read is enough for them, and they agree with a store
-// that had to stay on audit_logs.
+// so a role that can only read is enough for them, and they read what a store
+// that had to stay on audit_logs writes.
 func existingRequestLogCollection(ctx context.Context, database *mongo.Database) (*mongo.Collection, error) {
 	names, err := requestLogCollectionNames(ctx, database)
 	if err != nil {
@@ -63,18 +63,24 @@ func adoptLegacyCollection(ctx context.Context, database *mongo.Database) (*mong
 		slog.Info("requestlog: renamed the audit_logs collection to request_logs")
 	case isMongoError(err, mongoNamespaceNotFound), isMongoError(err, mongoNamespaceExists):
 		// Another replica renamed it first.
-	default:
-		// Whichever collection holds the request log now: the rename may have
-		// been refused, or have gone through without its reply arriving.
-		collection, listErr := existingRequestLogCollection(ctx, database)
-		if listErr != nil {
-			return nil, fmt.Errorf("failed to rename the audit_logs collection to request_logs: %w", err)
-		}
-		slog.Warn("requestlog: could not rename the audit_logs collection to request_logs",
-			"error", err, "collection", collection.Name())
+	case renameRefused(err):
+		slog.Warn("requestlog: could not rename the audit_logs collection to request_logs, and keeps using audit_logs",
+			"error", err)
 		return collection, nil
+	default:
+		return nil, fmt.Errorf("failed to rename the audit_logs collection to request_logs: %w", err)
 	}
 	return database.Collection(requestLogCollectionName), nil
+}
+
+// renameRefused reports whether the server answered a rename with an error of
+// its own, rather than the command failing to reach it or to finish in time. A
+// start that fails for the latter reasons is retried; one that settled on
+// audit_logs because of them would keep writing there after another replica
+// renamed the collection.
+func renameRefused(err error) bool {
+	var commandErr mongo.CommandError
+	return errors.As(err, &commandErr) && !mongo.IsNetworkError(err) && !mongo.IsTimeout(err)
 }
 
 // absorbLegacyCollections moves into request_logs what a binary on the older
