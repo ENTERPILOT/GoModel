@@ -145,6 +145,7 @@ func TestMongoDBReaderFollowsTheRename(t *testing.T) {
 		require.NotNil(t, entry)
 
 		startMongoStore(t, db)
+		require.Equal(t, []string{requestLogCollectionName}, collectionNames(t, db))
 		entry, err = reader.GetLogByID(ctx, "written-before")
 		require.NoError(t, err)
 		require.NotNil(t, entry, "the reader kept reading audit_logs after the rename")
