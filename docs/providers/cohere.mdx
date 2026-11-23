@@ -101,8 +101,10 @@ A `reasoning_effort` (or `reasoning.effort`) is translated to the same control
 when the request carries no `thinking` object of its own: `none` turns thinking
 off, and on a reasoning model `minimal` and `low` set a `token_budget` of 1024,
 `medium` 8192, and `high` and `xhigh` 24576, while `max` keeps Cohere's default
-of unlimited thinking. A budget leaves 1024 tokens of `max_tokens` for the
-answer, and thinking is turned off when no budget fits. Models that do not
+of unlimited thinking. These budgets are upper bounds: when the request sets
+`max_tokens`, the budget is lowered to leave 1024 tokens of it for the answer
+(`high` with `max_tokens: 4000` sends 2976), and thinking is turned off when no
+budget fits. Models that do not
 reason ignore every effort but `none`.
 
 Thinking output is returned as the OpenAI-compatible `reasoning_content`

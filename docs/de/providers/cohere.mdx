@@ -104,9 +104,11 @@ Ein `reasoning_effort` (oder `reasoning.effort`) wird in dieselbe Steuerung
 übersetzt, wenn der Request kein eigenes `thinking`-Objekt enthält: `none`
 schaltet Thinking aus, und bei einem Reasoning-Modell setzen `minimal` und `low`
 ein `token_budget` von 1024, `medium` 8192 sowie `high` und `xhigh` 24576,
-während `max` Coheres Standard des unbegrenzten Thinkings beibehält. Ein Budget
-lässt 1024 Tokens von `max_tokens` für die Antwort übrig, und Thinking wird
-ausgeschaltet, wenn kein Budget passt. Modelle ohne Reasoning ignorieren jeden
+während `max` Coheres Standard des unbegrenzten Thinkings beibehält. Diese
+Budgets sind Obergrenzen: Setzt der Request `max_tokens`, wird das Budget so
+weit gesenkt, dass 1024 Tokens davon für die Antwort bleiben (`high` mit
+`max_tokens: 4000` sendet 2976), und Thinking wird ausgeschaltet, wenn kein
+Budget passt. Modelle ohne Reasoning ignorieren jeden
 Effort außer `none`.
 
 Die Thinking-Ausgabe wird sowohl in normalen als auch in streamenden Responses
