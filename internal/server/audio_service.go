@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -234,7 +235,13 @@ func (s *audioService) createAudioTranscription(c *echo.Context, translation boo
 			// A transcript relayed by a provider that ignored stream=true is one
 			// JSON object; TranscriptUsageBody also recovers the usage event from
 			// a body that turned out to be server-sent events.
-			return priceTranscript(usage.TranscriptUsageBody(data), pricing)
+			body := usage.TranscriptUsageBody(data)
+			if resp.AudioSeconds > 0 {
+				// A text or caption transcript cannot carry the duration the
+				// provider measured, so it arrives beside the body.
+				body = []byte(`{"usage":{"type":"duration","seconds":` + strconv.FormatFloat(resp.AudioSeconds, 'f', -1, 64) + `}}`)
+			}
+			return priceTranscript(body, pricing)
 		},
 		newStreamSink: func() audioUsageSink {
 			// A relayed transcript reports its usage in the terminal

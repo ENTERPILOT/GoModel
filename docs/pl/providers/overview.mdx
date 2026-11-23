@@ -81,6 +81,7 @@ przez providera upstream.
 | Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` opcjonalnie) | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/pl/providers/bailian) |
 | MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` opcjonalnie) | `MiniMax-M3` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [MiniMax](/pl/providers/minimax) |
 | Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` opcjonalnie) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/pl/providers/xiaomi) |
+| Deepgram (tylko głos) | `DEEPGRAM_API_KEY` (`DEEPGRAM_BASE_URL` opcjonalnie) | `nova-3` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [Deepgram](/pl/providers/deepgram) |
 | ElevenLabs (tylko głos) | `ELEVENLABS_API_KEY` (`ELEVENLABS_BASE_URL` opcjonalnie) | `eleven_multilingual_v2` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [ElevenLabs](/pl/providers/elevenlabs) |
 | audio.cpp (tylko audio) | `AUDIOCPP_BASE_URL` (`AUDIOCPP_API_KEY` opcjonalnie) | `pocket-tts` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [audio.cpp](/pl/providers/audiocpp) |
 | Jev / Kev (tylko decyzje) | `JEV_API_KEY` (`JEV_BASE_URL` opcjonalnie) | `jev-latest` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [Jev](/pl/providers/jev) |
@@ -162,6 +163,11 @@ przez providera upstream.
 - **Fireworks AI** – ID modeli to ścieżki w zakresie konta, takie jak
   `accounts/fireworks/models/gpt-oss-120b`; używaj ich dosłownie w requestach i w
   `FIREWORKS_MODELS`.
+- **Deepgram** – provider wyłącznie głosowy: `/v1/audio/transcriptions`
+  (speech-to-text) i `/v1/audio/speech` (text-to-speech) są obsługiwane, ale chat,
+  `/v1/responses` i embeddingi nie. Identyfikator modelu text-to-speech określa
+  jego głos (`aura-2-thalia-en`); możesz też wysłać rodzinę `aura-2` razem z
+  `voice`. Mapowanie opcji opisuje [przewodnik Deepgram](/pl/providers/deepgram).
 - **ElevenLabs** – provider wyłącznie głosowy: `/v1/audio/speech` (text-to-speech)
   i `/v1/audio/transcriptions` (speech-to-text) są obsługiwane, ale chat,
   `/v1/responses` i embeddingi nie (oznaczenia ❌ powyżej wynikają z tego, a nie z
