@@ -82,7 +82,7 @@ func applyReasoning(req *anthropicRequest, model, effort string) {
 	}
 	if isAdaptiveThinkingModel(model) {
 		req.Thinking = &anthropicThinking{Type: "adaptive"}
-		req.OutputConfig = &anthropicOutputConfig{Effort: normalizeEffort(effort)}
+		req.OutputConfig = &anthropicOutputConfig{Effort: SupportedEffort(model, normalizeEffort(effort))}
 	} else {
 		budget := reasoningEffortToBudgetTokens(effort)
 		req.Thinking = &anthropicThinking{

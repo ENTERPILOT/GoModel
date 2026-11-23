@@ -400,6 +400,24 @@ func matchesModelPrefix(model string, prefixes []string) bool {
 	return false
 }
 
+// xhighRejectedPrefixes lists the adaptive-thinking models that take effort
+// "max" but not "xhigh", the level Opus 4.7 added: Anthropic answers them
+// with a 400 ("This model does not support effort level 'xhigh'").
+var xhighRejectedPrefixes = []string{
+	"claude-opus-4-6",
+	"claude-sonnet-4-6",
+}
+
+// SupportedEffort returns the effort model is sent for effort: "xhigh"
+// becomes "high", the next level down, on a model that rejects it. Every
+// other effort, in any spelling, is returned as it is.
+func SupportedEffort(model, effort string) string {
+	if strings.EqualFold(strings.TrimSpace(effort), "xhigh") && matchesModelPrefix(model, xhighRejectedPrefixes) {
+		return "high"
+	}
+	return effort
+}
+
 // normalizeEffort maps effort to the values Anthropic's adaptive thinking
 // accepts: "low", "medium", "high", "xhigh", and "max". Opus 4.8 introduced the
 // "xhigh" and "max" levels for deeper reasoning. Any unsupported value is
