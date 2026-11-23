@@ -200,16 +200,18 @@ occurrence of a repeated member:
 | `think` (boolean or level)                                 | Ollama                                    |
 | `chat_template_kwargs.enable_thinking`, `.thinking`, `.reasoning_effort`, `.thinking_budget` | vLLM, SGLang, llama.cpp |
 | `extra_body.google.thinking_config` `thinking_budget`/`thinking_level` (names in any case) | Gemini |
-| Messages `thinking` (a `budget_tokens`, or adaptive) and `output_config.effort` | Anthropic            |
+| Messages `thinking` (a `budget_tokens`, or adaptive) and `output_config.effort`, at the top level and in a message ([per-message effort](https://platform.claude.com/docs/en/build-with-claude/effort-per-message)) | Anthropic |
 
 A control that turns reasoning off (`false`, a zero budget,
 `{"type": "disabled"}`) and a level within the ceiling are kept. Anything the
 scale cannot place, such as a token budget or `true`, counts as above the
 ceiling: the gateway drops every client reasoning control and sends the ceiling
-as the effort instead. A control object that repeats `type` and is `disabled`
-only in the last one is dropped too; what replaces it is the highest effort the
-request names elsewhere within the ceiling, or `none` when it names no other, so
-the ceiling does not switch reasoning on. A Messages `budget_tokens` above the
+as the effort instead. A request that also turns reasoning off (for example
+`enable_thinking: false` next to a `thinking_budget`) is not switched on that
+way, and neither is a control object that repeats `type` and is `disabled` only
+in the last one: those controls are dropped too, and what replaces them is the
+highest effort the request names elsewhere within the ceiling, or `none` when
+it names no other. A Messages `budget_tokens` above the
 budget the gateway itself sends for the ceiling level (5000 for `low`, 10000
 for `medium`, 20000 for `high` and up) is lowered to that budget. The one
 exception to never adding an effort is adaptive Messages thinking
@@ -221,7 +223,9 @@ thinking budget, OpenCode Zen's default effort), that value is kept within the
 ceilings too: a thinking budget shrinks to fit under the capped `max_tokens`,
 and thinking is turned off when not even the minimum budget fits. Adaptive
 thinking (Claude Opus 4.6, Sonnet 4.6, and later) has no budget: it stays on,
-and the capped `max_tokens` bounds what it spends.
+and the capped `max_tokens` bounds what it spends. Claude Opus 4.6 and Sonnet
+4.6 take `max` but not `xhigh`, so under an `xhigh` ceiling they are sent
+`high`.
 
 Ceilings apply after [virtual model overrides](/features/virtual-models#force-a-reasoning-effort),
 on every attempt, including failover legs, so they also bound an effort or a

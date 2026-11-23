@@ -212,17 +212,19 @@ Groß-/Kleinschreibung und in jedem Vorkommen eines wiederholten Members:
 | `think` (Boolean oder Stufe)                               | Ollama                                    |
 | `chat_template_kwargs.enable_thinking`, `.thinking`, `.reasoning_effort`, `.thinking_budget` | vLLM, SGLang, llama.cpp |
 | `extra_body.google.thinking_config` `thinking_budget`/`thinking_level` (Namen in beliebiger Schreibweise) | Gemini |
-| Messages `thinking` (ein `budget_tokens` oder adaptiv) und `output_config.effort` | Anthropic          |
+| Messages `thinking` (ein `budget_tokens` oder adaptiv) und `output_config.effort`, auf oberster Ebene und in einer Message ([Effort pro Message](https://platform.claude.com/docs/en/build-with-claude/effort-per-message)) | Anthropic |
 
 Eine Steuerung, die Reasoning ausschaltet (`false`, ein Budget von null,
 `{"type": "disabled"}`), und eine Stufe innerhalb der Obergrenze bleiben
 erhalten. Alles, was die Skala nicht einordnen kann, etwa ein Token-Budget oder
 `true`, gilt als über der Obergrenze: Das Gateway entfernt alle
 Reasoning-Steuerungen des Clients und sendet stattdessen die Obergrenze als
-Effort. Ein Steuerungsobjekt, das `type` wiederholt und nur im letzten Vorkommen
-`disabled` ist, wird ebenfalls entfernt; an seine Stelle tritt der höchste
-Effort, den der Request sonst innerhalb der Obergrenze nennt, oder `none`, wenn
-er keinen anderen nennt, damit die Obergrenze Reasoning nicht einschaltet. Ein
+Effort. Ein Request, der Reasoning zugleich ausschaltet (zum Beispiel
+`enable_thinking: false` neben einem `thinking_budget`), wird so nicht
+eingeschaltet, ebenso wenig ein Steuerungsobjekt, das `type` wiederholt und nur
+im letzten Vorkommen `disabled` ist: Auch diese Steuerungen werden entfernt, und
+an ihre Stelle tritt der höchste Effort, den der Request sonst innerhalb der
+Obergrenze nennt, oder `none`, wenn er keinen anderen nennt. Ein
 Messages-`budget_tokens` über dem Budget, das das Gateway selbst für die Stufe
 der Obergrenze sendet (5000 für `low`, 10000 für `medium`, 20000 ab `high`),
 wird auf dieses Budget gesenkt. Die einzige Ausnahme davon, nie einen Effort
@@ -236,7 +238,8 @@ innerhalb der Obergrenzen: Ein Thinking-Budget schrumpft, bis es unter das
 begrenzte `max_tokens` passt, und Thinking wird ausgeschaltet, wenn nicht
 einmal das Mindestbudget passt. Adaptives Thinking (Claude Opus 4.6, Sonnet 4.6
 und neuer) hat kein Budget: Es bleibt an, und das begrenzte `max_tokens`
-beschränkt, was es verbraucht.
+beschränkt, was es verbraucht. Claude Opus 4.6 und Sonnet 4.6 akzeptieren `max`,
+aber nicht `xhigh`, daher erhalten sie unter einer `xhigh`-Obergrenze `high`.
 
 Obergrenzen greifen nach den [Overrides virtueller Modelle](/de/features/virtual-models#reasoning-effort-erzwingen)
 bei jedem Versuch, auch bei Failover-Versuchen, und begrenzen daher auch einen

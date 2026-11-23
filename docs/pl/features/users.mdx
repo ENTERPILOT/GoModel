@@ -201,17 +201,19 @@ dowolnej wielkości liter i w każdym wystąpieniu powtórzonej składowej:
 | `think` (wartość logiczna albo poziom)                     | Ollama                                    |
 | `chat_template_kwargs.enable_thinking`, `.thinking`, `.reasoning_effort`, `.thinking_budget` | vLLM, SGLang, llama.cpp |
 | `extra_body.google.thinking_config` `thinking_budget`/`thinking_level` (nazwy w dowolnej wielkości liter) | Gemini |
-| Messages `thinking` (`budget_tokens` albo adaptacyjny) i `output_config.effort` | Anthropic            |
+| Messages `thinking` (`budget_tokens` albo adaptacyjny) i `output_config.effort`, na najwyższym poziomie i w wiadomości ([effort per message](https://platform.claude.com/docs/en/build-with-claude/effort-per-message)) | Anthropic |
 
 Sterowanie, które wyłącza reasoning (`false`, budżet zero,
 `{"type": "disabled"}`), oraz poziom w granicach limitu zostają zachowane.
 Wszystko, czego skala nie potrafi umieścić, np. budżet tokenów albo `true`,
 liczy się jako powyżej limitu: gateway usuwa wszystkie sterowania reasoningiem
-klienta i zamiast nich wysyła limit jako effort. Obiekt sterowania, który
-powtarza `type` i ma `disabled` tylko w ostatnim wystąpieniu, też jest usuwany;
-zastępuje go najwyższy effort, który request podaje gdzie indziej w granicach
-limitu, albo `none`, gdy nie podaje żadnego innego, żeby limit nie włączał
-reasoningu. Messages `budget_tokens` powyżej budżetu, który gateway sam wysyła
+klienta i zamiast nich wysyła limit jako effort. Request, który zarazem wyłącza
+reasoning (na przykład `enable_thinking: false` obok `thinking_budget`), nie
+zostaje w ten sposób włączony, podobnie jak obiekt sterowania, który powtarza
+`type` i ma `disabled` tylko w ostatnim wystąpieniu: te sterowania też są
+usuwane, a zastępuje je najwyższy effort, który request podaje gdzie indziej w
+granicach limitu, albo `none`, gdy nie podaje żadnego innego. Messages
+`budget_tokens` powyżej budżetu, który gateway sam wysyła
 dla poziomu limitu (5000 dla `low`, 10000 dla `medium`, 20000 od `high`),
 zostaje obniżony do tego budżetu. Jedynym wyjątkiem od zasady, że effort nigdy
 nie jest dodawany, jest adaptacyjny thinking Messages
@@ -224,6 +226,8 @@ się w limitach: budżet thinking kurczy się, aż zmieści się pod ograniczony
 `max_tokens`, a thinking zostaje wyłączony, gdy nie mieści się nawet budżet
 minimalny. Adaptacyjny thinking (Claude Opus 4.6, Sonnet 4.6 i nowsze) nie ma
 budżetu: zostaje włączony, a ograniczone `max_tokens` wyznacza, ile może zużyć.
+Claude Opus 4.6 i Sonnet 4.6 przyjmują `max`, ale nie `xhigh`, więc przy limicie
+`xhigh` dostają `high`.
 
 Limity działają po [nadpisaniach modeli wirtualnych](/pl/features/virtual-models#wymuszanie-reasoning-effort),
 przy każdej próbie, także przy próbach failover, więc ograniczają też effort
