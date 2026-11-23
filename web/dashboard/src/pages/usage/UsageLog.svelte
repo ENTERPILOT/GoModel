@@ -1,5 +1,5 @@
 <script>
-  // Request log: paginated per-request usage entries following the page's
+  // Usage log: paginated per-request usage entries following the page's
   // window and facet filters.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import NoDataIllustration from "$lib/components/atoms/NoDataIllustration.svelte";
@@ -92,7 +92,7 @@ import {
 {/snippet}
 
 <div class="usage-log-section">
-  <h3>{m.usage_request_log()}</h3>
+  <h3>{m.usage_log_title()}</h3>
   <div class="usage-log-toolbar">
     <div class="usage-filter-row usage-filter-row-search">
       <FilterInput

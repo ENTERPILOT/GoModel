@@ -148,7 +148,7 @@ test("requestEntryLiveInProgress stays true while a partial response body is str
   const streaming = {
     _live: true,
     _live_pending: true,
-    _live_state: "audit.stream",
+    _live_state: "request_log.stream",
     _response_partial: true,
     status_code: 200,
     data: { response_body: { choices: [] } },
@@ -158,7 +158,7 @@ test("requestEntryLiveInProgress stays true while a partial response body is str
   assert.equal(
     requestEntryLiveInProgress({
       ...streaming,
-      _live_state: "audit.completed",
+      _live_state: "request_log.completed",
       _response_partial: false,
       duration_ns: 1000,
     }),
@@ -170,7 +170,7 @@ test("request log panes surface pending spinners and streaming badges for live r
   const waiting = {
     _live: true,
     _live_pending: true,
-    _live_state: "audit.updated",
+    _live_state: "request_log.updated",
     data: {},
   };
   const waitingResponse = requestLogResponsePane(waiting);
@@ -185,7 +185,7 @@ test("request log panes surface pending spinners and streaming badges for live r
   const streaming = {
     _live: true,
     _live_pending: true,
-    _live_state: "audit.stream",
+    _live_state: "request_log.stream",
     _response_partial: true,
     status_code: 200,
     data: {
@@ -202,7 +202,7 @@ test("request log panes surface pending spinners and streaming badges for live r
   // A stale partial flag on an already-settled entry must not keep the badge.
   const settled = {
     ...streaming,
-    _live_state: "audit.completed",
+    _live_state: "request_log.completed",
     duration_ns: 1000,
   };
   assert.equal(requestLogResponsePane(settled).streaming, false);
@@ -260,7 +260,7 @@ test("requestEntryLiveInProgress marks only live rows still waiting for a respon
     requestEntryLiveInProgress({
       _live: true,
       _live_pending: true,
-      _live_state: "audit.started",
+      _live_state: "request_log.started",
     }),
     true,
   );
@@ -269,7 +269,7 @@ test("requestEntryLiveInProgress marks only live rows still waiting for a respon
     requestEntryLiveInProgress({
       _live: true,
       _live_pending: true,
-      _live_state: "audit.completed",
+      _live_state: "request_log.completed",
       status_code: 200,
       duration_ns: 123000000,
     }),

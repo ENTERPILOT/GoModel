@@ -1,0 +1,113 @@
+---
+title: "Eksport konfiguracji"
+description: "Wyeksportuj konfigurację, z którą uruchomiłby się teraz gateway GoModel, jako jeden plik config.yaml: z binarki, Docker Compose lub dockera. Dowiedz się też, dlaczego dashboard nie ma przycisku eksportu."
+icon: "file-output"
+keywords: ["eksport konfiguracji", "config export", "config.yaml", "kopia zapasowa", "backup", "docker", "docker compose", "dashboard", "sekrety", "secrets"]
+---
+
+`gomodel config export` wypisuje konfigurację, z którą uruchomiłby się teraz
+gateway, jako jeden plik `config.yaml`: Twój `config.yaml`, zmienne
+środowiskowe oraz obiekty zapisane w dashboardzie, takie jak providerzy, modele
+wirtualne, użytkownicy i budżety. Użyj go, żeby przejrzeć konfigurację, trzymać
+ją w Gicie albo uruchomić z niej kolejną instancję.
+
+## Eksport
+
+Uruchom polecenie tam, gdzie działa gateway, żeby odczytało te same pliki,
+środowisko i bazę danych. Jest bezpieczne, gdy gateway działa. Logi trafiają na
+stderr, więc plik zawiera tylko konfigurację.
+
+Polecenie czyta pliki i środowisko od nowa, a nie stan działającego gatewaya.
+Jeśli zmieniłeś `config.yaml`, a gateway odrzucił przeładowanie, eksport pokaże
+zmieniony plik albo zakończy się tym samym błędem.
+
+<Tabs>
+  <Tab title="Binarka">
+    Z katalogu, w którym startuje gateway, z tym samym środowiskiem:
+
+    ```bash
+    gomodel config export > gomodel-export.yaml
+    ```
+  </Tab>
+  <Tab title="Docker Compose">
+    ```bash
+    docker compose exec -T gomodel /gomodel config export > gomodel-export.yaml
+    ```
+
+    `gomodel` to nazwa serwisu w Twoim `docker-compose.yaml`. `-T` wyłącza
+    przydzielanie terminala, więc plik dostaje wyjście bez zmian.
+  </Tab>
+  <Tab title="docker">
+    ```bash
+    docker exec gomodel /gomodel config export > gomodel-export.yaml
+    ```
+
+    `gomodel` to nazwa kontenera (`docker ps`).
+  </Tab>
+</Tabs>
+
+<Warning>
+  Zapisuj do nowego pliku, nigdy do `config.yaml`, który czyta gateway: powłoka
+  opróżnia ten plik, zanim polecenie wystartuje.
+</Warning>
+
+Ustawienia o wartości domyślnej są pomijane, więc plik pokazuje tylko to, co
+zmieniłeś. Dodaj `--include-defaults`, żeby zapisać też wartości domyślne,
+z wyjątkiem ustawień, które domyślnie są puste.
+
+## Sekrety
+
+Ustawienia będące sekretami, takie jak klucze API, są zapisywane jako
+referencje, nigdy jako wartości:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_key: "${env:OPENAI_API_KEY}"
+  groq:
+    type: groq
+    api_key: "${env:GOMODEL_PROVIDERS_GROQ_API_KEY}" # secret not exported: set GOMODEL_PROVIDERS_GROQ_API_KEY
+```
+
+Klucz wpisany w dashboardzie dostaje komentarz `# secret not exported` z nazwą
+zmiennej, którą trzeba ustawić. Gateway wczytujący ten plik nie wystartuje,
+dopóki ta zmienna nie zostanie ustawiona.
+
+Dowolny tekst, na przykład opis, jest sprawdzany tylko pod kątem wzorców danych
+uwierzytelniających, więc wklejony do niego token może trafić do pliku. Przejrzyj
+taki tekst, zanim udostępnisz plik.
+
+## Użycie eksportu
+
+Zapisz go jako `config/config.yaml` na docelowej instancji (w Dockerze zamontuj
+go jako `/app/config/config.yaml`), ustaw zmienne, do których się odwołuje,
+i uruchom gateway. Obiekty pochodzące z dashboardu są teraz zadeklarowane
+w pliku, więc w dashboardzie są tylko do odczytu.
+
+<Note>
+  Nie wszystko ma postać w `config.yaml`. Zarządzane klucze API, workflow,
+  guardraile utworzone w dashboardzie, nadpisania cen modeli, ustawienia
+  runtime, wyłączone dane uwierzytelniające providerów i nazwy wyświetlane
+  serwerów MCP nie są eksportowane; wymienia je nagłówek pliku. Zostają w bazie
+  danych: żeby je przenieść, wskaż docelowej instancji tę bazę albo przywróć na
+  niej jej [kopię zapasową](/pl/guides/updating#1-wykonaj-kopię-zapasową-bazy-danych).
+</Note>
+
+## Dlaczego dashboard nie ma przycisku eksportu
+
+Eksport jest celowo poleceniem powłoki, bez żadnego endpointu HTTP.
+
+- **Opisuje całe wdrożenie.** Nawet bez sekretów wymienia każdy upstream, bazę
+  danych i wewnętrzny URL oraz to, gdzie znajdują się poszczególne dane
+  uwierzytelniające.
+- **Logowanie do dashboardu nie powinno wystarczyć, żeby go zabrać.** Endpoint
+  oddałby plik każdemu, kto ma login administratora, również skradziony. Dostęp
+  do powłoki gatewaya ma węższa grupa, która i tak może czytać jego pliki
+  i środowisko.
+- **Ukrywanie sekretów ma granice.** Token wklejony do opisu jest zapisywany bez
+  zmian, więc plik nie powinien być dostępny jednym kliknięciem.
+
+Pełne zasady opisuje sekcja
+[Exporting the Effective Configuration](/advanced/config-yaml#exporting-the-effective-configuration)
+(po angielsku).

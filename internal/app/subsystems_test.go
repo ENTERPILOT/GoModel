@@ -25,6 +25,12 @@ func (*lifecycleRuntimeSetting) Apply(string) error { return nil }
 // SetSharedStore makes the extension shared store part of the fully wired app.
 func (*lifecycleRuntimeSetting) SetSharedStore(ext.SharedStore) {}
 
+type lifecycleAlertSink struct{}
+
+func (lifecycleAlertSink) Name() string { return "lifecycle" }
+
+func (lifecycleAlertSink) SendAlert(context.Context, ext.AlertEvent) error { return nil }
+
 // newFullyWiredApp builds an App with every optional subsystem enabled, so the
 // coverage tests below see the complete registry rather than the subset a
 // minimal config happens to initialize.
@@ -54,6 +60,8 @@ func newFullyWiredApp(t *testing.T) *App {
 
 	extensions := &ext.Registry{}
 	extensions.RegisterSetting(&lifecycleRuntimeSetting{})
+	// An alert destination makes budget alerts part of the fully wired app.
+	extensions.RegisterAlertSink(lifecycleAlertSink{})
 	application, err := New(context.Background(), Config{
 		AppConfig:  loaded,
 		Factory:    providers.NewProviderFactory(),
@@ -102,6 +110,22 @@ func TestShutdownStopsRuntimeSettingsBeforeProviders(t *testing.T) {
 	require.GreaterOrEqual(t, runtimeSettingsIndex, 0)
 	require.GreaterOrEqual(t, providersIndex, 0)
 	require.Less(t, runtimeSettingsIndex, providersIndex)
+}
+
+// Alerts are claimed before they are queued, so one that fails while the
+// queue drains is lost for good. Draining therefore has to finish before
+// anything a delivery or an evaluation uses closes: the shared store a sink
+// keeps state in, the budget and usage stores, telemetry, and storage.
+func TestShutdownDrainsBudgetAlertsBeforeWhatTheyUse(t *testing.T) {
+	order := newFullyWiredApp(t).shutdownOrder()
+	index := func(name string) int {
+		return slices.IndexFunc(order, func(subsystem registeredSubsystem) bool { return subsystem.name == name })
+	}
+	alertsIndex := index(subsystemBudgetAlerts)
+	require.GreaterOrEqual(t, alertsIndex, 0)
+	for _, used := range []string{subsystemSharedStore, subsystemBudgets, subsystemUsage, subsystemTelemetry, subsystemStorage} {
+		assert.Greater(t, index(used), alertsIndex, "%s closes before budget alerts have drained", used)
+	}
 }
 
 // The mirror of the check above: an entry in shutdownOrder that nothing

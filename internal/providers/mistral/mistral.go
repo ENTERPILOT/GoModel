@@ -58,10 +58,12 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 
 // normalizeChatResponse flattens a buffered completion's thinking chunks
 // (thinking becomes reasoning_content) before the typed decode, which rejects
-// Mistral's content chunk arrays.
+// Mistral's content chunk arrays, and maps Mistral's "model_length" finish
+// reason to "length".
 func normalizeChatResponse(raw []byte) []byte {
 	flattened, _ := flattenThinkingChunks(raw)
-	return flattened
+	mapped, _ := mapFinishReasons(flattened)
+	return mapped
 }
 
 // StreamChatCompletion returns Mistral's SSE stream wrapped so that every

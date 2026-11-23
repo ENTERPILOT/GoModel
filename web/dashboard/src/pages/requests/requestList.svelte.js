@@ -14,7 +14,7 @@
 // `liveLogs.requestThreadChildren` when the user unfolds it.
 
 import { getJSON } from "$lib/api/client.js";
-import { readStored, writeStored } from "$lib/utils/storage.js";
+import { readStoredRenamed, writeStored } from "$lib/utils/storage.js";
 import { dateRange } from "$lib/stores/dateRange.svelte.js";
 import { liveLogs } from "./liveLogs.svelte.js";
 import { normalizeRequestColumns, parseStoredRequestColumns } from "./request-columns.js";
@@ -47,7 +47,7 @@ class RequestListStore {
   // Column visibility view preference ({ [column key]: boolean }); persisted
   // like the session-grouping toggle.
   requestColumns = $state(
-    parseStoredRequestColumns(readStored("gomodel_audit_columns", "{}")),
+    parseStoredRequestColumns(readStoredRenamed("gomodel_requests_columns", "gomodel_audit_columns", "{}")),
   );
   requestLogExpandedEntries = $state({});
   requestLogExpandedThreads = $state({});
@@ -98,7 +98,7 @@ class RequestListStore {
   }
   set requestLogHiddenTypes(value) {
     liveLogs.requestLogHiddenTypes = normalizeHiddenTypes(value);
-    writeStored("gomodel_audit_hidden_types", JSON.stringify(liveLogs.requestLogHiddenTypes));
+    writeStored("gomodel_requests_hidden_types", JSON.stringify(liveLogs.requestLogHiddenTypes));
   }
   get requestLogGroupSessions() {
     return liveLogs.requestLogGroupSessions;
@@ -134,7 +134,7 @@ class RequestListStore {
 
   toggleRequestLogGroupSessions() {
     liveLogs.requestLogGroupSessions = !liveLogs.requestLogGroupSessions;
-    writeStored("gomodel_audit_group_sessions", liveLogs.requestLogGroupSessions);
+    writeStored("gomodel_requests_group_sessions", liveLogs.requestLogGroupSessions);
     this.requestLogExpandedThreads = {};
     liveLogs.requestThreadChildren = {};
     this.fetchRequestLog(true);
@@ -147,7 +147,7 @@ class RequestListStore {
       ...this.requestColumns,
       [key]: !this.requestColumns[key],
     });
-    writeStored("gomodel_audit_columns", JSON.stringify(this.requestColumns));
+    writeStored("gomodel_requests_columns", JSON.stringify(this.requestColumns));
   }
 
   async fetchRequestLog(resetOffset) {
@@ -189,7 +189,7 @@ class RequestListStore {
         this.liveFilters(),
       );
       if (!Array.isArray(next.entries)) next.entries = [];
-      next.entries = liveLogs.upsertRequestLogRecords(next.entries, "audit.list");
+      next.entries = liveLogs.upsertRequestLogRecords(next.entries, "request_log.list");
       this.requestLog = next;
       this.requestLogExpandedThreads = pruneThreadMap(
         this.requestLogExpandedThreads,
@@ -327,7 +327,7 @@ class RequestListStore {
       );
       merged.entries = liveLogs.upsertRequestLogRecords(
         merged.entries,
-        "audit.thread",
+        "request_log.thread",
       );
       liveLogs.requestThreadChildren = {
         ...liveLogs.requestThreadChildren,

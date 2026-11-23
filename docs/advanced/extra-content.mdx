@@ -40,7 +40,7 @@ against it work unchanged.
 | API | Location |
 | --- | --- |
 | Chat Completions | `tool_calls[].extra_content`; on the assistant message for turn-wide state such as thinking blocks; also on streamed `tool_calls` and message deltas |
-| Responses | `function_call` output items; `reasoning` output items; the assistant `message` item when a text-turn signature arrives while streaming |
+| Responses | `function_call` output items; `reasoning` output items; the assistant `message` item when a text-turn signature arrives while streaming; the assistant `message` item for Mistral citation chunks |
 | Anthropic Messages | `tool_use` content blocks. Thinking blocks use the dialect's own `signature` and `data` fields instead. |
 
 State sits on the unit that maps to one provider part. A tool call becomes one
@@ -57,7 +57,9 @@ belong to the whole assistant turn, so they live on the message.
   own. A Gemini signature never reaches Anthropic or OpenAI, and a history
   that moved between providers does not fail on foreign fields.
 - **Only the owning adapter reads or writes inside it.** Nothing else in the
-  gateway interprets the contents.
+  gateway interprets the contents. One exception: the Responses translation
+  writes `extra_content.mistral`, copying the chunks the Mistral adapter left
+  on the chat message without interpreting them.
 - **Echo it verbatim.** Do not rewrite, reorder, or trim the member.
 
 ## Thought signature preservation
@@ -327,6 +329,7 @@ before dispatch, on every route, in every dialect.
 | `extra_content.google` | any other provider | nothing; the member is dropped |
 | `extra_content.anthropic` | `anthropic` | thinking blocks and `is_error`, restored in place; a thinking block Anthropic did not sign is dropped |
 | `extra_content.anthropic` | any other provider | nothing; the member is dropped |
+| `extra_content.mistral` | any provider, `mistral` included | nothing; the member is dropped |
 
 The client's own history is never modified. The filtering happens on the copy
 GoModel sends upstream.
@@ -337,3 +340,4 @@ GoModel sends upstream.
 | --- | --- | --- |
 | `google` | `gemini`, `vertex` | `thought_signature`: the Gemini 3 signature of a function call or text turn. |
 | `anthropic` | `anthropic` | `thinking_blocks`: the `thinking` and `redacted_thinking` blocks of an assistant turn, signatures included, written on responses and read back on requests; `is_error`: marks a tool result as failed, set by the Anthropic Messages API ingress. |
+| `mistral` | `mistral` | `content_chunks`: the content chunks of an answer that have no OpenAI equivalent, such as [citation `reference` chunks](/providers/mistral#citations), written on the Responses `message` item. Output only: nothing reads it back. |

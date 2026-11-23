@@ -170,7 +170,7 @@ func TestProviderScopeKeepsASingleBreaker(t *testing.T) {
 	cfg := DefaultConfig("test", "")
 	client := New(cfg, nil)
 	for _, model := range []string{"model1", "model2"} {
-		got := client.breakerForModel(model)
+		got := client.breakerForRequest(t.Context(), model)
 		require.Same(t, client.circuitBreaker, got, "%s must share the provider breaker under the default scope", model)
 
 		// Releasing the provider breaker is a no-op, not a bad bookkeeping entry.

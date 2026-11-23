@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/goccy/go-json"
+	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage"
@@ -62,14 +63,18 @@ const (
 	GuardrailTargetResponse = "response"
 )
 
+// LiveEventRequestLogPrefix starts every request log live event type. A live
+// stream filters on it without the trailing dot.
+const LiveEventRequestLogPrefix = "request_log."
+
 const (
-	LiveEventRequestLogStarted   = "audit.started"
-	LiveEventRequestLogUpdated   = "audit.updated"
-	LiveEventRequestLogStream    = "audit.stream"
-	LiveEventRequestLogCompleted = "audit.completed"
-	LiveEventRequestLogFailed    = "audit.failed"
-	LiveEventRequestLogFlushed   = "audit.flushed"
-	LiveEventRequestLogRemoved   = "audit.removed"
+	LiveEventRequestLogStarted   = LiveEventRequestLogPrefix + "started"
+	LiveEventRequestLogUpdated   = LiveEventRequestLogPrefix + "updated"
+	LiveEventRequestLogStream    = LiveEventRequestLogPrefix + "stream"
+	LiveEventRequestLogCompleted = LiveEventRequestLogPrefix + "completed"
+	LiveEventRequestLogFailed    = LiveEventRequestLogPrefix + "failed"
+	LiveEventRequestLogFlushed   = LiveEventRequestLogPrefix + "flushed"
+	LiveEventRequestLogRemoved   = LiveEventRequestLogPrefix + "removed"
 )
 
 const maxAttemptErrorMessageLength = 2048
@@ -228,12 +233,76 @@ type LogData struct {
 // applied to one request. Fields intentionally do not use omitempty so "false"
 // remains explicit once the snapshot exists.
 type WorkflowFeaturesSnapshot struct {
-	Cache      bool `json:"cache" bson:"cache"`
-	Audit      bool `json:"audit" bson:"audit"`
-	Usage      bool `json:"usage" bson:"usage"`
-	Budget     bool `json:"budget" bson:"budget"`
-	Guardrails bool `json:"guardrails" bson:"guardrails"`
-	Failover   bool `json:"failover" bson:"failover"`
+	Cache       bool `json:"cache" bson:"cache"`
+	RequestLogs bool `json:"request_logs" bson:"request_logs"`
+	Usage       bool `json:"usage" bson:"usage"`
+	Budget      bool `json:"budget" bson:"budget"`
+	Guardrails  bool `json:"guardrails" bson:"guardrails"`
+	Failover    bool `json:"failover" bson:"failover"`
+}
+
+// workflowFeaturesSnapshotWire is WorkflowFeaturesSnapshot as JSON and BSON.
+// The request_logs flag was named audit through v0.2.5, and dashboards and
+// replicas of that version read only audit, so both keys are written to the
+// API and to storage. request_logs wins when both are read; entries stored by
+// v0.2.5 and earlier carry audit alone.
+type workflowFeaturesSnapshotWire struct {
+	Cache       bool  `json:"cache" bson:"cache"`
+	RequestLogs *bool `json:"request_logs,omitempty" bson:"request_logs,omitempty"`
+	Audit       *bool `json:"audit,omitempty" bson:"audit,omitempty"`
+	Usage       bool  `json:"usage" bson:"usage"`
+	Budget      bool  `json:"budget" bson:"budget"`
+	Guardrails  bool  `json:"guardrails" bson:"guardrails"`
+	Failover    bool  `json:"failover" bson:"failover"`
+}
+
+func (s WorkflowFeaturesSnapshot) wire() workflowFeaturesSnapshotWire {
+	return workflowFeaturesSnapshotWire{
+		Cache:       s.Cache,
+		RequestLogs: &s.RequestLogs,
+		Audit:       &s.RequestLogs, // deprecated alias: drop this line to stop writing it
+		Usage:       s.Usage,
+		Budget:      s.Budget,
+		Guardrails:  s.Guardrails,
+		Failover:    s.Failover,
+	}
+}
+
+func (w workflowFeaturesSnapshotWire) snapshot() WorkflowFeaturesSnapshot {
+	return WorkflowFeaturesSnapshot{
+		Cache:       w.Cache,
+		RequestLogs: core.RequestLogsFlag(w.RequestLogs, w.Audit),
+		Usage:       w.Usage,
+		Budget:      w.Budget,
+		Guardrails:  w.Guardrails,
+		Failover:    w.Failover,
+	}
+}
+
+// MarshalJSON writes request_logs and its deprecated alias audit.
+func (s WorkflowFeaturesSnapshot) MarshalJSON() ([]byte, error) { return json.Marshal(s.wire()) }
+
+// UnmarshalJSON reads request_logs, falling back to its deprecated alias audit.
+func (s *WorkflowFeaturesSnapshot) UnmarshalJSON(data []byte) error {
+	var wire workflowFeaturesSnapshotWire
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*s = wire.snapshot()
+	return nil
+}
+
+// MarshalBSON writes request_logs and its deprecated alias audit.
+func (s WorkflowFeaturesSnapshot) MarshalBSON() ([]byte, error) { return bson.Marshal(s.wire()) }
+
+// UnmarshalBSON reads request_logs, falling back to its deprecated alias audit.
+func (s *WorkflowFeaturesSnapshot) UnmarshalBSON(data []byte) error {
+	var wire workflowFeaturesSnapshotWire
+	if err := bson.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*s = wire.snapshot()
+	return nil
 }
 
 // FailoverSnapshot stores the runtime failover selection used for one request.

@@ -37,6 +37,13 @@ type ModelSlowdownResolver interface {
 	ResolveSlowdown(context.Context, core.RequestedModelSelector, core.ModelSelector) float64
 }
 
+// ModelTimeoutsResolver optionally resolves the per-attempt upstream
+// timeouts for a requested/resolved model pair; route is the virtual-model
+// path resolution recorded. The context carries the effective user path.
+type ModelTimeoutsResolver interface {
+	ResolveTimeouts(ctx context.Context, requested core.RequestedModelSelector, resolved core.ModelSelector, route []string) core.UpstreamTimeouts
+}
+
 // ModelRequestOverridesResolver optionally resolves the operator-forced
 // reasoning effort and request parameters for one provider attempt:
 // resolution is the request's model resolution and attempt the concrete model

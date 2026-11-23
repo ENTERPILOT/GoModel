@@ -44,7 +44,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			}
 
 			// This only short-circuits when an upstream component has already
-			// populated the context with an Audit=false workflow before next(c).
+			// populated the context with a RequestLogs=false workflow before next(c).
 			// In the common path workflow resolution happens later, so the real
 			// gating occurs after next(c) once the final workflow has been resolved.
 			if !requestLogEnabledForContext(c.Request().Context()) {
@@ -136,7 +136,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			_, entry.StatusCode = echo.ResolveResponseStatus(c.Response(), err)
 
 			// Request capture is deferred until after next so a later-resolved
-			// Audit=false workflow can skip it entirely. It reads the current
+			// RequestLogs=false workflow can skip it entirely. It reads the current
 			// request: the body joins the snapshot only after authentication.
 			PopulateRequestData(entry, c.Request(), cfg)
 

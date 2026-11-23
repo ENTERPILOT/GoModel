@@ -31,7 +31,8 @@ var Registration = providers.Registration{
 }
 
 // Provider implements ElevenLabs' native text-to-speech and speech-to-text
-// APIs behind the OpenAI-compatible audio endpoints, plus native passthrough.
+// APIs behind the OpenAI-compatible audio endpoints, Scribe Realtime behind the
+// realtime websocket, plus native passthrough.
 // Chat, Responses, and embeddings return invalid_request_error because
 // ElevenLabs has no such endpoints.
 type Provider struct {
@@ -132,28 +133,30 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 // staticTranscriptionModels lists ElevenLabs' speech-to-text ("Scribe")
 // models, which are not included in GET /v1/models (that endpoint only lists
 // text-to-speech models). scribe_v2 is current; scribe_v1 remains valid but
-// is superseded.
+// is superseded. scribe_v2_realtime and scribe_v3_live are the streaming
+// models: they serve realtime sessions only, and ElevenLabs rejects them on
+// the file transcription endpoint.
 var staticTranscriptionModels = []core.Model{
-	{
-		ID:      "scribe_v2",
+	transcriptionModel("scribe_v2", "Scribe v2"),
+	transcriptionModel("scribe_v1", "Scribe v1"),
+	transcriptionModel("scribe_v2_realtime", "Scribe v2 Realtime", "realtime"),
+	transcriptionModel("scribe_v3_live", "Scribe v3 Live", "realtime"),
+}
+
+// transcriptionModel describes a Scribe model; extraModes names what it serves
+// besides transcription.
+func transcriptionModel(id, displayName string, extraModes ...string) core.Model {
+	modes := append([]string{"audio_transcription"}, extraModes...)
+	return core.Model{
+		ID:      id,
 		Object:  "model",
 		OwnedBy: "elevenlabs",
 		Metadata: &core.ModelMetadata{
-			DisplayName: "Scribe v2",
-			Modes:       []string{"audio_transcription"},
-			Categories:  core.CategoriesForModes([]string{"audio_transcription"}),
+			DisplayName: displayName,
+			Modes:       modes,
+			Categories:  core.CategoriesForModes(modes),
 		},
-	},
-	{
-		ID:      "scribe_v1",
-		Object:  "model",
-		OwnedBy: "elevenlabs",
-		Metadata: &core.ModelMetadata{
-			DisplayName: "Scribe v1",
-			Modes:       []string{"audio_transcription"},
-			Categories:  core.CategoriesForModes([]string{"audio_transcription"}),
-		},
-	},
+	}
 }
 
 type modelInfo struct {

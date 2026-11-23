@@ -2,6 +2,7 @@ package budget
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"strings"
@@ -103,6 +104,9 @@ func normalizeBudgetsForUpsert(budgets []Budget) ([]Budget, error) {
 		if err != nil {
 			return nil, err
 		}
+		// The store keeps it only for a new budget or a changed amount or
+		// cost basis; see Budget.Revision.
+		item.Revision = rand.Text()
 		key := budgetKey(item.Scope, item.Subject, item.PeriodSeconds)
 		if existing, ok := seen[key]; ok {
 			normalized[existing] = item

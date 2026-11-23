@@ -340,6 +340,150 @@ func TestStreamResponses_PreservesFlattenedThinking(t *testing.T) {
 		"the answer must stream as its own exact delta sequence")
 }
 
+// A cited answer, as Mistral returns it after a tool result that supplied the
+// references: reference chunks between the text chunks, each listing the
+// caller's reference ids.
+const citedCompletionJSON = `{
+	"id": "cmpl-mistral-3",
+	"object": "chat.completion",
+	"created": 1773842038,
+	"model": "mistral-large-4-0",
+	"choices": [{
+		"index": 0,
+		"message": {
+			"role": "assistant",
+			"content": [
+				{"type": "text", "text": "Paris is the capital"},
+				{"type": "reference", "reference_ids": [0]},
+				{"type": "text", "text": " and the largest city."},
+				{"type": "reference", "reference_ids": [0, 2]}
+			]
+		},
+		"finish_reason": "stop"
+	}],
+	"usage": {"prompt_tokens": 9, "completion_tokens": 8, "total_tokens": 17}
+}`
+
+// The same answer streamed: a reference chunk arrives in a delta whose
+// content is a chunk array.
+const citedChunkSSE = "data: {\"id\":\"cmpl-mistral-3\",\"object\":\"chat.completion.chunk\",\"model\":\"mistral-large-4-0\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Paris is the capital\"}}]}\n\n" +
+	"data: {\"id\":\"cmpl-mistral-3\",\"object\":\"chat.completion.chunk\",\"model\":\"mistral-large-4-0\",\"choices\":[{\"index\":0,\"delta\":{\"content\":[{\"type\":\"reference\",\"reference_ids\":[0]}]}}]}\n\n" +
+	"data: {\"id\":\"cmpl-mistral-3\",\"object\":\"chat.completion.chunk\",\"model\":\"mistral-large-4-0\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" and the largest city.\"}}]}\n\n" +
+	"data: {\"id\":\"cmpl-mistral-3\",\"object\":\"chat.completion.chunk\",\"model\":\"mistral-large-4-0\",\"choices\":[{\"index\":0,\"delta\":{\"content\":[{\"type\":\"reference\",\"reference_ids\":[0,2]}]},\"finish_reason\":\"stop\"}]}\n\n" +
+	"data: [DONE]\n\n"
+
+// citedExtraContentJSON is the extra_content of the Responses message item
+// for the cited answer.
+const citedExtraContentJSON = `{"mistral":{"content_chunks":[{"type":"reference","reference_ids":[0]},{"type":"reference","reference_ids":[0,2]}]}}`
+
+// Responses has no standard member for a citation that carries only reference
+// ids, so the message item keeps the chunks in its extra_content, next to the
+// unchanged text part.
+func TestResponses_KeepsReferenceChunks(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusOK, citedCompletionJSON)
+	provider := newTestProvider(server)
+
+	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
+		Model: "mistral-large-4-0",
+		Input: "Tell me about Paris.",
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Output, 1)
+	message := resp.Output[0]
+	require.Equal(t, "message", message.Type)
+	require.Len(t, message.Content, 1)
+	assert.Equal(t, "Paris is the capital and the largest city.", message.Content[0].Text)
+	assert.Empty(t, message.Content[0].Annotations)
+
+	encoded, err := json.Marshal(message)
+	require.NoError(t, err)
+	var wire map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(encoded, &wire))
+	assert.JSONEq(t, citedExtraContentJSON, string(wire[core.ExtraContentField]))
+	assert.NotContains(t, wire, unknownChunksKey)
+}
+
+func TestStreamResponses_KeepsReferenceChunks(t *testing.T) {
+	server, _ := providertest.SSEServer(t, citedChunkSSE)
+	provider := newTestProvider(server)
+
+	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model:  "mistral-large-4-0",
+		Input:  "Tell me about Paris.",
+		Stream: true,
+	})
+	require.NoError(t, err)
+	body, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	require.NoError(t, stream.Close())
+
+	// The chunks ride on the message item where it is stated whole: its
+	// output_item.done event and the terminal output.
+	var answer strings.Builder
+	var doneItem, terminalItem map[string]json.RawMessage
+	for _, payload := range dataLines(string(body)) {
+		var frame struct {
+			Type     string                     `json:"type"`
+			Delta    string                     `json:"delta"`
+			Item     map[string]json.RawMessage `json:"item"`
+			Response struct {
+				Output []map[string]json.RawMessage `json:"output"`
+			} `json:"response"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(payload), &frame), "frame: %s", payload)
+		switch frame.Type {
+		case "response.output_text.delta":
+			answer.WriteString(frame.Delta)
+		case "response.output_item.done":
+			doneItem = frame.Item
+		case "response.completed":
+			require.Len(t, frame.Response.Output, 1)
+			terminalItem = frame.Response.Output[0]
+		}
+	}
+	assert.Equal(t, "Paris is the capital and the largest city.", answer.String())
+	require.NotNil(t, doneItem)
+	require.NotNil(t, terminalItem)
+	assert.JSONEq(t, `"message"`, string(doneItem["type"]))
+	assert.JSONEq(t, citedExtraContentJSON, string(doneItem[core.ExtraContentField]))
+	assert.JSONEq(t, citedExtraContentJSON, string(terminalItem[core.ExtraContentField]))
+}
+
+// A Responses client replays output items as they came. The router strips
+// extra_content before the request reaches this provider; a request that
+// skips the router must still not send it to Mistral, which rejects members
+// its schema does not define.
+func TestResponses_DropsReplayedReferenceChunks(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+	provider := newTestProvider(server)
+
+	_, err := provider.Responses(context.Background(), &core.ResponsesRequest{
+		Model: "mistral-large-4-0",
+		Input: []any{
+			map[string]any{"type": "message", "role": "user", "content": "Tell me about Paris."},
+			map[string]any{
+				"type":   "message",
+				"id":     "msg_1",
+				"role":   "assistant",
+				"status": "completed",
+				"content": []any{
+					map[string]any{"type": "output_text", "text": "Paris is the capital.", "annotations": []any{}},
+				},
+				core.ExtraContentField: map[string]any{"mistral": map[string]any{
+					"content_chunks": []any{map[string]any{"type": "reference", "reference_ids": []any{0}}},
+				}},
+			},
+			map[string]any{"type": "message", "role": "user", "content": "And Lyon?"},
+		},
+	})
+	require.NoError(t, err)
+
+	messages, ok := capture.Last(t).JSON(t)["messages"].([]any)
+	require.True(t, ok)
+	require.Len(t, messages, 3)
+	assert.Equal(t, map[string]any{"role": "assistant", "content": "Paris is the capital."}, messages[1])
+}
+
 // A request without reasoning and without replayed thinking must reach the
 // upstream byte-identical in shape: no injected members.
 func TestChatCompletion_AdaptsRequest_Noop(t *testing.T) {
@@ -356,4 +500,64 @@ func TestChatCompletion_AdaptsRequest_Noop(t *testing.T) {
 	assert.NotContains(t, wire, "reasoning_effort")
 	assert.NotContains(t, wire, "reasoning")
 	assert.NotContains(t, wire, "stream_options")
+}
+
+// Mistral reports a completion cut off by the model's context window as
+// finish_reason "model_length". Clients only know the OpenAI "length" value,
+// so it must be mapped on both the buffered and the streamed path.
+func TestChatCompletion_MapsModelLengthFinishReason(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{"id":"cmpl-1","object":"chat.completion","created":1,"model":"mistral-large-4-0","choices":[{"index":0,"message":{"role":"assistant","content":"cut"},"finish_reason":"model_length"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	provider := newTestProvider(server)
+
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "mistral-large-4-0",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 1)
+	assert.Equal(t, "length", resp.Choices[0].FinishReason)
+}
+
+func TestStreamChatCompletion_MapsModelLengthFinishReason(t *testing.T) {
+	server, _ := providertest.SSEServer(t, "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"cut\"},\"finish_reason\":null}]}\n\n"+
+		"data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"model_length\"}]}\n\n"+
+		"data: [DONE]\n\n")
+	provider := newTestProvider(server)
+
+	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "mistral-large-4-0",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Stream:   true,
+	})
+	require.NoError(t, err)
+	body, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	require.NoError(t, stream.Close())
+
+	out := string(body)
+	assert.Contains(t, out, `"finish_reason":"length"`)
+	assert.NotContains(t, out, "model_length")
+	assert.Contains(t, out, `"content":"cut"`)
+	assert.Contains(t, out, "data: [DONE]")
+}
+
+// Only a finish_reason of "model_length" is rewritten: other reasons, and text
+// that merely mentions the value, are relayed byte for byte.
+func TestMapFinishReasons_LeavesOtherPayloadsUntouched(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{name: "stop", in: `{"choices":[{"index":0,"delta":{"content":"line\n"},"finish_reason":"stop"}]}`},
+		{name: "length", in: `{"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}`},
+		{name: "value only in content", in: `{"choices":[{"index":0,"delta":{"content":"model_length"},"finish_reason":null}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := []byte(tt.in)
+			out, changed := mapFinishReasons(in)
+			assert.False(t, changed)
+			assert.Equal(t, in, out)
+		})
+	}
 }

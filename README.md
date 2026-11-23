@@ -137,7 +137,7 @@ The official SDKs therefore work unchanged. Configure their base URLs as follows
 - Amazon Bedrock Runtime and Bedrock Mantle
 - ChatGPT (the Codex backend) and Claude
 - GitHub Copilot
-- ElevenLabs (text-to-speech and speech-to-text)
+- ElevenLabs (text-to-speech, speech-to-text, and realtime transcription)
 - Jev (TypeSafe System One decision API) and self-hosted Kev, also behind OpenAI's Decisions API
 - All OpenAI-compatible providers
 
