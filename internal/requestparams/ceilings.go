@@ -22,6 +22,19 @@ type Ceilings struct {
 	// OutputTokens is the highest output token limit allowed, in any of the
 	// token-limit spellings.
 	OutputTokens int
+	// ModelOutputTokens is the most output tokens the attempt's model
+	// produces, when the catalogue knows it. It is no ceiling: a request that
+	// sends no limit gets the lower of it and OutputTokens, because a ceiling
+	// above what the model takes would be refused upstream as a limit.
+	ModelOutputTokens int
+}
+
+// filledOutputTokens is the limit given to a request that sends none.
+func (c Ceilings) filledOutputTokens() int {
+	if c.ModelOutputTokens > 0 && c.ModelOutputTokens < c.OutputTokens {
+		return c.ModelOutputTokens
+	}
+	return c.OutputTokens
 }
 
 // IsZero reports whether no ceiling is set.
@@ -41,15 +54,17 @@ func (c Ceilings) Tighten(other Ceilings) Ceilings {
 	return c
 }
 
-// CapChatTokens returns req with its output token limit within limit. Adapters
-// read max_tokens and, where that is unset, max_completion_tokens, so a
-// request that sets neither gets max_tokens: its own max_output_tokens when
-// that is within limit (chat has no such member, so alone it would limit
-// nothing upstream), limit otherwise. Every spelling the request does carry
-// is lowered to limit in place. The request is never mutated: the result is
-// req itself when it is already within the limit and spells no limit in
-// another letter case.
-func CapChatTokens(req *core.ChatRequest, limit int) (*core.ChatRequest, error) {
+// CapChatTokens returns req with its output token limit within the token
+// ceiling. Adapters read max_tokens and, where that is unset,
+// max_completion_tokens, so a request that sets neither gets max_tokens: its
+// own max_output_tokens when that is within the ceiling (chat has no such
+// member, so alone it would limit nothing upstream), otherwise the ceiling,
+// or the model's own maximum when that is lower. Every spelling the request
+// does carry is lowered to the ceiling in place. The request is never
+// mutated: the result is req itself when it is already within the ceiling and
+// spells no limit in another letter case.
+func CapChatTokens(req *core.ChatRequest, ceilings Ceilings) (*core.ChatRequest, error) {
+	limit := ceilings.OutputTokens
 	if req == nil || limit <= 0 {
 		return req, nil
 	}
@@ -60,7 +75,7 @@ func CapChatTokens(req *core.ChatRequest, limit int) (*core.ChatRequest, error) 
 		req = &cloned
 	}
 	if req.MaxTokens == nil && !carriesTokenLimit(req.ExtraFields, "max_completion_tokens") {
-		return ApplyChat(req, nil, forcedTokenLimit("max_tokens", lowestTokenLimit(req.ExtraFields, limit, chatTokenLimitExtras)))
+		return ApplyChat(req, nil, forcedTokenLimit("max_tokens", filledTokenLimit(req.ExtraFields, limit, ceilings, chatTokenLimitExtras)))
 	}
 	maxTokens, fields, changed, err := capTokens(req.MaxTokens, req.ExtraFields, limit, chatTokenLimitExtras)
 	if err != nil || !changed {
@@ -74,7 +89,8 @@ func CapChatTokens(req *core.ChatRequest, limit int) (*core.ChatRequest, error) 
 // CapResponsesTokens is CapChatTokens for the Responses API, whose only
 // limit is max_output_tokens: a request that sets it in a chat spelling
 // alone gets it there.
-func CapResponsesTokens(req *core.ResponsesRequest, limit int) (*core.ResponsesRequest, error) {
+func CapResponsesTokens(req *core.ResponsesRequest, ceilings Ceilings) (*core.ResponsesRequest, error) {
+	limit := ceilings.OutputTokens
 	if req == nil || limit <= 0 {
 		return req, nil
 	}
@@ -85,7 +101,7 @@ func CapResponsesTokens(req *core.ResponsesRequest, limit int) (*core.ResponsesR
 		req = &cloned
 	}
 	if req.MaxOutputTokens == nil {
-		return ApplyResponses(req, nil, forcedTokenLimit("max_output_tokens", lowestTokenLimit(req.ExtraFields, limit, responsesTokenLimitExtras)))
+		return ApplyResponses(req, nil, forcedTokenLimit("max_output_tokens", filledTokenLimit(req.ExtraFields, limit, ceilings, responsesTokenLimitExtras)))
 	}
 	maxTokens, fields, changed, err := capTokens(req.MaxOutputTokens, req.ExtraFields, limit, responsesTokenLimitExtras)
 	if err != nil || !changed {
@@ -123,6 +139,18 @@ func lowestTokenLimit(fields core.UnknownJSONFields, limit int, keys []string) i
 		}
 	}
 	return limit
+}
+
+// filledTokenLimit returns the limit written to a request that sets none in
+// its endpoint's own member: the lowest it carries under keys within limit,
+// or, when it carries none below limit, what the ceilings fill in. limit is
+// the token ceiling, lowered already by a limit the request spells in another
+// letter case.
+func filledTokenLimit(fields core.UnknownJSONFields, limit int, ceilings Ceilings, keys []string) int {
+	if carried := lowestTokenLimit(fields, limit, keys); carried < limit {
+		return carried
+	}
+	return min(limit, ceilings.filledOutputTokens())
 }
 
 // forcedTokenLimit is the parameter set that writes limit as the request's

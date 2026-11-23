@@ -73,12 +73,32 @@ func TestCapChatTokens(t *testing.T) {
 		maxTokens  *int
 		extras     map[string]json.RawMessage
 		limit      int
+		model      int // the model's own maximum, 0 when the catalogue has none
 		wantTokens *int
 		wantExtras map[string]string
 		absent     []string
 		unchanged  bool
 	}{
 		{name: "an omitted limit is set to the ceiling", limit: 100, wantTokens: new(100)},
+		{name: "review request: an omitted limit is set to the model's maximum under a higher ceiling", limit: 200000, model: 16384, wantTokens: new(16384)},
+		{name: "an omitted limit is set to the ceiling under a higher model maximum", limit: 100, model: 16384, wantTokens: new(100)},
+		{name: "a client limit above the model's maximum and within the ceiling is the client's", maxTokens: new(50000), limit: 200000, model: 16384, wantTokens: new(50000), unchanged: true},
+		{
+			name:       "a limit in another spelling below the model's maximum is the one moved",
+			extras:     map[string]json.RawMessage{"max_output_tokens": json.RawMessage(`700`)},
+			limit:      200000,
+			model:      16384,
+			wantTokens: new(700),
+			absent:     []string{"max_output_tokens"},
+		},
+		{
+			name:       "a re-cased limit below the model's maximum lowers what is filled in",
+			extras:     map[string]json.RawMessage{"MAX_TOKENS": json.RawMessage(`20`)},
+			limit:      200000,
+			model:      16384,
+			wantTokens: new(20),
+			absent:     []string{"MAX_TOKENS"},
+		},
 		{name: "an omitted limit stays unset without a ceiling", unchanged: true},
 		{name: "lower client limit is kept", maxTokens: new(50), limit: 100, wantTokens: new(50), unchanged: true},
 		{name: "equal client limit is kept", maxTokens: new(100), limit: 100, wantTokens: new(100), unchanged: true},
@@ -166,7 +186,7 @@ func TestCapChatTokens(t *testing.T) {
 			req := &core.ChatRequest{Model: "m", MaxTokens: tt.maxTokens, ExtraFields: core.UnknownJSONFieldsFromMap(tt.extras)}
 			client := clonePtr(tt.maxTokens)
 
-			capped, err := CapChatTokens(req, tt.limit)
+			capped, err := CapChatTokens(req, Ceilings{OutputTokens: tt.limit, ModelOutputTokens: tt.model})
 			require.NoError(t, err)
 
 			if tt.unchanged {
@@ -192,12 +212,15 @@ func TestCapResponsesTokens(t *testing.T) {
 		maxTokens  *int
 		extras     map[string]json.RawMessage
 		limit      int
+		model      int // the model's own maximum, 0 when the catalogue has none
 		wantTokens *int
 		wantExtras map[string]string
 		absent     []string
 		unchanged  bool
 	}{
 		{name: "an omitted limit is set to the ceiling as max_output_tokens", limit: 100, wantTokens: new(100)},
+		{name: "review request: an omitted limit is set to the model's maximum under a higher ceiling", limit: 200000, model: 16384, wantTokens: new(16384)},
+		{name: "a client limit above the model's maximum and within the ceiling is the client's", maxTokens: new(50000), limit: 200000, model: 16384, wantTokens: new(50000), unchanged: true},
 		{
 			name:       "a null chat spelling is replaced by the ceiling",
 			extras:     map[string]json.RawMessage{"max_tokens": json.RawMessage(`null`)},
@@ -237,7 +260,7 @@ func TestCapResponsesTokens(t *testing.T) {
 			req := &core.ResponsesRequest{Model: "m", MaxOutputTokens: tt.maxTokens, ExtraFields: core.UnknownJSONFieldsFromMap(tt.extras)}
 			client := clonePtr(tt.maxTokens)
 
-			capped, err := CapResponsesTokens(req, tt.limit)
+			capped, err := CapResponsesTokens(req, Ceilings{OutputTokens: tt.limit, ModelOutputTokens: tt.model})
 			require.NoError(t, err)
 
 			if tt.unchanged {
@@ -278,13 +301,13 @@ func TestCapTokensKeepsTheLowestRecasedLimit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fields := core.UnknownJSONFieldsFromMap(tt.extras)
 
-			chat, err := CapChatTokens(&core.ChatRequest{Model: "m", MaxTokens: tt.maxTokens, ExtraFields: fields}, 100)
+			chat, err := CapChatTokens(&core.ChatRequest{Model: "m", MaxTokens: tt.maxTokens, ExtraFields: fields}, Ceilings{OutputTokens: 100})
 			require.NoError(t, err)
 			require.NotNil(t, chat.MaxTokens)
 			assert.Equal(t, tt.want, *chat.MaxTokens)
 			assert.True(t, chat.ExtraFields.IsEmpty(), "no re-cased limit is left for an upstream to read")
 
-			responses, err := CapResponsesTokens(&core.ResponsesRequest{Model: "m", MaxOutputTokens: tt.maxTokens, ExtraFields: fields}, 100)
+			responses, err := CapResponsesTokens(&core.ResponsesRequest{Model: "m", MaxOutputTokens: tt.maxTokens, ExtraFields: fields}, Ceilings{OutputTokens: 100})
 			require.NoError(t, err)
 			require.NotNil(t, responses.MaxOutputTokens)
 			assert.Equal(t, tt.want, *responses.MaxOutputTokens)
@@ -317,7 +340,7 @@ func TestCapChatTokensBoundsEveryOccurrenceOfARepeatedMember(t *testing.T) {
 			var req core.ChatRequest
 			require.NoError(t, json.Unmarshal([]byte(tt.body), &req))
 
-			capped, err := CapChatTokens(&req, 100)
+			capped, err := CapChatTokens(&req, Ceilings{OutputTokens: 100})
 			require.NoError(t, err)
 
 			values := capped.ExtraFields.LookupAll("max_completion_tokens")

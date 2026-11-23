@@ -51,7 +51,23 @@ func (s *Service) ResolveRequestOverrides(
 	if s.requestPolicy != nil {
 		resolved.Ceilings = resolved.Ceilings.Tighten(s.requestPolicy.RequestCeilings(ctx))
 	}
+	if resolved.Ceilings.OutputTokens > 0 {
+		resolved.Ceilings.ModelOutputTokens = s.modelOutputTokens(attempt)
+	}
 	return resolved
+}
+
+// modelOutputTokens returns the most output tokens the catalogue says the
+// attempt's model produces, or 0 when it does not say.
+func (s *Service) modelOutputTokens(attempt core.ModelSelector) int {
+	if s.catalog == nil {
+		return 0
+	}
+	model, ok := s.catalog.LookupModel(attempt.QualifiedModel())
+	if !ok || model == nil || model.Metadata == nil || model.Metadata.MaxOutputTokens == nil {
+		return 0
+	}
+	return *model.Metadata.MaxOutputTokens
 }
 
 // modelOverrides returns what the virtual models force on one provider

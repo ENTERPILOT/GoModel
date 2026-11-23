@@ -125,6 +125,34 @@ func TestResolveRequestOverridesAddsSubjectCeilings(t *testing.T) {
 	}
 }
 
+// A token ceiling comes with the attempt model's own maximum, when the
+// catalogue knows one, so a request that sends no limit is not given a limit
+// the model refuses. The maximum is no ceiling of its own.
+func TestServiceRequestOverridesCarryTheModelMaximumUnderATokenCeiling(t *testing.T) {
+	catalog := fakeCatalog{
+		providers: []string{"openai"},
+		supported: map[string]core.Model{
+			"openai/gpt-4o":      {ID: "gpt-4o", Metadata: &core.ModelMetadata{MaxOutputTokens: new(16384)}},
+			"openai/gpt-4o-mini": {ID: "gpt-4o-mini"},
+		},
+	}
+	service, err := NewService(newSQLVMStore(t), catalog, true)
+	require.NoError(t, err)
+	require.NoError(t, service.Refresh(context.Background()))
+	eng := core.WithEffectiveUserPath(context.Background(), "/eng")
+	resolve := func(model string) requestparams.Ceilings {
+		return service.ResolveRequestOverrides(eng, &core.RequestModelResolution{}, core.ModelSelector{Provider: "openai", Model: model}).Ceilings
+	}
+
+	service.SetAccessPolicy(pathPolicyStub{userPath: "/eng", ceilings: requestparams.Ceilings{OutputTokens: 200000}})
+	assert.Equal(t, requestparams.Ceilings{OutputTokens: 200000, ModelOutputTokens: 16384}, resolve("gpt-4o"))
+	assert.Equal(t, requestparams.Ceilings{OutputTokens: 200000}, resolve("gpt-4o-mini"), "a model without a known maximum")
+	assert.Equal(t, requestparams.Ceilings{OutputTokens: 200000}, resolve("unlisted"), "a model the catalogue does not list")
+
+	service.SetAccessPolicy(pathPolicyStub{userPath: "/eng", ceilings: requestparams.Ceilings{ReasoningEffort: "low"}})
+	assert.Equal(t, requestparams.Ceilings{ReasoningEffort: "low"}, resolve("gpt-4o"), "no token ceiling, no limit to fill in")
+}
+
 func TestServiceDefaultModelComesFromTheSubjectPolicy(t *testing.T) {
 	service := newSlowdownService(t)
 	eng := core.WithEffectiveUserPath(context.Background(), "/eng")

@@ -8,8 +8,8 @@ import (
 // ChatRequestWithCeilings returns req lowered to the ceilings: a reasoning
 // effort above the ceiling becomes the ceiling, and so does an output token
 // limit above it. A request without an output token limit gets the token
-// ceiling as its limit; one without an effort keeps none, so a ceiling never
-// turns reasoning on.
+// ceiling as its limit, or the model's own maximum when that is lower; one
+// without an effort keeps none, so a ceiling never turns reasoning on.
 func ChatRequestWithCeilings(req *core.ChatRequest, ceilings requestparams.Ceilings) (*core.ChatRequest, error) {
 	if req == nil || ceilings.IsZero() {
 		return req, nil
@@ -17,7 +17,7 @@ func ChatRequestWithCeilings(req *core.ChatRequest, ceilings requestparams.Ceili
 	if effort, exceeds := effortWithinCeiling(req.Reasoning, req.ExtraFields, ceilings.ReasoningEffort); exceeds {
 		req = chatRequestWithEffort(req, effort, withoutReasoningControls)
 	}
-	return requestparams.CapChatTokens(req, ceilings.OutputTokens)
+	return requestparams.CapChatTokens(req, ceilings)
 }
 
 // ResponsesRequestWithCeilings is ChatRequestWithCeilings for Responses.
@@ -28,7 +28,7 @@ func ResponsesRequestWithCeilings(req *core.ResponsesRequest, ceilings requestpa
 	if effort, exceeds := effortWithinCeiling(req.Reasoning, req.ExtraFields, ceilings.ReasoningEffort); exceeds {
 		req = responsesRequestWithEffort(req, effort, withoutReasoningControls)
 	}
-	return requestparams.CapResponsesTokens(req, ceilings.OutputTokens)
+	return requestparams.CapResponsesTokens(req, ceilings)
 }
 
 // ChatRequestExceedsCeilings reports whether the ceilings would change req.
