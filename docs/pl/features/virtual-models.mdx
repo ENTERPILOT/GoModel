@@ -404,8 +404,12 @@ jego celami, a nie można go usunąć ani zmienić jego nazwy, dopóki nie zosta
 Łańcuchy muszą być acykliczne (`a -> b -> a` jest odrzucane z wypisanym cyklem)
 i mieć głębokość co najwyżej 8 modeli wirtualnych. Obie reguły są egzekwowane przy zapisie
 z dashboardu i przy starcie dla wpisów deklaratywnych. Cel musi istnieć w momencie
-zapisu – najpierw utwórz wewnętrzny model wirtualny – a modelu wirtualnego, przez który
+dodania – najpierw utwórz wewnętrzny model wirtualny – a modelu wirtualnego, przez który
 przechodzą inne łańcuchy, nie można usunąć ani zmienić jego nazwy, dopóki nie zostaną przekierowane.
+
+Cel, który zniknie później, bo jego model został wycofany albo dostawca usunięty,
+nie blokuje zapisu: model wirtualny nadal można wyłączyć, przemianować lub edytować,
+a żądania pomijają brakujący cel, dopóki go nie usuniesz.
 
 ## Zmiana nazwy lub celu przekierowania
 

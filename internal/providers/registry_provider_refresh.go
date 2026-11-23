@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -22,6 +23,14 @@ type providerRefreshTarget struct {
 // request-time recovery when startup discovery failed before a provider was
 // reachable.
 func (r *ModelRegistry) RefreshProviderModels(ctx context.Context, providerSelector string) (int, error) {
+	// Callers bound a targeted refresh themselves (the on-demand refresh and
+	// the failed-provider recheck).
+	return r.refreshProviderModels(ctx, providerSelector, 0)
+}
+
+// refreshProviderModels is RefreshProviderModels with each provider's listing
+// bounded by a positive listingTimeout, as a full sweep bounds it.
+func (r *ModelRegistry) refreshProviderModels(ctx context.Context, providerSelector string, listingTimeout time.Duration) (int, error) {
 	providerSelector = strings.TrimSpace(providerSelector)
 	if providerSelector == "" {
 		return 0, core.NewInvalidRequestError("provider selector is required", nil)
@@ -66,9 +75,7 @@ func (r *ModelRegistry) RefreshProviderModels(ctx context.Context, providerSelec
 		providerNames,
 		configuredProviderModels,
 		configuredProviderModelsModes,
-		// Callers bound a targeted refresh themselves (the on-demand refresh
-		// and the failed-provider recheck).
-		0,
+		listingTimeout,
 	)
 	dropEmptyFetchedInventories(&fetched)
 

@@ -283,24 +283,34 @@ function aliasTargets(alias) {
 }
 
 // targetListLabel joins targets for a table cell, truncating long lists.
-function targetListLabel(targets, separator) {
-  const shown = targets.slice(0, 3);
+function targetListLabel(targets, separator, limit = 3) {
+  const shown = targets.slice(0, limit);
   const more = targets.length - shown.length;
   return shown.join(separator) + (more > 0 ? " +" + more : "");
 }
 
-export function aliasTargetLabel(alias) {
-  if (!alias) return "—";
+// aliasRouting describes a virtual model for its list row: the strategy that
+// picks among its targets (kind "" for a plain alias, which has one target and
+// nothing to pick), the targets as the row shows them, and the full list. The
+// row names two targets, so name, strategy, and targets stay on one line.
+export function aliasRouting(alias) {
   const targets = aliasTargets(alias);
   if (targets.length > 1) {
-    return (
-      targetListLabel(targets, ", ") +
-      " · " +
-      strategyLabel(alias.strategy, alias.strategy_plugin)
-    );
+    return {
+      kind: String(alias.strategy || "").toLowerCase() || "round_robin",
+      label: strategyLabel(alias.strategy, alias.strategy_plugin),
+      targets: targetListLabel(targets, ", ", 2),
+      all: targets.join(", "),
+    };
   }
-  if (alias.resolved_model) return alias.resolved_model;
-  return targets[0] || "—";
+  const target = (alias && alias.resolved_model) || targets[0] || "—";
+  return { kind: "", label: "", targets: target, all: target };
+}
+
+export function aliasTargetLabel(alias) {
+  if (!alias) return "—";
+  const routing = aliasRouting(alias);
+  return routing.kind ? routing.targets + " · " + routing.label : routing.targets;
 }
 
 // ---- Routing kind of a virtual model over a real model ----

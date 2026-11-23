@@ -27,6 +27,7 @@ import {
   initialRenderStep,
 } from "../src/pages/models/renderBatching.js";
 import {
+  aliasRouting,
   aliasTargetLabel,
   mapRedirectView,
   maskingFailsOver,
@@ -223,6 +224,44 @@ test("mapRedirectView keeps load-balanced targets, strategy, and labels them", (
   assert.equal(alias.targets[1].weight, 2);
   assert.equal(alias.strategy, "round_robin");
   assert.equal(aliasTargetLabel(alias), "openai/gpt-4o, groq/llama · Round-robin");
+});
+
+test("aliasRouting names two targets in the row and keeps the full list", () => {
+  const pool = mapRedirectView({
+    source: "cheap",
+    kind: "redirect",
+    targets: [
+      { provider: "groq", model: "llama" },
+      { provider: "gemini", model: "flash-lite" },
+      { provider: "bailian", model: "qwen-flash" },
+      { provider: "openai", model: "gpt-luna" },
+    ],
+    strategy: "cost",
+    enabled: true,
+    valid: true,
+  });
+  assert.deepEqual(aliasRouting(pool), {
+    kind: "cost",
+    label: "Lowest cost",
+    targets: "groq/llama, gemini/flash-lite +2",
+    all: "groq/llama, gemini/flash-lite, bailian/qwen-flash, openai/gpt-luna",
+  });
+
+  // A plain alias has one target and no strategy to show.
+  const plain = mapRedirectView({
+    source: "default",
+    kind: "redirect",
+    targets: [{ provider: "openai", model: "gpt-luna" }],
+    strategy: "round_robin",
+    enabled: true,
+    valid: true,
+  });
+  assert.deepEqual(aliasRouting(plain), {
+    kind: "",
+    label: "",
+    targets: "openai/gpt-luna",
+    all: "openai/gpt-luna",
+  });
 });
 
 test("buildDisplayModels combines source-backed redirects with the concrete model row", () => {
