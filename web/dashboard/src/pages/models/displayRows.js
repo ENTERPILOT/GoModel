@@ -16,6 +16,7 @@ import {
   aliasStateClass,
   aliasStateText,
   aliasTargetLabel,
+  maskingRoutingKind,
   modelAccessSummary,
 } from "./routing.js";
 
@@ -535,16 +536,20 @@ export function modelOverrideEditButtonLabel(subject, hasOverride) {
 
 // rowPolicySources lists the rows a table row takes per-model values
 // (slowdown, upstream timeouts) from, most specific first. An alias row shows
-// its own. A model row replaced by a masking redirect shows the redirect's,
-// since requests never reach the model's own policies. Any other model row
-// shows its exact policy, then the model-wide one (source "gpt-4o"), which
-// the gateway applies field by field wherever the exact policy leaves a
-// value unset.
+// its own. A model row shows its exact policy, then the model-wide one
+// (source "gpt-4o"), which the gateway applies field by field wherever the
+// exact policy leaves a value unset. A masking redirect's values come before
+// them while it still serves the model (failover or balancing); one that
+// sends requests elsewhere replaces them, since they are never reached.
 function rowPolicySources(row) {
   if (row && row.is_alias) return [row.alias];
-  if (row && row.masking_alias) return [row.masking_alias];
   const access = (row && row.access) || {};
-  return [access.override, access.model_policy];
+  const policies = [access.override, access.model_policy];
+  const masking = row && row.masking_alias;
+  if (!masking) return policies;
+  return maskingRoutingKind(masking) === "redirect"
+    ? [masking]
+    : [masking, ...policies];
 }
 
 // pickPolicyValue returns the first value sources set for field, and the

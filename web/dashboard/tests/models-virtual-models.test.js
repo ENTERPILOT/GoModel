@@ -1795,8 +1795,14 @@ test("toggle payloads preserve configured timeouts", () => {
   assert.equal(payload.response_header_timeout, 20);
 });
 
-test("rowUpstreamTimeouts shows the masking redirect's timeouts, else the model's policies", () => {
+test("rowUpstreamTimeouts shows a masking redirect's timeouts before the model's policies", () => {
   const modelPolicy = { source: "gpt-4o", timeout: 120, response_header_timeout: 30 };
+  const elsewhere = { name: "openai/gpt-4o", targets: [{ provider: "azure", model: "gpt-4o" }] };
+  const failover = {
+    name: "openai/gpt-4o",
+    strategy: "failover",
+    targets: [{ provider: "openai", model: "gpt-4o" }, { provider: "azure", model: "gpt-4o" }],
+  };
   const none = { timeout_source: "", response_header_timeout_source: "" };
   const cases = [
     {
@@ -1805,12 +1811,25 @@ test("rowUpstreamTimeouts shows the masking redirect's timeouts, else the model'
       want: { ...none, timeout: 30, response_header_timeout: null },
     },
     {
-      name: "a masking redirect replaces the model's own policies",
+      name: "a redirect elsewhere replaces the model's own policies",
       row: {
-        masking_alias: { timeout: 30 },
+        masking_alias: { ...elsewhere, timeout: 30 },
         access: { override: { timeout: 60, response_header_timeout: 10 }, model_policy: modelPolicy },
       },
       want: { ...none, timeout: 30, response_header_timeout: null },
+    },
+    {
+      name: "a failover redirect that serves the model keeps its policies",
+      row: {
+        masking_alias: { ...failover, timeout: 30 },
+        access: { override: {}, model_policy: modelPolicy },
+      },
+      want: {
+        timeout: 30,
+        timeout_source: "",
+        response_header_timeout: 30,
+        response_header_timeout_source: "gpt-4o",
+      },
     },
     {
       name: "exact policy without a masking redirect",
@@ -1848,19 +1867,30 @@ test("rowUpstreamTimeouts shows the masking redirect's timeouts, else the model'
   }
 });
 
-test("rowSlowdown shows the masking redirect's slowdown, else the model's policies", () => {
+test("rowSlowdown shows a masking redirect's slowdown before the model's policies", () => {
   const modelPolicy = { source: "gpt-4o", slowdown: 0.5 };
+  const elsewhere = { name: "openai/gpt-4o", targets: [{ provider: "azure", model: "gpt-4o" }] };
+  const failover = {
+    name: "openai/gpt-4o",
+    strategy: "failover",
+    targets: [{ provider: "openai", model: "gpt-4o" }, { provider: "azure", model: "gpt-4o" }],
+  };
   const cases = [
     { name: "alias row", row: { is_alias: true, alias: { slowdown: 2 } }, want: { value: 2, source: "" } },
     {
       name: "masking redirect",
-      row: { masking_alias: { slowdown: 1 }, access: { override: { slowdown: 2 } } },
+      row: { masking_alias: { ...elsewhere, slowdown: 1 }, access: { override: { slowdown: 2 } } },
       want: { value: 1, source: "" },
     },
     {
-      name: "a masking redirect replaces the model's own policies",
-      row: { masking_alias: {}, access: { override: { slowdown: 2 }, model_policy: modelPolicy } },
+      name: "a redirect elsewhere replaces the model's own policies",
+      row: { masking_alias: elsewhere, access: { override: { slowdown: 2 }, model_policy: modelPolicy } },
       want: { value: null, source: "" },
+    },
+    {
+      name: "a failover redirect that serves the model keeps its policies",
+      row: { masking_alias: failover, access: { override: {}, model_policy: modelPolicy } },
+      want: { value: 0.5, source: "gpt-4o" },
     },
     {
       name: "exact policy",
