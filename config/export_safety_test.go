@@ -141,6 +141,23 @@ func TestExportYAMLKeepsExpansionThatIsTheDefault(t *testing.T) {
 	assert.Equal(t, "server:\n  port: \"${GOMODEL_TEST_PORT}\"\n", string(out))
 }
 
+func TestExportYAMLKeepsReferenceThatIsTheDefault(t *testing.T) {
+	// A reference that resolves to the default here may not on the next
+	// instance.
+	clearAllConfigEnvVars(t)
+	t.Setenv("GOMODEL_TEST_MODE", "off")
+	t.Setenv("GOMODEL_TEST_PATH", DefaultMediaPath())
+	loaded := loadYAML(t, []byte("mcp:\n  tool_discovery: ${env:GOMODEL_TEST_MODE}\nmedia:\n  storage:\n    path: ${env:GOMODEL_TEST_PATH}\n"))
+	require.Equal(t, MCPToolDiscoveryOff, loaded.Config.MCP.ToolDiscovery)
+
+	out, err := loaded.ExportYAML(ExportDocument{Config: loaded.Config}, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "media:\n  storage:\n    path: \"${env:GOMODEL_TEST_PATH}\"\nmcp:\n  tool_discovery: \"${env:GOMODEL_TEST_MODE}\"\n", string(out))
+	t.Setenv("GOMODEL_TEST_MODE", "search")
+	assert.Equal(t, MCPToolDiscoverySearch, loadYAML(t, out).Config.MCP.ToolDiscovery)
+}
+
 func TestExportYAMLRedactsCredentialsOutsideSecretFields(t *testing.T) {
 	var ext yaml.Node
 	require.NoError(t, yaml.Unmarshal([]byte("auth: ext-auth\ncookie: ext-cookie\npass: ext-pass\nregion: eu\n"), &ext))

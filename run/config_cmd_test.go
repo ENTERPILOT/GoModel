@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -82,16 +84,26 @@ func TestRunConfigExport(t *testing.T) {
 }
 
 func TestRunConfigExportIncludeDefaults(t *testing.T) {
+	// So a developer's OPENAI_API_KEY does not declare a provider.
+	for _, entry := range os.Environ() {
+		if name, value, _ := strings.Cut(entry, "="); name != "" && !slices.Contains([]string{"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "SYSTEMROOT"}, strings.ToUpper(name)) {
+			t.Setenv(name, value)
+			require.NoError(t, os.Unsetenv(name))
+		}
+	}
 	t.Chdir(t.TempDir())
 	t.Setenv("STORAGE_TYPE", "sqlite")
-	t.Setenv("SQLITE_PATH", filepath.Join(t.TempDir(), "export.db"))
+	sqlitePath := filepath.Join(t.TempDir(), "export.db")
+	t.Setenv("SQLITE_PATH", sqlitePath)
 	export := func(args ...string) string {
 		var stdout, stderr bytes.Buffer
 		require.NoError(t, Run(context.Background(), Options{Args: args, Stdout: &stdout, Stderr: &stderr}), stderr.String())
 		return stdout.String()
 	}
 
-	assert.NotContains(t, export("config", "export"), "retention_days:", "a setting at its default is left out")
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(export("config", "export")), &doc))
+	assert.Equal(t, map[string]any{"storage": map[string]any{"sqlite": map[string]any{"path": sqlitePath}}}, doc, "settings at their default are left out")
 	assert.Contains(t, export("config", "export", "--include-defaults"), "retention_days: 30")
 }
 

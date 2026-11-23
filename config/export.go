@@ -306,10 +306,10 @@ func (e *exporter) walk(path string, v, def reflect.Value, node *yaml.Node, clas
 				if def.Kind() == reflect.Struct {
 					_, defChild, _ = yamlField(def, key.Value)
 				}
-				// A value environment expansion wrote is kept as written, empty
-				// or not, as is a section holding one: it reads the variable on
-				// the next load.
-				expanded := e.expandedUnder(childPath)
+				// A value environment expansion or a secret reference wrote is
+				// kept as written, whatever it gave, as is a section holding
+				// one: it reads the variable or the secret on the next load.
+				expanded := e.expandedUnder(childPath) || e.secrets.referencedUnder(childPath)
 				if !expanded && (isNil(child) || e.atDefault(child, defChild)) {
 					continue
 				}
@@ -516,11 +516,17 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 	e.setSecret(path, node, head, secret, envName)
 }
 
+// pathUnder reports whether path is section or a path inside it.
+func pathUnder(path, section string) bool {
+	rest, ok := strings.CutPrefix(path, section)
+	return ok && (rest == "" || rest[0] == '.' || rest[0] == '[')
+}
+
 // expandedUnder reports whether environment expansion wrote the value at
 // path or one inside it.
 func (e *exporter) expandedUnder(path string) bool {
 	for written := range e.expanded {
-		if rest, ok := strings.CutPrefix(written, path); ok && (rest == "" || rest[0] == '.' || rest[0] == '[') {
+		if pathUnder(written, path) {
 			return true
 		}
 	}
@@ -531,7 +537,7 @@ func (e *exporter) expandedUnder(path string) bool {
 // unresolved.
 func (e *exporter) isUnresolved(path string) bool {
 	for _, section := range e.unresolved {
-		if rest, ok := strings.CutPrefix(path, section); ok && (rest == "" || rest[0] == '.' || rest[0] == '[') {
+		if pathUnder(path, section) {
 			return true
 		}
 	}
@@ -777,6 +783,22 @@ func (s *Secrets) configured(field, resolved string) (string, bool) {
 		return "", false
 	}
 	return use.original, true
+}
+
+// referencedUnder reports whether the value at path, or one inside it, was
+// configured as a secret reference.
+func (s *Secrets) referencedUnder(path string) bool {
+	if s == nil {
+		return false
+	}
+	s.rotation.mu.Lock()
+	defer s.rotation.mu.Unlock()
+	for field := range s.rotation.uses {
+		if pathUnder(field, path) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolvedSecretWhere reports whether a reference recorded for a field

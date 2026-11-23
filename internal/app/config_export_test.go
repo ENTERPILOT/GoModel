@@ -41,6 +41,7 @@ users:
     description: from config.yaml
 budgets:
   enabled: true
+  provider_billed_cache_hits: false
   user_paths:
     - path: /team
       limits:
@@ -190,7 +191,7 @@ func TestExportConfig(t *testing.T) {
 	assert.Equal(t, "mk-do-not-leak", reloaded.Config.Server.MasterKey)
 	assert.Equal(t, "${env:EXPORT_TEST_MASTER_KEY}", reloaded.Config.Users[1].Description)
 	assert.Equal(t, "Bearer lin-new", reloaded.Config.MCP.Servers["linear"].Headers["Authorization"])
-	assert.True(t, reloaded.Config.Budgets.ProviderBilledCacheHits, "settings beside the budgets keep their value")
+	assert.False(t, reloaded.Config.Budgets.ProviderBilledCacheHits, "settings beside the budgets keep their value")
 }
 
 func TestExportConfigKeepsVirtualModelParams(t *testing.T) {

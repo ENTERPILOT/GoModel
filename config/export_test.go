@@ -398,7 +398,8 @@ func TestExportYAMLOfDefaultsIsEmpty(t *testing.T) {
 
 func TestExportYAMLKeepsLocalModelCacheBesideRedis(t *testing.T) {
 	clearAllConfigEnvVars(t)
-	// Left out, the local cache would be: it is the default only alone.
+	// The local cache is the default only when no Redis cache is set: left
+	// out beside one, it would not load back.
 	loaded := loadYAML(t, []byte("cache:\n  model:\n    local: {}\n    redis:\n      url: redis://cache:6379\n"))
 
 	out, err := loaded.ExportYAML(ExportDocument{Config: loaded.Config}, nil)

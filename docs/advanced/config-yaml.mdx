@@ -237,7 +237,7 @@ Settings that hold their default value are left out, since they load the same
 way, so the file shows only what differs from the defaults. A setting that
 differs is kept even when empty, such as `enable_passthrough_routes: false`
 or an explicit empty list such as `retry_on_statuses: []`, and so is a
-`${VAR}` expansion, whatever it expands to. A gateway with nothing configured
+`${VAR}` expansion or a secret reference, whatever it gives. A gateway with nothing configured
 exports `{}`. Defaults that depend on where the gateway runs, such as
 `storage.sqlite.path`, are left out too, so the instance that loads the file
 uses its own.

@@ -229,7 +229,7 @@ gomodel config export > gomodel-export.yaml
 ```
 
 Settings that hold their default value are left out. Add `--include-defaults`
-to write them too.
+to write them too, except settings that are empty by default.
 
 Do not redirect it onto the `config.yaml` it reads; the shell empties that
 file first.
