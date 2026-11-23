@@ -308,7 +308,9 @@ export function providerBreakerStateClass(provider) {
 
 // A model's own breaker state, when it has one and it is not closed: under
 // scope "model", or for a model running on its own upstream timeout. Such a
-// breaker pauses only that model, so the provider's state does not show it.
+// breaker pauses only that model. For a per-model timeout the provider's
+// state never shows it; under scope "model" the provider's state is that of
+// whichever model was requested last.
 export function providerHealthModelBreakerState(model) {
   const state = String((model && model.circuit_state) || "").trim();
   return state === "closed" ? "" : state;

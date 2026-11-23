@@ -64,7 +64,8 @@ type ModelHealth struct {
 	Flagged  bool   `json:"flagged"`
 	// CircuitState is the state of the model's own circuit breaker as of its
 	// most recent request ("closed", "half-open", "open"). It is empty when
-	// the model shares the provider's breaker.
+	// the model shares the provider's breaker. Like the rest of the row, it
+	// leaves the snapshot once the model has no request in the window.
 	CircuitState string     `json:"circuit_state,omitempty"`
 	LastError    *ErrorInfo `json:"last_error,omitempty"`
 }
@@ -156,6 +157,13 @@ func (t *Tracker) Record(info llmclient.ResponseInfo) {
 	if info.Model == "" || info.Model == llmclient.UnknownModel {
 		return
 	}
+	model := provider.model(info.Model)
+	// A request that went through a breaker says which one: the model's own
+	// (its state) or the provider's (empty). One that bypassed breakers has
+	// no CircuitState and leaves the model's state as it was.
+	if info.CircuitState != "" {
+		model.circuitState = info.ModelCircuitState
+	}
 	// A caller-side cancellation proves nothing about provider health; the
 	// circuit breaker treats it as neutral and so does this tracker. Client
 	// deadlines (context.DeadlineExceeded) still count as failures.
@@ -164,8 +172,6 @@ func (t *Tracker) Record(info llmclient.ResponseInfo) {
 	}
 
 	now := t.now()
-	model := provider.model(info.Model)
-	model.circuitState = info.ModelCircuitState
 
 	failed := info.Error != nil || info.StatusCode >= 400
 	model.events = append(model.events, event{at: now, failed: failed})

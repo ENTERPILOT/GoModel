@@ -49,8 +49,9 @@ type ResponseInfo struct {
 	// update as traffic flows.
 	CircuitState string
 	// ModelCircuitState is the state of the model's own breaker after this
-	// request completed. It is set only when the request ran on one: under
-	// scope "model", or on a per-model timeout under scope "provider".
+	// request completed. It is set only when the request ran on one: a
+	// request naming a model under scope "model", or on a per-model timeout
+	// under scope "provider".
 	ModelCircuitState string
 }
 
