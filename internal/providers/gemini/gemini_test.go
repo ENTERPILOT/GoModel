@@ -1427,7 +1427,8 @@ func TestStreamChatCompletion_NativeBlockedPromptEmitsError(t *testing.T) {
 	stream := string(raw)
 	assert.Contains(t, stream, `"type":"provider_error"`)
 	assert.Contains(t, stream, "Gemini blocked prompt: SAFETY: unsafe prompt")
-	assert.Contains(t, stream, "data: [DONE]")
+	// A stream that failed in-band ends with its error, not [DONE].
+	assert.NotContains(t, stream, "[DONE]")
 }
 
 func TestListModels(t *testing.T) {
