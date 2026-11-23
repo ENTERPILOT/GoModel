@@ -78,17 +78,17 @@ func TestStoreWritesTimestampsInUTC(t *testing.T) {
 				// interprets them.
 				var entryStored, attemptStored string
 				err = db.QueryRow(ctx,
-					"SELECT "+utcProjection(db, "timestamp")+" FROM audit_logs WHERE id = ?",
+					"SELECT "+utcProjection(db, "timestamp")+" FROM request_logs WHERE id = ?",
 					"utc-entry").Scan(&entryStored)
 				require.NoError(t, err)
 				err = db.QueryRow(ctx,
-					"SELECT "+utcProjection(db, "started_at")+" FROM audit_log_attempts WHERE audit_log_id = ?",
+					"SELECT "+utcProjection(db, "started_at")+" FROM request_log_attempts WHERE request_log_id = ?",
 					"utc-entry").Scan(&attemptStored)
 				require.NoError(t, err)
 
 				for column, stored := range map[string]string{
-					"audit_logs.timestamp":          entryStored,
-					"audit_log_attempts.started_at": attemptStored,
+					"request_logs.timestamp":          entryStored,
+					"request_log_attempts.started_at": attemptStored,
 				} {
 					assert.Contains(t, stored, tc.wantUTCClock, "%s = %q, want the %s UTC wall clock", column, stored, tc.wantUTCClock)
 

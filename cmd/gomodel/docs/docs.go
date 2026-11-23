@@ -14163,7 +14163,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "attempts": {
-                    "description": "Attempts captures provider calls made for this logical request. SQL\nstores split this into audit_log_attempts; Mongo stores it embedded.",
+                    "description": "Attempts captures provider calls made for this logical request. SQL\nstores split this into request_log_attempts; Mongo stores it embedded.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/requestlog.AttemptSnapshot"
