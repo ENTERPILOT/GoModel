@@ -31,9 +31,9 @@ func TestEffortCeilingReplacesRecasedAndRepeatedControls(t *testing.T) {
 		"re-cased provider controls":                  `"Thinking":{"type":"enabled"},"Enable_Thinking":true,"THINKING_BUDGET":32000,"Think":"high"`,
 		"a re-cased type after a disabled one":        `"thinking":{"type":"disabled","budget_tokens":32000,"Type":"enabled"}`,
 		"re-cased template switches":                  `"Chat_Template_Kwargs":{"enable_thinking":true},"chat_template_kwargs":{"Enable_Thinking":true}`,
-		"a repeated template switch":                  `"chat_template_kwargs":{"enable_thinking":true,"enable_thinking":false}`,
+		"a repeated template switch":                  `"chat_template_kwargs":{"enable_thinking":true,"enable_thinking":"on"}`,
 		"re-cased extra_body members":                 `"Extra_Body":{"thinking_budget":32000},"extra_body":{"Thinking_Budget":32000}`,
-		"a repeated extra_body member":                `"extra_body":{"thinking":{"type":"enabled","budget_tokens":32000},"thinking":{"type":"disabled"}}`,
+		"a repeated extra_body member":                `"extra_body":{"thinking":{"type":"enabled","budget_tokens":32000},"thinking":{"type":"enabled"}}`,
 		"a repeated extra_body":                       `"extra_body":{"think":"max"},"extra_body":null`,
 	}
 	for _, dialect := range dialects {
@@ -56,13 +56,19 @@ func TestEffortCeilingReplacesRecasedAndRepeatedControls(t *testing.T) {
 }
 
 // A control that is off in the type a decoder keeps, the last one, asks for
-// no reasoning. Its other type still must not reach the upstream, but the
+// no reasoning, and so does a request that turns reasoning off next to a
+// control the scale cannot rank: a budget means nothing while thinking is
+// off. What cannot be ranked still must not reach the upstream, but the
 // ceiling is not what replaces it: that would switch reasoning on.
 func TestEffortCeilingDoesNotSwitchOnAControlThatIsOff(t *testing.T) {
 	for name, control := range map[string]string{
-		"review request: a repeated type": `"thinking":{"type":"enabled","budget_tokens":32000,"type":"disabled"}`,
-		"a re-cased type before":          `"thinking":{"Type":"enabled","budget_tokens":32000,"type":"disabled"}`,
-		"a re-cased type after":           `"thinking":{"type":"enabled","budget_tokens":32000,"TYPE":"disabled"}`,
+		"review request: a repeated type":                `"thinking":{"type":"enabled","budget_tokens":32000,"type":"disabled"}`,
+		"a re-cased type before":                         `"thinking":{"Type":"enabled","budget_tokens":32000,"type":"disabled"}`,
+		"a re-cased type after":                          `"thinking":{"type":"enabled","budget_tokens":32000,"TYPE":"disabled"}`,
+		"review request: a budget beside a switch off":   `"chat_template_kwargs":{"enable_thinking":false,"thinking_budget":8192}`,
+		"a budget beside a switch off, at the top level": `"enable_thinking":false,"thinking_budget":8192`,
+		"a repeated template switch that ends off":       `"chat_template_kwargs":{"enable_thinking":true,"enable_thinking":false}`,
+		"a repeated control that ends off":               `"extra_body":{"thinking":{"type":"enabled","budget_tokens":32000},"thinking":{"type":"disabled"}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newUpstreamFixture(t, cappedRows, nil)
@@ -71,7 +77,11 @@ func TestEffortCeilingDoesNotSwitchOnAControlThatIsOff(t *testing.T) {
 
 			sent := f.sent(t, "openai")
 			assert.Equal(t, "none", openAIEffort(sent))
-			assert.NotContains(t, sent, "thinking")
+			for key := range sent {
+				if key != "reasoning_effort" {
+					assert.NotContains(t, reasoningMembers, strings.ToLower(key), "%s reached the upstream", key)
+				}
+			}
 		})
 	}
 }
@@ -98,7 +108,7 @@ func TestEffortCeilingReadsEveryOccurrenceOfGeminiThinkingConfig(t *testing.T) {
 		"an extra_body without a budget before":   `"extra_body":{"google":{"thinking_config":{"include_thoughts":true}}},"extra_body":` + budget,
 		"a repeated google":                       `"extra_body":{"google":{"thinking_config":{"thinking_budget":32768}},"google":{}}`,
 		"a repeated thinking_config":              `"extra_body":{"google":{"thinking_config":{"thinking_budget":32768},"thinking_config":{"include_thoughts":true}}}`,
-		"a repeated budget":                       `"extra_body":{"google":{"thinking_config":{"thinking_budget":32768,"thinking_budget":0}}}`,
+		"a repeated budget":                       `"extra_body":{"google":{"thinking_config":{"thinking_budget":32768,"thinking_budget":1}}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newUpstreamFixture(t, cappedRows, nil)

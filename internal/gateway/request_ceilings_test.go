@@ -78,6 +78,11 @@ func TestChatRequestWithCeilingsReasoningEffort(t *testing.T) {
 		{name: "ollama think level above the ceiling", extras: map[string]string{"think": `"high"`}, ceiling: "low", want: "low"},
 		{name: "ollama think level within the ceiling", extras: map[string]string{"think": `"low"`}, ceiling: "low", unchanged: true},
 		{name: "chat template reasoning switch", extras: map[string]string{"chat_template_kwargs": `{"enable_thinking":true}`}, ceiling: "low", want: "low"},
+		{name: "review request: a budget beside a switch that is off does not switch reasoning on", extras: map[string]string{"chat_template_kwargs": `{"enable_thinking":false,"thinking_budget":8192}`}, ceiling: "medium", want: "none"},
+		{name: "a budget beside a switch that is off, at the top level", extras: map[string]string{"enable_thinking": `false`, "thinking_budget": `8192`}, ceiling: "medium", want: "none"},
+		{name: "a budget beside an effort of none", extras: map[string]string{"reasoning_effort": `"none"`, "extra_body": `{"google":{"thinking_config":{"thinking_budget":8192}}}`}, ceiling: "medium", want: "none"},
+		{name: "a budget beside a switch that is off and an effort within the ceiling", reasoning: &core.Reasoning{Effort: "low"}, extras: map[string]string{"enable_thinking": `false`, "thinking_budget": `8192`}, ceiling: "medium", want: "low"},
+		{name: "an effort above the ceiling beside a switch that is off and a budget", reasoning: &core.Reasoning{Effort: "max"}, extras: map[string]string{"enable_thinking": `false`, "thinking_budget": `8192`}, ceiling: "medium", want: "medium"},
 		{name: "chat template effort within the ceiling", extras: map[string]string{"chat_template_kwargs": `{"reasoning_effort":"low","enable_thinking":false}`}, ceiling: "low", unchanged: true},
 		{name: "controls inside extra_body count too", extras: map[string]string{"extra_body": `{"enable_thinking":true}`}, ceiling: "low", want: "low"},
 		{name: "a re-cased flat effort is the effort", raw: `{"REASONING_EFFORT":"max"}`, ceiling: "low", want: "low"},
@@ -95,7 +100,8 @@ func TestChatRequestWithCeilingsReasoningEffort(t *testing.T) {
 		{name: "re-cased template switches", raw: `{"Chat_Template_Kwargs":{"Enable_Thinking":true}}`, ceiling: "low", want: "low"},
 		{name: "re-cased extra_body members", raw: `{"Extra_Body":{"Thinking_Budget":9}}`, ceiling: "low", want: "low"},
 		{name: "a repeated control is checked in every occurrence", raw: `{"extra_body":{"think":"max","think":"low"},"chat_template_kwargs":{"enable_thinking":true,"enable_thinking":false}}`, ceiling: "low", want: "low"},
-		{name: "a repeated gemini thinking config is checked in every occurrence", raw: `{"extra_body":{"google":{"thinking_config":{"thinking_budget":9},"thinking_config":{"thinking_budget":0}}}}`, ceiling: "low", want: "low"},
+		{name: "a repeated gemini thinking config is checked in every occurrence", raw: `{"extra_body":{"google":{"thinking_config":{"thinking_budget":9},"thinking_config":{"thinking_level":"high"}}}}`, ceiling: "low", want: "low"},
+		{name: "a repeated gemini thinking config that is off in one occurrence is not switched on", raw: `{"extra_body":{"google":{"thinking_config":{"thinking_budget":9},"thinking_config":{"thinking_budget":0}}}}`, ceiling: "low", want: "none"},
 		{name: "no ceiling keeps any effort", reasoning: &core.Reasoning{Effort: "max"}, unchanged: true},
 	}
 	for _, tt := range tests {

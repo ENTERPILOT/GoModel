@@ -40,22 +40,31 @@ func ChatRequestExceedsCeilings(req *core.ChatRequest, ceilings requestparams.Ce
 // effortWithinCeiling reports whether the efforts a request carries, in any
 // spelling, have to be replaced, and the effort that replaces them all. One
 // above ceiling is replaced by the ceiling, and so is one the common scale
-// cannot rank, so no spelling slips past it. A control that is off where
-// decoders read it but not in every occurrence (requested.unsettledOff) is
-// replaced too, by the highest effort the request does ask for, "none" when
-// there is no other: a ceiling never switches reasoning on.
+// cannot rank, so no spelling slips past it.
+//
+// A ceiling never switches reasoning on, so two requests are replaced by the
+// highest effort they name within the ceiling instead, "none" when they name
+// no other: one whose control is off where decoders read it but not in every
+// occurrence (requested.unsettledOff), and one that turns reasoning off next
+// to a control that cannot be ranked (enable_thinking false beside a
+// thinking_budget, which the upstream ignores while thinking is off).
 func effortWithinCeiling(reasoning *core.Reasoning, fields core.UnknownJSONFields, ceiling string) (effort string, exceeds bool) {
 	if ceiling == "" {
 		return "", false
 	}
 	found := requestedEfforts(reasoning, fields)
 	limit, highest := requestparams.EffortRank(ceiling), 0
+	off, unranked := false, false
 	for _, level := range found.efforts {
 		rank := requestparams.EffortRank(level)
-		if rank < 0 || rank > limit {
+		if rank > limit {
 			return ceiling, true
 		}
+		off, unranked = off || rank == 0, unranked || rank < 0
 		highest = max(highest, rank)
 	}
-	return requestparams.ReasoningEffortLevels()[highest], found.unsettledOff
+	if unranked && !off {
+		return ceiling, true
+	}
+	return requestparams.ReasoningEffortLevels()[highest], unranked || found.unsettledOff
 }

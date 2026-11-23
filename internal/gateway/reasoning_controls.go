@@ -35,7 +35,8 @@ var templateControlFields = []string{"enable_thinking", "thinking", "reasoning_e
 
 // unrankedEffort stands for an effort the common scale cannot place, such as
 // a token budget or a bare "on": it ranks as unknown, which a ceiling treats
-// as exceeding, so the control is replaced by the ceiling, never forwarded.
+// as exceeding, so the control is replaced, never forwarded (see
+// effortWithinCeiling for what replaces it).
 const unrankedEffort = "?"
 
 // requested is what a request's reasoning controls ask for.
