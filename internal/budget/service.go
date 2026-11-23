@@ -639,6 +639,13 @@ func activePeriod(budget Budget, now time.Time, settings Settings) (time.Time, t
 // all their spends in one round trip. Enforcement runs on every request, so the
 // batched lookup is what keeps a wide match set from costing a query each.
 func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time, settings Settings) ([]CheckResult, error) {
+	return s.evaluatePeriod(ctx, budgets, now, now, settings)
+}
+
+// evaluatePeriod is evaluate for the period every budget was in at the
+// instant at, with spend counted up to until. Alerting reads a period that
+// has ended with it.
+func (s *Service) evaluatePeriod(ctx context.Context, budgets []Budget, at, until time.Time, settings Settings) ([]CheckResult, error) {
 	if len(budgets) == 0 {
 		return []CheckResult{}, nil
 	}
@@ -646,7 +653,7 @@ func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time,
 	windows := make([]SpendWindow, 0, len(budgets))
 	windowIndexes := make([]int, 0, len(budgets))
 	for i, budget := range budgets {
-		start, end := activePeriod(budget, now, settings)
+		start, end := activePeriod(budget, at, settings)
 		results[i] = CheckResult{Budget: budget, PeriodStart: start, PeriodEnd: end, Remaining: budget.Amount}
 		// A template shown in the global admin list has no single usage total.
 		// Only resolved request/user-path checks query one child partition.
@@ -658,7 +665,7 @@ func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time,
 			Subject:          budget.evaluationSubject(),
 			CostBasis:        budget.EnforcedBasis(),
 			Start:            start,
-			End:              now,
+			End:              until,
 			ExcludeCacheHits: budget.Scope == ScopeProvider && !s.providerBilledCacheHits,
 		})
 		windowIndexes = append(windowIndexes, i)

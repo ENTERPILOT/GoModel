@@ -543,6 +543,12 @@ Zeitraum und Schwelle einmal ausgelöst:
 - Die Ausgaben werden aus der gespeicherten Nutzung gelesen. Eine Warnung
   folgt dem auslösenden Request daher um den Usage-Flush
   (`USAGE_FLUSH_INTERVAL`, 5 s) plus bis zu ein Intervall verzögert.
+- Ein beendeter Zeitraum wird noch zwei Intervalle plus 30 s lang ausgewertet,
+  sodass ein Schwellenwert, der in seinen letzten Augenblicken erreicht wurde,
+  trotzdem eine Warnung auslöst. Bei dieser Warnung liegt `period_end` vor
+  `timestamp`: Das Budget befindet sich bereits im nächsten Zeitraum. Ein
+  Budget, das seit dem Ende des Zeitraums geändert oder zurückgesetzt wurde,
+  wird für ihn nicht ausgewertet.
 
 Die Zustellung erfolgt höchstens einmal und ist nicht garantiert. Der Eintrag
 wird vor der Zustellung geschrieben, und eine Warnung wird nie ein zweites Mal
@@ -603,7 +609,7 @@ Jede Warnung ist ein `POST` mit JSON-Body:
 | `budget.revision`          | Opak. Neu bei jeder Änderung des Betrags oder der Kostenbasis, auch zurück auf einen früheren Wert, und beim Neuanlegen; nicht, wenn nur die Schwellen geändert werden. |
 | `threshold_percent`        | Die erreichte Schwelle.                                                                                   |
 | `spent`, `usage_ratio`     | Ausgaben im Zeitraum beim Auslösen und `spent / amount` (über `1`, wenn überschritten).                   |
-| `period_start`, `period_end` | Der Zeitraum, zu dem die Warnung gehört. Ein Reset verschiebt `period_start` auf den Reset-Zeitpunkt.   |
+| `period_start`, `period_end` | Der Zeitraum, zu dem die Warnung gehört. Ein Reset verschiebt `period_start` auf den Reset-Zeitpunkt. `period_end` liegt vor `timestamp`, wenn der Zeitraum gerade beendet wurde. |
 | `projected_spend`          | Siehe [Ausgabenprognose](#ausgabenprognose). Entfällt, solange zu wenig vom Zeitraum vergangen ist.       |
 | `projected_exhaustion_at`  | Wann das Budget beim aktuellen Tempo aufgebraucht ist. Entfällt ohne Prognose oder wenn es reicht.        |
 

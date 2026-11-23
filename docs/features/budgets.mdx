@@ -508,6 +508,11 @@ and threshold:
   the 10,000 children that spent most; the rest are not evaluated.
 - Spend is read from stored usage, so an alert trails the request that caused
   it by the usage flush (`USAGE_FLUSH_INTERVAL`, 5 s) plus up to one interval.
+- A period that has ended is evaluated for another two intervals plus 30 s, so
+  a threshold reached in its last moments still alerts. That alert has a
+  `period_end` earlier than its `timestamp`: the budget is already in its next
+  period. A budget changed or reset since the period ended is not evaluated
+  for it.
 
 Delivery is at-most-once, not guaranteed. The record is written before
 delivery and an alert is never raised a second time, so a gateway stopped
@@ -565,7 +570,7 @@ Each alert is one `POST` with a JSON body:
 | `budget.revision`          | Opaque. A new one whenever the amount or cost basis changes, even back to an earlier value, and when the budget is recreated; not when only thresholds change. |
 | `threshold_percent`        | The threshold that was reached.                                                                      |
 | `spent`, `usage_ratio`     | Spend in the period when the alert was raised, and `spent / amount` (above `1` when exceeded).       |
-| `period_start`, `period_end` | The period the alert belongs to. A reset moves `period_start` to the reset time.                   |
+| `period_start`, `period_end` | The period the alert belongs to. A reset moves `period_start` to the reset time. `period_end` is before `timestamp` when the period has just ended. |
 | `projected_spend`          | See [Spend projection](#spend-projection). Omitted when too little of the period has elapsed.        |
 | `projected_exhaustion_at`  | When the budget runs out at the current rate. Omitted without a projection, or when it lasts the period. |
 

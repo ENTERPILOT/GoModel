@@ -519,6 +519,11 @@ requestu. Alert jest wysyłany raz dla każdej rewizji budżetu, okresu i progu:
 - Wydatki są odczytywane z zapisanego zużycia, więc alert jest opóźniony
   względem requestu, który go wywołał, o zapis zużycia
   (`USAGE_FLUSH_INTERVAL`, 5 s) plus najwyżej jeden interwał.
+- Zakończony okres jest oceniany jeszcze przez dwa interwały plus 30 s, więc
+  próg osiągnięty w jego ostatnich chwilach nadal wywołuje alert. Taki alert
+  ma `period_end` wcześniejsze niż `timestamp`: budżet jest już w kolejnym
+  okresie. Budżet zmieniony lub zresetowany po zakończeniu okresu nie jest dla
+  niego oceniany.
 
 Dostarczenie następuje najwyżej raz i nie jest gwarantowane. Zapis następuje
 przed dostarczeniem, a alert nigdy nie jest zgłaszany po raz drugi: gateway
@@ -577,7 +582,7 @@ Każdy alert to jeden `POST` z treścią JSON:
 | `budget.revision`          | Nieprzezroczysta. Nowa przy każdej zmianie kwoty lub podstawy kosztu, także z powrotem na wcześniejszą wartość, i po ponownym utworzeniu; nie przy samej zmianie progów. |
 | `threshold_percent`        | Osiągnięty próg.                                                                                       |
 | `spent`, `usage_ratio`     | Wydatki w okresie w chwili zgłoszenia alertu oraz `spent / amount` (powyżej `1` po przekroczeniu).     |
-| `period_start`, `period_end` | Okres, do którego należy alert. Reset przesuwa `period_start` na czas resetu.                        |
+| `period_start`, `period_end` | Okres, do którego należy alert. Reset przesuwa `period_start` na czas resetu. `period_end` jest wcześniejsze niż `timestamp`, gdy okres właśnie się zakończył. |
 | `projected_spend`          | Zobacz [Prognoza wydatków](#prognoza-wydatków). Pomijane, gdy minęło zbyt mało okresu.                 |
 | `projected_exhaustion_at`  | Kiedy budżet wyczerpie się w obecnym tempie. Pomijane bez prognozy albo gdy budżet wystarczy na okres. |
 

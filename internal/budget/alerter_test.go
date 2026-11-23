@@ -509,7 +509,9 @@ func TestAlerterFiresUnsortedThresholds(t *testing.T) {
 func TestAlerterStartEvaluatesUntilStopped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := &memoryAlertStore{}
-		store.budgets = []Budget{{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourlySeconds, Amount: 10}}
+		// The fake clock starts on the hour. The budget is created then, so
+		// the hour that just ended is not evaluated for it.
+		store.budgets = []Budget{{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourlySeconds, Amount: 10, UpdatedAt: time.Now()}}
 		var passes atomic.Int32
 		store.sum = func(SpendWindow) (float64, bool, error) {
 			passes.Add(1)

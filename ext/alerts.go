@@ -44,6 +44,8 @@ type AlertEvent struct {
 	// a value above 1 means the budget is exceeded.
 	UsageRatio float64 `json:"usage_ratio"`
 	// PeriodStart and PeriodEnd bound the budget period the alert belongs to.
+	// PeriodEnd is before Timestamp when a threshold reached in the last
+	// moments of a period is alerted just after it.
 	PeriodStart time.Time `json:"period_start"`
 	PeriodEnd   time.Time `json:"period_end"`
 	// ProjectedSpend is the spend the period ends on if spending continues at

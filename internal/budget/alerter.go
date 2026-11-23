@@ -24,6 +24,9 @@ const (
 	// deleted; alertPruneGrace keeps them a while past the period end.
 	alertPruneInterval = time.Hour
 	alertPruneGrace    = 24 * time.Hour
+	// alertLateUsageGrace is how long after a period ends its last usage may
+	// still be on the way to storage.
+	alertLateUsageGrace = 30 * time.Second
 )
 
 // Alerter evaluates every budget against its alert thresholds in the
@@ -37,11 +40,17 @@ const (
 // recreated budget is a new claim and so fires again; see AlertClaim. Claiming
 // first means delivery is at most once: an instance that stops between the
 // claim and the delivery loses that alert.
+//
+// A period that has just ended is evaluated again, in full, for a short while:
+// see justEnded.
 type Alerter struct {
 	service  *Service
 	store    AlertStore
 	notify   func(ext.AlertEvent)
 	interval time.Duration
+	// endedFor is how long after a period ends it is still evaluated: two
+	// intervals, so a late pass does not skip it, plus alertLateUsageGrace.
+	endedFor time.Duration
 	now      func() time.Time
 	// childLimit is alertChildLimit; tests lower it.
 	childLimit int
@@ -73,6 +82,7 @@ func NewAlerter(service *Service, interval time.Duration, notify func(ext.AlertE
 		store:    store,
 		notify:   notify,
 		interval: interval,
+		endedFor: 2*interval + alertLateUsageGrace,
 		now:      time.Now,
 		settled:  make(map[string]time.Time),
 
@@ -117,7 +127,8 @@ func (a *Alerter) Start() func() {
 
 // Evaluate runs one pass: it reads the spend of every budget, in one batched
 // lookup plus one grouped lookup per per-child template, and after each
-// lookup fires the thresholds reached and not yet claimed.
+// lookup fires the thresholds reached and not yet claimed. It then does the
+// same for the periods that have just ended.
 func (a *Alerter) Evaluate(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -128,6 +139,37 @@ func (a *Alerter) Evaluate(ctx context.Context) error {
 	}
 	a.forgetEnded(now)
 
+	errs := a.evaluatePeriod(ctx, budgets, now, now, now, settings)
+	for end, ended := range a.justEnded(budgets, now, settings) {
+		// The instant before a period ends is in it.
+		errs = append(errs, a.evaluatePeriod(ctx, ended, end.Add(-time.Nanosecond), end, now, settings)...)
+	}
+	errs = append(errs, a.prune(ctx, now))
+	return errors.Join(errs...)
+}
+
+// justEnded returns the budgets whose previous period ended less than
+// endedFor ago, by that period's end.
+//
+// Without it a threshold first reached after the last pass of a period would
+// never be alerted, although enforcement may have rejected requests over it:
+// the next pass reads only the new period. A budget created, changed, or reset
+// since the period ended is left out, because what it is now says nothing
+// about that period.
+func (a *Alerter) justEnded(budgets []Budget, now time.Time, settings Settings) map[time.Time][]Budget {
+	ended := make(map[time.Time][]Budget)
+	for _, budget := range budgets {
+		end, _ := PeriodBounds(now, budget.PeriodSeconds, settings)
+		if now.Sub(end) < a.endedFor && budget.UpdatedAt.Before(end) {
+			ended[end] = append(ended[end], budget)
+		}
+	}
+	return ended
+}
+
+// evaluatePeriod fires the thresholds budgets reached in the period they were
+// in at the instant at, with spend counted up to until.
+func (a *Alerter) evaluatePeriod(ctx context.Context, budgets []Budget, at, until, now time.Time, settings Settings) []error {
 	var plain, templates []Budget
 	for _, budget := range budgets {
 		if budget.PerChild {
@@ -140,34 +182,33 @@ func (a *Alerter) Evaluate(ctx context.Context) error {
 	// slow one must not use up the time the others need to be claimed: every
 	// lookup fires what it found before the next one starts.
 	var errs []error
-	results, err := a.service.evaluate(ctx, plain, now, settings)
+	results, err := a.service.evaluatePeriod(ctx, plain, at, until, settings)
 	if err != nil {
 		errs = append(errs, err)
 	}
 	a.fireAll(ctx, results, now)
 	for _, template := range templates {
-		children, err := a.evaluateChildren(ctx, template, now, settings)
+		children, err := a.evaluateChildren(ctx, template, at, until, settings)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
 		a.fireAll(ctx, children, now)
 	}
-	errs = append(errs, a.prune(ctx, now))
-	return errors.Join(errs...)
+	return errs
 }
 
 // evaluateChildren resolves a per-child template to one result per direct
-// child that has spend in the current period. The store totals each child
-// over its whole subtree, so a child's spend is what enforcement counts.
-func (a *Alerter) evaluateChildren(ctx context.Context, template Budget, now time.Time, settings Settings) ([]CheckResult, error) {
-	start, end := activePeriod(template, now, settings)
+// child that has spend in the period. The store totals each child over its
+// whole subtree, so a child's spend is what enforcement counts.
+func (a *Alerter) evaluateChildren(ctx context.Context, template Budget, at, until time.Time, settings Settings) ([]CheckResult, error) {
+	start, end := activePeriod(template, at, settings)
 	children, err := a.store.SumSpendByChild(ctx, SpendWindow{
 		Scope:     ScopeUserPath,
 		Subject:   template.Subject,
 		CostBasis: template.EnforcedBasis(),
 		Start:     start,
-		End:       now,
+		End:       until,
 	}, a.childLimit)
 	if err != nil {
 		return nil, err
@@ -237,10 +278,11 @@ func (a *Alerter) fire(ctx context.Context, result CheckResult, now time.Time) {
 	}
 }
 
-// forgetEnded drops the remembered claims of periods that are over.
+// forgetEnded drops the remembered claims of periods that are over and no
+// longer evaluated.
 func (a *Alerter) forgetEnded(now time.Time) {
 	for key, periodEnd := range a.settled {
-		if periodEnd.Before(now) {
+		if now.Sub(periodEnd) >= a.endedFor {
 			delete(a.settled, key)
 		}
 	}
