@@ -38,6 +38,7 @@ const (
 var upstreamModels = map[string]string{
 	"anthropic/claude-sonnet-4-5":  "anthropic",
 	"anthropic/claude-opus-5":      "anthropic",
+	"anthropic/claude-opus-4-6":    "anthropic",
 	"anthropic/claude-fable-5-2":   "anthropic",
 	"openai/gpt-5":                 "openai",
 	"openai/gpt-4o":                "openai",

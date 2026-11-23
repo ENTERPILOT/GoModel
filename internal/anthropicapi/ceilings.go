@@ -111,6 +111,16 @@ func effortWithinCeiling(thinking *Thinking, effort, ceiling string, alwaysThink
 	return thinking, effort
 }
 
+// EffortWithinCeiling returns the output_config.effort a body may carry for
+// effort under ceiling: effort itself when it is a level within the ceiling,
+// the ceiling's own level otherwise.
+func EffortWithinCeiling(effort, ceiling string) string {
+	if rank := requestparams.EffortRank(effort); rank >= 0 && rank <= requestparams.EffortRank(ceiling) {
+		return effort
+	}
+	return messagesEffort(ceiling)
+}
+
 // messagesEffort is the output_config.effort that stands for a ceiling
 // level. Anthropic's scale starts at "low", so the levels below it map there.
 func messagesEffort(ceiling string) string {

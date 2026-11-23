@@ -54,3 +54,48 @@ func TestWithSingleLimits(t *testing.T) {
 		})
 	}
 }
+
+func TestWithMessageEffortsWithin(t *testing.T) {
+	tests := []struct {
+		name    string
+		ceiling string
+		body    string
+		want    string // "" when the body is returned as it is
+	}{
+		{name: "no ceiling", body: `{"messages":[{"role":"system","content":[],"output_config":{"effort":"max"}}]}`},
+		{name: "within the ceiling", ceiling: "high", body: `{"messages":[{"role":"system","content":[],"output_config":{"effort":"low"}}]}`},
+		{name: "no per-message effort", ceiling: "low", body: `{"output_config":{"effort":"max"},"messages":[{"role":"user","content":"output_config effort max"}]}`},
+		{
+			name:    "review request: an effort above the ceiling, the bytes around it kept",
+			ceiling: "low",
+			body:    ` { "output_config": {"effort": "low"}, "messages": [ {"role": "user", "content": "hi"}, {"role": "system", "content": [], "output_config": { "effort" : "max" } } ] }`,
+			want:    ` { "output_config": {"effort": "low"}, "messages": [ {"role": "user", "content": "hi"}, {"role": "system", "content": [], "output_config": { "effort" : "low" } } ] }`,
+		},
+		{
+			name:    "every message, every occurrence, any letter case",
+			ceiling: "medium",
+			body:    `{"messages":[{"output_config":{"effort":"max","EFFORT":"low","effort":"xhigh"}},{"Output_Config":{"effort":"high"},"output_config":{"effort":"medium"}}],"Messages":[{"output_config":{"effort":"max"}}]}`,
+			want:    `{"messages":[{"output_config":{"effort":"medium","EFFORT":"low","effort":"medium"}},{"Output_Config":{"effort":"medium"},"output_config":{"effort":"medium"}}],"Messages":[{"output_config":{"effort":"medium"}}]}`,
+		},
+		{name: "an escaped effort is the effort", ceiling: "low", body: `{"messages":[{"output_config":{"effort":"m\u0061x"}}]}`, want: `{"messages":[{"output_config":{"effort":"low"}}]}`},
+		{name: "an effort off the scale", ceiling: "high", body: `{"messages":[{"output_config":{"effort":"ultra"}}]}`, want: `{"messages":[{"output_config":{"effort":"high"}}]}`},
+		{name: "a ceiling below Anthropic's scale", ceiling: "none", body: `{"messages":[{"output_config":{"effort":"medium"}},{"output_config":{"effort":"low"}}]}`, want: `{"messages":[{"output_config":{"effort":"low"}},{"output_config":{"effort":"low"}}]}`},
+		{name: "an effort that is no string is left for Anthropic to refuse", ceiling: "low", body: `{"messages":[{"output_config":{"effort":9}},{"output_config":"max"},"max"]}`},
+		{name: "an effort inside content is no effort", ceiling: "low", body: `{"messages":[{"role":"user","content":[{"type":"text","text":"x","output_config":{"effort":"max"}}]}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, changed := withMessageEffortsWithin([]byte(tt.body), tt.ceiling)
+
+			if tt.want == "" {
+				assert.False(t, changed)
+				assert.Equal(t, tt.body, string(got))
+				return
+			}
+			assert.True(t, changed)
+			assert.Equal(t, tt.want, string(got))
+			_, again := withMessageEffortsWithin(got, tt.ceiling)
+			assert.False(t, again, "a lowered body is within the ceiling")
+		})
+	}
+}

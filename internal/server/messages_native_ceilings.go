@@ -24,6 +24,17 @@ func modelAlwaysThinks(workflow *core.Workflow) bool {
 	return workflow != nil && workflow.Resolution != nil && anthropic.AlwaysThinks(workflow.Resolution.ResolvedSelector.Model)
 }
 
+// nativeMessagesCeilings returns ceilings as a native body for the model
+// workflow resolved to can carry them: an effort ceiling the model rejects as
+// a level ("xhigh" on Claude Opus 4.6 and Sonnet 4.6) is the next level down
+// it takes, as the anthropic provider sends it on the translated pipeline.
+func nativeMessagesCeilings(workflow *core.Workflow, ceilings requestparams.Ceilings) requestparams.Ceilings {
+	if workflow != nil && workflow.Resolution != nil {
+		ceilings.ReasoningEffort = anthropic.SupportedEffort(workflow.Resolution.ResolvedSelector.Model, ceilings.ReasoningEffort)
+	}
+	return ceilings
+}
+
 // messagesExceedCeilings reports whether a Messages request forwarded as it
 // was sent would be above the ceilings.
 func messagesExceedCeilings(req *anthropicapi.MessagesRequest, ceilings requestparams.Ceilings, alwaysThinks bool) bool {
@@ -34,9 +45,10 @@ func messagesExceedCeilings(req *anthropicapi.MessagesRequest, ceilings requestp
 // messagesBodyWithinCeilings returns a native Messages body its caller's
 // ceilings hold for, whichever decoder reads it. The body first gets a single
 // member for each limit (see withSingleLimits); then max_tokens, the thinking
-// config and output_config.effort are lowered where they stand. A body under
-// no ceiling, or one within them that spells each limit once, is returned as
-// it is. Lowering a value keeps every other byte; folding a repeated or
+// config and output_config.effort are lowered where they stand, and so is
+// every effort a message sets for the turns after it (see
+// withMessageEffortsWithin). A body under no ceiling, or one within them that
+// spells each limit once, is returned as it is. Lowering a value keeps every other byte; folding a repeated or
 // re-cased member keeps every other member's bytes but rewrites the object,
 // without the whitespace between its members. req is the body as decoded and
 // alwaysThinks whether its model cannot stop thinking. A body the edits
@@ -62,22 +74,83 @@ func lowerMessagesBody(body []byte, req *anthropicapi.MessagesRequest, ceilings 
 			return nil, err
 		}
 	}
+	body, efforts := withMessageEffortsWithin(body, ceilings.ReasoningEffort)
 	lowered, exceeds := anthropicapi.WithinCeilings(req, ceilings.ReasoningEffort, ceilings.OutputTokens, alwaysThinks)
-	if !exceeds {
+	if !exceeds && !efforts {
 		return body, nil
 	}
-	body, err := writeMessagesLimits(body, req, lowered)
-	if err != nil {
-		return nil, err
+	if exceeds {
+		var err error
+		if body, err = writeMessagesLimits(body, req, lowered); err != nil {
+			return nil, err
+		}
 	}
 	sent, err := anthropicapi.DecodeMessagesRequest(body)
 	if err != nil {
 		return nil, err
 	}
-	if _, folded := withSingleLimits(body); folded || messagesExceedCeilings(sent, ceilings, alwaysThinks) {
+	_, folded = withSingleLimits(body)
+	_, efforts = withMessageEffortsWithin(body, ceilings.ReasoningEffort)
+	if folded || efforts || messagesExceedCeilings(sent, ceilings, alwaysThinks) {
 		return nil, errors.New("the lowered body is still above the ceilings")
 	}
 	return body, nil
+}
+
+// withMessageEffortsWithin returns body with every per-message effort above
+// ceiling lowered to it, and whether that changed body. Anthropic lets a
+// "system" entry of messages set the effort of the turns after it
+// (output_config.effort, behind a beta header the gateway forwards), so the
+// top-level effort is not the only one a body carries. The gateway does not
+// decode these, so each is lowered where it stands, in every occurrence of a
+// repeated member and in any letter case: whichever one a decoder keeps is
+// within the ceiling. An effort that is not a string is left for Anthropic
+// to refuse.
+func withMessageEffortsWithin(body []byte, ceiling string) ([]byte, bool) {
+	root := gjson.ParseBytes(body)
+	if strings.TrimSpace(ceiling) == "" || !root.IsObject() {
+		return body, false
+	}
+	// Parse drops leading whitespace from Raw without counting it in Index.
+	root.Index = len(body) - len(bytes.TrimLeft(body, " \t\r\n"))
+	var out []byte
+	at := 0
+	eachMember(root, "messages", func(messages gjson.Result) {
+		if !messages.IsArray() {
+			return
+		}
+		messages.ForEach(func(_, message gjson.Result) bool {
+			eachMember(message, "output_config", func(config gjson.Result) {
+				eachMember(config, "effort", func(effort gjson.Result) {
+					within := anthropicapi.EffortWithinCeiling(effort.String(), ceiling)
+					if effort.Type != gjson.String || within == effort.String() {
+						return
+					}
+					out = append(append(out, body[at:effort.Index]...), strconv.Quote(within)...)
+					at = effort.Index + len(effort.Raw)
+				})
+			})
+			return true
+		})
+	})
+	if at == 0 {
+		return body, false
+	}
+	return append(out, body[at:]...), true
+}
+
+// eachMember calls visit with the value of every member of object named
+// name, in any letter case, in document order.
+func eachMember(object gjson.Result, name string, visit func(value gjson.Result)) {
+	if !object.IsObject() {
+		return
+	}
+	object.ForEach(func(key, value gjson.Result) bool {
+		if strings.EqualFold(key.String(), name) {
+			visit(value)
+		}
+		return true
+	})
 }
 
 // writeMessagesLimits writes the members in which lowered differs from req
