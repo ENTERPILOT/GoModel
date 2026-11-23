@@ -16,6 +16,8 @@ import {
   rowIsManaged,
   rowRedirectCanRemove,
   rowAnchorID,
+  rowUpstreamTimeouts,
+  upstreamTimeoutsLabel,
 } from "../src/pages/models/displayRows.js";
 import {
   qualifiedModelName,
@@ -41,6 +43,7 @@ import {
   defaultVirtualModelForm,
   formatParamsJSON,
   parseParamsJSON,
+  parseTimeoutSeconds,
   removePrimaryTarget,
   virtualModelTargetOptions,
   vmFormHasPrimaryTarget,
@@ -53,6 +56,7 @@ import {
   vmFormTargetColumns,
   vmFormStrategyPending,
   vmFormSupportsSlowdown,
+  vmFormTimeoutsValid,
   vmRoutingSummary,
 } from "../src/pages/models/vmForm.js";
 
@@ -1656,4 +1660,175 @@ test("buildDisplayModels matches a virtual model to a row by its exact, case-sen
   const exactRow = exact.find((row) => row.key === "model:openai/gpt-5");
   assert.equal(exactRow.masking_alias.name, " openai/gpt-5 ");
   assert.equal(exact.filter((row) => row.is_alias).length, 0);
+});
+
+test("parseTimeoutSeconds accepts blank or whole seconds from 1 to 86400", () => {
+  const cases = [
+    { input: "", want: null },
+    { input: null, want: null },
+    { input: undefined, want: null },
+    { input: "  ", want: null },
+    { input: 1, want: 1 },
+    { input: "30", want: 30 },
+    { input: 86400, want: 86400 },
+    { input: 0, want: NaN },
+    { input: -5, want: NaN },
+    { input: 86401, want: NaN },
+    { input: 1.5, want: NaN },
+    { input: "abc", want: NaN },
+  ];
+  for (const { input, want } of cases) {
+    assert.equal(parseTimeoutSeconds(input), want, `input ${JSON.stringify(input)}`);
+  }
+});
+
+test("default form leaves timeouts empty so they inherit", () => {
+  const form = defaultVirtualModelForm();
+  assert.equal(form.timeout, "");
+  assert.equal(form.response_header_timeout, "");
+});
+
+test("save payload carries timeouts only when set", () => {
+  const configured = buildVirtualModelSavePayload(
+    {
+      source: "extract",
+      target_model: "openai/gpt-4o",
+      targets: [],
+      timeout: 600,
+      response_header_timeout: "120",
+      enabled: true,
+    },
+    "",
+    "create",
+  );
+  assert.equal(configured.payload.timeout, 600);
+  assert.equal(configured.payload.response_header_timeout, 120);
+
+  const inherited = buildVirtualModelSavePayload(
+    {
+      source: "extract",
+      target_model: "openai/gpt-4o",
+      targets: [],
+      timeout: "",
+      response_header_timeout: null,
+      enabled: true,
+    },
+    "",
+    "create",
+  );
+  assert.equal(Object.hasOwn(inherited.payload, "timeout"), false);
+  assert.equal(Object.hasOwn(inherited.payload, "response_header_timeout"), false);
+
+  const policy = buildVirtualModelSavePayload(
+    { source: "openai/text-embedding-3-small", target_model: "", timeout: 10, enabled: true },
+    "",
+    "create",
+  );
+  assert.equal(policy.payload.timeout, 10);
+});
+
+test("save payload drops timeouts on provider-wide and global policies", () => {
+  for (const source of ["openai/", "/"]) {
+    const { payload } = buildVirtualModelSavePayload(
+      { source, target_model: "", timeout: 30, response_header_timeout: 10, enabled: true },
+      "",
+      "create",
+    );
+    assert.equal(Object.hasOwn(payload, "timeout"), false, source);
+    assert.equal(Object.hasOwn(payload, "response_header_timeout"), false, source);
+  }
+});
+
+test("vmFormTimeoutsValid rejects out-of-range timeouts on models and redirects only", () => {
+  const cases = [
+    { form: { source: "fast", target_model: "openai/gpt-4o", timeout: 30 }, want: true },
+    { form: { source: "fast", target_model: "openai/gpt-4o", timeout: "" }, want: true },
+    { form: { source: "fast", target_model: "openai/gpt-4o", timeout: 0 }, want: false },
+    {
+      form: { source: "fast", target_model: "openai/gpt-4o", response_header_timeout: 86401 },
+      want: false,
+    },
+    { form: { source: "openai/gpt-4o", target_model: "", timeout: 2.5 }, want: false },
+    // Hidden on provider-wide policies, so a stale value never blocks a save.
+    { form: { source: "openai/", target_model: "", timeout: 0 }, want: true },
+  ];
+  for (const { form, want } of cases) {
+    assert.equal(vmFormTimeoutsValid(form), want, JSON.stringify(form));
+  }
+});
+
+test("splitVirtualModelViews parses timeouts on redirects and policies", () => {
+  const { aliases, policies } = splitVirtualModelViews([
+    { kind: "redirect", source: "fast", target: { model: "gpt-4o" }, timeout: 15 },
+    {
+      kind: "policy",
+      source: "openai/gpt-4o",
+      response_header_timeout: 20,
+    },
+  ]);
+  assert.equal(aliases[0].timeout, 15);
+  assert.equal(aliases[0].response_header_timeout, null);
+  assert.equal(policies[0].timeout, null);
+  assert.equal(policies[0].response_header_timeout, 20);
+});
+
+test("toggle payloads preserve configured timeouts", () => {
+  const alias = buildAliasTogglePayload({
+    name: "fast",
+    target_model: "openai/gpt-4o",
+    timeout: 15,
+    response_header_timeout: null,
+    enabled: true,
+  });
+  assert.equal(alias.timeout, 15);
+  assert.equal(Object.hasOwn(alias, "response_header_timeout"), false);
+
+  const { method, payload } = buildModelTogglePayload(
+    "openai/gpt-4o",
+    { selector: "openai/gpt-4o", user_paths: [], enabled: false, response_header_timeout: 20 },
+    { selector: "openai/gpt-4o", default_enabled: true, effective_enabled: false },
+  );
+  assert.equal(method, "PUT");
+  assert.equal(payload.enabled, true);
+  assert.equal(payload.response_header_timeout, 20);
+});
+
+test("rowUpstreamTimeouts shows the masking redirect's timeouts, else the model policy", () => {
+  const cases = [
+    {
+      name: "alias row",
+      row: { is_alias: true, alias: { timeout: 30, response_header_timeout: null } },
+      want: { timeout: 30, response_header_timeout: null },
+    },
+    {
+      name: "a masking redirect replaces the model's own policy",
+      row: {
+        masking_alias: { timeout: 30 },
+        access: { override: { timeout: 60, response_header_timeout: 10 } },
+      },
+      want: { timeout: 30, response_header_timeout: null },
+    },
+    {
+      name: "model policy without a masking redirect",
+      row: { access: { override: { timeout: 60, response_header_timeout: 10 } } },
+      want: { timeout: 60, response_header_timeout: 10 },
+    },
+    {
+      name: "nothing configured",
+      row: { access: {} },
+      want: { timeout: null, response_header_timeout: null },
+    },
+  ];
+  for (const { name, row, want } of cases) {
+    assert.deepEqual(rowUpstreamTimeouts(row), want, name);
+  }
+});
+
+test("upstreamTimeoutsLabel lists only configured timeouts", () => {
+  assert.equal(upstreamTimeoutsLabel({ timeout: null, response_header_timeout: null }), "");
+  assert.equal(
+    upstreamTimeoutsLabel({ timeout: 30, response_header_timeout: 10 }),
+    "30s per attempt · 10s to headers",
+  );
+  assert.equal(upstreamTimeoutsLabel({ timeout: null, response_header_timeout: 10 }), "10s to headers");
 });

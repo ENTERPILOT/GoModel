@@ -18,6 +18,8 @@
   rowAnchorID,
   rowIsManaged,
   rowRedirectCanRemove,
+  rowUpstreamTimeouts,
+  upstreamTimeoutsLabel,
 } from "./displayRows.js";
 import {
   maskingFailsOver,
@@ -98,6 +100,7 @@ import {
   const slowdown = $derived(
     Number(configuredSlowdown == null ? 0 : configuredSlowdown),
   );
+  const timeoutsLabel = $derived(upstreamTimeoutsLabel(rowUpstreamTimeouts(row)));
 </script>
 
 <tr id={rowAnchorID(row) || undefined} class={displayRowClass(row)}>
@@ -171,6 +174,11 @@ import {
       {#if slowdown > 0}
         <div class="model-name-secondary">
           {m.models_slowdown()} <span class="mono font-size-md">{m.models_inference_time({ value: slowdown })}</span>
+        </div>
+      {/if}
+      {#if timeoutsLabel}
+        <div class="model-name-secondary">
+          {m.models_upstream_timeouts()} <span class="mono font-size-md">{timeoutsLabel}</span>
         </div>
       {/if}
     </div>

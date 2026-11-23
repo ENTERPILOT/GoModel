@@ -524,6 +524,10 @@ These control timeouts and connection pooling for upstream API requests to LLM p
 | `HTTP_STREAM_IDLE_TIMEOUT`     | Longest silence in seconds a stream may keep once its first bytes arrived; `0` disables | `300` (5 min) |
 | `HTTP_MAX_IDLE_CONNS_PER_HOST` | Idle keep-alive connections each provider keeps open to its upstream; `0` or less uses the default | `512` |
 
+To give one model or redirect a different `HTTP_TIMEOUT` or
+`HTTP_RESPONSE_HEADER_TIMEOUT`, see
+[Set upstream timeouts](/features/virtual-models#set-upstream-timeouts).
+
 A stream that goes quiet for longer than `HTTP_STREAM_IDLE_TIMEOUT` is closed
 with a `504` provider error instead of hanging until `HTTP_TIMEOUT`. The wait
 for the first token does not count, so slow reasoning models are unaffected.

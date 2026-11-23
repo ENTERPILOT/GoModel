@@ -30,7 +30,7 @@ policy on the **Source** selector.
 
 GoModel does not persist empty, ineffective access policies, whether saved from
 the dashboard or through the admin API. If a saved policy has no target, user
-paths, description, slowdown, or reasoning effort and its enabled state matches the inherited/default
+paths, description, slowdown, upstream timeouts, or reasoning effort and its enabled state matches the inherited/default
 access state, GoModel removes the stored row. It retains an otherwise empty
 policy when that row still overrides a disabled default or an inherited
 user-path restriction.
@@ -228,6 +228,65 @@ request parameters as well (see
 [what the semantic cache keys on](/features/cache#what-the-semantic-cache-keys-on)
 for exactly which fields), so aliases that apply different values, including
 `top_k` or `chat_template_kwargs`, never share a semantic entry either.
+
+## Set upstream timeouts
+
+By default every upstream call uses the gateway-wide
+[HTTP client timeouts](/advanced/configuration#http-client): `HTTP_TIMEOUT`
+and `HTTP_RESPONSE_HEADER_TIMEOUT`, both `600` seconds. Set `timeout` and
+`response_header_timeout` on a redirect or a concrete model to override them
+for requests through that redirect or to that model. Use a short budget where
+a slow answer is useless (embeddings, autocomplete, a fast fallback leg) and a
+long one for models that legitimately take longer (document extraction, deep
+reasoning), without changing the limit for every other model.
+
+Both fields are whole seconds from `1` to `86400`; leave them empty (the
+default) to inherit. In the dashboard, fill **Upstream timeout** and
+**Response header timeout** in the virtual model editor.
+
+```yaml
+virtual_models:
+  - source: embed-fast
+    target: openai/text-embedding-3-small
+    timeout: 10
+  - source: extract
+    target: anthropic/claude-sonnet-4-6
+    timeout: 1800
+  # A policy on the model itself applies to every request for it.
+  - source: openai/gpt-4o
+    timeout: 120
+    response_header_timeout: 30
+```
+
+- Each value applies to **each upstream attempt**. Retries and failover legs
+  get a fresh budget rather than sharing one deadline.
+- Like `HTTP_TIMEOUT`, `timeout` bounds the whole attempt, including reading a
+  streamed response body, so a short `timeout` on a streaming chat model cuts
+  long streams off. To bound only the wait for the first byte, set
+  `response_header_timeout` instead.
+- A `timeout` longer than the inherited response-header timeout also extends
+  the wait for headers: a non-streaming call sends its headers only when the
+  answer is ready. Set `response_header_timeout` to keep a shorter limit.
+- An attempt that times out is not retried on the same provider; it counts as
+  failed and moves on to the next [failover](/features/failover) target, as
+  the failover policy allows.
+- A timed-out attempt counts as a
+  [circuit breaker](/advanced/resilience#what-counts-as-a-failure) failure.
+  Requests running on a per-model timeout always use their model's own
+  breaker, so a tight budget on one model never opens the circuit for the
+  provider's other models.
+- Each field resolves on its own: the redirects that route the request come
+  first (outermost first), then the resolved model's exact policy
+  (`openai/gpt-4o`), then its model-wide policy (`gpt-4o`), then the
+  gateway-wide setting. A policy whose `user_paths` exclude the caller is
+  skipped.
+- Failover legs reuse the timeouts resolved for the request.
+- Only a redirect or a concrete model accepts timeouts; provider-wide
+  (`openai/`) and global (`/`) policies reject them.
+- They are admin configuration only: callers cannot set them with request
+  headers.
+- Native AWS SDK calls (Bedrock) and realtime WebSocket handshakes keep the
+  gateway-wide timeouts.
 
 The rest of this page covers redirects.
 
@@ -458,7 +517,8 @@ Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
 [Session Keeping](/features/session-keeping)), `failover` (default `true`; see
 [Failover](/features/failover)), `user_paths`, `description`,
 `slowdown` (`0` disables inherited slowdown; active factors range from `0.1` to
-`10`), `reasoning_effort` (see [Force a reasoning effort](#force-a-reasoning-effort)),
+`10`), `timeout` and `response_header_timeout` (see
+[Set upstream timeouts](#set-upstream-timeouts)), `reasoning_effort` (see [Force a reasoning effort](#force-a-reasoning-effort)),
 `params` and `default_params` (see
 [Set request parameters](#set-request-parameters)), and `enabled`.
 A target has `model` and optional `provider`, `weight`, and `reasoning_effort`

@@ -352,6 +352,55 @@ func TestUpsertVirtualModelValidatesSlowdown(t *testing.T) {
 	}
 }
 
+func TestUpsertVirtualModelTimeouts(t *testing.T) {
+	tests := []struct {
+		name       string
+		fields     string
+		wantStatus int
+		wantView   func(t *testing.T, view virtualmodels.View)
+	}{
+		{
+			name:       "both set",
+			fields:     `"timeout":300,"response_header_timeout":20`,
+			wantStatus: http.StatusOK,
+			wantView: func(t *testing.T, view virtualmodels.View) {
+				require.NotNil(t, view.Timeout)
+				require.NotNil(t, view.ResponseHeaderTimeout)
+				assert.Equal(t, 300, *view.Timeout)
+				assert.Equal(t, 20, *view.ResponseHeaderTimeout)
+			},
+		},
+		{
+			name:       "omitted inherits",
+			wantStatus: http.StatusOK,
+			wantView: func(t *testing.T, view virtualmodels.View) {
+				assert.Nil(t, view.Timeout)
+				assert.Nil(t, view.ResponseHeaderTimeout)
+			},
+		},
+		{name: "zero rejected", fields: `"timeout":0`, wantStatus: http.StatusBadRequest},
+		{name: "above maximum rejected", fields: `"response_header_timeout":86401`, wantStatus: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newVMHandler(t)
+			body := `{"source":"extract","target_model":"openai/gpt-4o"`
+			if tt.fields != "" {
+				body += "," + tt.fields
+			}
+			body += "}"
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", body)
+			err := h.UpsertVirtualModel(c)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			if tt.wantView != nil {
+				tt.wantView(t, echotest.Decode[virtualmodels.View](t, rec))
+			}
+		})
+	}
+}
+
 func TestUpsertVirtualModelReasoningEffort(t *testing.T) {
 	tests := []struct {
 		name       string

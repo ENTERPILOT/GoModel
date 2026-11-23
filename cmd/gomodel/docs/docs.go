@@ -11205,6 +11205,10 @@ const docTemplate = `{
                     "description": "ReasoningEffort forces the reasoning effort sent upstream (\"none\",\n\"minimal\", \"low\", \"medium\", \"high\", \"xhigh\", or \"max\"); empty keeps the\nclient's value.",
                     "type": "string"
                 },
+                "response_header_timeout": {
+                    "description": "ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in\nseconds (1 to 86400), for every upstream attempt. Omitted inherits.",
+                    "type": "integer"
+                },
                 "session_affinity": {
                     "description": "SessionAffinity keeps a detected session on the target that served it\nbefore. Omitted means enabled; false restores stateless balancing.",
                     "type": "boolean"
@@ -11239,6 +11243,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/admin.virtualModelTargetRequest"
                     }
+                },
+                "timeout": {
+                    "description": "Timeout overrides HTTP_TIMEOUT, in seconds (1 to 86400), for every\nupstream attempt of a request through this row. Omitted inherits.",
+                    "type": "integer"
                 },
                 "user_paths": {
                     "type": "array",
@@ -15682,6 +15690,10 @@ const docTemplate = `{
                 "resolved_model": {
                     "type": "string"
                 },
+                "response_header_timeout": {
+                    "description": "ResponseHeaderTimeout is the per-attempt wait for upstream response\nheaders in seconds; omitted inherits.",
+                    "type": "integer"
+                },
                 "scope_kind": {
                     "type": "string"
                 },
@@ -15710,6 +15722,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/virtualmodels.Target"
                     }
+                },
+                "timeout": {
+                    "description": "Timeout is the per-attempt upstream timeout in seconds; omitted inherits.",
+                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"
@@ -15762,6 +15778,10 @@ const docTemplate = `{
                     "description": "ReasoningEffort, when set, replaces the reasoning effort of every\nrequest sent upstream through this redirect or to this model, whatever\nthe client asked for. Empty leaves the client's value untouched.",
                     "type": "string"
                 },
+                "response_header_timeout": {
+                    "description": "ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in\nseconds, for every upstream attempt. Nil inherits.",
+                    "type": "integer"
+                },
                 "session_affinity": {
                     "description": "SessionAffinity keeps requests of one detected session on the target that\nserved it before, while that target stays available. Tri-state: nil means\nenabled (the default); explicit false restores stateless balancing.",
                     "type": "boolean"
@@ -15789,6 +15809,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/virtualmodels.Target"
                     }
+                },
+                "timeout": {
+                    "description": "Timeout overrides HTTP_TIMEOUT, in seconds, for every upstream attempt\nof a request routed through this redirect or to this model. Nil\ninherits (from the target model's policy, then the gateway default).",
+                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"
