@@ -233,7 +233,7 @@ func TestNewSQLStoreStartsReplicasTogether(t *testing.T) {
 	cases := map[string][]string{
 		"new database": nil,
 		"legacy schema": {`
-			CREATE TABLE request_logs (
+			CREATE TABLE audit_logs (
 				id TEXT PRIMARY KEY,
 				timestamp ` + sqlx.TypeTimestamp + ` NOT NULL,
 				model TEXT,
