@@ -306,6 +306,18 @@ func (s *Service) Get(source string) (*VirtualModel, bool) {
 	return nil, false
 }
 
+// ModelWidePolicy returns the policy declared for a model name on every
+// provider (source "gpt-4o"). It supplies per-model values such as slowdown
+// and upstream timeouts where the model's exact policy leaves them unset.
+func (s *Service) ModelWidePolicy(model string) (*VirtualModel, bool) {
+	policy, ok := s.snapshot().modelWide[model]
+	if !ok {
+		return nil, false
+	}
+	clone := policy.clone()
+	return &clone, true
+}
+
 // ListViews returns all virtual models (redirects and policies) for the admin UI.
 func (s *Service) ListViews() []View {
 	rows := s.List()

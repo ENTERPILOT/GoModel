@@ -279,7 +279,8 @@ virtual_models:
   first (outermost first), then the resolved model's exact policy
   (`openai/gpt-4o`), then its model-wide policy (`gpt-4o`), then the
   gateway-wide setting. A policy whose `user_paths` exclude the caller is
-  skipped.
+  skipped. On the Models page, a value a model takes from its model-wide
+  policy is marked `(from gpt-4o)`.
 - Failover legs reuse the timeouts resolved for the request.
 - Only a redirect or a concrete model accepts timeouts; provider-wide
   (`openai/`) and global (`/`) policies reject them.

@@ -18,7 +18,9 @@
   rowAnchorID,
   rowIsManaged,
   rowRedirectCanRemove,
+  rowSlowdown,
   rowUpstreamTimeouts,
+  slowdownLabel,
   upstreamTimeoutsLabel,
 } from "./displayRows.js";
 import {
@@ -70,13 +72,6 @@ import {
   const aliasRoute = $derived(row.is_alias ? aliasRouting(row.alias) : null);
 
   const pricing = $derived(pricingOverrides.modelRowPricing(row));
-  const configuredSlowdown = $derived(
-    row.is_alias
-      ? row.alias && row.alias.slowdown
-      : row.masking_alias && row.masking_alias.slowdown != null
-        ? row.masking_alias.slowdown
-        : row.access && row.access.override && row.access.override.slowdown,
-  );
   // What the virtual model over this real model does with its requests: the
   // icon, the secondary line, and the edit/remove labels all follow it.
   const globalFailover = $derived(runtimeConfig.booleanFlag("FAILOVER_ENABLED", true));
@@ -122,9 +117,7 @@ import {
         : m.models_removing_redirect({ model: row.display_name }),
   );
 
-  const slowdown = $derived(
-    Number(configuredSlowdown == null ? 0 : configuredSlowdown),
-  );
+  const slowdown = $derived(slowdownLabel(rowSlowdown(row)));
   const timeoutsLabel = $derived(upstreamTimeoutsLabel(rowUpstreamTimeouts(row)));
 </script>
 
@@ -200,9 +193,9 @@ import {
           {/if}
         </div>
       {/if}
-      {#if slowdown > 0}
+      {#if slowdown}
         <div class="model-name-secondary">
-          {m.models_slowdown()} <span class="mono font-size-md">{m.models_inference_time({ value: slowdown })}</span>
+          {m.models_slowdown()} <span class="mono font-size-md">{slowdown}</span>
         </div>
       {/if}
       {#if timeoutsLabel}

@@ -18,6 +18,10 @@ type modelAccessResponse struct {
 	EffectiveEnabled bool                        `json:"effective_enabled"`
 	UserPaths        []string                    `json:"user_paths,omitempty"`
 	Override         *virtualmodels.VirtualModel `json:"override,omitempty"`
+	// ModelPolicy is the model-wide policy row (source "gpt-4o"), if any. Its
+	// per-model values (slowdown, upstream timeouts) apply wherever Override
+	// leaves them unset.
+	ModelPolicy *virtualmodels.VirtualModel `json:"model_policy,omitempty"`
 }
 
 type modelInventoryResponse struct {
@@ -102,6 +106,9 @@ func (h *Handler) modelAccessResolver() func(core.ModelSelector) modelAccessResp
 		if override, ok := h.virtualModels.Get(selector.QualifiedModel()); ok && override != nil && !override.IsRedirect() {
 			overrideCopy := *override
 			access.Override = &overrideCopy
+		}
+		if policy, ok := h.virtualModels.ModelWidePolicy(selector.Model); ok {
+			access.ModelPolicy = policy
 		}
 		return access
 	}

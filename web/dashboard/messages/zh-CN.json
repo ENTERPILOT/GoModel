@@ -783,6 +783,7 @@
   "models_upstream_timeouts": "超时",
   "models_timeout_per_attempt": "每次尝试 {value} 秒",
   "models_timeout_headers": "响应头 {value} 秒",
+  "models_inherited_from": "来自 {source}",
   "models_reasoning_effort_field": "推理强度覆盖",
   "models_reasoning_effort_client": "沿用客户端的值",
   "models_reasoning_effort_help": "经由此虚拟模型或发往此模型的每个上游请求都会使用该推理强度，忽略客户端请求的值。模型自身的设置优先于虚拟模型，内层虚拟模型优先于外层。",

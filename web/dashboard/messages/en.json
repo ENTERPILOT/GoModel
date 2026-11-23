@@ -873,6 +873,7 @@
   "models_upstream_timeouts": "Timeouts",
   "models_timeout_per_attempt": "{value}s per attempt",
   "models_timeout_headers": "{value}s to headers",
+  "models_inherited_from": "from {source}",
   "models_reasoning_effort_field": "Reasoning effort override",
   "models_reasoning_effort_client": "Client's value",
   "models_reasoning_effort_help": "Every request sent upstream through this virtual model or to this model gets this reasoning effort, whatever the client asked for. A model's own override beats a virtual model's, and an inner virtual model beats an outer one.",
