@@ -110,6 +110,11 @@ Redis when several replicas should share discovery results and cache hits.
   Take that into account when ordering service startup.
 </Note>
 
+A slow Redis adds at most 250 ms to a cacheable request before it falls through
+to the provider. Connection timeouts default to 2 s (dial) and 500 ms
+(read/write); see [slow or unreachable caches](/features/cache#slow-or-unreachable-caches)
+to raise them.
+
 Redis does not coordinate rate limits or budgets: replicas share both through
 the database. Redis is a cache, not a distributed lock.
 
