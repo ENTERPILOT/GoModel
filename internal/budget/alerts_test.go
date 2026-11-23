@@ -2,6 +2,7 @@ package budget
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -157,6 +158,12 @@ func TestThresholdReachedAtFullSpendMatchesEnforcement(t *testing.T) {
 		result := CheckResult{Budget: Budget{Amount: amount}, Spent: amount, HasUsage: true}
 		assert.True(t, result.thresholdReached(100), "amount %v", amount)
 	}
+
+	// Nor does it fire while enforcement still lets requests through.
+	below := CheckResult{Budget: Budget{Amount: 0.1}, Spent: math.Nextafter(0.1, 0), HasUsage: true}
+	require.GreaterOrEqual(t, below.Spent*100, below.Budget.Amount*100, "the amount no longer shows the rounding")
+	assert.False(t, below.thresholdReached(100))
+	assert.True(t, below.thresholdReached(99))
 }
 
 func TestAlertThresholdsEncoding(t *testing.T) {
