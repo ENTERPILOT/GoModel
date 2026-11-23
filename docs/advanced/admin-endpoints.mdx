@@ -840,7 +840,14 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   `service_account_json_base64` to a run of asterisks (`***********`), and
   mask any password in `proxy_url`. Sending back any value of three or more
   asterisks keeps the stored one, so an edit never has to repeat a secret; a
-  redacted entry with no stored value behind it returns `400`. A `proxy_url`
+  redacted entry with no stored value behind it returns `400`. A masked API
+  key shows its first 5 and last 3 characters (keys of 20 or more
+  characters) and names the stored key it stands for:
+  `sk-pr***********7Qa#2` is the second, so entries can be removed or
+  reordered. Slots refer to the stored list at save time: a mask whose
+  characters no longer match its stored key returns `400`. That check misses
+  fully masked short keys and keys that share their visible characters, so
+  reload before saving after concurrent edits. A bare mask keeps the stored key at its own position. A `proxy_url`
   sent back with its password still masked (`xxxxx`) keeps the stored
   password, also when the scheme, host, port, or username changes. A value
   made only of secret references is shown as is.

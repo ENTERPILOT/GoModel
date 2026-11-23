@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // Mistral content chunk types on reasoning models: the answer arrives as
@@ -20,7 +22,9 @@ const (
 	// Mistral's "reference" chunk) on the message/delta as a vendor member, so
 	// they survive the round trip without breaking the typed content decode,
 	// which rejects unsupported part types and would fail the whole response.
-	unknownChunksKey = "mistral_content_chunks"
+	// The Responses translation moves the member into the message item's
+	// extra_content.
+	unknownChunksKey = providers.MistralContentChunksField
 )
 
 // contentKey is the member hasContentArray looks for.
