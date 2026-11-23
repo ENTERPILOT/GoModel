@@ -3,6 +3,7 @@ package core
 import (
 	"testing"
 
+	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -70,6 +71,34 @@ func TestWorkflowPromptGuardrailsHash(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, tt.workflow.PromptGuardrailsHash())
+		})
+	}
+}
+
+// The request_logs flag was named audit through v0.2.5: both keys are written
+// and either is read, request_logs first.
+func TestWorkflowFeaturesJSON_RequestLogsAndAuditAlias(t *testing.T) {
+	raw, err := json.Marshal(WorkflowFeatures{Cache: true, RequestLogs: true})
+	require.NoError(t, err)
+	assert.JSONEq(t,
+		`{"cache":true,"request_logs":true,"audit":true,"usage":false,"budget":false,"guardrails":false,"failover":false}`,
+		string(raw))
+
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "audit only, as v0.2.5 wrote it", raw: `{"audit":true}`, want: true},
+		{name: "request_logs only", raw: `{"request_logs":true}`, want: true},
+		{name: "request_logs wins over audit", raw: `{"audit":true,"request_logs":false}`, want: false},
+		{name: "neither", raw: `{"cache":true}`, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var features WorkflowFeatures
+			require.NoError(t, json.Unmarshal([]byte(tt.raw), &features))
+			assert.Equal(t, tt.want, features.RequestLogs)
 		})
 	}
 }

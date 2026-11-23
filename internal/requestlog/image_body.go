@@ -22,6 +22,11 @@ const imageMetaMaxBytes = 1024 * 1024
 // per image item; real revised prompts are a few hundred bytes.
 const imageRevisedPromptMaxBytes = 16 * 1024
 
+// imageItemDetailMaxBytes bounds each provider-returned per-image detail kept
+// per item (the size, the error code, the error message); real ones are a
+// few bytes to a short sentence.
+const imageItemDetailMaxBytes = 2 * 1024
+
 // ImageBodyLog is the request log representation of an image request or response.
 // The "__images__" marker lets the dashboard detect it and render a gallery
 // (for items with a MediaID) or labeled placeholders. Meta holds the
@@ -35,17 +40,26 @@ type ImageBodyLog struct {
 
 // ImageItemLog is one image inside an ImageBodyLog. Role is "input" (an edit
 // source), "mask", or "output". URL items (hosted DALL·E results) carry no
-// bytes; stored items name their media object. Rows written before ADR-0013
+// bytes; stored items name their media object. An output that failed inside a
+// partially successful batch carries only Error. Rows written before ADR-0013
 // carry the pixels inline as base64 under "encoding" and "data" instead.
 type ImageItemLog struct {
-	Role          string `json:"role" bson:"role"`
-	Filename      string `json:"filename,omitempty" bson:"filename,omitempty"`
-	ContentType   string `json:"content_type,omitempty" bson:"content_type,omitempty"`
-	Bytes         int64  `json:"bytes" bson:"bytes"`
-	URL           string `json:"url,omitempty" bson:"url,omitempty"`
-	RevisedPrompt string `json:"revised_prompt,omitempty" bson:"revised_prompt,omitempty"`
-	MediaID       string `json:"media_id,omitempty" bson:"media_id,omitempty"`
-	Stored        bool   `json:"stored" bson:"stored"`
+	Role          string             `json:"role" bson:"role"`
+	Filename      string             `json:"filename,omitempty" bson:"filename,omitempty"`
+	ContentType   string             `json:"content_type,omitempty" bson:"content_type,omitempty"`
+	Bytes         int64              `json:"bytes" bson:"bytes"`
+	URL           string             `json:"url,omitempty" bson:"url,omitempty"`
+	Size          string             `json:"size,omitempty" bson:"size,omitempty"`
+	RevisedPrompt string             `json:"revised_prompt,omitempty" bson:"revised_prompt,omitempty"`
+	Error         *ImageItemErrorLog `json:"error,omitempty" bson:"error,omitempty"`
+	MediaID       string             `json:"media_id,omitempty" bson:"media_id,omitempty"`
+	Stored        bool               `json:"stored" bson:"stored"`
+}
+
+// ImageItemErrorLog is the provider's reason one image of a batch failed.
+type ImageItemErrorLog struct {
+	Code    string `json:"code,omitempty" bson:"code,omitempty"`
+	Message string `json:"message,omitempty" bson:"message,omitempty"`
 }
 
 // BuildImageUploadBody builds the request log value for an image edit request: the
@@ -76,7 +90,17 @@ func BuildImageResponseBody(capture *MediaCapture, resp *core.ImageGenerationRes
 	body.Meta = capImageMeta(imageResponseMeta(resp))
 	contentType := imageOutputContentType(resp.OutputFormat)
 	for _, data := range resp.Data {
-		item := ImageItemLog{Role: "output", RevisedPrompt: truncateUTF8(data.RevisedPrompt, imageRevisedPromptMaxBytes)}
+		item := ImageItemLog{
+			Role:          "output",
+			Size:          truncateUTF8(data.Size, imageItemDetailMaxBytes),
+			RevisedPrompt: truncateUTF8(data.RevisedPrompt, imageRevisedPromptMaxBytes),
+		}
+		if data.Error != nil {
+			item.Error = &ImageItemErrorLog{
+				Code:    truncateUTF8(data.Error.Code, imageItemDetailMaxBytes),
+				Message: truncateUTF8(data.Error.Message, imageItemDetailMaxBytes),
+			}
+		}
 		switch {
 		case data.URL != "":
 			item.URL = data.URL
@@ -180,6 +204,7 @@ func imageResponseMeta(resp *core.ImageGenerationResponse) map[string]any {
 		"quality":       resp.Quality,
 		"size":          resp.Size,
 		"provider":      resp.Provider,
+		"request_id":    resp.RequestID,
 	} {
 		if value != "" {
 			meta[key] = value

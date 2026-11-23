@@ -105,6 +105,11 @@ session reported no usage of its own, so a session is never billed twice. As wit
 translation, WebRTC calls carry their media outside the gateway and are not
 metered.
 
+ElevenLabs Scribe Realtime (`scribe_v2_realtime`, `scribe_v3_live`) has its own
+websocket protocol. The gateway translates it to and from these events, so the
+same client works with `/v1/realtime?model=scribe_v2_realtime`; see
+[ElevenLabs](/providers/elevenlabs) for the event mapping and its limits.
+
 ## Anthropic-Compatible API
 
 | Endpoint                    | Method | Description                                                                   |

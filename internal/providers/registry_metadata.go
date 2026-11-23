@@ -413,8 +413,9 @@ func applyConfigMetadataOverrides(
 // applyInferredModelMetadata is the last enrichment step: models that ended up
 // with no modes and no categories — neither the remote model registry nor
 // operator config knows them, the common case for local llama.cpp/LM Studio/
-// Ollama models — get modes inferred from their ID so obvious embedding models
-// are categorized as such instead of falling out of every category listing.
+// Ollama models — get modes inferred from their ID so obvious embedding and
+// audio models are categorized as such instead of falling out of every
+// category listing.
 // Runs after enrichProviderModelMaps and applyConfigMetadataOverrides so both
 // real sources always win; uses the same replacements protocol (nil for fresh,
 // unpublished maps). Returns the number of models that received inferred modes.

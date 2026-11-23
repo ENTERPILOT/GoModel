@@ -194,40 +194,63 @@ type dynamicTransport struct {
 type boundTransport struct {
 	trust *trustState
 	rt    *http.Transport
+	// headerVariants holds pooled transports for per-attempt response-header
+	// timeout overrides (see WithAttemptTimeouts), keyed by duration.
+	headerVariants headerTimeoutVariants
 }
 
 // current returns the transport for the installed trust configuration,
 // building it first if the configuration changed since the last request.
 func (d *dynamicTransport) current() *http.Transport {
-	state := trust.Load()
+	b := d.bound(trust.Load())
+	return b.rt
+}
+
+// bound returns the transport set for the installed trust configuration,
+// rebuilding it when the configuration changed since the last request.
+func (d *dynamicTransport) bound(state *trustState) *boundTransport {
 	if b := d.active.Load(); b != nil && b.trust == state {
-		return b.rt
+		return b
 	}
 	fresh := &boundTransport{trust: state, rt: newTransport(&d.config, state)}
 	for {
 		old := d.active.Load()
 		if old != nil && old.trust == state {
 			// Another request rebuilt it first.
-			return old.rt
+			return old
 		}
 		if d.active.CompareAndSwap(old, fresh) {
 			if old != nil {
-				old.rt.CloseIdleConnections()
+				old.closeIdleConnections()
 			}
-			return fresh.rt
+			return fresh
 		}
 	}
 }
 
 func (d *dynamicTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	return d.current().RoundTrip(req)
+	state := trust.Load()
+	b := d.bound(state)
+	if headerTimeout, ok := responseHeaderTimeoutOverride(req.Context(), d.config.ResponseHeaderTimeout); ok {
+		return b.headerVariants.get(headerTimeout, func() *http.Transport {
+			cfg := d.config
+			cfg.ResponseHeaderTimeout = headerTimeout
+			return newTransport(&cfg, state)
+		}).RoundTrip(req)
+	}
+	return b.rt.RoundTrip(req)
 }
 
 // CloseIdleConnections lets http.Client.CloseIdleConnections reach the pool.
 func (d *dynamicTransport) CloseIdleConnections() {
 	if b := d.active.Load(); b != nil {
-		b.rt.CloseIdleConnections()
+		b.closeIdleConnections()
 	}
+}
+
+func (b *boundTransport) closeIdleConnections() {
+	b.rt.CloseIdleConnections()
+	b.headerVariants.closeIdleConnections()
 }
 
 // CurrentTransport returns the *http.Transport a client created by this

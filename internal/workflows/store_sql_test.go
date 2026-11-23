@@ -36,7 +36,7 @@ func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
 func testWorkflowPayload() Payload {
 	return Payload{
 		SchemaVersion: 1,
-		Features:      FeatureFlags{Cache: true, Audit: true, Usage: true},
+		Features:      FeatureFlags{Cache: true, RequestLogs: true, Usage: true},
 	}
 }
 

@@ -595,9 +595,9 @@ export function requestEntryLiveInProgress(entry) {
   if (!entry || !entry._live || !entry._live_pending) return false;
   const liveState = String(entry._live_state || "").trim();
   if (
-    liveState === "audit.completed" ||
-    liveState === "audit.flushed" ||
-    liveState === "audit.detail"
+    liveState === "request_log.completed" ||
+    liveState === "request_log.flushed" ||
+    liveState === "request_log.detail"
   ) {
     return false;
   }

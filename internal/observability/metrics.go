@@ -72,6 +72,30 @@ var (
 		},
 		[]string{"provider"},
 	)
+
+	// BudgetAlertsFired counts budget alerts this instance raised: a budget
+	// reached one of its alert thresholds and this instance won the claim.
+	BudgetAlertsFired = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gomodel_budget_alerts_fired_total",
+			Help: "Total number of budget threshold alerts raised by this instance",
+		},
+		[]string{"scope", "threshold"},
+	)
+
+	// BudgetAlertDeliveryFailures counts alerts a destination did not
+	// receive: a webhook that failed after its retries, a sink that returned
+	// an error, panicked, or did not return in time, an alert dropped because
+	// the destination's queue was full, and one abandoned at shutdown.
+	// destination is "webhook" for every webhook, or the sink's name, which
+	// the dispatcher keeps distinct from it and from every other sink's.
+	BudgetAlertDeliveryFailures = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gomodel_budget_alert_delivery_failures_total",
+			Help: "Total number of budget alerts that could not be delivered to a destination",
+		},
+		[]string{"destination"},
+	)
 )
 
 // circuitStateValue maps llmclient circuit state names to gauge values.
@@ -175,6 +199,9 @@ func NewPrometheusHooks() llmclient.Hooks {
 //
 // Empty 200 responses by provider and reason:
 //   sum(rate(gomodel_empty_responses_total[5m])) by (provider, reason)
+//
+// Budget alert delivery failures by destination:
+//   sum(increase(gomodel_budget_alert_delivery_failures_total[1h])) by (destination)
 
 // Example Grafana dashboard queries:
 //
@@ -201,6 +228,8 @@ func ResetMetrics() {
 	ResponseSnapshotStoreFailures.Reset()
 	EmptyResponsesTotal.Reset()
 	CircuitBreakerState.Reset()
+	BudgetAlertsFired.Reset()
+	BudgetAlertDeliveryFailures.Reset()
 	TokensTotal.Reset()
 	TokenDetailsTotal.Reset()
 	ProviderCostTotal.Reset()

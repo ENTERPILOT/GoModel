@@ -591,7 +591,7 @@ export function conversationEntryIsLatest(entries, entryID) {
 }
 
 export function shouldHydrateConversation(eventType, changedEntryID, selectedAnchorID) {
-    return String(eventType || '').trim() === 'audit.flushed' &&
+    return String(eventType || '').trim() === 'request_log.flushed' &&
         String(changedEntryID || '').trim() !== '' &&
         String(changedEntryID || '').trim() === String(selectedAnchorID || '').trim();
 }
@@ -828,11 +828,12 @@ function imageRoleLabel(role) {
 
 // renderImageItem renders one image: an inline preview when the bytes were
 // captured (by media_id, or inline base64 on rows written before media
-// storage existed), a link when the provider returned a hosted URL, or a
-// labeled placeholder explaining why no pixels are available.
+// storage existed), a link when the provider returned a hosted URL, the
+// provider's error when this image of a batch failed, or a labeled
+// placeholder explaining why no pixels are available.
 function renderImageItem(item) {
     const role = escapeHTML(imageRoleLabel(item.role));
-    const details = [item.filename, item.content_type, item.bytes ? formatByteSize(item.bytes) : '']
+    const details = [item.filename, item.content_type, item.size, item.bytes ? formatByteSize(item.bytes) : '']
         .filter(Boolean)
         .map((part) => escapeHTML(String(part)))
         .join(' · ');
@@ -840,6 +841,14 @@ function renderImageItem(item) {
         ? '<div class="request-log-image-note">' + escapeHTML(String(item.revised_prompt)) + '</div>'
         : '';
     const caption = '<div class="request-log-image-caption mono">' + role + (details ? ' · ' + details : '') + '</div>';
+    if (item.error && typeof item.error === 'object') {
+        const failure = [item.error.code, item.error.message].filter(Boolean).map(String).join(': ');
+        return '<figure class="request-log-image request-log-image-empty">'
+            + '<div class="request-log-image-icon" aria-hidden="true">⚠️</div>'
+            + caption
+            + '<div class="request-log-image-note">' + escapeHTML(failure) + '</div>'
+            + revised + '</figure>';
+    }
     const mediaId = item.stored ? sanitizeMediaId(item.media_id) : '';
     if (mediaId) {
         return '<figure class="request-log-image">'

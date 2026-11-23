@@ -417,7 +417,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Request logging runs before workflow resolution so early workflow resolution/validation
 	// failures are still logged. The middleware defers request capture and
 	// dynamically gates response capture on the final resolved workflow, so
-	// Audit=false still suppresses per-request capture work.
+	// RequestLogs=false still suppresses per-request capture work.
 	if cfg != nil && cfg.RequestLogger != nil && cfg.RequestLogger.Config().Enabled {
 		e.Use(requestlog.Middleware(cfg.RequestLogger))
 	}

@@ -291,6 +291,7 @@
                         "pages": [
                             "guides/production",
                             "guides/updating",
+                            "guides/exporting-config",
                             "guides/migrate-from-litellm",
                             "guides/caddy",
                             "guides/openai-agents-sdk",
@@ -479,6 +480,7 @@
                         "pages": [
                             "de/guides/production",
                             "de/guides/updating",
+                            "de/guides/exporting-config",
                             "de/guides/migrate-from-litellm",
                             "de/guides/caddy",
                             "de/guides/openai-agents-sdk",
@@ -659,6 +661,7 @@
                         "pages": [
                             "zh/guides/production",
                             "zh/guides/updating",
+                            "zh/guides/exporting-config",
                             "zh/guides/migrate-from-litellm",
                             "zh/guides/caddy",
                             "zh/guides/openai-agents-sdk",
@@ -839,6 +842,7 @@
                         "pages": [
                             "pl/guides/production",
                             "pl/guides/updating",
+                            "pl/guides/exporting-config",
                             "pl/guides/migrate-from-litellm",
                             "pl/guides/caddy",
                             "pl/guides/openai-agents-sdk",

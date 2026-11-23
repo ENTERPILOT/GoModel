@@ -21,6 +21,7 @@ var parsedEnvVars = []string{
 	"SEMANTIC_CACHE_EXCLUDE_SYSTEM_PROMPT",
 	"SEMANTIC_CACHE_PGVECTOR_DIMENSION",
 	"SEMANTIC_CACHE_PINECONE_DIMENSION",
+	"BUDGETS_ALERTS_THRESHOLDS",
 }
 
 // parsedEnvPrefixes are variable families whose values are limits.

@@ -236,11 +236,11 @@ func TestStreamResponsesFallsBackAfterEmptyPrimaryStream(t *testing.T) {
 		Policy: &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-fallback",
 			Features: core.WorkflowFeatures{
-				Cache:      true,
-				Audit:      true,
-				Usage:      true,
-				Guardrails: true,
-				Failover:   true,
+				Cache:       true,
+				RequestLogs: true,
+				Usage:       true,
+				Guardrails:  true,
+				Failover:    true,
 			},
 		},
 	}

@@ -105,6 +105,11 @@ tylko wtedy, gdy sesja nie zaraportowała własnego użycia, więc sesja nigdy n
 rozliczana dwukrotnie. Podobnie jak przy tłumaczeniu, połączenia WebRTC przesyłają
 media poza gatewayem i nie są mierzone.
 
+ElevenLabs Scribe Realtime (`scribe_v2_realtime`, `scribe_v3_live`) ma własny protokół
+WebSocket. Gateway tłumaczy go na te zdarzenia i z powrotem, więc ten sam klient działa
+z `/v1/realtime?model=scribe_v2_realtime`; mapowanie zdarzeń i jego ograniczenia opisuje
+strona [ElevenLabs](/pl/providers/elevenlabs).
+
 ## API kompatybilne z Anthropic
 
 | Endpoint                    | Metoda | Opis                                                                          |

@@ -327,7 +327,7 @@ func mergeableFailoverPolicy(vm VirtualModel) bool {
 }
 
 // mergeFailoverPolicy turns a mergeable policy into the failover redirect its
-// legacy rule expressed, keeping the policy's description, slowdown,
+// legacy rule expressed, keeping the policy's description, slowdown, timeouts,
 // reasoning effort and request parameters. The
 // provenance marker is used only when the policy had no description, so a
 // start interrupted between this upsert and the row delete reports the row
@@ -335,6 +335,8 @@ func mergeableFailoverPolicy(vm VirtualModel) bool {
 func mergeFailoverPolicy(policy, model VirtualModel) VirtualModel {
 	merged := model
 	merged.Slowdown = policy.Slowdown
+	merged.Timeout = policy.Timeout
+	merged.ResponseHeaderTimeout = policy.ResponseHeaderTimeout
 	merged.ReasoningEffort = policy.ReasoningEffort
 	merged.Params = policy.Params
 	merged.DefaultParams = policy.DefaultParams

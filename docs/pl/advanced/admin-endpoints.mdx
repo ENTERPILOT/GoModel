@@ -809,7 +809,15 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   maskują hasło w `proxy_url`. Odesłanie dowolnej wartości złożonej z trzech
   lub więcej gwiazdek zachowuje zapisaną wartość, więc edycja nigdy nie
   wymaga powtórzenia sekretu; zamaskowany wpis, za którym nie stoi żadna
-  zapisana wartość, zwraca `400`. `proxy_url` odesłane z wciąż zamaskowanym
+  zapisana wartość, zwraca `400`. Zamaskowany klucz API pokazuje pierwsze 5
+  i ostatnie 3 znaki (klucze o długości co najmniej 20 znaków) i wskazuje
+  zapisany klucz, który zastępuje: `sk-pr***********7Qa#2` to drugi, więc
+  wpisy można usuwać i zmieniać ich kolejność. Numery odnoszą się do listy
+  zapisanej w chwili zapisu: maska, której znaki nie pasują już do jej
+  klucza, zwraca `400`. To sprawdzenie pomija w pełni zamaskowane krótkie
+  klucze i klucze o tych samych widocznych znakach, więc po równoczesnych
+  edycjach przeładuj dane przed zapisem.
+  Sama maska zachowuje zapisany klucz na tej samej pozycji. `proxy_url` odesłane z wciąż zamaskowanym
   hasłem (`xxxxx`) zachowuje zapisane hasło, także gdy zmienia się schemat,
   host, port lub nazwa użytkownika. Wartość złożona wyłącznie z referencji do
   sekretów jest pokazywana bez zmian.
@@ -836,6 +844,15 @@ dostępne, gdy zarządzanie budżetem jest włączone.
 `(user_path, period)` lub `(user_path, period_seconds)` dla okresów niestandardowych.
 Te operacje nie działają globalnie dla okresu. Dla tras `PUT` i
 `DELETE` ze ścieżką w URL zakoduj `user_path` w URL; kształt requestu opisuje strona [Budżety](/pl/features/budgets).
+
+`GET /admin/budgets` zwraca każdy budżet ze statusem oraz, gdy minie 5% jego
+okresu, `projected_spend`. `projected_exhaustion_at` pojawia się tylko wtedy,
+gdy według prognozy budżet wyczerpie się przed końcem okresu i nie jest jeszcze
+wydany; szablon budżetu dla każdego potomka nie ma żadnego z tych pól. Obiekt
+`alerts` na
+najwyższym poziomie informuje, czy [alerty budżetowe](/pl/features/budgets#alerty)
+są włączone (`enabled`), i podaje ich `default_thresholds`; budżet z własnymi
+progami niesie `alert_thresholds`, które przyjmuje `PUT`.
 
 Przykłady requestów i zachowanie egzekwowania znajdziesz na stronie [Budżety](/pl/features/budgets).
 
@@ -1088,6 +1105,20 @@ zaległości po krótkich przerwach w sieci.
 Źródłem prawdy pozostają utrwalone tabele logu requestów i użycia. Jeśli
 kursor przeglądarki wypadnie poza bufor odtwarzania, stream wysyła zdarzenie resetu,
 a dashboard przeładowuje dane ze zwykłych endpointów REST.
+
+Zdarzenia logu requestów nazywają się `request_log.started`, `request_log.updated`,
+`request_log.stream`, `request_log.completed`, `request_log.failed`,
+`request_log.flushed` i `request_log.removed`, a zdarzenia użycia `usage.*`.
+Parametr zapytania `types` wybiera rodzaje zdarzeń, które otrzymuje stream:
+`types=request_log,usage`.
+
+Przed zmianą nazwy logu requestów zdarzenia te nazywały się `audit.*`. Te nazwy
+są przestarzałe, ale nadal obsługiwane. Stream, który wymienia `request_log`
+w `types`, otrzymuje nowe nazwy. Stream, który wymienia tylko stary alias
+`audit` albo nie podaje `types`, nadal otrzymuje `audit.*` (jako nazwę zdarzenia
+SSE, w polu `type` i w `_live_state` ładunku), dopóki przestarzałe nazwy nie
+zostaną usunięte; daty usunięcia jeszcze nie ustalono. Aby przejść na nowe
+nazwy, podaj `types=request_log,usage`.
 
 ## Wyłączanie funkcji administracyjnych
 

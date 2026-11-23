@@ -22,6 +22,21 @@ export function readStored(key, fallback = null) {
   }
 }
 
+/**
+ * Read a key that used to be stored as `legacyKey`. A value found only under
+ * the old name is returned and copied to the new one, so the next read no
+ * longer needs it. The old key is left in place: a dashboard served by a
+ * gateway from before the rename still reads it.
+ */
+export function readStoredRenamed(key, legacyKey, fallback = null) {
+  const value = readStored(key);
+  if (value != null) return value;
+  const legacy = readStored(legacyKey);
+  if (legacy == null) return fallback;
+  writeStored(key, legacy);
+  return legacy;
+}
+
 /** Write a key; a failure is non-fatal (the preference just won't persist). */
 export function writeStored(key, value) {
   const storage = browserStorage();

@@ -1,12 +1,12 @@
 ---
 title: "ElevenLabs"
-description: "在 GoModel 中配置 ElevenLabs：voice_id 与命名语音的区别、支持的音频格式，以及语音转文本的时间戳。"
+description: "在 GoModel 中配置 ElevenLabs：voice_id 与命名语音的区别、支持的音频格式、语音转文本的时间戳，以及 Scribe Realtime 实时转录。"
 icon: "audio-lines"
-keywords: ["ElevenLabs", "文本转语音", "text-to-speech", "TTS", "语音转文本", "speech-to-text", "STT", "语音", "voice", "提供商配置", "provider setup"]
+keywords: ["ElevenLabs", "文本转语音", "text-to-speech", "TTS", "语音转文本", "speech-to-text", "STT", "Scribe Realtime", "实时转录", "语音", "voice", "提供商配置", "provider setup"]
 ---
 
 ElevenLabs 是一个仅提供语音能力的提供商：它通过标准的 `/v1/audio/speech` 和
-`/v1/audio/transcriptions` 端点提供文本转语音和语音转文本。它没有聊天、`/responses` 或嵌入 API，因此对于路由到 ElevenLabs 的模型，这些端点会返回 `invalid_request_error`。
+`/v1/audio/transcriptions` 端点提供文本转语音和语音转文本，并通过 `/v1/realtime` WebSocket 提供流式语音转文本（Scribe Realtime）。它没有聊天、`/responses` 或嵌入 API，因此对于路由到 ElevenLabs 的模型，这些端点会返回 `invalid_request_error`。
 
 ## 配置
 
@@ -61,6 +61,39 @@ ElevenLabs 的 `/v1/models` 列表中——GoModel 会自行将它们添加到 `
 `verbose_json`；不支持 `srt`/`vtt`。请求 `verbose_json`，或在 `timestamp_granularities` 中包含
 `word`，会向 ElevenLabs 请求单词级时间信息，GoModel 会将其映射到 OpenAI 的 `words` 数组中。不支持 `prompt`。
 
+## 实时转录
+
+`scribe_v2_realtime` 和 `scribe_v3_live` 通过[实时 WebSocket](/zh/advanced/api-endpoints) 转录实时音频流。Scribe Realtime
+使用自己的 WebSocket 协议，因此 GoModel 会进行转换：客户端收发的是 OpenAI Realtime 的转录事件，不需要任何针对 ElevenLabs 的代码。
+
+```bash
+wscat -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -c "ws://localhost:8080/v1/realtime?model=scribe_v2_realtime"
+```
+
+| OpenAI Realtime 事件 | 客户端 | ElevenLabs 消息 |
+| --------------------------------------------------- | --------- | ------------------------------------------- |
+| `input_audio_buffer.append`                         | 发送 | `input_audio_chunk` |
+| `input_audio_buffer.commit`                         | 发送 | 带 `commit: true` 的 `input_audio_chunk` |
+| `session.created`                                   | 接收 | `session_started` |
+| `conversation.item.input_audio_transcription.delta` | 接收 | `partial_transcript` |
+| 先 `input_audio_buffer.committed`，再 `conversation.item.input_audio_transcription.completed` | 接收 | `committed_transcript` |
+| `error`                                             | 接收 | `auth_error`、`quota_exceeded`、`input_error` 以及其他错误消息 |
+
+默认行为，以及与 OpenAI 转录会话的差异：
+
+- **音频为 24 kHz 的 PCM16 单声道**，即 OpenAI Realtime 的默认格式。请求其他格式的 `session.update` 会收到 `error` 事件。
+- **由语音活动检测结束一个片段**，与 OpenAI 默认的 `server_vad` 相同。`input_audio_buffer.commit` 可以提前结束片段。
+- **会话设置在会话打开时即已确定。** ElevenLabs 通过 WebSocket URL 接收这些设置，此时 `session.update` 还无法到达。GoModel 会用
+  `session.updated` 事件回应 `session.update`，其中描述实际生效的会话；`language`、`prompt` 和 `turn_detection` 设置不会被应用。语言会自动检测。
+- **增量只会追加。** 片段尚未结束时，ElevenLabs 可能会修正之前的词。此时 GoModel 不再为该片段发送增量；最终文本由 `completed` 事件给出。
+- **其他客户端事件**（`input_audio_buffer.clear`、`response.create`、对话项）会收到 `error` 事件：ElevenLabs 没有对应的消息。
+- **空闲会话会被关闭。** 会话在 15 秒内没有收到音频时，ElevenLabs 会将其关闭，因此在会话打开期间请持续发送音频。
+- **用量根据 GoModel 转发的音频计量**，按模型的每秒输入单价计费，因为 ElevenLabs 不上报用量。如果目录中没有该模型的价格，仍会记录时长；可通过[覆盖定价](/zh/features/cost-tracking)来计算成本。
+
+这两个模型只用于实时会话：ElevenLabs 会在 `/v1/audio/transcriptions` 上拒绝它们。WebRTC 通话和客户端密钥（`/v1/realtime/calls`、`/v1/realtime/client_secrets`）不适用于
+ElevenLabs 模型。
+
 ## ElevenLabs 不支持的功能
 
 以下所有情况都会返回 `invalid_request_error`，而不是静默丢弃该选项：
@@ -73,14 +106,13 @@ ElevenLabs 的 `/v1/models` 列表中——GoModel 会自行将它们添加到 `
 
 ## 未实现
 
-GoModel 只实现了 ElevenLabs 中能够映射到兼容 OpenAI 端点的两项能力：文本转语音和语音转文本。ElevenLabs 提供的其他所有功能，目前在 GoModel 中都没有类型化支持：
+GoModel 只实现了 ElevenLabs 中能够映射到兼容 OpenAI 端点的能力：文本转语音、语音转文本和实时转录。ElevenLabs 提供的其他所有功能，目前在 GoModel 中都没有类型化支持：
 
 - **语音转语音（变声器）**——`POST /v1/speech-to-speech/{voice_id}`
   没有可供翻译的兼容 OpenAI 的对应接口，因此没有对应的类型化端点。未来可以将其作为原生透传路由添加，但**目前通过透传也无法使用它**——参见上文的
   `/v1` 别名限制；语音转语音没有可用于绕过该限制的 `/v2` 路径，因此目前完全无法通过 GoModel 访问。
 - **配音、语音克隆/设计、项目（Studio）以及对话式 AI（智能体）**——原因相同：没有可翻译的兼容 OpenAI 的结构，并且（对于这些 API 中仅提供 `/v1` 的部分）同样受上述透传限制影响。在该限制修复后，它们是未来原生透传支持的合理候选。
-- **实时/流式 TTS 和 STT**（`/v1/text-to-speech/{voice_id}/stream`、
-  WebSocket 流式传输）——GoModel 的 `/v1/audio/speech` 和
-  `/v1/audio/transcriptions` 是同步的请求/响应；没有为 ElevenLabs 实现流式变体。
+- **流式 TTS**（`/v1/text-to-speech/{voice_id}/stream`、
+  WebSocket 输入流式传输）——GoModel 的 `/v1/audio/speech` 是同步的请求/响应；没有为 ElevenLabs 实现流式变体。
 
 这些都不是专门针对 ElevenLabs 刻意回避功能扩张——而是反映了 GoModel 的音频接口有意采用 OpenAI 的结构，而 ElevenLabs 的 API 远比 OpenAI 的 TTS/STT 这一对接口庞大。

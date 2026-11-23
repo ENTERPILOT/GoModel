@@ -139,6 +139,14 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw []byte) error {
 		s.stopped = true
 		return writeOpenAIStreamError(out, err)
 	}
+	// Until a choice has been written the client has seen nothing, so an
+	// unusable turn can still fail as an error instead of an empty completion.
+	if len(s.choices) == 0 {
+		if err := geminiUnusableTurnError(&event, s.providerName); err != nil {
+			s.stopped = true
+			return writeOpenAIStreamError(out, err)
+		}
+	}
 
 	for i, candidate := range event.Candidates {
 		if err := s.writeCandidate(out, candidate, i); err != nil {

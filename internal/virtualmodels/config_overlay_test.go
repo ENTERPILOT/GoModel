@@ -22,7 +22,7 @@ func TestConfigModels_Conversion(t *testing.T) {
 	t.Parallel()
 	enabled := false
 	got := mustConfigModels(t, []config.VirtualModelConfig{
-		{Source: "alias", Target: "openai/gpt-4o", Slowdown: new(0.5)},
+		{Source: "alias", Target: "openai/gpt-4o", Slowdown: new(0.5), Timeout: new(300), ResponseHeaderTimeout: new(20)},
 		{
 			Source:   "smart",
 			Strategy: StrategyCost,
@@ -38,6 +38,10 @@ func TestConfigModels_Conversion(t *testing.T) {
 	require.Equal(t, "openai/gpt-4o", got[0].Targets[0].Model)
 	require.NotNil(t, got[0].Slowdown)
 	require.Equal(t, 0.5, *got[0].Slowdown)
+	require.NotNil(t, got[0].Timeout)
+	require.Equal(t, 300, *got[0].Timeout)
+	require.NotNil(t, got[0].ResponseHeaderTimeout)
+	require.Equal(t, 20, *got[0].ResponseHeaderTimeout)
 	require.True(t, got[0].Enabled)
 	require.True(t, got[0].Managed, "shorthand target conversion = %#v", got[0])
 	require.Len(t, got[1].Targets, 2)

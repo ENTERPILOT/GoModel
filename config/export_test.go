@@ -177,6 +177,7 @@ func TestExportYAMLRoundTrips(t *testing.T) {
 server:
   master_key: ${env:GOMODEL_TEST_MASTER}
   body_size_limit: 20M
+  enable_passthrough_routes: false
 cache:
   model:
     redis:
@@ -359,4 +360,93 @@ func stringish(t reflect.Type) bool {
 		t = t.Elem()
 	}
 	return t.Kind() == reflect.String
+}
+
+func TestExportYAMLSkipsDefaults(t *testing.T) {
+	cfg := buildDefaultConfig()
+	cfg.Server.Port = "9090"
+	cfg.Server.EnablePassthroughRoutes = false
+	cfg.Guardrails.Rules = []GuardrailRuleConfig{{Name: "safety", Type: "system_prompt"}}
+	providers := map[string]RawProviderConfig{"ollama": {Type: "ollama", BaseURL: "http://localhost:11434/v1"}}
+
+	out := exportYAML(t, NewSecrets(), cfg, providers, nil)
+
+	assert.Equal(t, `server:
+  port: "9090"
+  enable_passthrough_routes: false
+guardrails:
+  rules:
+    - name: safety
+      type: system_prompt
+providers:
+  ollama:
+    type: ollama
+    base_url: http://localhost:11434/v1
+`, out)
+}
+
+func TestExportYAMLOfDefaultsIsEmpty(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	loaded := loadYAML(t, nil)
+
+	out, err := loaded.ExportYAML(ExportDocument{Config: loaded.Config}, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "{}\n", string(out))
+	assert.Equal(t, loaded.Config, loadYAML(t, out).Config)
+}
+
+func TestExportYAMLKeepsLocalModelCacheBesideRedis(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	// The local cache is the default only when no Redis cache is set: left
+	// out beside one, it would not load back.
+	loaded := loadYAML(t, []byte("cache:\n  model:\n    local: {}\n    redis:\n      url: redis://cache:6379\n"))
+
+	out, err := loaded.ExportYAML(ExportDocument{Config: loaded.Config}, nil)
+
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "local: {}")
+	assert.Equal(t, loaded.Config, loadYAML(t, out).Config)
+}
+
+func TestExportYAMLIncludeDefaults(t *testing.T) {
+	cfg := buildDefaultConfig()
+	cfg.Server.EnablePassthroughRoutes = false
+	cfg.Guardrails.Rules = []GuardrailRuleConfig{{Name: "safety", Type: "system_prompt"}}
+
+	exported, err := (&LoadResult{Secrets: NewSecrets()}).ExportYAML(ExportDocument{Config: cfg, IncludeDefaults: true}, nil)
+	require.NoError(t, err)
+	out := string(exported)
+
+	assert.Equal(t, "8080", exportedValue(t, out, "server", "port"), "a default that is not empty is kept")
+	assert.Contains(t, out, "retention_days: 30")
+	assert.Contains(t, out, "enable_passthrough_routes: false")
+	assert.Equal(t, "safety", exportedValue(t, out, "guardrails", "rules", "0", "name"))
+	// Those empty by default are left out all the same.
+	for _, empty := range []string{`: ""`, ": 0\n", ": {}", "master_key_disabled:", "body_size_limit:", "opentelemetry:", "mongodb:", "api_key:", "workload_identity:", "order:"} {
+		assert.NotContains(t, out, empty)
+	}
+}
+
+func TestExportYAMLKeepsExplicitEmptyLists(t *testing.T) {
+	// An empty list disables the statuses a nil list inherits.
+	providers := map[string]RawProviderConfig{"openai": {Type: "openai", Resilience: &RawResilienceConfig{
+		Retry:          &RawRetryConfig{RetryOnStatuses: []string{}},
+		CircuitBreaker: &RawCircuitBreakerConfig{FailureOnStatuses: []string{}},
+	}}}
+
+	out := exportYAML(t, NewSecrets(), buildDefaultConfig(), providers, nil)
+
+	var doc struct {
+		Providers map[string]RawProviderConfig `yaml:"providers"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc), out)
+	resilience := doc.Providers["openai"].Resilience
+	require.NotNil(t, resilience, out)
+	require.NotNil(t, resilience.Retry, out)
+	require.NotNil(t, resilience.CircuitBreaker, out)
+	assert.NotNil(t, resilience.Retry.RetryOnStatuses, out)
+	assert.Empty(t, resilience.Retry.RetryOnStatuses)
+	assert.NotNil(t, resilience.CircuitBreaker.FailureOnStatuses, out)
+	assert.Empty(t, resilience.CircuitBreaker.FailureOnStatuses)
 }

@@ -1,13 +1,14 @@
 ---
 title: "ElevenLabs"
-description: "ElevenLabs in GoModel konfigurieren: voice_id statt benannter Stimmen, unterstützte Audioformate und Zeitstempel bei Speech-to-Text."
+description: "ElevenLabs in GoModel konfigurieren: voice_id statt benannter Stimmen, unterstützte Audioformate, Zeitstempel bei Speech-to-Text und Realtime-Transkription mit Scribe Realtime."
 icon: "audio-lines"
-keywords: ["ElevenLabs", "Text-to-Speech", "text-to-speech", "TTS", "Speech-to-Text", "speech-to-text", "STT", "Stimme", "voice", "Provider-Einrichtung", "provider setup"]
+keywords: ["ElevenLabs", "Text-to-Speech", "text-to-speech", "TTS", "Speech-to-Text", "speech-to-text", "STT", "Scribe Realtime", "Realtime-Transkription", "Stimme", "voice", "Provider-Einrichtung", "provider setup"]
 ---
 
 ElevenLabs ist ein reiner Sprach-Provider: Er stellt Text-to-Speech und
 Speech-to-Text hinter den Standard-Endpunkten `/v1/audio/speech` und
-`/v1/audio/transcriptions` bereit. Er hat keine Chat-, `/responses`- oder
+`/v1/audio/transcriptions` bereit, dazu Streaming-Speech-to-Text (Scribe
+Realtime) hinter dem WebSocket `/v1/realtime`. Er hat keine Chat-, `/responses`- oder
 Embeddings-API, daher liefern diese Endpunkte für Modelle, die an ElevenLabs
 geroutet werden, `invalid_request_error`.
 
@@ -75,6 +76,61 @@ Wenn Sie `verbose_json` oder `word` in `timestamp_granularities` anfordern,
 fragt GoModel bei ElevenLabs Zeitangaben auf Wortebene an und bildet sie auf das
 OpenAI-Array `words` ab. `prompt` wird nicht unterstützt.
 
+## Realtime-Transkription
+
+`scribe_v2_realtime` und `scribe_v3_live` transkribieren einen Live-Audiostream
+über den [Realtime-WebSocket](/de/advanced/api-endpoints). Scribe Realtime hat
+ein eigenes WebSocket-Protokoll, das GoModel übersetzt: Clients senden und
+empfangen die Transkriptions-Events von OpenAI Realtime und brauchen keinen
+ElevenLabs-spezifischen Code.
+
+```bash
+wscat -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -c "ws://localhost:8080/v1/realtime?model=scribe_v2_realtime"
+```
+
+| OpenAI-Realtime-Event | Client | ElevenLabs-Nachricht |
+| --------------------------------------------------- | --------- | ------------------------------------------- |
+| `input_audio_buffer.append`                         | sendet | `input_audio_chunk` |
+| `input_audio_buffer.commit`                         | sendet | `input_audio_chunk` mit `commit: true` |
+| `session.created`                                   | empfängt | `session_started` |
+| `conversation.item.input_audio_transcription.delta` | empfängt | `partial_transcript` |
+| `input_audio_buffer.committed`, dann `conversation.item.input_audio_transcription.completed` | empfängt | `committed_transcript` |
+| `error`                                             | empfängt | `auth_error`, `quota_exceeded`, `input_error` und die übrigen Fehlernachrichten |
+
+Standardwerte und Unterschiede zu einer OpenAI-Transkriptions-Session:
+
+- **Audio ist PCM16 mono mit 24 kHz**, der Standard von OpenAI Realtime. Ein
+  `session.update`, das ein anderes Format anfordert, erhält ein `error`-Event.
+- **Die Sprachaktivitätserkennung beendet ein Segment**, wie das
+  standardmäßige `server_vad` von OpenAI. `input_audio_buffer.commit` beendet
+  es vorzeitig.
+- **Die Session-Einstellungen stehen beim Öffnen der Session fest.** ElevenLabs
+  erwartet sie in der WebSocket-URL, bevor ein `session.update` eintreffen kann.
+  GoModel beantwortet `session.update` mit einem `session.updated`-Event, das
+  die tatsächlich geltende Session beschreibt; die Einstellungen `language`,
+  `prompt` und `turn_detection` werden nicht angewendet. Die gesprochene Sprache
+  wird automatisch erkannt.
+- **Deltas hängen nur an.** ElevenLabs kann frühere Wörter korrigieren, solange
+  ein Segment offen ist. In diesem Fall sendet GoModel für dieses Segment keine
+  weiteren Deltas; das `completed`-Event enthält den endgültigen Text.
+- **Andere Client-Events** (`input_audio_buffer.clear`, `response.create`,
+  Conversation Items) erhalten ein `error`-Event: ElevenLabs hat dafür kein
+  Gegenstück.
+- **Inaktive Sessions werden geschlossen.** ElevenLabs schließt eine Session,
+  die 15 Sekunden lang kein Audio erhält; senden Sie daher fortlaufend Audio,
+  solange die Session offen ist.
+- **Die Nutzung wird aus dem von GoModel weitergeleiteten Audio ermittelt**, zum
+  sekundengenauen Input-Preis des Modells, weil ElevenLabs keine Nutzung meldet.
+  Hat das Modell keinen Preis im Katalog, wird die Dauer trotzdem erfasst;
+  [überschreiben Sie den Preis](/de/features/cost-tracking), um die Kosten zu
+  berechnen.
+
+Diese beiden Modelle bedienen ausschließlich Realtime-Sessions: ElevenLabs lehnt
+sie unter `/v1/audio/transcriptions` ab. WebRTC-Calls und Client Secrets
+(`/v1/realtime/calls`, `/v1/realtime/client_secrets`) stehen für
+ElevenLabs-Modelle nicht zur Verfügung.
+
 ## Von ElevenLabs nicht unterstützt
 
 Alle folgenden Optionen liefern `invalid_request_error`, statt die Option
@@ -88,8 +144,9 @@ stillschweigend zu verwerfen:
 
 ## Nicht implementiert
 
-GoModel implementiert nur die beiden ElevenLabs-Funktionen, die sich auf
-OpenAI-kompatible Endpunkte abbilden lassen: Text-to-Speech und Speech-to-Text.
+GoModel implementiert nur die ElevenLabs-Funktionen, die sich auf
+OpenAI-kompatible Endpunkte abbilden lassen: Text-to-Speech, Speech-to-Text und
+Realtime-Transkription.
 Für alles andere, was ElevenLabs anbietet, gibt es in GoModel derzeit keine
 typisierte Unterstützung:
 
@@ -105,10 +162,10 @@ typisierte Unterstützung:
   das übersetzt werden könnte, und (für die reinen `/v1`-Teile dieser APIs) gilt
   dieselbe Passthrough-Einschränkung. Sie sind sinnvolle Kandidaten für künftige
   native Passthrough-Unterstützung, sobald diese Einschränkung behoben ist.
-- **Realtime-/Streaming-TTS und -STT** (`/v1/text-to-speech/{voice_id}/stream`,
-  WebSocket-Streaming) – `/v1/audio/speech` und `/v1/audio/transcriptions` von
-  GoModel arbeiten synchron nach dem Request/Response-Prinzip; für ElevenLabs ist
-  keine Streaming-Variante implementiert.
+- **Streaming-TTS** (`/v1/text-to-speech/{voice_id}/stream`,
+  Input-Streaming per WebSocket) – `/v1/audio/speech` von GoModel arbeitet
+  synchron nach dem Request/Response-Prinzip; für ElevenLabs ist keine
+  Streaming-Variante implementiert.
 
 Nichts davon ist eine ElevenLabs-spezifische Abgrenzung gegen ausufernden
 Funktionsumfang – es spiegelt wider, dass die Audio-Oberfläche von GoModel

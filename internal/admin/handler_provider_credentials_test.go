@@ -159,7 +159,7 @@ func TestListProviderCredentials_RedactsSecretsAndFlagsManaged(t *testing.T) {
 
 	multiKey := byName["multi-key"]
 	assert.False(t, multiKey.Managed)
-	assert.Equal(t, []string{"***********"}, multiKey.APIKeys)
+	assert.Equal(t, []string{"***********#1"}, multiKey.APIKeys)
 
 	vertex := byName["local-vertex"]
 	assert.False(t, vertex.Managed)
@@ -320,6 +320,106 @@ func TestUpsertProviderCredential_RedactedKeyPreservesStoredValuePositionally(t 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	assert.Equal(t, []string{"sk-one", "sk-new"}, fake.rows["multi"].APIKeys)
+}
+
+// The view's masks name their stored key, so removing or reordering masked
+// rows keeps exactly the keys the client left in place.
+func TestUpsertProviderCredential_HintedMasksRoundTrip(t *testing.T) {
+	keys := []string{"sk-proj-aaaaaaaaaaaaaaaaAAA", "sk-proj-bbbbbbbbbbbbbbbba#2", "sk-proj-ccccccccccccccccCCC"}
+	fake := newProviderCredentialsAdminFake()
+	fake.rows["multi"] = providers.ManagedProviderCredential{Name: "multi", Type: "openai", APIKeys: keys, Enabled: true}
+	h := newProviderCredentialsHandler(fake)
+
+	// Drop the first key and swap the rest, echoing the view's masks; the
+	// second key's visible "#2" must not be read as its slot.
+	masks := redactAPIKeys(keys)
+	body, err := json.Marshal(map[string]any{"name": "multi", "type": "openai", "api_keys": []string{masks[2], masks[1]}})
+	require.NoError(t, err)
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", string(body))
+	require.NoError(t, h.UpsertProviderCredential(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	assert.Equal(t, []string{keys[2], keys[1]}, fake.rows["multi"].APIKeys)
+}
+
+// A hinted mask whose characters no longer match the key at its slot was read
+// before the stored list changed; saving it would keep the wrong key.
+func TestUpsertProviderCredential_StaleHintedMaskIsRejected(t *testing.T) {
+	keyA := "sk-proj-aaaaaaaaaaaaaaaaAAA"
+	keyB := "sk-proj-bbbbbbbbbbbbbbbbBBB"
+	fake := newProviderCredentialsAdminFake()
+	fake.rows["multi"] = providers.ManagedProviderCredential{
+		Name:    "multi",
+		Type:    "openai",
+		APIKeys: []string{keyB, keyA},
+		Enabled: true,
+	}
+	h := newProviderCredentialsHandler(fake)
+
+	staleMaskForA := redactAPIKeys([]string{keyA})[0]
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"multi","type":"openai","api_keys":["`+staleMaskForA+`"]}`)
+	require.NoError(t, h.UpsertProviderCredential(c))
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Equal(t, providers.CredentialFieldAPIKeys, errorParam(t, rec))
+	assert.Equal(t, []string{keyB, keyA}, fake.rows["multi"].APIKeys)
+}
+
+func TestRedactAPIKeys_ShowsHintOnlyForLongKeys(t *testing.T) {
+	got := redactAPIKeys([]string{"sk-proj-abcdefghijklmnop7Qa", "sk-short", "${env:OPENAI_KEY}"})
+	assert.Equal(t, []string{"sk-pr***********7Qa#1", "***********#2", "${env:OPENAI_KEY}"}, got)
+}
+
+func TestUpsertProviderCredential_SlotMasksPreserveTheNamedStoredKey(t *testing.T) {
+	tests := []struct {
+		name    string
+		apiKeys string
+		want    []string
+	}{
+		{name: "middle key removed", apiKeys: `["***********#1","***********#3"]`, want: []string{"sk-a", "sk-c"}},
+		{name: "first key removed", apiKeys: `["***********#2","***********#3"]`, want: []string{"sk-b", "sk-c"}},
+		{name: "reordered with a new key", apiKeys: `["sk-new","***********#3","***********#1"]`, want: []string{"sk-new", "sk-c", "sk-a"}},
+		{name: "real key containing asterisks", apiKeys: `["sk-***-literal#2"]`, want: []string{"sk-***-literal#2"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newProviderCredentialsAdminFake()
+			fake.rows["multi"] = providers.ManagedProviderCredential{
+				Name:    "multi",
+				Type:    "openai",
+				APIKeys: []string{"sk-a", "sk-b", "sk-c"},
+				Enabled: true,
+			}
+			h := newProviderCredentialsHandler(fake)
+
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"multi","type":"openai","api_keys":`+tt.apiKeys+`}`)
+			require.NoError(t, h.UpsertProviderCredential(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+			assert.Equal(t, tt.want, fake.rows["multi"].APIKeys)
+		})
+	}
+}
+
+func TestUpsertProviderCredential_SlotMaskWithoutStoredKeyIsRejected(t *testing.T) {
+	for _, mask := range []string{"***********#3", "***********#0", "***********#x", "***********#", "sk-pr***********7Qa", "sk-pr***********7Qa2", "sk-pr***********a#3", "x-***********#2"} {
+		t.Run(mask, func(t *testing.T) {
+			fake := newProviderCredentialsAdminFake()
+			fake.rows["multi"] = providers.ManagedProviderCredential{
+				Name:    "multi",
+				Type:    "openai",
+				APIKeys: []string{"sk-a", "sk-b"},
+				Enabled: true,
+			}
+			h := newProviderCredentialsHandler(fake)
+
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"multi","type":"openai","api_keys":["`+mask+`"]}`)
+			require.NoError(t, h.UpsertProviderCredential(c))
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			assert.Equal(t, providers.CredentialFieldAPIKeys, errorParam(t, rec))
+			assert.Equal(t, []string{"sk-a", "sk-b"}, fake.rows["multi"].APIKeys)
+		})
+	}
 }
 
 func TestUpsertProviderCredential_LongerRedactedKeyPreservesStoredValue(t *testing.T) {

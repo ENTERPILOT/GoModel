@@ -1,0 +1,89 @@
+---
+title: "导出配置"
+description: "通过二进制文件、Docker Compose 或 docker，将 GoModel 网关此刻启动时会使用的配置导出为一个 config.yaml，并了解控制台为什么没有导出按钮。"
+icon: "file-output"
+keywords: ["导出配置", "config export", "config.yaml", "备份", "backup", "docker", "docker compose", "控制台", "dashboard", "Secret", "secrets"]
+---
+
+`gomodel config export` 会把网关此刻启动时将使用的配置输出为一个 `config.yaml`：包括你的 `config.yaml`、环境变量，
+以及保存在控制台中的对象，例如提供商、虚拟模型、用户和预算。可以用它来审查配置、提交到 Git，或据此启动另一个实例。
+
+## 导出
+
+请在网关运行的位置执行该命令，这样它读取的是相同的文件、环境和数据库。网关运行期间执行是安全的。日志输出到 stderr，
+因此文件中只有配置。
+
+该命令会重新读取文件和环境，而不是读取正在运行的网关的状态。如果你修改了 `config.yaml` 而网关拒绝了重新加载，
+导出的将是修改后的文件，或者以同样的错误失败。
+
+<Tabs>
+  <Tab title="二进制文件">
+    在网关启动所在的目录中，使用相同的环境执行：
+
+    ```bash
+    gomodel config export > gomodel-export.yaml
+    ```
+  </Tab>
+  <Tab title="Docker Compose">
+    ```bash
+    docker compose exec -T gomodel /gomodel config export > gomodel-export.yaml
+    ```
+
+    `gomodel` 是你的 `docker-compose.yaml` 中的服务名。`-T` 会关闭终端分配，使输出原样写入文件。
+  </Tab>
+  <Tab title="docker">
+    ```bash
+    docker exec gomodel /gomodel config export > gomodel-export.yaml
+    ```
+
+    `gomodel` 是容器名（`docker ps`）。
+  </Tab>
+</Tabs>
+
+<Warning>
+  请写入一个新文件，切勿写到网关读取的 `config.yaml` 上：shell 会在命令启动之前清空该文件。
+</Warning>
+
+处于默认值的设置会被省略，因此文件只显示你修改过的内容。加上 `--include-defaults` 可以把默认值也写出来，
+但默认为空的设置除外。
+
+## Secret
+
+属于 Secret 的设置（例如 API 密钥）会写成引用，绝不会写成具体的值：
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_key: "${env:OPENAI_API_KEY}"
+  groq:
+    type: groq
+    api_key: "${env:GOMODEL_PROVIDERS_GROQ_API_KEY}" # secret not exported: set GOMODEL_PROVIDERS_GROQ_API_KEY
+```
+
+在控制台中输入的密钥会带有 `# secret not exported` 注释，其中写明需要设置的变量名。加载该文件的网关在这个变量设置之前不会启动。
+
+自由文本（例如描述）只会按凭据的常见形式进行检查，因此粘贴在其中的令牌可能会出现在文件里。分享文件之前请检查这类文本。
+
+## 使用导出文件
+
+在目标实例上将其保存为 `config/config.yaml`（在 Docker 中，挂载到 `/app/config/config.yaml`），设置它引用的变量，
+然后启动网关。来自控制台的对象现在已在文件中声明，因此在控制台中是只读的。
+
+<Note>
+  并非所有内容都有 `config.yaml` 形式。托管 API 密钥、工作流、在控制台中创建的护栏、模型价格覆盖、运行时设置、
+  已禁用的提供商凭据以及 MCP 服务器的显示名称不会被导出，文件头部会列出它们。这些对象保留在数据库中：
+  要迁移它们，请让目标实例使用该数据库，或在目标实例上恢复该数据库的[备份](/zh/guides/updating#1-备份数据库)。
+</Note>
+
+## 为什么控制台没有导出按钮
+
+导出被有意设计为一条 shell 命令，背后没有任何 HTTP 端点。
+
+- **它描述了整个部署。** 即使不含 Secret，它也会列出每个上游、数据库和内部 URL，以及每个凭据存放的位置。
+- **仅凭控制台登录不应足以拿走它。** 如果有端点，任何拥有管理员登录的人（包括窃取了登录凭据的人）都能拿到这个文件。
+  能够访问网关 shell 的人范围更小，而他们本来就能读取网关的文件和环境。
+- **脱敏有其局限。** 粘贴到描述中的令牌会原样写出，因此这个文件不应该一键即可获得。
+
+完整规则请参阅
+[Exporting the Effective Configuration](/advanced/config-yaml#exporting-the-effective-configuration)（英文）。

@@ -25,6 +25,8 @@ type mongoVirtualModelDocument struct {
 	UserPaths       []string `bson:"user_paths,omitempty"`
 	Description     string   `bson:"description,omitempty"`
 	Slowdown        *float64 `bson:"slowdown,omitempty"`
+	Timeout         *int     `bson:"timeout,omitempty"`
+	HeaderTimeout   *int     `bson:"response_header_timeout,omitempty"`
 	ReasoningEffort string   `bson:"reasoning_effort,omitempty"`
 	// Params and DefaultParams are stored as JSON text so numbers keep their
 	// exact configured form; a document would go through float64.
@@ -118,22 +120,24 @@ func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
 	}
 	update := bson.M{
 		"$set": bson.M{
-			"targets":          vm.Targets,
-			"strategy":         vm.Strategy,
-			"strategy_plugin":  vm.StrategyPlugin,
-			"strategy_config":  vm.StrategyConfig,
-			"session_affinity": vm.SessionAffinity,
-			"failover":         vm.Failover,
-			"provider_name":    vm.ProviderName,
-			"model":            vm.Model,
-			"user_paths":       vm.UserPaths,
-			"description":      vm.Description,
-			"slowdown":         vm.Slowdown,
-			"reasoning_effort": vm.ReasoningEffort,
-			"params":           paramsJSON,
-			"default_params":   defaultParamsJSON,
-			"enabled":          vm.Enabled,
-			"updated_at":       vm.UpdatedAt,
+			"targets":                 vm.Targets,
+			"strategy":                vm.Strategy,
+			"strategy_plugin":         vm.StrategyPlugin,
+			"strategy_config":         vm.StrategyConfig,
+			"session_affinity":        vm.SessionAffinity,
+			"failover":                vm.Failover,
+			"provider_name":           vm.ProviderName,
+			"model":                   vm.Model,
+			"user_paths":              vm.UserPaths,
+			"description":             vm.Description,
+			"slowdown":                vm.Slowdown,
+			"timeout":                 vm.Timeout,
+			"response_header_timeout": vm.ResponseHeaderTimeout,
+			"reasoning_effort":        vm.ReasoningEffort,
+			"params":                  paramsJSON,
+			"default_params":          defaultParamsJSON,
+			"enabled":                 vm.Enabled,
+			"updated_at":              vm.UpdatedAt,
 		},
 		"$setOnInsert": bson.M{
 			"created_at": vm.CreatedAt,
@@ -170,22 +174,24 @@ func virtualModelFromMongo(doc mongoVirtualModelDocument) (VirtualModel, error) 
 		return VirtualModel{}, fmt.Errorf("virtual model %q: %w", doc.ID, err)
 	}
 	vm := VirtualModel{
-		Source:          doc.ID,
-		Strategy:        doc.Strategy,
-		StrategyPlugin:  doc.StrategyPlugin,
-		StrategyConfig:  strategyConfigFromBSON(doc.StrategyConfig),
-		SessionAffinity: doc.SessionAffinity,
-		Failover:        doc.Failover,
-		ProviderName:    doc.ProviderName,
-		Model:           doc.Model,
-		Description:     doc.Description,
-		Slowdown:        doc.Slowdown,
-		ReasoningEffort: doc.ReasoningEffort,
-		Params:          params,
-		DefaultParams:   defaultParams,
-		Enabled:         doc.Enabled,
-		CreatedAt:       doc.CreatedAt.UTC(),
-		UpdatedAt:       doc.UpdatedAt.UTC(),
+		Source:                doc.ID,
+		Strategy:              doc.Strategy,
+		StrategyPlugin:        doc.StrategyPlugin,
+		StrategyConfig:        strategyConfigFromBSON(doc.StrategyConfig),
+		SessionAffinity:       doc.SessionAffinity,
+		Failover:              doc.Failover,
+		ProviderName:          doc.ProviderName,
+		Model:                 doc.Model,
+		Description:           doc.Description,
+		Slowdown:              doc.Slowdown,
+		Timeout:               doc.Timeout,
+		ResponseHeaderTimeout: doc.HeaderTimeout,
+		ReasoningEffort:       doc.ReasoningEffort,
+		Params:                params,
+		DefaultParams:         defaultParams,
+		Enabled:               doc.Enabled,
+		CreatedAt:             doc.CreatedAt.UTC(),
+		UpdatedAt:             doc.UpdatedAt.UTC(),
 	}
 	if len(doc.Targets) > 0 {
 		vm.Targets = append([]Target(nil), doc.Targets...)
