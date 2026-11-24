@@ -45,30 +45,58 @@ OPENCODE_GO_MODELS=glm-5.1,kimi-k2.7-code,deepseek-v4-pro
 
 ## Endpoints
 
-OpenCode Zen serves most models on OpenAI-style `/chat/completions` (Bearer
-auth) and a few models only on the Anthropic-native `/messages` endpoint
-(`x-api-key` auth). GoModel routes per model:
+OpenCode Zen serves each model on a native dialect, published in the `api`
+member of `GET /models`: OpenAI-style `/chat/completions` (Bearer auth),
+OpenAI-style `/responses`, or the Anthropic-native `/messages` endpoint
+(`x-api-key` auth). GoModel reads that listing and routes chat and Responses
+models per model, so a model Zen adds on either of those dialects lands on its
+own endpoint with no configuration change. Anthropic-native models are still
+routed from a manual list (see below).
 
-- **OpenAI-style models** (GLM, Kimi, DeepSeek, MiMo, MiniMax, most Qwen) go to
-  `/chat/completions`. `/models` and `/v1/responses` (translated to chat
-  completions) use the same path.
-- **Anthropic-only models** are translated to the Anthropic Messages dialect and
-  sent to `/messages`, mirroring how GoModel already serves native Anthropic.
-  Both paths normalize to the same OpenAI-compatible response, so clients see
-  one consistent surface regardless of which model they pick — whether they call
-  `/v1/chat/completions` or `/v1/messages`.
+- **`/chat/completions` models** (GLM, Kimi, DeepSeek, MiMo, most Qwen): a
+  `/v1/chat/completions` request goes to `/chat/completions` as it arrives. A
+  `/v1/responses` request for the same model is not a passthrough: it is
+  translated to chat completions on the way out and rendered back in the
+  Responses shape on the way in.
+- **`/responses` models** (Muse Spark, Grok 4.7, the GPT Luna family) are served
+  natively on `/responses`, buffered and streamed alike, so a `/v1/responses`
+  request goes to that endpoint without being translated to chat. The provider's
+  reasoning policy still applies before the request leaves, though: the effort
+  is mapped onto the `low`/`high`/`max` set Zen accepts, and a default is filled
+  in when the client asked for none, while a client `reasoning.summary` is
+  forwarded exactly as sent. See [Reasoning](#reasoning) for the mapping.
+  `/chat/completions` rejects them with "Model does not support this protocol", so
+  a `/v1/chat/completions` request for one of them is translated to the Responses
+  API and rendered back as a chat completion.
+  A chat request the translation cannot carry exactly — an unsupported field, or
+  a message shape it does not model — is rejected with an `invalid_request_error`
+  instead of returning a completion; send such a request to `/v1/responses`.
+- **Anthropic-only models** (the manual `/messages` list) are translated to the
+  Anthropic Messages dialect and sent to `/messages`, mirroring how GoModel
+  already serves native Anthropic.
 
-The set of `/messages`-only models is currently maintained manually (default:
-`qwen3.7-max`) because OpenCode Zen does not yet expose per-model endpoint
-metadata. Override it when needed:
+Every path normalizes to the same OpenAI-compatible response, so clients see
+one consistent surface regardless of which model they pick — whether they call
+`/v1/chat/completions` or `/v1/messages`.
+
+The listing is read at most once a minute, and only when a request names a model
+the provider has not routed before, so routing costs no upstream call on the
+hot path. A model the listing does not mention — because the listing failed or
+the model is unpublished — is sent to `/chat/completions`, the endpoint that
+serves most models, except a model in the manual `/messages` list, which still
+goes to `/messages` (`OPENCODE_GO_MESSAGES_MODELS` is authoritative and does not
+depend on the listing).
+
+The set of `/messages`-only models is still maintained manually (default:
+`qwen3.7-max`). Override it when needed:
 
 ```bash
 OPENCODE_GO_MESSAGES_MODELS=qwen3.7-max
 ```
 
 <Note>
-  This manual split is temporary and will be replaced by metadata-driven routing
-  once the upstream model list distinguishes endpoints.
+  The `/messages` split is temporary and will move onto the same metadata once
+  the provider routes Anthropic-native models from the listing too.
 </Note>
 
 ## Session header
@@ -76,8 +104,9 @@ OPENCODE_GO_MESSAGES_MODELS=qwen3.7-max
 OpenCode Zen asks every client to send an `x-opencode-session` header so it
 can route one conversation to the same upstream and keep its prompt cache
 warm. Upstream has announced that requests without it may start failing.
-GoModel adds the header to every OpenCode Go request by default, on both the
-`/chat/completions` and `/messages` paths, using the first available value:
+GoModel adds the header to every OpenCode Go request by default, on the
+`/chat/completions`, `/responses`, and `/messages` paths, using the first
+available value:
 
 1. An `x-opencode-session` header sent by the client (OpenCode itself, pi, and
    other tools that speak OpenCode Zen's dialect) is forwarded verbatim.
@@ -133,6 +162,12 @@ Any other value (`turbo`, say) is forwarded unchanged for the upstream to judge.
 `reasoning.effort` is GoModel's canonical field, so a request that sets both it
 and a top-level `reasoning_effort` is sent with the mapped `reasoning.effort` —
 the same precedence every other GoModel provider applies.
+
+A chat request translated to the Responses API also asks for a reasoning summary:
+the Responses API emits summaries only on request, so the translation sends
+`summary: "auto"` unless the client set one, which is forwarded unchanged
+(`"concise"`, `"detailed"`, and so on). Native `/v1/responses` requests carry the
+client's `reasoning.summary` exactly as sent, and none is added to them.
 
 Models routed to `/messages` use the Anthropic thinking dialect instead and are
 not affected by this mapping.

@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/goccy/go-json"
+
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
@@ -44,6 +46,73 @@ func adaptChatRequest(defaultEffort string) func(*core.ChatRequest) (*core.ChatR
 		}
 		return providers.AdaptReasoningEffortRequest(req, defaultEffort)
 	}
+}
+
+// adaptResponsesRequest applies to a native Responses request the policy
+// adaptChatRequest applies to chat: the effort is mapped onto the low/high/max
+// set OpenCode Zen accepts, and defaultEffort fills in one that carries none.
+// The Responses dialect already speaks the nested reasoning object, so only the
+// effort level and the injected default differ from what the client sent.
+func adaptResponsesRequest(defaultEffort string) func(*core.ResponsesRequest) *core.ResponsesRequest {
+	return func(req *core.ResponsesRequest) *core.ResponsesRequest {
+		if req == nil {
+			return nil
+		}
+		// A flat reasoning_effort is the chat dialect's shape, not a member the
+		// Responses endpoint defines. The client clearly asked for reasoning, so
+		// the value is promoted onto the nested object instead of being forwarded
+		// unchanged: dropping it would let the default override the client's
+		// choice, and keeping it would send an unknown field upstream.
+		flatEffort, hadFlat := flatReasoningEffort(req.ExtraFields)
+		if hadFlat {
+			withoutFlat := *req
+			withoutFlat.ExtraFields = req.ExtraFields.Without("reasoning_effort")
+			req = &withoutFlat
+		}
+		// reasoning.effort stays canonical: it wins over the flat member, the
+		// same precedence adaptChatRequest applies.
+		effort := ""
+		if req.Reasoning != nil {
+			effort = strings.TrimSpace(req.Reasoning.Effort)
+		}
+		if effort == "" {
+			effort = flatEffort
+		}
+		if effort == "" {
+			if defaultEffort == "" {
+				return req
+			}
+			effort = defaultEffort
+		}
+		effort = normalizeReasoningEffort(effort)
+		if req.Reasoning != nil && effort == req.Reasoning.Effort {
+			return req
+		}
+		reasoning := core.Reasoning{}
+		if req.Reasoning != nil {
+			reasoning = *req.Reasoning
+		}
+		reasoning.Effort = effort
+		adapted := *req
+		adapted.Reasoning = &reasoning
+		return &adapted
+	}
+}
+
+// flatReasoningEffort reports the value of a top-level reasoning_effort member
+// and whether the client sent one at all. A value that is not a string yields an
+// empty effort but still reports its presence, so the unsupported member is
+// dropped rather than forwarded.
+func flatReasoningEffort(fields core.UnknownJSONFields) (string, bool) {
+	raw := fields.Lookup("reasoning_effort")
+	if len(raw) == 0 {
+		return "", false
+	}
+	var effort string
+	if json.Unmarshal(raw, &effort) != nil {
+		return "", true
+	}
+	return strings.TrimSpace(effort), true
 }
 
 // normalizeReasoningEffort maps GoModel's effort levels onto the low/high/max

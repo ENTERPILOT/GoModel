@@ -39,24 +39,29 @@ OPENCODE_GO_MODELS=glm-5.1,kimi-k2.7-code,deepseek-v4-pro
 
 ## 端点
 
-OpenCode Zen 在 OpenAI 风格的 `/chat/completions`（Bearer 认证）上提供大多数模型，另有少数模型仅在 Anthropic 原生的 `/messages` 端点（`x-api-key` 认证）上提供。GoModel 按模型进行路由：
+OpenCode Zen 为每个模型提供各自的原生端点，并公布在 `GET /models` 每个条目的 `api` 字段中：OpenAI 风格的 `/chat/completions`（Bearer 认证）、OpenAI 风格的 `/responses`，或 Anthropic 原生的 `/messages` 端点（`x-api-key` 认证）。GoModel 读取该列表，并按模型为聊天模型和 Responses 模型路由，因此 Zen 在这两种格式上新增的模型会自动落到自己的端点上，无需修改配置。Anthropic 原生模型仍由手动列表路由（见下文）。
 
-- **OpenAI 风格的模型**（GLM、Kimi、DeepSeek、MiMo、MiniMax 以及大多数 Qwen）发送到 `/chat/completions`。`/models` 和 `/v1/responses`（转换为聊天补全）使用同一路径。
-- **仅支持 Anthropic 格式的模型**会被转换为 Anthropic Messages 格式并发送到 `/messages`，这与 GoModel 处理原生 Anthropic 的方式一致。两条路径都会规范化为相同的兼容 OpenAI 的响应，因此无论客户端选择哪个模型，也无论调用的是 `/v1/chat/completions` 还是 `/v1/messages`，看到的都是一致的接口。
+- **`/chat/completions` 模型**（GLM、Kimi、DeepSeek、MiMo 以及大多数 Qwen）：`/v1/chat/completions` 请求会原样发送到 `/chat/completions`。同一模型的 `/v1/responses` 请求并非透传：出站时会被转换为聊天补全，回程再渲染成 Responses 格式。
+- **`/responses` 模型**（Muse Spark、Grok 4.7、GPT Luna 系列）在 `/responses` 上原生提供，缓冲与流式均是如此，因此 `/v1/responses` 请求会直接发送到该端点，不做聊天格式的转换。但在发出之前，提供商的推理策略仍会作用于它：推理强度会被映射到 Zen 所接受的 low / high / max 集合，客户端未指定时还会补上默认值；客户端设置的 `reasoning.summary` 则按原样转发。映射细节见[推理](#推理)一节。`/chat/completions` 会用 "Model does not support this protocol" 拒绝它们，因此对这类模型的 `/v1/chat/completions` 请求会被转换为 Responses API，并以聊天补全的形式返回。转换无法精确承载的聊天请求（不支持的字段，或未建模的消息形式）会返回 `invalid_request_error` 错误，而不是返回补全结果；请将这类请求发送到 `/v1/responses`。
+- **仅支持 Anthropic 格式的模型**（手动 `/messages` 列表）会被转换为 Anthropic Messages 格式并发送到 `/messages`，这与 GoModel 处理原生 Anthropic 的方式一致。
 
-仅支持 `/messages` 的模型集合目前需要手动维护（默认值：`qwen3.7-max`），因为 OpenCode Zen 尚未提供按模型区分的端点元数据。需要时可以覆盖它：
+每条路径都会规范化为相同的兼容 OpenAI 的响应，因此无论客户端选择哪个模型，也无论调用的是 `/v1/chat/completions` 还是 `/v1/messages`，看到的都是一致的接口。
+
+该列表最多每分钟读取一次，且仅在请求中出现尚未路由过的模型时读取，因此正常路径上的路由不产生额外的上游调用。列表中未出现的模型（例如列表获取失败或模型未公布）会发送到 `/chat/completions`，也就是为大多数模型提供服务的端点；但手动 `/messages` 列表中的模型除外，它们仍会发送到 `/messages`（`OPENCODE_GO_MESSAGES_MODELS` 具有最高优先级，且不依赖该列表）。
+
+仅支持 `/messages` 的模型集合仍需要手动维护（默认值：`qwen3.7-max`）。需要时可以覆盖它：
 
 ```bash
 OPENCODE_GO_MESSAGES_MODELS=qwen3.7-max
 ```
 
 <Note>
-  这种手动划分是临时措施；一旦上游模型列表能够区分端点，就会被基于元数据的路由所取代。
+  这种 `/messages` 划分是临时措施；一旦 provider 也能从该列表路由 Anthropic 原生模型，就会迁移到同一份元数据上。
 </Note>
 
 ## 会话请求头
 
-OpenCode Zen 要求每个客户端发送 `x-opencode-session` 请求头，以便将同一个对话路由到同一个上游，并保持其提示词缓存处于预热状态。上游已宣布，不带该请求头的请求可能会开始失败。GoModel 默认会为每个 OpenCode Go 请求添加该请求头（`/chat/completions` 和 `/messages` 路径均是如此），并使用第一个可用的值：
+OpenCode Zen 要求每个客户端发送 `x-opencode-session` 请求头，以便将同一个对话路由到同一个上游，并保持其提示词缓存处于预热状态。上游已宣布，不带该请求头的请求可能会开始失败。GoModel 默认会为每个 OpenCode Go 请求添加该请求头（`/chat/completions`、`/responses` 和 `/messages` 路径均是如此），并使用第一个可用的值：
 
 1. 客户端发送的 `x-opencode-session` 请求头（来自 OpenCode 本身、pi 以及其他使用 OpenCode Zen 格式的工具）会被原样转发。
 2. 否则，使用 GoModel 通过[会话保持](/zh/features/session-keeping)检测到的会话：OpenCode 的 `X-Session-Id`、Claude Code 的会话 id、请求体中的会话字段，或者对于完全不发送任何信号的智能体，使用根据内容派生的 `auto-…` id。
@@ -95,6 +100,8 @@ OPENCODE_GO_DEFAULT_REASONING_EFFORT=high
 | `xhigh`、`max`           | `max`         |
 
 任何其他值（例如 `turbo`）会原样转发，由上游自行判断。`reasoning.effort` 是 GoModel 的规范字段，因此同时设置了它和顶层 `reasoning_effort` 的请求，会以映射后的 `reasoning.effort` 发送，这与 GoModel 其他所有提供商采用的优先级相同。
+
+转换为 Responses API 的聊天请求还会请求推理摘要：Responses API 仅在收到请求时才输出摘要，因此转换时会发送 `summary: "auto"`，除非客户端自行设置了摘要——此时会原样转发（例如 `"concise"`、`"detailed"`）。原生的 `/v1/responses` 请求会按原样携带客户端的 `reasoning.summary`，不会额外添加。
 
 路由到 `/messages` 的模型改用 Anthropic 的 thinking 格式，不受此映射影响。
 

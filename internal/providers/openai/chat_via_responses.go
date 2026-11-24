@@ -131,14 +131,15 @@ func isOpenAIModelName(model string) bool {
 // Other providers' replay state (extra_content) is removed by the router
 // before the request reaches this provider.
 func carriesChatOnlyFields(fields core.UnknownJSONFields, assistantMessage bool) bool {
-	// reasoning_content is exempt only for assistant messages: it is this
-	// converter's own output, so a client echoing it back must not become
-	// untranslatable. User and content-part fields remain unsupported.
+	// reasoning_content, and its nested form reasoning, are this converter's
+	// own output: a client replaying an assistant turn echoes them back, so
+	// they must not become untranslatable. The exemption is assistant-only —
+	// on any other role the same members are unexpected and still rejected.
+	// They are dropped, not replayed: the Responses translation maps fields
+	// explicitly, and Codex pins store: false.
 	if assistantMessage {
-		fields = fields.Without("reasoning_content")
+		fields = fields.Without("reasoning_content", "reasoning")
 	}
-	// Replay state belongs in extra_content; Codex pins store: false, so
-	// reasoning itself is dropped rather than replayed upstream.
 	return !fields.Without(core.ExtraContentField).IsEmpty()
 }
 
