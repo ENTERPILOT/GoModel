@@ -633,6 +633,10 @@ wykonuj na nim VACUUM osobno.
   a plik bazy danych z domyślnymi uprawnieniami, więc na współdzielonym hoście może być
   czytelny dla wszystkich. Uruchamiaj GoModel jako dedykowany użytkownik i zaostrz uprawnienia,
   zwłaszcza jeśli jakiekolwiek dane uwierzytelniające są zapisywane przez dashboard.
+- **Przy głównym systemie plików tylko do odczytu zapewnij zapisywalny `/tmp`.** SQLite zapisuje tam
+  pliki tymczasowe. Bez niego partie logów audytowych zawierające co najmniej dwa wpisy kończą się
+  błędem `disk I/O error (6410)` i przepadają. Dodaj `--tmpfs /tmp` do `docker run --read-only`
+  albo zamontuj `emptyDir` w `/tmp` w Kubernetes. Chart Helm już to robi.
 - **Utrzymuj rozsądną wartość `BODY_SIZE_LIMIT`.** Domyślnie wynosi `10M` i to ona chroni przed
   użyciem zbyt dużego body do wyczerpania pamięci. Wartość, której nie da się sparsować, wraca
   do wartości domyślnej z jedynie ostrzeżeniem, więc sprawdź pisownię.
