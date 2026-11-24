@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -38,9 +39,10 @@ const (
 	// AuthMethod is the authentication method recorded in the request log.
 	AuthMethod = "dashboard_login"
 
-	// The session key is stretched from the password once at startup, so a
-	// captured cookie cannot be used to guess the password offline at the
-	// speed of a plain hash. Parameters follow the OWASP Argon2id minimum.
+	// The session key is stretched from the password, so a captured cookie
+	// cannot be used to guess the password offline at the speed of a plain
+	// hash. A sign-in is checked by stretching the submitted password the
+	// same way. Parameters follow the OWASP Argon2id minimum.
 	keyTime    = 2
 	keyMemory  = 19 * 1024 // KiB
 	keyThreads = 1
@@ -51,13 +53,14 @@ const (
 // Service verifies dashboard credentials and the sessions issued for them. It
 // is safe for concurrent use.
 type Service struct {
-	username    string
-	usernameSum [sha256.Size]byte
-	passwordSum [sha256.Size]byte
-	key         []byte
-	attempts    *attemptLimiter
-	recorder    atomic.Pointer[ext.AuthenticationEventRecorder]
-	now         func() time.Time
+	username string
+	key      []byte
+	// deriving admits one key derivation at a time: each takes keyMemory,
+	// and sign-ins are rare.
+	deriving sync.Mutex
+	attempts *attemptLimiter
+	recorder atomic.Pointer[ext.AuthenticationEventRecorder]
+	now      func() time.Time
 }
 
 // New creates the login service for one username and password.
@@ -70,13 +73,15 @@ func New(username, password string) (*Service, error) {
 		return nil, errors.New("dashboard login needs a password")
 	}
 	return &Service{
-		username:    username,
-		usernameSum: sha256.Sum256([]byte(username)),
-		passwordSum: sha256.Sum256([]byte(password)),
-		key:         argon2.IDKey([]byte(password), []byte(keySalt+username), keyTime, keyMemory, keyThreads, keyLength),
-		attempts:    newAttemptLimiter(),
-		now:         time.Now,
+		username: username,
+		key:      deriveKey(username, password),
+		attempts: newAttemptLimiter(),
+		now:      time.Now,
 	}, nil
+}
+
+func deriveKey(username, password string) []byte {
+	return argon2.IDKey([]byte(password), []byte(keySalt+username), keyTime, keyMemory, keyThreads, keyLength)
 }
 
 // Username returns the configured username.
@@ -124,14 +129,17 @@ func (s *Service) session(request *http.Request) (time.Time, bool) {
 	return s.verify(cookie.Value)
 }
 
-// credentialsMatch compares in constant time, digests first so neither length
-// leaks, and always checks both values.
+// credentialsMatch reports whether the username and password are the
+// configured ones. The password is never compared directly: it is stretched
+// into the key the configured password produced, and the keys are compared in
+// constant time. Both values are always checked, so a wrong username answers
+// no faster than a wrong password.
 func (s *Service) credentialsMatch(username, password string) bool {
-	usernameSum := sha256.Sum256([]byte(strings.TrimSpace(username)))
-	passwordSum := sha256.Sum256([]byte(password))
-	usernameOK := subtle.ConstantTimeCompare(usernameSum[:], s.usernameSum[:])
-	passwordOK := subtle.ConstantTimeCompare(passwordSum[:], s.passwordSum[:])
-	return usernameOK&passwordOK == 1
+	usernameOK := subtle.ConstantTimeCompare([]byte(strings.TrimSpace(username)), []byte(s.username))
+	s.deriving.Lock()
+	key := deriveKey(s.username, password)
+	s.deriving.Unlock()
+	return usernameOK&subtle.ConstantTimeCompare(key, s.key) == 1
 }
 
 // issue returns a session token and the time it expires.
