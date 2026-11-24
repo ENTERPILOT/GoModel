@@ -15,7 +15,7 @@ import (
 func TestNewMongoDBStoreDropsLegacyExecutionPlanIndex(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		ctx := context.Background()
-		coll := db.Collection("audit_logs")
+		coll := db.Collection("request_logs")
 		// A collection from before v0.1.17 still carries the pre-rename index.
 		_, err := coll.Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{Key: "execution_plan_version_id", Value: 1}}})
 		require.NoError(t, err)

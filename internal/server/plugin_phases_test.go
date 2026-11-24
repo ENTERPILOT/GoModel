@@ -368,6 +368,11 @@ func TestChatCompletion_BufferedStreamKeepsImages(t *testing.T) {
 const truncatedChatStream = "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-nano\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"the \"}}]}\n\n" +
 	"data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-nano\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"secret answer\"}}]}\n\n"
 
+// inBandErrorChatStream is a provider stream that failed after streaming text,
+// as Gemini's converter ends an unusable turn: an in-band error and no [DONE].
+const inBandErrorChatStream = "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-nano\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"the secret answer\"}}]}\n\n" +
+	"data: {\"error\":{\"type\":\"provider_error\",\"message\":\"Gemini returned no usable output: MALFORMED_FUNCTION_CALL\",\"param\":null,\"code\":null,\"provider\":\"gemini\"}}\n\n"
+
 // A provider stream cut off mid-answer ends with the stream_incomplete error
 // event and is logged as a stream error. A guardrail that edits the buffered
 // text must not turn it into a finished answer.
@@ -385,6 +390,10 @@ func TestChatCompletion_TruncatedStreamStaysIncompleteAfterEdit(t *testing.T) {
 		{"truncated, unedited", truncatedChatStream, map[string]string{"response": "warn"}, pluginapi.KindResponse, "secret answer", true},
 		{"truncated, response phase edit", truncatedChatStream, edit, pluginapi.KindResponse, `"content":"clean"`, true},
 		{"truncated, buffered stream phase edit", truncatedChatStream, map[string]string{"stream": "buffer", "response": "edit", "text": "clean"}, pluginapi.KindStream, `"content":"clean"`, true},
+		// A stream that failed in-band after text is not turned into a
+		// finished answer by an edit either.
+		{"in-band error, response phase edit", inBandErrorChatStream, edit, pluginapi.KindResponse, `"content":"clean"`, true},
+		{"in-band error, buffered stream phase edit", inBandErrorChatStream, map[string]string{"stream": "buffer", "response": "edit", "text": "clean"}, pluginapi.KindStream, `"content":"clean"`, true},
 		// [DONE] without a finish_reason is a complete answer.
 		{"done without finish_reason, edited", truncatedChatStream + "data: [DONE]\n\n", edit, pluginapi.KindResponse, `"content":"clean"`, false},
 	}

@@ -243,3 +243,40 @@ func TestBuildImageResponseBody_CapsRevisedPrompt(t *testing.T) {
 	assert.LessOrEqual(t, len(kept), imageRevisedPromptMaxBytes)
 	assert.True(t, utf8.ValidString(kept))
 }
+
+// A partially successful batch keeps what an operator needs to investigate
+// it: each image's size, the failed item's error, and the upstream request ID.
+func TestBuildImageResponseBody_KeepsItemErrorsSizesAndRequestID(t *testing.T) {
+	body := BuildImageResponseBody(nil, &core.ImageGenerationResponse{
+		RequestID: "trace",
+		Data: []core.ImageData{
+			{URL: "https://img/1.jpg", Size: "2720x1536"},
+			{Error: &core.ImageItemError{Code: "1027", Message: "output image failed content safety check"}},
+		},
+	})
+
+	require.Len(t, body.Items, 2)
+	assert.Equal(t, "2720x1536", body.Items[0].Size)
+	assert.Nil(t, body.Items[0].Error)
+	assert.Equal(t, &ImageItemErrorLog{Code: "1027", Message: "output image failed content safety check"}, body.Items[1].Error)
+	assert.Empty(t, body.Items[1].URL)
+	assert.Equal(t, "trace", body.Meta["request_id"])
+}
+
+// TestBuildImageResponseBody_CapsItemError bounds the provider-returned error
+// message. The leading one-byte rune puts the limit in the middle of a
+// two-byte rune, which must be dropped whole rather than split.
+func TestBuildImageResponseBody_CapsItemError(t *testing.T) {
+	long := "a" + strings.Repeat("é", imageItemDetailMaxBytes)
+	body := BuildImageResponseBody(nil, &core.ImageGenerationResponse{
+		Data: []core.ImageData{{Error: &core.ImageItemError{Code: "1027", Message: long}}},
+	})
+
+	require.Len(t, body.Items, 1)
+	require.NotNil(t, body.Items[0].Error)
+	assert.Equal(t, "1027", body.Items[0].Error.Code)
+	kept := body.Items[0].Error.Message
+	assert.Equal(t, "a"+strings.Repeat("é", (imageItemDetailMaxBytes-1)/2), kept)
+	assert.Len(t, kept, imageItemDetailMaxBytes-1)
+	assert.True(t, utf8.ValidString(kept))
+}

@@ -110,6 +110,36 @@ func TestChatCompletion_CompatDropsRejectedFieldsAndClampsEffort(t *testing.T) {
 	assert.Equal(t, float64(1), sent["n"])
 }
 
+// Gemini's OpenAI-compatible endpoint answers HTTP 400 "the number of
+// stop_sequences must not exceed 5" for a longer list, like the native API.
+func TestChatCompletion_CompatCapsStopSequences(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "false")
+	tests := []struct {
+		name string
+		stop string
+		want any
+	}{
+		{name: "within limit is kept", stop: `["a","b","c","d","e"]`, want: []any{"a", "b", "c", "d", "e"}},
+		{name: "over limit is truncated", stop: `["a","b","c","d","e","f","g"]`, want: []any{"a", "b", "c", "d", "e"}},
+		{name: "bare string is kept", stop: `"END"`, want: "END"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, capture := providertest.JSONServer(t, http.StatusOK, `{"id":"x","object":"chat.completion","model":"gemini-2.5-flash","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`)
+			provider := New(providers.ProviderConfig{APIKey: "key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
+
+			var req core.ChatRequest
+			body := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],"stop":` + tt.stop + `}`
+			require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+			_, err := provider.ChatCompletion(context.Background(), &req)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.want, capture.Last(t).JSON(t)["stop"])
+		})
+	}
+}
+
 func TestChatCompletion_CompatNestedReasoningIsClamped(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "false")
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{"id":"x","object":"chat.completion","model":"gemini-2.5-flash","choices":[]}`)

@@ -24,7 +24,11 @@ type StreamUsageObserver struct {
 	labels          []string
 	operation       *core.GenAIOperation
 	rewriteSaved    int
-	closed          bool
+	costReport      *CostReport
+	// inheritedCost is set while cachedEntry is priced with a cost the
+	// provider reported for the token counts of an earlier event.
+	inheritedCost bool
+	closed        bool
 }
 
 func NewStreamUsageObserver(logger LoggerInterface, model, provider, requestID, endpoint string, pricingResolver PricingResolver, userPath ...string) *StreamUsageObserver {
@@ -103,6 +107,16 @@ func (o *StreamUsageObserver) SetRewriteTokensSaved(tokensSaved int) {
 	o.rewriteSaved = tokensSaved
 }
 
+// SetCostReport makes the observer report the cost of the usage it has seen
+// so far each time an event adds to it, so a stream can carry its cost in the
+// event that carries its final usage.
+func (o *StreamUsageObserver) SetCostReport(report *CostReport) {
+	if o == nil {
+		return
+	}
+	o.costReport = report
+}
+
 var usageKeyLiteral = []byte(`"usage"`)
 
 // HasUsageObject reports whether a raw SSE JSON payload contains a "usage"
@@ -144,7 +158,24 @@ func (o *StreamUsageObserver) OnJSONEvent(chunk map[string]any) {
 	if entry == nil {
 		return
 	}
+	cached, reportsCost := o.cachedEntry, isProviderReportedCostSource(entry.CostSource)
 	o.cachedEntry = o.mergeWithCachedEntry(entry)
+	o.inheritedCost = !reportsCost && (o.inheritedCost || inheritsProviderCost(o.cachedEntry, cached))
+	if o.inheritedCost {
+		// The cost the provider reported for other token counts is not the
+		// cost of these, so this event is returned without one.
+		o.costReport.Forget()
+		return
+	}
+	o.costReport.Record(o.logger, o.cachedEntry)
+}
+
+// inheritsProviderCost reports whether entry, merged with cached, is priced
+// with a cost the provider reported for the token counts of cached, which
+// entry no longer has.
+func inheritsProviderCost(entry, cached *UsageEntry) bool {
+	return cached != nil && isProviderReportedCostSource(entry.CostSource) &&
+		(entry.InputTokens != cached.InputTokens || entry.OutputTokens != cached.OutputTokens)
 }
 
 // mergeWithCachedEntry folds usage from an earlier event into the latest one.
@@ -355,36 +386,25 @@ func (o *StreamUsageObserver) pricingProvider() string {
 // on, so harvesting it for everyone adds a raw-usage member without changing
 // any other provider's cost math.
 func copyRootLevelCost(rawData map[string]any, chunk map[string]any) {
-	if _, exists := rawData["cost"]; exists {
-		return
-	}
-	// A NaN fails this comparison and is dropped, matching how
-	// copyExtendedUsageFields screens the usage-level member.
-	if value, ok := numericFloat(chunk["cost"]); ok && value >= 0 {
-		rawData["cost"] = value
-	}
+	copyProviderCosts(rawData, chunk, true)
 }
 
+// copyExtendedUsageFields copies the usage members without a typed home. The
+// provider-reported costs among them are the ones providerCostFields lists.
 func copyExtendedUsageFields(rawData map[string]any, usageMap map[string]any) {
+	copyProviderCosts(rawData, usageMap, false)
 	for key, value := range usageMap {
 		switch key {
 		case "prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens",
 			"prompt_tokens_details", "completion_tokens_details", "input_tokens_details", "output_tokens_details":
 			continue
-		case "cost", "cost_in_usd_ticks":
-			if numericValue, ok := numericFloat(value); ok && numericValue >= 0 {
-				rawData[key] = numericValue
-			}
-			continue
-		case "cost_details":
-			if details, ok := nestedUsageMap(value); ok {
-				rawData[key] = details
-			}
-			continue
 		case "is_byok":
 			if boolValue, ok := value.(bool); ok {
 				rawData[key] = boolValue
 			}
+			continue
+		}
+		if isProviderCostMember(key) {
 			continue
 		}
 		if numericValue, ok := numericUsageValue(value); ok && numericValue > 0 {

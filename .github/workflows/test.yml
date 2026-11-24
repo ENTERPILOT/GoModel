@@ -42,7 +42,7 @@ jobs:
         uses: ./.github/actions/go-cache
         with:
           key: lint
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: false
@@ -132,7 +132,7 @@ jobs:
           key: unit
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: false
@@ -179,7 +179,7 @@ jobs:
           key: e2e
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: false
@@ -217,7 +217,7 @@ jobs:
           key: integration
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: false
@@ -252,7 +252,7 @@ jobs:
           key: perf
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: false
@@ -271,7 +271,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -324,9 +324,13 @@ jobs:
         with:
           node-version: '22'
 
+      # Pinned: a bare `npx mint` installs the release published last, and a
+      # mint release reaches npm a few minutes before the @mintlify/cli version
+      # it depends on, so a run in that window fails with ETARGET. Dependabot
+      # does not see this pin; bump it by hand.
       - name: Validate docs.json
         if: steps.changes.outputs.docs == 'true'
-        run: npx mint validate
+        run: npx mint@4.3.37 validate
         working-directory: docs
 
   # Compiling the binary doesn't depend on tests passing, so this runs in
@@ -353,7 +357,7 @@ jobs:
           key: build
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: false

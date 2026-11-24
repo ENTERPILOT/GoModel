@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/sync/singleflight"
 
@@ -392,4 +393,22 @@ func nativeBaseURLFromOpenAICompatibleBaseURL(baseURL string) (string, bool) {
 		return "", false
 	}
 	return nativeBaseURL, true
+}
+
+// maxFailureTextLen bounds the upstream prose, such as a finish message or
+// the model's own text, copied into an error message, so the error stays
+// log-friendly and doesn't carry whole model output into logs.
+const maxFailureTextLen = 240
+
+// truncateFailureText cuts upstream prose at maxFailureTextLen without
+// splitting a multi-byte character.
+func truncateFailureText(text string) string {
+	if len(text) <= maxFailureTextLen {
+		return text
+	}
+	cut := maxFailureTextLen
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut] + "..."
 }

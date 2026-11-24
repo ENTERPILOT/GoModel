@@ -158,10 +158,10 @@ support, not every individual model capability exposed by an upstream provider.
 - **Fireworks AI** — model IDs are account-scoped paths such as
   `accounts/fireworks/models/gpt-oss-120b`; use them verbatim in requests and
   in `FIREWORKS_MODELS`.
-- **ElevenLabs** — a voice-only provider: `/v1/audio/speech` (text-to-speech)
-  and `/v1/audio/transcriptions` (speech-to-text) are supported, but chat,
-  `/v1/responses`, and embeddings are not (the ❌s above reflect that, not a
-  gateway limitation). The OpenAI `voice` field must be an ElevenLabs
+- **ElevenLabs** — a voice-only provider: `/v1/audio/speech` (text-to-speech),
+  `/v1/audio/transcriptions` (speech-to-text), and `/v1/realtime` (Scribe
+  Realtime transcription) are supported, but chat, `/v1/responses`, and
+  embeddings are not (the ❌s above reflect that, not a gateway limitation). The OpenAI `voice` field must be an ElevenLabs
   voice_id. See the [ElevenLabs guide](/providers/elevenlabs) for supported
   audio formats and speech-to-text models.
 - **Chutes AI** — defaults to `https://llm.chutes.ai/v1` and discovers its
@@ -263,7 +263,9 @@ support, not every individual model capability exposed by an upstream provider.
   capabilities), and finally a conservative name check for models still
   unclassified: IDs containing `embed` or matching well-known embedding
   families (`bge`, `e5`, `gte`, `minilm`) are categorized as embedding models,
-  and IDs containing `rerank` as reranking models — namespaced IDs like
+  IDs containing `rerank` as reranking models, and IDs with a `tts`,
+  `whisper`, `transcribe`, `asr`, or `stt` token as audio models (an embedding
+  or reranking match wins over an audio token) — namespaced IDs like
   `org/model` are checked by their final path segment. Declare operator
   metadata only when a model stays unclassified after all of this. Categories
   affect dashboard grouping only; `/v1/embeddings`

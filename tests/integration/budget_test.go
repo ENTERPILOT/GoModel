@@ -99,7 +99,7 @@ func TestBudget_EnforcesAndPersistsAcrossDatabases(t *testing.T) {
 					require.Equal(t, "budget_exceeded", requestLogEntry.Data.ErrorCode)
 				}
 			} else {
-				require.False(t, dbassert.StorageObjectExists(t, tt.dbType, fixture.PgPool, fixture.MongoDb, "audit_logs"))
+				require.False(t, dbassert.StorageObjectExists(t, tt.dbType, fixture.PgPool, fixture.MongoDb, "request_logs"))
 			}
 		})
 	}

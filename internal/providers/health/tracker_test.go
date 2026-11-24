@@ -374,6 +374,67 @@ func TestErrorMessageTruncationIsRuneSafe(t *testing.T) {
 	assert.True(t, utf8.ValidString(message), "truncated message is not valid UTF-8: %q", message)
 }
 
+func TestTrackerReportsModelCircuitState(t *testing.T) {
+	tracker, _ := newTestTracker(time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC))
+	record := func(model, modelState string) {
+		tracker.Record(llmclient.ResponseInfo{
+			Provider: "openai", Model: model, StatusCode: 200,
+			CircuitState: "closed", ModelCircuitState: modelState,
+		})
+	}
+	// "shared" runs on the provider breaker; "fast" has its own, which opens.
+	// "steady" drops back to the provider breaker after running on its own.
+	record("shared", "")
+	record("shared", "")
+	record("fast", "closed")
+	record("fast", "open")
+	record("steady", "half-open")
+	record("steady", "")
+
+	snapshot := tracker.Snapshot()["openai"]
+	assert.Equal(t, "closed", snapshot.CircuitState, "the provider breaker is reported apart from model breakers")
+	require.Len(t, snapshot.Models, 3)
+	assert.Equal(t, ModelHealth{Model: "fast", Requests: 2, CircuitState: "open"}, snapshot.Models[0], "open circuits sort first")
+	states := map[string]string{}
+	for _, model := range snapshot.Models {
+		states[model.Model] = model.CircuitState
+	}
+	assert.Equal(t, map[string]string{"fast": "open", "shared": "", "steady": ""}, states)
+	assert.Equal(t, []string{"fast"}, snapshot.OpenCircuitModels())
+}
+
+func TestTrackerKeepsModelCircuitStateWithoutBreakerVerdict(t *testing.T) {
+	tracker, _ := newTestTracker(time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC))
+	state := func() string {
+		models := tracker.Snapshot()["openai"].Models
+		require.Len(t, models, 1)
+		return models[0].CircuitState
+	}
+
+	tracker.Record(llmclient.ResponseInfo{
+		Provider: "openai", Model: "fast", StatusCode: 504,
+		CircuitState: "closed", ModelCircuitState: "open",
+	})
+	// A request that bypassed breakers carries no state and changes nothing.
+	tracker.Record(llmclient.ResponseInfo{Provider: "openai", Model: "fast", StatusCode: 200})
+	assert.Equal(t, "open", state())
+
+	// A canceled probe is no health event, but its breaker state is current.
+	tracker.Record(llmclient.ResponseInfo{
+		Provider: "openai", Model: "fast", Error: context.Canceled,
+		CircuitState: "closed", ModelCircuitState: "half-open",
+	})
+	assert.Equal(t, "half-open", state())
+	assert.Equal(t, 2, tracker.Snapshot()["openai"].Requests, "a canceled request is not counted")
+
+	// A canceled request for an untracked model creates no entry.
+	tracker.Record(llmclient.ResponseInfo{
+		Provider: "openai", Model: "new", Error: context.Canceled,
+		CircuitState: "closed", ModelCircuitState: "closed",
+	})
+	assert.Len(t, tracker.providers["openai"].models, 1)
+}
+
 func TestProviderHealthFlaggedModels(t *testing.T) {
 	snapshot := ProviderHealth{Models: []ModelHealth{
 		{Model: "a", Flagged: true},

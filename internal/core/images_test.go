@@ -87,3 +87,22 @@ func TestImageGenerationResponse_OmitsEmptyOptionalFields(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"created":1,"data":[{"url":"https://img"}]}`, string(out))
 }
+
+func TestImageGenerationResponse_GeneratedImageCount(t *testing.T) {
+	tests := []struct {
+		name string
+		data []ImageData
+		want int
+	}{
+		{name: "no items", want: 0},
+		{name: "url and base64 items", data: []ImageData{{URL: "https://img/1.png"}, {B64JSON: "aGk="}}, want: 2},
+		{name: "failed item is not counted", data: []ImageData{{URL: "https://img/1.png"}, {Error: &ImageItemError{Code: "1027", Message: "withheld"}}}, want: 1},
+		{name: "item without an image is not counted", data: []ImageData{{URL: "https://img/1.png"}, {RevisedPrompt: "a cat"}}, want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &ImageGenerationResponse{Data: tt.data}
+			assert.Equal(t, tt.want, resp.GeneratedImageCount())
+		})
+	}
+}

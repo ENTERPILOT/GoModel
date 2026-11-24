@@ -29,8 +29,9 @@ var (
 // realtimeService adapts Echo requests to the realtime websocket reverse proxy.
 // It stays a thin transport layer: validate, authorize, enforce budget, resolve
 // the upstream target (credential injection lives in the provider), then relay
-// frames verbatim. The realtime event schema is the wire format, so no request
-// or response translation happens here.
+// frames. The realtime event schema is the wire format, so no request or
+// response translation happens here; a provider with its own protocol brings a
+// translator in its target.
 type realtimeService struct {
 	provider        core.RoutableProvider
 	modelResolver   RequestModelResolver
@@ -161,7 +162,10 @@ func (s *realtimeService) handle(c *echo.Context, model, providerHint, intent st
 		// usage; tapping the attach session too would double-count every response.
 		tap = nil
 	}
-	hooks := realtime.Hooks{OnServerFrame: tap}
+	// A provider with its own websocket protocol brings a translator that
+	// converts the session to and from the OpenAI event schema; without one the
+	// frames relay verbatim.
+	hooks := realtime.Hooks{OnServerFrame: tap, Translator: target.Translator}
 	// A provider that leaves the model out of the upstream URL (OpenAI
 	// transcription sessions) asks the gateway to pin the client's in-session
 	// model selection to the routed model the caller was authorized for.

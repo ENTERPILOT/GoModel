@@ -53,12 +53,13 @@ func MetaFromContext(ctx context.Context, workflow *core.Workflow) pluginapi.Met
 	if policy := workflow.Policy; policy != nil {
 		meta.WorkflowVersionID = strings.TrimSpace(policy.VersionID)
 		meta.Features = map[string]bool{
-			"cache":      policy.Features.Cache,
-			"audit":      policy.Features.Audit,
-			"usage":      policy.Features.Usage,
-			"budget":     policy.Features.Budget,
-			"guardrails": policy.Features.Guardrails,
-			"failover":   policy.Features.Failover,
+			"cache":        policy.Features.Cache,
+			"request_logs": policy.Features.RequestLogs,
+			"audit":        policy.Features.RequestLogs, // deprecated alias: drop this line to stop exposing it
+			"usage":        policy.Features.Usage,
+			"budget":       policy.Features.Budget,
+			"guardrails":   policy.Features.Guardrails,
+			"failover":     policy.Features.Failover,
 		}
 	}
 	return meta

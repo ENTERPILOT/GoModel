@@ -272,7 +272,7 @@ func TestDeleteGuardrailRejectsActiveWorkflowReference(t *testing.T) {
 				Name:     "global",
 				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true},
+					Features:      workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: true},
 					Guardrails:    []workflows.GuardrailStep{{Ref: "policy-system", Step: 10}},
 				},
 				WorkflowHash: "hash-global",
@@ -314,7 +314,7 @@ func TestDeleteGuardrailIgnoresDisabledWorkflowGuardrailRefs(t *testing.T) {
 				Name:     "global",
 				Payload: workflows.Payload{
 					SchemaVersion: 1,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
+					Features:      workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: false},
 					Guardrails:    []workflows.GuardrailStep{{Ref: "policy-system", Step: 10}},
 				},
 				WorkflowHash: "hash-global",
@@ -355,7 +355,7 @@ func TestUpsertGuardrailRejectsRetypeUsedInUnsupportedPhase(t *testing.T) {
 				Name:     "global",
 				Payload: workflows.Payload{
 					SchemaVersion: 2,
-					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true},
+					Features:      workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true, Guardrails: true},
 					Steps:         []workflows.Step{{Ref: "redact", Phase: "response", Step: 10}},
 				},
 				WorkflowHash: "hash-global",
@@ -410,7 +410,7 @@ func TestUpsertGuardrailRefreshesWorkflowsWhenTheDataKeyIsUnconfirmed(t *testing
 	require.NoError(t, guardrailService.Refresh(context.Background()))
 	// The workflow service is not refreshed yet, so it matches nothing until
 	// the handler refreshes it after the save.
-	planStore := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, Audit: true, Usage: true})}}
+	planStore := &workflowTestStore{versions: []workflows.Version{globalWorkflow(workflows.FeatureFlags{Cache: true, RequestLogs: true, Usage: true})}}
 	planService, err := workflows.NewService(planStore, workflows.NewCompilerWithFeatureCaps(guardrailService, core.DefaultWorkflowFeatures()))
 	require.NoError(t, err)
 	_, err = planService.Match(core.WorkflowSelector{})

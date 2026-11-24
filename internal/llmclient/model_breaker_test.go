@@ -1,6 +1,7 @@
 package llmclient
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"net/http"
@@ -170,11 +171,39 @@ func TestProviderScopeKeepsASingleBreaker(t *testing.T) {
 	cfg := DefaultConfig("test", "")
 	client := New(cfg, nil)
 	for _, model := range []string{"model1", "model2"} {
-		got := client.breakerForModel(model)
+		got := client.breakerForRequest(t.Context(), model)
 		require.Same(t, client.circuitBreaker, got, "%s must share the provider breaker under the default scope", model)
 
 		// Releasing the provider breaker is a no-op, not a bad bookkeeping entry.
 		client.releaseModelBreaker(model, client.circuitBreaker)
 	}
 	require.Empty(t, client.modelBreakers)
+}
+
+func TestModelScopeReportsModelCircuitState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/failing" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	cfg := DefaultConfig("test", server.URL)
+	cfg.Retry.MaxRetries = 0
+	cfg.CircuitBreaker.Scope = "model"
+	cfg.CircuitBreaker.FailureThreshold = 1
+	type states struct{ provider, model string }
+	var reported []states
+	cfg.Hooks.OnRequestEnd = func(_ context.Context, info ResponseInfo) {
+		reported = append(reported, states{info.CircuitState, info.ModelCircuitState})
+	}
+	client := New(cfg, nil)
+
+	require.Error(t, client.Do(t.Context(), Request{Method: "GET", Endpoint: "/failing", Model: "failing"}, nil))
+	require.NoError(t, client.Do(t.Context(), Request{Method: "GET", Endpoint: "/healthy", Model: "healthy"}, nil))
+	// A request naming no model is charged to the provider breaker.
+	require.NoError(t, client.Do(t.Context(), Request{Method: "GET", Endpoint: "/healthy"}, nil))
+
+	require.Equal(t, []states{{"open", "open"}, {"closed", "closed"}, {"closed", ""}}, reported)
 }

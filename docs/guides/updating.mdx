@@ -179,6 +179,20 @@ that cannot get its table is skipped with a logged warning, along with the
 request log indexes after it, and the start continues; the next start creates
 them.
 
+After v0.2.5 the request log's storage was renamed from `audit_logs` to
+`request_logs`: the tables on SQLite and PostgreSQL, the collection on
+MongoDB. The rename happens in place and copies no rows; on SQLite and
+PostgreSQL the indexes keep their `idx_audit_` names. On
+PostgreSQL the old names stay behind as views, so replicas still on the older
+version keep reading and writing the request log during a rolling upgrade, and a
+rolled-back version still starts (it logs index-creation warnings, since it
+cannot index a view); point your own queries at `request_logs`. On
+SQLite and MongoDB an older version that runs after the rename starts a new,
+empty `audit_logs`, and the next start of a current version with request logging on moves what it logged
+into `request_logs`. If MongoDB refuses the rename, for example because the
+role lacks the privilege, the gateway logs a warning and keeps using
+`audit_logs`.
+
 ## Pinning a version
 
 Updates default to the latest release. To stay on a known version, pin it:

@@ -72,7 +72,7 @@ func ensureTrigramSearchIndex(ctx context.Context, db sqlx.DB, errorMessage stri
 	if hasTrigramSearchIndex(ctx, db) {
 		return
 	}
-	statement := fmt.Sprintf(`CREATE INDEX CONCURRENTLY IF NOT EXISTS %s ON audit_logs USING GIN (%s %s.gin_trgm_ops)`,
+	statement := fmt.Sprintf(`CREATE INDEX CONCURRENTLY IF NOT EXISTS %s ON request_logs USING GIN (%s %s.gin_trgm_ops)`,
 		trigramSearchIndex, searchText(errorMessage), `"`+strings.ReplaceAll(schema, `"`, `""`)+`"`)
 	started := time.Now()
 	if _, err := db.Exec(ctx, statement); err != nil {

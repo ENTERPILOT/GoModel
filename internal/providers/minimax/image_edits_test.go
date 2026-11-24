@@ -242,3 +242,20 @@ func TestCreateImageEditForwardsSupportedDimensions(t *testing.T) {
 	assert.Equal(t, float64(1024), body["width"])
 	assert.Equal(t, float64(512), body["height"])
 }
+
+// H3 edits live on a different endpoint with a different request shape, so the
+// image-01 translation must not send them to /image_generation.
+func TestCreateImageEditRejectsH3Models(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
+	provider := newTestProvider("minimax-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+	req := portraitRequest()
+	req.Model = "MiniMax-H3-Image"
+
+	_, err := provider.CreateImageEdit(context.Background(), req)
+
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+	assert.Contains(t, gatewayErr.Message, "H3 image edits are not supported")
+	assert.Zero(t, capture.Count())
+}

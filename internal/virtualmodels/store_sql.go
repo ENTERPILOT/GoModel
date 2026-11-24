@@ -29,6 +29,8 @@ var sqlSchema = []string{
 		user_paths TEXT NOT NULL DEFAULT '[]',
 		description TEXT NOT NULL DEFAULT '',
 		slowdown DOUBLE PRECISION DEFAULT NULL,
+		timeout_seconds INTEGER DEFAULT NULL,
+		response_header_timeout_seconds INTEGER DEFAULT NULL,
 		reasoning_effort TEXT NOT NULL DEFAULT '',
 		params TEXT NOT NULL DEFAULT '',
 		default_params TEXT NOT NULL DEFAULT '',
@@ -52,19 +54,21 @@ var virtualModelMigrations = []string{
 	"ALTER TABLE virtual_models ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN params TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN default_params TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE virtual_models ADD COLUMN timeout_seconds INTEGER DEFAULT NULL",
+	"ALTER TABLE virtual_models ADD COLUMN response_header_timeout_seconds INTEGER DEFAULT NULL",
 }
 
 const selectVirtualModelColumns = `
 	SELECT source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths,
-		description, slowdown, reasoning_effort, params, default_params, enabled, created_at, updated_at
+		description, slowdown, timeout_seconds, response_header_timeout_seconds, reasoning_effort, params, default_params, enabled, created_at, updated_at
 	FROM virtual_models
 `
 
 const upsertVirtualModelSQL = `
 	INSERT INTO virtual_models (
-		source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths, description, slowdown, reasoning_effort, params, default_params, enabled, created_at, updated_at
+		source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths, description, slowdown, timeout_seconds, response_header_timeout_seconds, reasoning_effort, params, default_params, enabled, created_at, updated_at
 	)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(source) DO UPDATE SET
 		targets = excluded.targets,
 		strategy = excluded.strategy,
@@ -77,6 +81,8 @@ const upsertVirtualModelSQL = `
 		user_paths = excluded.user_paths,
 		description = excluded.description,
 		slowdown = excluded.slowdown,
+		timeout_seconds = excluded.timeout_seconds,
+		response_header_timeout_seconds = excluded.response_header_timeout_seconds,
 		reasoning_effort = excluded.reasoning_effort,
 		params = excluded.params,
 		default_params = excluded.default_params,
@@ -189,6 +195,8 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 		sqlutil.JSONStrings(vm.UserPaths),
 		vm.Description,
 		vm.Slowdown,
+		vm.Timeout,
+		vm.ResponseHeaderTimeout,
 		vm.ReasoningEffort,
 		paramsJSON,
 		defaultParamsJSON,
@@ -216,6 +224,8 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 		&userPaths,
 		&vm.Description,
 		&vm.Slowdown,
+		&vm.Timeout,
+		&vm.ResponseHeaderTimeout,
 		&vm.ReasoningEffort,
 		&params,
 		&defaultParams,

@@ -26,7 +26,7 @@ func (r *MongoDBReader) GetLastUsedByAuthKeys(ctx context.Context, keyIDs []stri
 		}}},
 	}
 
-	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	cursor, err := r.logs(ctx).Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, fmt.Errorf("failed to aggregate auth key last used: %w", err)
 	}

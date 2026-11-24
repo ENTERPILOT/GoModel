@@ -27,7 +27,7 @@ const (
 	maxAttemptsPerBatch = maxSQLParams / columnsPerAttempt
 )
 
-const requestLogTable = "audit_logs"
+const requestLogTable = "request_logs"
 
 // SQLStore implements LogStore for SQL databases.
 type SQLStore struct {
@@ -45,7 +45,7 @@ type SQLStore struct {
 }
 
 var sqlTables = []string{
-	`CREATE TABLE IF NOT EXISTS audit_logs (
+	`CREATE TABLE IF NOT EXISTS request_logs (
 		id TEXT PRIMARY KEY,
 		timestamp ` + sqlx.TypeTimestamp + ` NOT NULL,
 		duration_ns ` + sqlx.TypeInt64 + ` DEFAULT 0,
@@ -72,9 +72,9 @@ var sqlTables = []string{
 		writer_id TEXT,
 		written_at ` + sqlx.TypeInt64 + `
 	)`,
-	`CREATE TABLE IF NOT EXISTS audit_log_attempts (
+	`CREATE TABLE IF NOT EXISTS request_log_attempts (
 		id ` + sqlx.TypeSerialPK + `,
-		audit_log_id TEXT NOT NULL,
+		request_log_id TEXT NOT NULL,
 		seq INTEGER NOT NULL,
 		kind TEXT NOT NULL,
 		provider_type TEXT,
@@ -89,60 +89,63 @@ var sqlTables = []string{
 		response_headers TEXT,
 		started_at ` + sqlx.TypeTimestamp + `,
 		duration_ns ` + sqlx.TypeInt64 + ` DEFAULT 0,
-		UNIQUE(audit_log_id, seq),
-		FOREIGN KEY(audit_log_id) REFERENCES audit_logs(id) ON DELETE CASCADE
+		UNIQUE(request_log_id, seq),
+		FOREIGN KEY(request_log_id) REFERENCES request_logs(id) ON DELETE CASCADE
 	)`,
 }
 
 // sqlMigrations backfill columns added after the tables' first release.
 var sqlMigrations = []string{
-	"ALTER TABLE audit_logs ADD COLUMN requested_model TEXT",
-	"ALTER TABLE audit_logs ADD COLUMN resolved_model TEXT",
-	"ALTER TABLE audit_logs ADD COLUMN provider_name TEXT",
-	"ALTER TABLE audit_logs ADD COLUMN alias_used " + sqlx.TypeBool + " DEFAULT FALSE",
-	"ALTER TABLE audit_logs ADD COLUMN workflow_version_id TEXT",
-	"ALTER TABLE audit_logs ADD COLUMN cache_type TEXT",
-	"ALTER TABLE audit_logs ADD COLUMN principal_id TEXT",
-	"ALTER TABLE audit_logs ADD COLUMN auth_key_id TEXT",
-	"ALTER TABLE audit_logs ADD COLUMN auth_method TEXT",
-	"ALTER TABLE audit_logs ADD COLUMN user_path TEXT",
-	"ALTER TABLE audit_logs ADD COLUMN session_id TEXT",
-	"ALTER TABLE audit_logs ADD COLUMN writer_id TEXT",
-	"ALTER TABLE audit_logs ADD COLUMN written_at " + sqlx.TypeInt64,
-	"ALTER TABLE audit_log_attempts ADD COLUMN response_body TEXT",
-	"ALTER TABLE audit_log_attempts ADD COLUMN response_headers TEXT",
+	"ALTER TABLE request_logs ADD COLUMN requested_model TEXT",
+	"ALTER TABLE request_logs ADD COLUMN resolved_model TEXT",
+	"ALTER TABLE request_logs ADD COLUMN provider_name TEXT",
+	"ALTER TABLE request_logs ADD COLUMN alias_used " + sqlx.TypeBool + " DEFAULT FALSE",
+	"ALTER TABLE request_logs ADD COLUMN workflow_version_id TEXT",
+	"ALTER TABLE request_logs ADD COLUMN cache_type TEXT",
+	"ALTER TABLE request_logs ADD COLUMN principal_id TEXT",
+	"ALTER TABLE request_logs ADD COLUMN auth_key_id TEXT",
+	"ALTER TABLE request_logs ADD COLUMN auth_method TEXT",
+	"ALTER TABLE request_logs ADD COLUMN user_path TEXT",
+	"ALTER TABLE request_logs ADD COLUMN session_id TEXT",
+	"ALTER TABLE request_logs ADD COLUMN writer_id TEXT",
+	"ALTER TABLE request_logs ADD COLUMN written_at " + sqlx.TypeInt64,
+	"ALTER TABLE request_log_attempts ADD COLUMN response_body TEXT",
+	"ALTER TABLE request_log_attempts ADD COLUMN response_headers TEXT",
 }
 
 // sqlIndexes are best-effort: a failure is logged and startup continues, since
 // a missing index degrades query speed rather than correctness.
+//
+// The request log indexes are named idx_audit_ after the tables' name up to
+// v0.2.5, and stay that way (see store_sql_migrate.go).
 var sqlIndexes = []string{
-	"CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON request_logs(timestamp)",
 	"DROP INDEX IF EXISTS idx_audit_model",
-	"CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_logs(status_code)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_provider ON audit_logs(provider)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_provider_name ON audit_logs(provider_name)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_status ON request_logs(status_code)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_provider ON request_logs(provider)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_provider_name ON request_logs(provider_name)",
 	// Retires the index on the pre-v0.1.17 execution_plan_version_id column,
 	// which the workflow rename left behind on older databases.
 	"DROP INDEX IF EXISTS idx_audit_execution_plan_version_id",
-	"CREATE INDEX IF NOT EXISTS idx_audit_workflow_version_id ON audit_logs(workflow_version_id)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_logs(request_id)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_principal_id ON audit_logs(principal_id)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_id ON audit_logs(auth_key_id)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON audit_logs(client_ip)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_workflow_version_id ON request_logs(workflow_version_id)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_request_id ON request_logs(request_id)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_principal_id ON request_logs(principal_id)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_id ON request_logs(auth_key_id)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON request_logs(client_ip)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_path ON request_logs(path)",
 	// Composite: serves both the session_id equality filter and its per-thread
 	// timestamp ordering (thread detail and the sessions grouping query). The
 	// drop retires the single-column predecessor, which IF NOT EXISTS would
 	// otherwise leave in place on databases that created it.
 	"DROP INDEX IF EXISTS idx_audit_session_id",
-	"CREATE INDEX IF NOT EXISTS idx_audit_session_timestamp ON audit_logs(session_id, timestamp)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_error_type ON audit_logs(error_type)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_log_seq ON audit_log_attempts(audit_log_id, seq)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_provider ON audit_log_attempts(provider_type)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_started_at ON audit_log_attempts(started_at)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_session_timestamp ON request_logs(session_id, timestamp)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_error_type ON request_logs(error_type)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_log_seq ON request_log_attempts(request_log_id, seq)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_provider ON request_log_attempts(provider_type)",
+	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_started_at ON request_log_attempts(started_at)",
 }
 
-const insertRequestLogPrefix = `INSERT INTO audit_logs (
+const insertRequestLogPrefix = `INSERT INTO request_logs (
 	id, timestamp, duration_ns, requested_model, resolved_model, provider,
 	provider_name, alias_used, workflow_version_id, cache_type, status_code,
 	request_id, principal_id, auth_key_id, auth_method, client_ip, method, path, user_path,
@@ -152,13 +155,13 @@ const insertRequestLogPrefix = `INSERT INTO audit_logs (
 // requestLogRowPlaceholder is one VALUES tuple of columnsPerEntry placeholders.
 var requestLogRowPlaceholder = "(" + strings.TrimSuffix(strings.Repeat("?, ", columnsPerEntry), ", ") + ")"
 
-const insertAttemptPrefix = `INSERT INTO audit_log_attempts (
-	audit_log_id, seq, kind, provider_type, provider_name, model,
+const insertAttemptPrefix = `INSERT INTO request_log_attempts (
+	request_log_id, seq, kind, provider_type, provider_name, model,
 	status_code, success, error_type, error_code, error_message,
 	response_body, response_headers, started_at, duration_ns
 ) VALUES `
 
-const insertAttemptSuffix = ` ON CONFLICT (audit_log_id, seq) DO NOTHING`
+const insertAttemptSuffix = ` ON CONFLICT (request_log_id, seq) DO NOTHING`
 
 const attemptRowPlaceholder = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
@@ -211,16 +214,27 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	return store, nil
 }
 
-// ensureSQLSchema creates the request log tables, brings older ones up to date and
-// creates the indexes built at startup.
+// ensureSQLSchema creates the request log tables, brings older ones up to date
+// (first of all onto their current names) and creates the indexes built at
+// startup.
 func ensureSQLSchema(ctx context.Context, db sqlx.DB) error {
+	if err := adoptLegacyTables(ctx, db, false); err != nil {
+		return err
+	}
 	if err := db.Schema(ctx, sqlTables...); err != nil {
 		return fmt.Errorf("failed to create request log tables: %w", err)
 	}
 	if err := renameRequestLogColumn(ctx, db, requestLogTable, "model", "requested_model"); err != nil {
-		return fmt.Errorf("failed to rename audit_logs.model to requested_model: %w", err)
+		return fmt.Errorf("failed to rename request_logs.model to requested_model: %w", err)
 	}
 	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
+		return err
+	}
+	// Now that both tables exist in their current shape: see adoptLegacyTables.
+	if err := adoptLegacyTables(ctx, db, true); err != nil {
+		return err
+	}
+	if err := ensureLegacyViews(ctx, db); err != nil {
 		return err
 	}
 	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
@@ -230,7 +244,7 @@ func ensureSQLSchema(ctx context.Context, db sqlx.DB) error {
 	}
 	// One Schema call per statement keeps them best-effort, and on PostgreSQL
 	// skips the indexes that already exist instead of queueing each for a
-	// lock on audit_logs. A statement that gave up on that lock ends the
+	// lock on request_logs. A statement that gave up on that lock ends the
 	// loop: each of the rest would wait it out again, a minute at a time.
 	for _, statement := range indexes {
 		err := db.Schema(ctx, statement)
@@ -259,7 +273,7 @@ func userPathIndexes(dialect sqlx.Dialect) []string {
 	}
 	return []string{
 		`DROP INDEX IF EXISTS idx_audit_user_path`,
-		`CREATE INDEX IF NOT EXISTS idx_audit_user_path_timestamp ON audit_logs(` + column + `, timestamp)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_user_path_timestamp ON request_logs(` + column + `, timestamp)`,
 	}
 }
 
@@ -281,15 +295,15 @@ func jsonPathIndexes(dialect sqlx.Dialect) []string {
 		return []string{
 			`DROP INDEX IF EXISTS idx_audit_response_id`,
 			`DROP INDEX IF EXISTS idx_audit_previous_response_id`,
-			`CREATE INDEX IF NOT EXISTS idx_audit_response_id_ts ON audit_logs(json_extract(data, '$.response_body.id'), timestamp)`,
-			`CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id_ts ON audit_logs(json_extract(data, '$.request_body.previous_response_id'), timestamp)`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_response_id_ts ON request_logs(json_extract(data, '$.response_body.id'), timestamp)`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id_ts ON request_logs(json_extract(data, '$.request_body.previous_response_id'), timestamp)`,
 		}
 	case sqlx.PostgreSQL:
 		return []string{
 			`DROP INDEX IF EXISTS idx_audit_response_id`,
 			`DROP INDEX IF EXISTS idx_audit_previous_response_id`,
-			`CREATE INDEX IF NOT EXISTS idx_audit_response_id_ts ON audit_logs((data #>> '{response_body,id}'), timestamp)`,
-			`CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id_ts ON audit_logs((data #>> '{request_body,previous_response_id}'), timestamp)`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_response_id_ts ON request_logs((data #>> '{response_body,id}'), timestamp)`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_previous_response_id_ts ON request_logs((data #>> '{request_body,previous_response_id}'), timestamp)`,
 		}
 	default:
 		return nil
@@ -477,12 +491,12 @@ func (s *SQLStore) cleanup() {
 	cutoff := s.db.Dialect().TimestampArg(time.Now().AddDate(0, 0, -s.retentionDays))
 
 	if _, err := s.db.Exec(ctx,
-		"DELETE FROM audit_log_attempts WHERE audit_log_id IN (SELECT id FROM audit_logs WHERE timestamp < ?)",
+		"DELETE FROM request_log_attempts WHERE request_log_id IN (SELECT id FROM request_logs WHERE timestamp < ?)",
 		cutoff); err != nil {
 		slog.Error("failed to cleanup old request log attempts", "error", err)
 		return
 	}
-	deleted, err := s.db.Exec(ctx, "DELETE FROM audit_logs WHERE timestamp < ?", cutoff)
+	deleted, err := s.db.Exec(ctx, "DELETE FROM request_logs WHERE timestamp < ?", cutoff)
 	if err != nil {
 		slog.Error("failed to cleanup old request logs", "error", err)
 		return

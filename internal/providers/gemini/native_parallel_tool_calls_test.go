@@ -130,7 +130,29 @@ data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"
 	for _, call := range toolCalls {
 		ids = append(ids, call["id"])
 	}
-	assert.Equal(t, []any{"call_1", "call_2", "call_0", "call_3"}, ids, "stream %s", raw)
+	require.Len(t, ids, 4, "stream %s", raw)
+	assert.Equal(t, "call_1", ids[0], "Gemini's own ID is kept")
+	assert.Equal(t, "call_0", ids[2], "Gemini's own ID is kept")
+	assert.Regexp(t, generatedToolCallID, ids[1], "missing ID is generated")
+	assert.Regexp(t, generatedToolCallID, ids[3], "repeated ID is replaced")
+	assert.NotEqual(t, ids[1], ids[3])
+}
+
+// generatedToolCallID matches the IDs toolCallIDs generates for calls Gemini
+// leaves without one.
+const generatedToolCallID = `^call_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+
+// Gemini 2.5 never supplies function call IDs, and each response gets a fresh
+// toolCallIDs. Generated IDs must still differ between responses: a client
+// keeps earlier tool calls in its history, and a repeated ID there makes it
+// lose track of which calls already ran.
+func TestToolCallIDs_GeneratedIDsDifferAcrossResponses(t *testing.T) {
+	first := (&toolCallIDs{}).assign("", nil)
+	second := (&toolCallIDs{}).assign("", nil)
+
+	assert.Regexp(t, generatedToolCallID, first)
+	assert.Regexp(t, generatedToolCallID, second)
+	assert.NotEqual(t, first, second)
 }
 
 func TestConvertChatRequestToGemini_GroupsParallelToolResults(t *testing.T) {

@@ -19,8 +19,10 @@ services:
       - METRICS_ENABLED=true
       # Storage configuration (PostgreSQL for request logs)
       - POSTGRES_URL=postgres://gomodel:gomodel@postgres:5432/gomodel
-      # MongoDB configuration (uncomment to use MongoDB instead)
-      - MONGODB_URL=mongodb://mongodb:27017/gomodel
+      # MongoDB configuration (uncomment to use MongoDB instead).
+      # directConnection: the replica set advertises localhost:27017, which
+      # reaches MongoDB from the host but not from this container.
+      - MONGODB_URL=mongodb://mongodb:27017/gomodel?directConnection=true
       # Request logging is enabled by default; pick its storage backend below
       # - STORAGE_TYPE=postgresql
       - STORAGE_TYPE=mongodb
@@ -39,7 +41,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     ports:
       - "6379:6379"
     volumes:
@@ -61,7 +63,7 @@ services:
       - POSTGRES_PASSWORD=gomodel
       - POSTGRES_DB=gomodel
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gomodel -d gomodel"]
@@ -86,7 +88,7 @@ services:
       start_period: 10s
 
   adminer:
-    image: adminer:5
+    image: adminer:6
     ports:
       - "8081:8080"
     depends_on:
@@ -96,7 +98,7 @@ services:
   prometheus:
     profiles:
       - app
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.16.0
     ports:
       - "9090:9090"
     volumes:

@@ -211,6 +211,7 @@
                                     "features/budgets",
                                     "features/rate-limits",
                                     "features/cost-tracking",
+                                    "features/response-cost",
                                     "features/labelling",
                                     "features/cache",
                                     "features/failover"
@@ -291,6 +292,7 @@
                         "pages": [
                             "guides/production",
                             "guides/updating",
+                            "guides/exporting-config",
                             "guides/migrate-from-litellm",
                             "guides/caddy",
                             "guides/openai-agents-sdk",
@@ -399,6 +401,7 @@
                                     "de/features/budgets",
                                     "de/features/rate-limits",
                                     "de/features/cost-tracking",
+                                    "de/features/response-cost",
                                     "de/features/labelling",
                                     "de/features/cache",
                                     "de/features/failover"
@@ -479,6 +482,7 @@
                         "pages": [
                             "de/guides/production",
                             "de/guides/updating",
+                            "de/guides/exporting-config",
                             "de/guides/migrate-from-litellm",
                             "de/guides/caddy",
                             "de/guides/openai-agents-sdk",
@@ -579,6 +583,7 @@
                                     "zh/features/budgets",
                                     "zh/features/rate-limits",
                                     "zh/features/cost-tracking",
+                                    "zh/features/response-cost",
                                     "zh/features/labelling",
                                     "zh/features/cache",
                                     "zh/features/failover"
@@ -659,6 +664,7 @@
                         "pages": [
                             "zh/guides/production",
                             "zh/guides/updating",
+                            "zh/guides/exporting-config",
                             "zh/guides/migrate-from-litellm",
                             "zh/guides/caddy",
                             "zh/guides/openai-agents-sdk",
@@ -759,6 +765,7 @@
                                     "pl/features/budgets",
                                     "pl/features/rate-limits",
                                     "pl/features/cost-tracking",
+                                    "pl/features/response-cost",
                                     "pl/features/labelling",
                                     "pl/features/cache",
                                     "pl/features/failover"
@@ -839,6 +846,7 @@
                         "pages": [
                             "pl/guides/production",
                             "pl/guides/updating",
+                            "pl/guides/exporting-config",
                             "pl/guides/migrate-from-litellm",
                             "pl/guides/caddy",
                             "pl/guides/openai-agents-sdk",

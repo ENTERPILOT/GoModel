@@ -44,6 +44,12 @@ func (t *UsageTap) Write(entry *usage.UsageEntry) {
 	t.inner.Write(entry)
 }
 
+// StampBilling implements usage.BillingStamper: the taps beneath this one
+// stamp the billing fields.
+func (t *UsageTap) StampBilling(entry *usage.UsageEntry) {
+	usage.StampBilling(t.inner, entry)
+}
+
 func (t *UsageTap) Config() usage.Config {
 	return t.inner.Config()
 }

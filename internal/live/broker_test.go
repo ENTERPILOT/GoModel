@@ -469,7 +469,7 @@ func TestBrokerRequestLogActiveSnapshotMergesNestedPreviewData(t *testing.T) {
 		RequestID: "req-1",
 		Timestamp: now.Add(time.Second),
 		Data: &requestlog.LogData{
-			WorkflowFeatures: &requestlog.WorkflowFeaturesSnapshot{Audit: true, Usage: true},
+			WorkflowFeatures: &requestlog.WorkflowFeaturesSnapshot{RequestLogs: true, Usage: true},
 		},
 	})
 
@@ -487,8 +487,9 @@ func TestBrokerRequestLogActiveSnapshotMergesNestedPreviewData(t *testing.T) {
 	require.Equal(t, "[REDACTED]", headers["Authorization"], "request_headers = %#v, want redacted authorization", data["request_headers"])
 	features, ok := data["workflow_features"].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, true, features["audit"])
-	require.Equal(t, true, features["usage"], "workflow_features = %#v, want audit and usage flags", data["workflow_features"])
+	require.Equal(t, true, features["request_logs"])
+	require.Equal(t, true, features["audit"], "the deprecated alias of request_logs is still sent")
+	require.Equal(t, true, features["usage"], "workflow_features = %#v, want request_logs and usage flags", data["workflow_features"])
 }
 
 func TestBrokerRequestLogUpdatedPreviewIncludesRequestBodyOnly(t *testing.T) {
@@ -609,10 +610,10 @@ func TestBrokerRequestLogPreviewIncludesCompactWorkflowData(t *testing.T) {
 		Timestamp: time.Now(),
 		Data: &requestlog.LogData{
 			WorkflowFeatures: &requestlog.WorkflowFeaturesSnapshot{
-				Cache:    true,
-				Audit:    true,
-				Usage:    true,
-				Failover: true,
+				Cache:       true,
+				RequestLogs: true,
+				Usage:       true,
+				Failover:    true,
 			},
 			Failover: &requestlog.FailoverSnapshot{TargetModel: "fallback-model"},
 		},
@@ -958,9 +959,9 @@ func TestBrokerReplayAfterBufferWrap(t *testing.T) {
 }
 
 // benchRequestLogLifecycle publishes the request log events one non-streaming chat
-// request emits with body and header capture on: audit.started, the
-// audit.updated events handlers raise while enriching the entry, then
-// audit.completed and audit.flushed. It is the per-request broker cost on
+// request emits with body and header capture on: request_log.started, the
+// request_log.updated events handlers raise while enriching the entry, then
+// request_log.completed and request_log.flushed. It is the per-request broker cost on
 // every request, whether or not a dashboard is connected.
 func benchRequestLogLifecycle(b *testing.B, subscribe bool) {
 	// The subscriber buffer is far larger than the default so a drain
@@ -1070,10 +1071,10 @@ func TestBrokerRequestLogActiveSnapshotKeepsEarlierFields(t *testing.T) {
 	require.Len(t, sub.Replay, 1)
 
 	payload := eventPayload(t, sub.Replay[0])
-	assert.Equal(t, "POST", payload["method"], "method from audit.started")
+	assert.Equal(t, "POST", payload["method"], "method from request_log.started")
 	assert.Equal(t, "/v1/chat/completions", payload["path"])
 	assert.Equal(t, true, payload["stream"])
-	assert.Equal(t, float64(200), payload["status_code"], "status code from audit.completed")
+	assert.Equal(t, float64(200), payload["status_code"], "status code from request_log.completed")
 	assert.Equal(t, EventRequestLogCompleted, payload["_live_state"], "the newest event names the state")
 
 	data, ok := payload["data"].(map[string]any)

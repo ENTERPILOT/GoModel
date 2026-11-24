@@ -151,7 +151,10 @@
     bottom: 30px;
   }
 
+  /* The live chart is empty whenever traffic is idle, so its placeholder
+     stays smaller and dimmer than the one on a chart that should have data. */
   .live-tokens-empty :global(.empty-state-icon) {
-    max-height: 100%;
+    max-height: min(124px, 100%);
+    opacity: 0.7;
   }
 </style>

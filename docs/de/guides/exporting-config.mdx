@@ -1,0 +1,119 @@
+---
+title: "Konfiguration exportieren"
+description: "Exportieren Sie die Konfiguration, mit der ein jetzt gestartetes GoModel-Gateway laufen würde, als eine config.yaml: mit dem Binary, Docker Compose oder docker. Und warum das Dashboard keinen Export-Button hat."
+icon: "file-output"
+keywords: ["Konfiguration exportieren", "config export", "config.yaml", "Backup", "docker", "docker compose", "Dashboard", "Secrets", "secrets"]
+---
+
+`gomodel config export` gibt die Konfiguration, mit der ein jetzt gestartetes
+Gateway laufen würde, als eine `config.yaml` aus: Ihre `config.yaml`,
+Umgebungsvariablen und die im Dashboard gespeicherten Objekte wie Provider,
+virtuelle Modelle, Benutzer und Budgets. Nutzen Sie den Export, um ein Setup zu
+prüfen, es in Git abzulegen oder eine weitere Instanz daraus zu starten.
+
+## Exportieren
+
+Führen Sie den Befehl dort aus, wo das Gateway läuft, damit er dieselben
+Dateien, dieselbe Umgebung und dieselbe Datenbank liest. Er ist sicher, während
+das Gateway läuft. Logs gehen nach stderr, die Datei enthält also nur die
+Konfiguration.
+
+Der Befehl liest Dateien und Umgebung neu ein, nicht den Zustand des laufenden
+Gateways. Wenn Sie `config.yaml` geändert haben und das Gateway den Reload
+abgelehnt hat, zeigt der Export die geänderte Datei oder scheitert mit
+demselben Fehler.
+
+<Tabs>
+  <Tab title="Binary">
+    Aus dem Verzeichnis, in dem das Gateway startet, mit derselben Umgebung:
+
+    ```bash
+    gomodel config export > gomodel-export.yaml
+    ```
+  </Tab>
+  <Tab title="Docker Compose">
+    ```bash
+    docker compose exec -T gomodel /gomodel config export > gomodel-export.yaml
+    ```
+
+    `gomodel` ist der Servicename in Ihrer `docker-compose.yaml`. `-T` schaltet
+    die Terminal-Zuweisung ab, sodass die Ausgabe unverändert in der Datei
+    landet.
+  </Tab>
+  <Tab title="docker">
+    ```bash
+    docker exec gomodel /gomodel config export > gomodel-export.yaml
+    ```
+
+    `gomodel` ist der Containername (`docker ps`).
+  </Tab>
+</Tabs>
+
+<Warning>
+  Schreiben Sie in eine neue Datei, niemals auf die `config.yaml`, die das
+  Gateway liest: Die Shell leert diese Datei, bevor der Befehl startet.
+</Warning>
+
+Einstellungen mit ihrem Standardwert werden ausgelassen, die Datei zeigt also
+nur, was Sie geändert haben. Mit `--include-defaults` werden auch die
+Standardwerte geschrieben, außer bei Einstellungen, die standardmäßig leer
+sind.
+
+## Secrets
+
+Einstellungen, die Secrets sind, etwa API-Keys, werden als Referenzen
+geschrieben, nie als Werte:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_key: "${env:OPENAI_API_KEY}"
+  groq:
+    type: groq
+    api_key: "${env:GOMODEL_PROVIDERS_GROQ_API_KEY}" # secret not exported: set GOMODEL_PROVIDERS_GROQ_API_KEY
+```
+
+Ein im Dashboard eingegebener Key erhält den Kommentar `# secret not exported`
+mit dem Namen der Variable, die zu setzen ist. Ein Gateway, das die Datei lädt,
+startet erst, wenn diese Variable gesetzt ist.
+
+Freitext, etwa eine Beschreibung, wird nur auf Muster von Zugangsdaten geprüft.
+Ein dort eingefügtes Token kann also in der Datei landen. Prüfen Sie solchen
+Text, bevor Sie die Datei weitergeben.
+
+## Den Export verwenden
+
+Speichern Sie ihn auf der Zielinstanz als `config/config.yaml` (unter Docker
+hängen Sie ihn als `/app/config/config.yaml` ein), setzen Sie die
+referenzierten Variablen und starten Sie das Gateway. Objekte aus dem Dashboard
+sind jetzt in der Datei deklariert und daher im Dashboard schreibgeschützt.
+
+<Note>
+  Nicht alles hat eine `config.yaml`-Form. Verwaltete API-Keys, Workflows, im
+  Dashboard erstellte Guardrails, Preis-Overrides für Modelle,
+  Laufzeiteinstellungen, deaktivierte Provider-Zugangsdaten und Anzeigenamen
+  von MCP-Servern werden nicht exportiert; der Dateikopf listet sie auf. Sie
+  bleiben in der Datenbank: Um sie zu übernehmen, verweisen Sie die Zielinstanz
+  auf diese Datenbank oder spielen Sie dort ein
+  [Backup](/de/guides/updating#1-die-datenbank-sichern) davon ein.
+</Note>
+
+## Warum das Dashboard keinen Export-Button hat
+
+Der Export ist bewusst ein Shell-Befehl, ohne HTTP-Endpunkt dahinter.
+
+- **Er beschreibt das gesamte Deployment.** Auch ohne Secrets listet er jeden
+  Upstream, jede Datenbank und jede interne URL auf, und wo welche Zugangsdaten
+  liegen.
+- **Ein Dashboard-Login soll nicht genügen, um ihn mitzunehmen.** Ein Endpunkt
+  würde die Datei jedem geben, der einen Admin-Login hat, auch einen
+  gestohlenen. Shell-Zugriff auf das Gateway hat eine kleinere Gruppe, die
+  dessen Dateien und Umgebung ohnehin lesen kann.
+- **Das Schwärzen hat Grenzen.** Ein in eine Beschreibung eingefügtes Token
+  wird unverändert geschrieben, die Datei sollte also nicht nur einen Klick
+  entfernt sein.
+
+Die vollständigen Regeln stehen unter
+[Exporting the Effective Configuration](/advanced/config-yaml#exporting-the-effective-configuration)
+(auf Englisch).

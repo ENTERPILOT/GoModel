@@ -12,6 +12,24 @@ import (
 // arrived 2s after inference start visible at 3s. Draining independently lets
 // the upstream continue producing while delayed chunks accumulate in memory.
 func NewSlowdownStream(ctx context.Context, source io.ReadCloser, factor float64, inferenceStarted time.Time) io.ReadCloser {
+	return NewSlowdownStreamWithState(ctx, source, factor, inferenceStarted, nil)
+}
+
+// DeliveryState is state the reader of a stream depends on that changes as
+// the stream is read: the cost of the events read so far, which the response
+// writes beside them. A slowdown stream reads ahead of what it delivers, so
+// it captures the state after each chunk it reads and restores it when that
+// chunk is delivered: the reader sees the state as of the bytes it holds.
+type DeliveryState interface {
+	// Capture returns the state as it stands.
+	Capture() any
+	// Restore makes a captured state the one the reader sees.
+	Restore(state any)
+}
+
+// NewSlowdownStreamWithState is NewSlowdownStream for a stream whose reader
+// depends on state; nil is none.
+func NewSlowdownStreamWithState(ctx context.Context, source io.ReadCloser, factor float64, inferenceStarted time.Time, state DeliveryState) io.ReadCloser {
 	if source == nil || factor <= 0 {
 		return source
 	}
@@ -24,6 +42,7 @@ func NewSlowdownStream(ctx context.Context, source io.ReadCloser, factor float64
 	streamCtx, cancel := context.WithCancel(ctx)
 	s := &slowdownStream{
 		source:    source,
+		state:     state,
 		factor:    factor,
 		started:   inferenceStarted,
 		ctx:       streamCtx,
@@ -37,13 +56,15 @@ func NewSlowdownStream(ctx context.Context, source io.ReadCloser, factor float64
 }
 
 type slowdownChunk struct {
-	data []byte
-	due  time.Time
-	err  error
+	data  []byte
+	due   time.Time
+	err   error
+	state any // the delivery state once the chunk was read
 }
 
 type slowdownStream struct {
 	source    io.ReadCloser
+	state     DeliveryState
 	factor    float64
 	started   time.Time
 	ctx       context.Context
@@ -66,14 +87,18 @@ func (s *slowdownStream) drain() {
 	for {
 		n, err := s.source.Read(buf)
 		due := s.scaledDue(time.Since(s.started))
+		var state any
+		if s.state != nil {
+			state = s.state.Capture()
+		}
 		if n > 0 {
 			data := append([]byte(nil), buf[:n]...)
-			if !s.enqueue(slowdownChunk{data: data, due: due}) {
+			if !s.enqueue(slowdownChunk{data: data, due: due, state: state}) {
 				return
 			}
 		}
 		if err != nil {
-			s.enqueue(slowdownChunk{due: due, err: err})
+			s.enqueue(slowdownChunk{due: due, err: err, state: state})
 			_ = s.closeSource()
 			return
 		}
@@ -153,6 +178,9 @@ func (s *slowdownStream) Read(p []byte) (int, error) {
 			continue
 		}
 		front := &s.queue[0]
+		if s.state != nil {
+			s.state.Restore(front.state)
+		}
 		if len(front.data) > 0 {
 			n := copy(p, front.data)
 			front.data = front.data[n:]

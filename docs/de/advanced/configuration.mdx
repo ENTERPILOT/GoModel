@@ -475,6 +475,7 @@ gespeicherte Logs sichtbar sind.
 | `USAGE_ENABLED`                | Aktiviert die Erfassung der Token-Nutzung                    | `true`  |
 | `USAGE_PRICING_RECALCULATION_ENABLED` | Aktiviert die Admin-Aktion zur Neuberechnung der Nutzungspreise, sofern unterstützt | `true` |
 | `ENFORCE_RETURNING_USAGE_DATA` | Ergänzt Streaming-Requests automatisch um `include_usage` | `true`  |
+| `USAGE_RESPONSE_COST_ENABLED`  | Gibt die Kosten, die GoModel für einen Request berechnet hat, an den Aufrufer zurück, sofern sie bekannt sind: `usage.cost` (Form von OpenRouter), dazu die Header `X-GoModel-Cost` und `X-GoModel-Cost-Currency` bei gepufferten Antworten. Erfordert `USAGE_ENABLED=true`. Siehe [Kosten in der Antwort](/de/features/response-cost) | `false` |
 | `USAGE_BUFFER_SIZE`            | Puffer im Arbeitsspeicher vor dem Schreiben                  | `1000`  |
 | `USAGE_FLUSH_INTERVAL`         | Schreibintervall in Sekunden                      | `5`     |
 | `USAGE_RETENTION_DAYS`         | Automatisches Löschen nach N Tagen (0 = nie)         | `90`    |
@@ -491,6 +492,12 @@ Budgetverwaltung und protokolliert eine Warnung.
 | `BUDGETS_PROVIDER_BILLED_CACHE_HITS` | Zählt abgerechnete Cache-Treffer in Provider-Budgets auf abgerechneten Kosten (GoModel Pro) | `true` |
 | `SET_BUDGET_<PATH>`          | Legt anfängliche Budgetlimits für einen User Path fest, etwa `daily=10`                             | _(leer)_ |
 | `SET_PROVIDER_BUDGET_<NAME>` | Legt anfängliche Budgetlimits für eine Provider-Instanz fest, etwa `daily=100`                    | _(leer)_ |
+| `BUDGETS_ALERTS_WEBHOOK_URL` | Webhook, der [Budget-Warnungen](/de/features/budgets#warnungen) als JSON erhält. Warnungen setzen `BUDGETS_ENABLED` und die Nutzungserfassung voraus und werden erst ausgewertet, wenn ein Webhook gesetzt ist oder ein eigener Build einen `ext.AlertSink` registriert | _(leer)_ |
+| `BUDGETS_ALERTS_WEBHOOK_SECRET` | Signiert jede Zustellung: `X-GoModel-Signature` trägt einen Zeitstempel und den HMAC-SHA256 von `<Zeitstempel>.<Body>` | _(leer)_ |
+| `BUDGETS_ALERTS_THRESHOLDS`  | Standard-Warnschwellen, Prozentwerte des Budgetbetrags, jeweils `1`-`100`                        | `80,100` |
+| `BUDGETS_ALERTS_INTERVAL`    | Sekunden zwischen den Auswertungen der Warnungen                                                 | `60`     |
+| `BUDGETS_ALERTS_WEBHOOK_TIMEOUT` | Sekunden pro Zustellversuch an den Webhook                                                   | `10`     |
+| `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` | Wiederholungen einer fehlgeschlagenen Webhook-Zustellung, mit exponentiellem Backoff; `0`-`10` | `3`      |
 
 `SET_BUDGET_<PATH>` unterstützt die Standardzeiträume `hourly`, `daily`,
 `weekly` und `monthly`. Das Suffix `<PATH>` wird in Kleinbuchstaben
