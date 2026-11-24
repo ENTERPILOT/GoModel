@@ -345,7 +345,8 @@ nieznany effort, ujemny limit tokenów lub domyślny model z wildcardem.
 `PUT /admin/users` przyjmuje `user_path`, `allowed_models`, `default_model`,
 `max_reasoning_effort`, `max_output_tokens` i `description`. Wywołanie
 zastępuje allowlistę i opis, a pole polityki requestów (`default_model`,
-`max_reasoning_effort`, `max_output_tokens`), które body pomija, zachowuje
+`max_reasoning_effort`, `max_output_tokens`), które body pomija albo ustawia
+na `null`, zachowuje
 wartość; klient, który nie wysyła tych pól, nie zniesie więc limitu. Wyślij
 `""` albo `0`, aby wyczyścić pole. `GET /admin/users` zwraca własne
 pola każdego węzła oraz obiekt `request_policy` z obowiązującymi wartościami i
