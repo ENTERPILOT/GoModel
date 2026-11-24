@@ -115,6 +115,8 @@ func (h *Handler) SignIn(c *echo.Context) error {
 	}
 	match, err := h.service.credentialsMatch(input.Username, input.Password)
 	if err != nil {
+		// Nothing was checked, so the attempt does not count against the client.
+		h.service.attempts.release(clientIP)
 		c.Response().Header().Set("Retry-After", "1")
 		return writeError(c, core.NewInvalidRequestErrorWithStatus(http.StatusServiceUnavailable, "too many sign-ins in progress; try again", nil).WithCode("sign_in_busy"))
 	}

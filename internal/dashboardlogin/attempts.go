@@ -56,6 +56,16 @@ func (l *attemptLimiter) admit(clientIP string, now time.Time) time.Duration {
 	return 0
 }
 
+// release gives back an attempt admit counted, for a sign-in turned away
+// before its password was checked.
+func (l *attemptLimiter) release(clientIP string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if record, tracked := l.clients[clientKey(clientIP)]; tracked && record.attempts > 0 {
+		record.attempts--
+	}
+}
+
 // reset forgets a client's attempts after it signed in.
 func (l *attemptLimiter) reset(clientIP string) {
 	l.mu.Lock()

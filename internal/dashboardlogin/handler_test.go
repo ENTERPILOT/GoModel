@@ -245,6 +245,15 @@ func TestSignInAsksToRetryWhenTooManyAreWaiting(t *testing.T) {
 	assert.Equal(t, "1", rec.Header().Get("Retry-After"))
 	assert.Empty(t, rec.Result().Cookies())
 	assert.Empty(t, events.events)
+
+	// Being turned away unchecked does not use up the client's attempts.
+	for range maxFailedAttempts {
+		require.Equal(t, http.StatusServiceUnavailable, signIn(t, h, credentials{Username: testUsername, Password: testPassword}).Code)
+	}
+	for range maxPendingChecks {
+		<-h.service.checks
+	}
+	assert.Equal(t, http.StatusOK, signIn(t, h, credentials{Username: testUsername, Password: testPassword}).Code)
 }
 
 func TestSignInSuccessForgetsEarlierFailures(t *testing.T) {

@@ -38,6 +38,22 @@ func TestAttemptLimiterResetForgetsAttempts(t *testing.T) {
 	assert.Zero(t, limiter.admit(client, now))
 }
 
+func TestAttemptLimiterReleaseGivesBackOneAttempt(t *testing.T) {
+	limiter := newAttemptLimiter()
+	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	const client = "203.0.113.7"
+
+	limiter.release(client) // an untracked client has nothing to give back
+	for range maxFailedAttempts {
+		limiter.admit(client, now)
+	}
+	require.NotZero(t, limiter.admit(client, now))
+
+	limiter.release(client)
+	assert.Zero(t, limiter.admit(client, now), "the released attempt is available again")
+	assert.NotZero(t, limiter.admit(client, now), "and only that one")
+}
+
 func TestAttemptLimiterCountsAnIPv6SubnetAsOneClient(t *testing.T) {
 	limiter := newAttemptLimiter()
 	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
