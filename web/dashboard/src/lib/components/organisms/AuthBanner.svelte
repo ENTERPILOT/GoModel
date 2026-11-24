@@ -1,5 +1,6 @@
 <script>
-  // "Authentication required" page banner with the Enter-API-key button.
+  // "Authentication required" page banner with the button that opens the auth
+  // dialog: Enter API key, or Sign in when the gateway has a password login.
   // Owns its own visibility (auth.authError), so pages just drop it in.
   import { auth } from "$lib/stores/auth.svelte.js";
   import * as m from "$lib/paraglide/messages.js";
@@ -13,7 +14,9 @@
       class="btn btn-primary"
       onclick={() => auth.openDialog()}
     >
-      {m.sidebar_action_enter_api_key()}
+      {auth.asksForPassword()
+        ? m.auth_action_sign_in()
+        : m.sidebar_action_enter_api_key()}
     </button>
   </div>
 {/if}

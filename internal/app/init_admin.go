@@ -14,6 +14,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/dashboardlogin"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
@@ -94,6 +95,7 @@ func (b *bootstrap) initAdmin() error {
 			usage.Billing{Enabled: appCfg.Pricing.MarkupsEnabled, BillCacheHits: appCfg.Pricing.BillCacheHits},
 			appCfg.Server.BasePath,
 			adminCfg.UIEnabled,
+			adminCfg.LoginEnabled(),
 		)
 		if adminErr != nil {
 			slog.Warn("failed to initialize admin", "error", adminErr)
@@ -111,9 +113,21 @@ func (b *bootstrap) initAdmin() error {
 				serverCfg.DashboardHandler = dashHandler
 				slog.Info("admin UI enabled", "url", fmt.Sprintf("%s://localhost:%s%s", appCfg.Server.Scheme(), appCfg.Server.Port, config.JoinBasePath(appCfg.Server.BasePath, "/admin/dashboard")))
 			}
+			if adminCfg.LoginEnabled() {
+				login, err := dashboardlogin.New(adminCfg.Username, adminCfg.Password)
+				if err != nil {
+					return fmt.Errorf("dashboard login: %w", err)
+				}
+				login.SetAuthenticationEventRecorder(requestlog.NewAuthenticationEventRecorder(app.requestLog.Logger))
+				serverCfg.DashboardLogin = dashboardlogin.NewHandler(login, appCfg.Server.BasePath)
+				slog.Info("dashboard login enabled", "username", adminCfg.Username)
+			}
 		}
 	} else {
 		slog.Info("admin API disabled")
+		if adminCfg.Password != "" {
+			slog.Warn("DASHBOARD_PASSWORD is set but ADMIN_ENDPOINTS_ENABLED=false — the dashboard login is off")
+		}
 	}
 
 	if serverCfg.SwaggerEnabled {
@@ -163,6 +177,7 @@ func newAdminHandlers(
 	billing usage.Billing,
 	basePath string,
 	uiEnabled bool,
+	loginEnabled bool,
 ) (*admin.Handler, *dashboard.Handler, requestlog.Reader, error) {
 	// Pricing recalculation writes through the same storage the reader uses.
 	var pricingRecalculator usage.PricingRecalculator
@@ -235,7 +250,11 @@ func newAdminHandlers(
 
 	var dashHandler *dashboard.Handler
 	if uiEnabled {
-		h, err := dashboard.NewWithDemoMode(basePath, runtimeConfig.DemoMode == "on")
+		h, err := dashboard.New(dashboard.Options{
+			BasePath:      basePath,
+			DemoMode:      runtimeConfig.DemoMode == "on",
+			PasswordLogin: loginEnabled,
+		})
 		if err != nil {
 			// The dashboard build is generated, not committed (see
 			// docs/adr/0010-dashboard-built-in-ci.md). A binary built without

@@ -15,6 +15,7 @@
   import { modelsStore } from "$lib/stores/models.svelte.js";
   import { versionStore } from "$lib/stores/version.svelte.js";
   import { syncDocumentLocale } from "$lib/i18n/locale.js";
+  import { loadSession } from "$lib/api/session.js";
 
   import OverviewPage from "$pages/overview/OverviewPage.svelte";
   import UsagePage from "$pages/usage/UsagePage.svelte";
@@ -54,6 +55,7 @@
   timezone.init();
   dateRange.init(); // after timezone.init(): "today" is timezone dependent
   auth.init();
+  loadSession();
   themeStore.init();
   sidebar.init();
   router.init();

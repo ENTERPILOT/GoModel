@@ -33,7 +33,7 @@ func newTestHandler(t *testing.T) *Handler {
 		"static/dist/assets/tiny-abc.js":      {Data: testTiny},
 		"static/dist/fonts/inter-latin.woff2": {Data: testWoff2},
 		"static/dist/logo.png":                {Data: testPNG},
-	}, "/", false)
+	}, Options{BasePath: "/"})
 	require.NoError(t, err)
 	return h
 }

@@ -257,6 +257,7 @@ func buildDefaultConfig() *Config {
 		Admin: AdminConfig{
 			EndpointsEnabled:         true,
 			UIEnabled:                true,
+			Username:                 DefaultAdminUsername,
 			LiveLogsEnabled:          true,
 			LiveLogsBufferSize:       10000,
 			LiveLogsReplayLimit:      1000,
@@ -309,6 +310,7 @@ func Load() (*LoadResult, error) {
 	}
 	rawProviders := layer.providers
 	yamlMasterKey := cfg.Server.MasterKey
+	yamlAdminPassword := cfg.Admin.Password
 
 	if err := applyResponseSimpleEnv(&cfg.Cache.Response); err != nil {
 		return nil, err
@@ -377,6 +379,11 @@ func Load() (*LoadResult, error) {
 	if layer.masterKeyUnresolved && cfg.Server.MasterKey != "" && cfg.Server.MasterKey == yamlMasterKey {
 		return nil, errors.New("server.master_key reads an environment variable that is not set; set it or remove server.master_key")
 	}
+	// The same goes for the dashboard password; DASHBOARD_PASSWORD replaces it.
+	if layer.adminPasswordUnresolved && cfg.Admin.Password != "" && cfg.Admin.Password == yamlAdminPassword {
+		return nil, errors.New("admin.password reads an environment variable that is not set; set it or remove admin.password")
+	}
+	normalizeAdminLogin(&cfg.Admin)
 	cfg.Server.BasePath = NormalizeBasePath(cfg.Server.BasePath)
 	cfg.Server.UserPathHeader, err = NormalizeHeaderName(cfg.Server.UserPathHeader, "X-GoModel-User-Path")
 	if err != nil {
@@ -488,8 +495,9 @@ type yamlLayer struct {
 	// providers is the raw provider map parsed from the providers: section.
 	providers map[string]RawProviderConfig
 	// masterKeyUnresolved reports whether server.master_key reads an unset
-	// variable.
-	masterKeyUnresolved bool
+	// variable; adminPasswordUnresolved reports the same for admin.password.
+	masterKeyUnresolved     bool
+	adminPasswordUnresolved bool
 	// expanded holds the strings environment expansion rewrote, as written;
 	// expandedUnknown reports that the file does not parse unexpanded.
 	expanded        map[string]writtenScalar
@@ -544,31 +552,37 @@ func applyYAML(cfg *Config, strict bool) (yamlLayer, error) {
 		target.RawProviders = map[string]RawProviderConfig{}
 	}
 	expanded, ok := expandedScalars(data)
+	masterKeyUnresolved, adminPasswordUnresolved := credentialsReadUnsetVariable(data, cfg.Server.MasterKey, cfg.Admin.Password)
 	return yamlLayer{
-		providers:           target.RawProviders,
-		masterKeyUnresolved: masterKeyReadsUnsetVariable(data, cfg.Server.MasterKey),
-		expanded:            expanded,
-		expandedUnknown:     !ok,
+		providers:               target.RawProviders,
+		masterKeyUnresolved:     masterKeyUnresolved,
+		adminPasswordUnresolved: adminPasswordUnresolved,
+		expanded:                expanded,
+		expandedUnknown:         !ok,
 	}, nil
 }
 
-// masterKeyReadsUnsetVariable reports whether the master key decoded from
-// data holds a reference expansion left unresolved. It expands data again with
-// a random marker in place of each unresolved reference, so field names expand
-// exactly as in the real decode and a key that merely contains "${" passes.
-func masterKeyReadsUnsetVariable(data []byte, expandedKey string) bool {
+// credentialsReadUnsetVariable reports whether the master key and the
+// dashboard password decoded from data hold a reference expansion left
+// unresolved. It expands data again with a random marker in place of each
+// unresolved reference, so field names expand exactly as in the real decode
+// and a credential that merely contains "${" passes.
+func credentialsReadUnsetVariable(data []byte, expandedKey, expandedPassword string) (masterKey, adminPassword bool) {
 	marker := "gomodel-unset-" + rand.Text()
 	var marked struct {
 		Server struct {
 			MasterKey string `yaml:"master_key"`
 		} `yaml:"server"`
+		Admin struct {
+			Password string `yaml:"password"`
+		} `yaml:"admin"`
 	}
 	if err := yaml.Unmarshal([]byte(expandWith(string(data), func(string) string { return marker })), &marked); err != nil {
 		// Unreachable when the real decode succeeded, since a marker parses
 		// wherever "${...}" does; stay closed regardless.
-		return strings.Contains(expandedKey, "${")
+		return strings.Contains(expandedKey, "${"), strings.Contains(expandedPassword, "${")
 	}
-	return strings.Contains(marked.Server.MasterKey, marker)
+	return strings.Contains(marked.Server.MasterKey, marker), strings.Contains(marked.Admin.Password, marker)
 }
 
 // ensureSingleDocument rejects a config file holding more than one YAML document.

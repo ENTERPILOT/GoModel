@@ -36,6 +36,8 @@ The admin REST API endpoints (`/admin/*`) accept two credentials as a Bearer tok
 - **`GOMODEL_MASTER_KEY`** — always has admin access.
 - **A managed API key with dashboard access** — managed keys are created *without* dashboard access by default, so a key handed out for model traffic cannot read the request log, issue new keys, or change gateway settings. Requests made with a managed key that lacks access return `403` with error code `dashboard_access_denied`.
 
+The dashboard can also be opened with a username and password instead of a key: set [`DASHBOARD_PASSWORD`](/advanced/configuration#dashboard-login). Signing in (`POST /admin/session` with `username` and `password`) gives the browser a session cookie that `/admin/*` accepts in place of a Bearer token; `DELETE /admin/session` signs out.
+
 <CodeGroup>
 
 ```bash curl

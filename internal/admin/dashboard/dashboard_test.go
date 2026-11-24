@@ -29,7 +29,7 @@ func TestBuildIndexHTML_MissingBuild(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := buildIndexHTML(tt.assets, "/", false)
+			_, err := buildIndexHTML(tt.assets, Options{BasePath: "/"})
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "make frontend")
 		})
@@ -40,7 +40,7 @@ func TestBuildIndexHTML_InjectsGlobalsAndBasePath(t *testing.T) {
 	assets := fstest.MapFS{
 		"static/dist/index.html": {Data: []byte(`<html><head><script src="/admin/static/assets/index-abc.js"></script></head><body></body></html>`)},
 	}
-	got, err := buildIndexHTML(assets, "/gateway", true)
+	got, err := buildIndexHTML(assets, Options{BasePath: "/gateway", DemoMode: true, PasswordLogin: true})
 	require.NoError(t, err)
 
 	html := string(got)
@@ -48,6 +48,7 @@ func TestBuildIndexHTML_InjectsGlobalsAndBasePath(t *testing.T) {
 		`src="/gateway/admin/static/assets/index-abc.js"`,
 		`window.GOMODEL_BASE_PATH="/gateway"`,
 		`window.GOMODEL_DEMO_MODE=true`,
+		`window.GOMODEL_PASSWORD_LOGIN=true`,
 	} {
 		assert.Contains(t, html, want)
 	}
@@ -82,6 +83,7 @@ func TestIndex_ReturnsHTML(t *testing.T) {
 	assert.Contains(t, body, `window.GOMODEL_BASE_PATH="/"`)
 	assert.Regexp(t, `window\.GOMODEL_VERSION="[^"]+"`, body)
 	assert.Contains(t, body, "window.GOMODEL_DEMO_MODE=false")
+	assert.Contains(t, body, "window.GOMODEL_PASSWORD_LOGIN=false")
 	assert.Regexp(t, `/admin/static/assets/index-[^"]+\.js`, body)
 	assert.Regexp(t, `/admin/static/assets/index-[^"]+\.css`, body)
 }
@@ -169,17 +171,17 @@ func TestIndex_HasNoExternalResources(t *testing.T) {
 // headers, and its CSP must still admit the one inline script it injects.
 func TestIndex_SetsSecurityHeaders(t *testing.T) {
 	tests := []struct {
-		name     string
-		basePath string
-		demoMode bool
+		name string
+		opts Options
 	}{
-		{name: "root", basePath: "/"},
-		{name: "base path and demo mode", basePath: "/gw", demoMode: true},
+		{name: "root", opts: Options{BasePath: "/"}},
+		{name: "base path and demo mode", opts: Options{BasePath: "/gw", DemoMode: true}},
+		{name: "password login", opts: Options{BasePath: "/", PasswordLogin: true}},
 	}
 	inlineScript := regexp.MustCompile(`<script>([^<]*)</script>`)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h, err := NewWithDemoMode(tt.basePath, tt.demoMode)
+			h, err := New(tt.opts)
 			require.NoError(t, err)
 
 			rec := serveIndex(t, h, "/admin/dashboard")

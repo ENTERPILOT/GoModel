@@ -17,7 +17,28 @@
   import { classOnOverflow } from "$lib/utils/attachments.js";
   import * as m from "$lib/paraglide/messages.js";
   import { NAV_ITEMS } from "./navigation.js";
+  import { signOut } from "$lib/api/session.js";
+  import { flash } from "$lib/stores/flash.svelte.js";
   import { LockKeyhole, LogOut, Route, UserRound } from "lucide";
+
+  // The footer button that opens the auth dialog asks for whichever
+  // credential the dialog will.
+  const unlockLabel = $derived(
+    !auth.needsAuth
+      ? m.sidebar_action_change_api_key()
+      : auth.asksForPassword()
+        ? m.auth_action_sign_in()
+        : m.sidebar_action_enter_api_key(),
+  );
+
+  async function signOutOfDashboard() {
+    try {
+      if (await signOut()) return;
+    } catch {
+      // Reported below.
+    }
+    flash.error(m.auth_sign_out_failed());
+  }
 
   // Visibility gates read the runtimeConfig store, so this re-filters when
   // the flags load.
@@ -200,20 +221,33 @@
         </a>
       </div>
     {/if}
+    {#if auth.sessionUser}
+      <div class="external-auth-section">
+        <div class="external-auth-user" title={auth.sessionUser}>
+          <Icon icon={UserRound} class="api-key-open-icon" />
+          <span>{auth.sessionUser}</span>
+        </div>
+        <button
+          type="button"
+          class="api-key-open-btn"
+          onclick={signOutOfDashboard}
+          aria-label={m.sidebar_action_sign_out()}
+        >
+          <Icon icon={LogOut} class="api-key-open-icon" />
+          <span>{m.sidebar_action_sign_out()}</span>
+        </button>
+      </div>
+    {/if}
     {#if auth.needsAuth || auth.hasApiKey()}
       <div class="api-key-section">
         <button
           type="button"
           class="api-key-open-btn"
           onclick={() => auth.openDialog()}
-          aria-label={auth.needsAuth
-            ? m.sidebar_action_enter_api_key()
-            : m.sidebar_action_change_api_key()}
+          aria-label={unlockLabel}
         >
           <Icon icon={LockKeyhole} class="api-key-open-icon" />
-          <span>{auth.needsAuth
-              ? m.sidebar_action_enter_api_key()
-              : m.sidebar_action_change_api_key()}</span>
+          <span>{unlockLabel}</span>
         </button>
       </div>
     {/if}

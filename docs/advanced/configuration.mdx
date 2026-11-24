@@ -505,6 +505,8 @@ workflow enforcement.
 | ------------------------------------- | ------------------------------------------------ | ------- |
 | `ADMIN_ENDPOINTS_ENABLED`             | Enable the admin REST API                        | `true`  |
 | `ADMIN_UI_ENABLED`                    | Enable the admin dashboard UI                    | `true`  |
+| `DASHBOARD_USERNAME`                  | Username for the [dashboard login](#dashboard-login) | `admin` |
+| `DASHBOARD_PASSWORD`                  | Password for the dashboard login; setting it turns the login on | _(empty, login off)_ |
 | `DASHBOARD_LIVE_LOGS_ENABLED`         | Stream realtime dashboard request/usage previews | `true`  |
 | `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | In-memory replay window for live dashboard events | `10000` |
 | `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Max events replayed to one reconnecting client   | `1000`  |
@@ -514,6 +516,46 @@ Live dashboard logs are compact previews for the Requests and Usage pages.
 They update rows before the async database flush finishes. The stored request-log and
 usage tables remain the source of truth; if a browser reconnects with a cursor
 outside the replay window, the dashboard reloads from the normal REST APIs.
+
+#### Dashboard login
+
+By default the dashboard asks for an API key: the master key, or a managed key
+with dashboard access. Set `DASHBOARD_PASSWORD` to sign in with a username and
+password instead, so the people who use the dashboard do not need the master
+key:
+
+```bash
+DASHBOARD_PASSWORD=change-me
+```
+
+```yaml
+admin:
+  username: admin # the default
+  password: ${file:/run/secrets/dashboard-password}
+```
+
+Signing in starts a 24-hour session held in an `HttpOnly`, `SameSite=Strict`
+cookie. A session can do what a managed key with dashboard access and no user
+path can: everything in the dashboard, except adding
+[secret references](/advanced/secret-references#dashboard-managed-credentials)
+while a master key is configured.
+
+- The login guards the dashboard and `/admin/*`. With a password set, the
+  admin API requires a credential even when `GOMODEL_MASTER_KEY` is empty,
+  instead of staying open.
+- Model API access does not change. The master key and managed API keys keep
+  working, on `/admin/*` too, and a gateway with neither still serves model
+  requests without a credential.
+- Ten failed sign-ins from one client address lock that address out for up to
+  15 minutes. Sign-ins and sign-outs are recorded in the request log.
+- Sessions are stateless: replicas started with the same username and password
+  accept each other's sessions. Changing either value ends every session.
+  Signing out clears the cookie in that browser only.
+- Serve the dashboard over HTTPS, so the password and the session cookie are
+  encrypted in transit.
+
+This is one shared login. To give each person their own, use
+[OIDC SSO](/pro/sso).
 
 #### HTTP Client
 

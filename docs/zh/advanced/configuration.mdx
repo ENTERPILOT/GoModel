@@ -317,12 +317,38 @@ server:
 | ------------------------------------- | ------------------------------------------------ | ------- |
 | `ADMIN_ENDPOINTS_ENABLED`             | 启用管理 REST API                        | `true`  |
 | `ADMIN_UI_ENABLED`                    | 启用管理控制台 UI                    | `true`  |
+| `DASHBOARD_USERNAME`                  | [控制台登录](#控制台登录)使用的用户名 | `admin` |
+| `DASHBOARD_PASSWORD`                  | 控制台登录使用的密码；设置后即启用登录 | _（空，登录关闭）_ |
 | `DASHBOARD_LIVE_LOGS_ENABLED`         | 推送控制台请求日志/用量实时预览   | `true`  |
 | `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | 控制台实时事件的内存回放窗口 | `10000` |
 | `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | 向单个重连客户端回放的最大事件数   | `1000`  |
 | `DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS` | 空闲流的心跳间隔（秒）      | `15`    |
 
 控制台实时日志是“请求”和 Usage 页面的精简预览。它们会在异步数据库刷写完成之前更新行。已存储的请求日志表和用量表仍是唯一可信的数据来源；如果浏览器重连时携带的游标超出了回放窗口，控制台会通过常规 REST API 重新加载数据。
+
+#### 控制台登录
+
+默认情况下，控制台要求输入 API 密钥：主密钥，或具有控制台访问权限的托管密钥。设置 `DASHBOARD_PASSWORD` 后即可改用用户名和密码登录，这样使用控制台的人就不需要主密钥：
+
+```bash
+DASHBOARD_PASSWORD=change-me
+```
+
+```yaml
+admin:
+  username: admin # 默认值
+  password: ${file:/run/secrets/dashboard-password}
+```
+
+登录后会开始一个 24 小时的会话，保存在 `HttpOnly`、`SameSite=Strict` 的 Cookie 中。会话的权限与一个具有控制台访问权限且未绑定用户路径的托管密钥相同：可以使用控制台的全部功能，但在配置了主密钥时不能添加 [Secret 引用](/zh/advanced/secret-references#控制台管理的凭据)。
+
+- 登录保护控制台和 `/admin/*`。设置密码后，即使 `GOMODEL_MASTER_KEY` 为空，Admin API 也要求凭据，而不再保持开放。
+- 模型 API 的访问方式不变。主密钥和托管 API 密钥照常可用（在 `/admin/*` 上也一样），两者都没有的网关仍然无需凭据即可处理模型请求。
+- 同一客户端地址连续十次登录失败后，该地址最多会被锁定 15 分钟。登录和退出登录都会记录在请求日志中。
+- 会话是无状态的：使用相同用户名和密码启动的副本会互相接受对方的会话。修改其中任意一个值都会结束所有会话。退出登录只会清除当前浏览器中的 Cookie。
+- 请通过 HTTPS 提供控制台，使密码和会话 Cookie 在传输过程中被加密。
+
+这是一个共享的登录。如需让每个人使用各自的账号，请使用 [OIDC SSO](/zh/pro/sso)。
 
 #### HTTP 客户端
 
