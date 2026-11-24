@@ -63,6 +63,10 @@ updates:
       default-days: 7
     labels:
       - "dependencies"
+    ignore:
+      # svelte-check supports TypeScript only up to 6.x; lift once it accepts 7.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     groups:
       npm:
         patterns:
