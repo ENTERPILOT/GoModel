@@ -430,7 +430,7 @@ func TestBuildIndexConcurrentlyRebuildsInvalidIndex(t *testing.T) {
 		if err != nil {
 			t.Skipf("cannot mark the index invalid on this server: %v", err)
 		}
-		require.NoError(t, buildIndexConcurrently(ctx, db, index))
+		ensureModelIndexesConcurrently(ctx, db)
 
 		var valid bool
 		require.NoError(t, db.QueryRow(ctx, `SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass(?)`, index.name).Scan(&valid))
@@ -438,21 +438,20 @@ func TestBuildIndexConcurrentlyRebuildsInvalidIndex(t *testing.T) {
 	})
 }
 
-// Replacing an interrupted build must leave audit_logs writable. A plain DROP
+// Replacing an interrupted build must leave request_logs writable. A plain DROP
 // INDEX waits for every open transaction that has touched the table, and the
 // writes of the requests being logged queue behind it until that one ends.
 func TestRebuildingInterruptedIndexKeepsRequestLogsWritable(t *testing.T) {
 	model := modelIndexes(sqlx.PostgreSQL)[0]
 	rebuilds := map[string]struct {
 		index   string
-		rebuild func(ctx context.Context, session sqlx.DB) error
+		rebuild func(ctx context.Context, session sqlx.DB)
 	}{
-		"model index": {model.name, func(ctx context.Context, session sqlx.DB) error {
-			return buildIndexConcurrently(ctx, session, model)
+		"model index": {model.name, func(ctx context.Context, session sqlx.DB) {
+			ensureModelIndexesConcurrently(ctx, session)
 		}},
-		"search index": {trigramSearchIndex, func(ctx context.Context, session sqlx.DB) error {
+		"search index": {trigramSearchIndex, func(ctx context.Context, session sqlx.DB) {
 			ensureTrigramSearchIndex(ctx, session, postgresErrorMessage)
-			return nil
 		}},
 	}
 	for name, tc := range rebuilds {
@@ -478,19 +477,24 @@ func TestRebuildingInterruptedIndexKeepsRequestLogsWritable(t *testing.T) {
 				pool := sqlx.PostgreSQLPool(db)
 				reader, err := pool.Begin(ctx)
 				require.NoError(t, err)
-				defer func() { _ = reader.Rollback(ctx) }()
-				_, err = reader.Exec(ctx, `SELECT 1 FROM audit_logs LIMIT 1`)
-				require.NoError(t, err)
-
 				conn, err := pool.Acquire(ctx)
 				require.NoError(t, err)
-				defer conn.Release()
+				var rebuild sync.WaitGroup
+				// On every exit path: the reader ends first, which lets the
+				// rebuild finish before its connection goes back to the pool.
+				defer func() {
+					_ = reader.Rollback(ctx)
+					rebuild.Wait()
+					conn.Release()
+				}()
+				_, err = reader.Exec(ctx, `SELECT 1 FROM request_logs LIMIT 1`)
+				require.NoError(t, err)
+
 				var rebuilder int
 				require.NoError(t, conn.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&rebuilder))
 				session, err := sqlx.NewPostgreSQLConn(conn)
 				require.NoError(t, err)
-				rebuilt := make(chan error, 1)
-				go func() { rebuilt <- tc.rebuild(ctx, session) }()
+				rebuild.Go(func() { tc.rebuild(ctx, session) })
 
 				// The drop waits for the reader either way; what matters is
 				// whether a write can pass it meanwhile.
@@ -506,7 +510,7 @@ func TestRebuildingInterruptedIndexKeepsRequestLogsWritable(t *testing.T) {
 					"a request is logged while the rebuild waits")
 
 				require.NoError(t, reader.Rollback(ctx))
-				require.NoError(t, <-rebuilt)
+				rebuild.Wait()
 				assert.True(t, hasValidIndex(ctx, t, db, tc.index))
 			})
 		})
