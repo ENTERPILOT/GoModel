@@ -58,6 +58,7 @@ Der gängigste Weg, GoModel zu konfigurieren. Setzen Sie eine der folgenden Vari
 | `SERVER_TLS_CLIENT_CA_FILE` | PEM-CA-Bundle; wenn gesetzt, braucht jeder Request außer `/health` und `/health/ready` ein davon signiertes Client-Zertifikat (mTLS) | _(leer)_ |
 | `SWAGGER_ENABLED`    | Stellt die [Swagger UI](/de/advanced/swagger-ui) bereit; erfordert einen Build mit `-tags=swagger` | `false`                |
 | `AUTH_VERIFY_ENABLED` | Stellt [`GET /v1/auth/verify`](/de/advanced/api-endpoints#key-verifizierung) bereit, das meldet, ob der API-Key eines Requests gültig ist | `false`                |
+| `REALTIME_ALLOWED_ORIGINS` | Kommagetrennte Browser-Origins (`scheme://host[:port]`), die von einer anderen Site aus einen [Realtime-Websocket](/de/advanced/api-endpoints#realtime-websockets-aus-dem-browser) öffnen dürfen; `*` deaktiviert die Prüfung | _(keine)_ |
 | `PID_FILE`           | Ort, an dem das laufende Gateway seine Prozess-ID für `gomodel --reload` ablegt. Eine Änderung erfordert einen Neustart | `data/gomodel.pid` neben einem `./data`-Verzeichnis, andernfalls das benutzerspezifische Datenverzeichnis |
 
 Request-Bodys dürfen mit `Content-Encoding: gzip` (oder `x-gzip`) oder `zstd`

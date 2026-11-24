@@ -382,6 +382,10 @@ func Load() (*LoadResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid server.user_path_header: %w", err)
 	}
+	cfg.Server.RealtimeAllowedOrigins, err = normalizeRealtimeAllowedOrigins(cfg.Server.RealtimeAllowedOrigins, false)
+	if err != nil {
+		return nil, fmt.Errorf("server.realtime_allowed_origins: %w", err)
+	}
 	cfg.Server.AuthKeyPrefix, err = authkeys.NormalizeTokenPrefix(cfg.Server.AuthKeyPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("invalid server.auth_key_prefix (AUTH_KEY_PREFIX): %w", err)

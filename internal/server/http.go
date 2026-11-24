@@ -114,6 +114,7 @@ type Config struct {
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
 	DisableLiteLLMTags              bool                                   // Leave LiteLLM tags alone: no labels from them and no stripping
 	RealtimeEnabled                 bool                                   // Enable the realtime websocket routes (/v1/realtime, /v1/realtime/translations) and passthrough upgrades
+	RealtimeAllowedOrigins          []string                               // Browser origins allowed to open a realtime websocket cross-origin; "*" disables the check
 	AuthVerifyEnabled               bool                                   // Enable the credential check route (GET /v1/auth/verify); off by default
 	MCPEnabled                      bool                                   // Enable the MCP gateway routes /mcp and /mcp/{server}
 	MCPGateway                      *mcpgateway.Service                    // MCP gateway service (nil if disabled or not wired)
@@ -260,6 +261,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Mirror the route-registration default below: a nil config enables realtime
 	// so the documented default and the registered route stay consistent.
 	handler.realtimeEnabled = cfg == nil || cfg.RealtimeEnabled
+	if cfg != nil {
+		handler.realtimeOrigins = newRealtimeOriginGuard(cfg.RealtimeAllowedOrigins)
+	}
 	if cfg != nil {
 		handler.versionChecker = cfg.VersionChecker
 		handler.masterKey = cfg.effectiveMasterKey()

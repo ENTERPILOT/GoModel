@@ -443,3 +443,35 @@ func TestLoadFailsOnReferenceInParsedEnvVar(t *testing.T) {
 		require.ErrorContains(t, err, "LOGGING_ENABLED: secret references are supported only in string settings")
 	})
 }
+
+// A realtime origin held in a secret reference passes Load unchecked and is
+// validated and canonicalized once resolved; a bad resolved value names the
+// entry, not the value.
+func TestResolveSecretsChecksRealtimeAllowedOrigins(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		want    []string
+		wantErr bool
+	}{
+		{name: "valid origin", value: "HTTPS://App.Example.com:443", want: []string{"https://app.example.com", "http://localhost:3000"}},
+		{name: "invalid origin", value: "app.example.com", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GOMODEL_TEST_REALTIME_ORIGIN", tt.value)
+			origins, err := normalizeRealtimeAllowedOrigins([]string{"${env:GOMODEL_TEST_REALTIME_ORIGIN}", "http://localhost:3000"}, false)
+			require.NoError(t, err)
+			result := &LoadResult{Config: &Config{Server: ServerConfig{RealtimeAllowedOrigins: origins}}}
+
+			err = result.ResolveSecrets(t.Context())
+			if tt.wantErr {
+				require.ErrorContains(t, err, "server.realtime_allowed_origins[0]")
+				assert.NotContains(t, err.Error(), tt.value)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, result.Config.Server.RealtimeAllowedOrigins)
+		})
+	}
+}

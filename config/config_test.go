@@ -63,7 +63,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"CONFIG_STRICT",
-		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "MASTER_KEY_DISABLED", "AUTH_KEY_PREFIX", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
+		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "MASTER_KEY_DISABLED", "AUTH_KEY_PREFIX", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS", "REALTIME_ALLOWED_ORIGINS",
 		"SERVER_TRUSTED_PROXIES", "SERVER_CLIENT_IP_HEADER", "SERVER_TRUSTED_HOPS", "SERVER_TLS_CERT_FILE", "SERVER_TLS_KEY_FILE", "SERVER_TLS_CLIENT_CA_FILE",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL", "GOMODEL_OFFLINE", "GOMODEL_VERSION_CHECK_ENABLED", "ALLOWLIST_UPSTREAM_METADATA",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
@@ -1105,6 +1105,41 @@ server:
 		require.NoError(t, err)
 		got := result.Config.Server.UserPathHeader
 		require.Equal(t, "X-Env-Path", got)
+	})
+}
+
+func TestLoad_RealtimeAllowedOrigins(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(string) {
+		result, err := Load()
+		require.NoError(t, err)
+		require.Empty(t, result.Config.Server.RealtimeAllowedOrigins)
+	})
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+server:
+  realtime_allowed_origins: ["HTTPS://App.Example.com:443", "https://app.example.com", " "]
+`
+		result := loadConfigYAML(t, dir, yaml)
+		require.Equal(t, []string{"https://app.example.com"}, result.Config.Server.RealtimeAllowedOrigins)
+	})
+
+	withTempDir(t, func(string) {
+		t.Setenv("REALTIME_ALLOWED_ORIGINS", "http://localhost:3000, *")
+
+		result, err := Load()
+		require.NoError(t, err)
+		require.Equal(t, []string{"http://localhost:3000", "*"}, result.Config.Server.RealtimeAllowedOrigins)
+	})
+
+	withTempDir(t, func(string) {
+		t.Setenv("REALTIME_ALLOWED_ORIGINS", "app.example.com")
+
+		_, err := Load()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "server.realtime_allowed_origins")
 	})
 }
 

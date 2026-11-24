@@ -43,6 +43,7 @@ type realtimeService struct {
 	calls           *realtime.CallRegistry
 	httpClient      *http.Client
 	enabled         bool
+	origins         *realtimeOriginGuard
 }
 
 // realtimeRoute carries the resolved routing identity for one session, used to
@@ -96,6 +97,11 @@ func (s *realtimeService) PassthroughRealtime(c *echo.Context, providerType, int
 func (s *realtimeService) handle(c *echo.Context, model, providerHint, intent string) error {
 	if !s.enabled {
 		return handleError(c, core.NewInvalidRequestErrorWithStatus(http.StatusNotImplemented, "realtime sessions are disabled", nil))
+	}
+	// Checked before anything is resolved, charged, or dialed: a refused
+	// origin must not open an upstream session.
+	if err := s.origins.check(c.Request()); err != nil {
+		return handleError(c, err)
 	}
 	router, ok := s.provider.(core.RealtimeRouter)
 	if !ok {
