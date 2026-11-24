@@ -491,6 +491,7 @@ workflow enforcement.
 | ------------------ | ---------------------------------------- | ---------- |
 | `METRICS_ENABLED`  | Enable Prometheus metrics (experimental) | `false`    |
 | `METRICS_ENDPOINT` | HTTP path for metrics                    | `/metrics` |
+| `METRICS_REQUIRE_AUTH` | Keep the metrics endpoint behind the gateway's bearer auth; no effect when none is configured | `false` |
 | `METRICS_CALLER_USER_PATH` | Add the user path to the token and cost metrics, Prometheus and OpenTelemetry alike, and to the Prometheus per-caller request counter (see [Caller dimensions](/guides/prometheus-metrics#caller-dimensions)) | `false` |
 | `METRICS_CALLER_USER_PATH_DEPTH` | Leading user path segments kept on metrics; a value below 1 uses the default | `2` |
 | `METRICS_CALLER_AUTH_KEY` | Add the managed API key's name to those metrics | `false` |

@@ -77,7 +77,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"SEMANTIC_CACHE_WEAVIATE_URL", "SEMANTIC_CACHE_WEAVIATE_CLASS", "SEMANTIC_CACHE_WEAVIATE_API_KEY",
 		"STORAGE_TYPE", "SQLITE_PATH", "POSTGRES_URL", "POSTGRES_MAX_CONNS",
 		"MONGODB_URL", "MONGODB_DATABASE", "GOMODEL_ENCRYPTION_KEY", "GOMODEL_ENCRYPTION_KEY_PREVIOUS",
-		"METRICS_ENABLED", "METRICS_ENDPOINT",
+		"METRICS_ENABLED", "METRICS_ENDPOINT", "METRICS_REQUIRE_AUTH",
 		"METRICS_CALLER_USER_PATH", "METRICS_CALLER_USER_PATH_DEPTH", "METRICS_CALLER_AUTH_KEY",
 		"METRICS_CALLER_REQUEST_LABELS", "METRICS_CALLER_MAX_VALUES",
 		"LOGGING_ENABLED", "LOGGING_LOG_BODIES", "LOGGING_LOG_REVISION_BODIES", "LOGGING_LOG_GUARDRAIL_STEPS", "LOGGING_LOG_HEADERS",
@@ -1105,6 +1105,29 @@ server:
 		require.NoError(t, err)
 		got := result.Config.Server.UserPathHeader
 		require.Equal(t, "X-Env-Path", got)
+	})
+}
+
+func TestLoad_MetricsRequireAuth(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(string) {
+		result, err := Load()
+		require.NoError(t, err)
+		require.False(t, result.Config.Metrics.RequireAuth)
+	})
+
+	withTempDir(t, func(dir string) {
+		result := loadConfigYAML(t, dir, "metrics:\n  require_auth: true\n")
+		require.True(t, result.Config.Metrics.RequireAuth)
+	})
+
+	withTempDir(t, func(string) {
+		t.Setenv("METRICS_REQUIRE_AUTH", "true")
+
+		result, err := Load()
+		require.NoError(t, err)
+		require.True(t, result.Config.Metrics.RequireAuth)
 	})
 }
 
