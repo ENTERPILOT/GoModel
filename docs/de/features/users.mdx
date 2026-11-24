@@ -208,7 +208,11 @@ einschalten würde, die nicht danach gefragt haben. Ein Request ohne Effort
 läuft daher mit dem Standard des Modells, und ein Modell, das nicht unter eine
 bestimmte Stufe denken kann (Gemini 3 und 4, OpenAI o-Serie, OpenCode Zen,
 Claude Fable 5.x, Mythos 5.x und Opus 5.5), erhält diese Stufe auch unter einer
-niedrigeren Obergrenze.
+niedrigeren Obergrenze. Ein Modell, das nur einige der Stufen kennt, erhält die
+höchste, die es innerhalb der Obergrenze kennt, nie die nächsthöhere: Unter
+einer Obergrenze von `medium` erhält GLM-5.3 von Z.ai, das `low`, `high` und
+`max` kennt, `low`, und [DeepSeek](/de/providers/deepseek), dessen einzige
+Stufen `high` und `max` sind, läuft ohne Reasoning.
 
 Neben `reasoning_effort` und `reasoning.effort` prüft eine Effort-Obergrenze
 die providerspezifischen Reasoning-Steuerungen, die Upstreams erreichen, auf

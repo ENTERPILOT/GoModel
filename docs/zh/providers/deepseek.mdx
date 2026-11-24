@@ -40,6 +40,8 @@ DeepSeek V4 推理模型接受顶层字符串字段 `reasoning_effort`，有两�
 | `xhigh` / `max` | `max` |
 | 其他任何值 | GoModel 原样透传，随后被 DeepSeek 拒绝 |
 
+在用户路径设置了 [`max_reasoning_effort`](/zh/features/users#请求策略) 时，绝不会发送高于上限的级别：上限为 `high` 或 `xhigh` 时最多发送 `high`，上限低于 `high` 时发送 `none`，因为 DeepSeek 没有更低的推理级别。
+
 GoModel 会将 OpenAI 格式的 `"reasoning": {"effort": "..."}` 改写为
 DeepSeek 的顶层 `reasoning_effort`，客户端无需任何修改。在调用 GoModel 之前，请将自定义的客户端取值校验或规范化为 `high` 或 `max`。
 DeepSeek 默认启用推理，因此省略 `reasoning` 字段不会关闭推理；如需禁用推理，请发送 `none`。提供其他任何

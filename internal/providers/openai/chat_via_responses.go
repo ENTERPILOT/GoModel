@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // OpenAI Chat Completions rejects or silently degrades some requests that the
@@ -27,6 +28,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	req = providers.ChatWithinEffortCeiling(ctx, req, sentEffort)
 	var resp *core.ChatResponse
 	if responsesReq, ok := responsesRoute(req); ok {
 		routed, err := p.Responses(ctx, responsesReq)
@@ -51,6 +53,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	if err != nil {
 		return nil, err
 	}
+	req = providers.ChatWithinEffortCeiling(ctx, req, sentEffort)
 	var stream io.ReadCloser
 	if responsesReq, ok := responsesRoute(req); ok {
 		routed, err := p.StreamResponses(ctx, responsesReq)
@@ -140,6 +143,17 @@ func carriesChatOnlyFields(fields core.UnknownJSONFields, assistantMessage bool)
 	// Replay state belongs in extra_content; Codex pins store: false, so
 	// reasoning itself is dropped rather than replayed upstream.
 	return !fields.Without(core.ExtraContentField).IsEmpty()
+}
+
+// sentEffort returns the reasoning effort OpenAI is sent for req on either
+// route: the requested one as the model takes it, or "" when req asks for
+// none.
+func sentEffort(req *core.ChatRequest) string {
+	effort := requestedEffort(req)
+	if effort == "" {
+		return ""
+	}
+	return supportedEffort(req.Model, effort)
 }
 
 // requestedEffort returns the reasoning effort the caller asked for, from the

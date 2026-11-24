@@ -24,6 +24,7 @@ var cappedRows = []users.User{
 	{UserPath: "/high", MaxReasoningEffort: "high"},
 	{UserPath: "/medium", MaxReasoningEffort: "medium"},
 	{UserPath: "/low", MaxReasoningEffort: "low"},
+	{UserPath: "/minimal", MaxReasoningEffort: "minimal"},
 	{UserPath: "/off", MaxReasoningEffort: "none"},
 	{UserPath: "/tokens", MaxOutputTokens: 1000},
 }
@@ -269,6 +270,43 @@ func TestCeilingBoundsAnAdapterDefaultEffort(t *testing.T) {
 	rec = f.post(t, "", "/v1/chat/completions", `{"model":"opencode_go/kimi-k2-thinking",`+hiMessages+`}`)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, "max", f.sent(t, "opencode_go")["reasoning_effort"], "without a ceiling the operator's default stands")
+}
+
+// An adapter maps the gateway's levels onto the ones its model takes, and
+// some round up. Under a ceiling the model gets the highest level it takes
+// that the ceiling allows, and its lowest one only when it takes none within.
+func TestEffortCeilingHoldsThroughAnAdaptersOwnLevels(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		userPath string
+		body     string
+		upstream string
+		want     any
+	}{
+		{"review request: GLM-5.3 takes medium as high", "/v1/chat/completions", "/medium", `{"model":"zai/glm-5.3","reasoning_effort":"max",` + hiMessages + `}`, "zai", "low"},
+		{"an effort within the ceiling is not rounded above it", "/v1/chat/completions", "/medium", `{"model":"zai/glm-5.3","reasoning":{"effort":"medium"},` + hiMessages + `}`, "zai", "low"},
+		{"GLM-5.3 takes xhigh as max", "/v1/chat/completions", "/xhigh", `{"model":"zai/glm-5.3","reasoning_effort":"max",` + hiMessages + `}`, "zai", "high"},
+		{"a level the model takes is sent as it is", "/v1/chat/completions", "/high", `{"model":"zai/glm-5.3","reasoning_effort":"max",` + hiMessages + `}`, "zai", "high"},
+		{"GLM-5.3 cannot think less than low", "/v1/chat/completions", "/off", `{"model":"zai/glm-5.3","reasoning_effort":"high",` + hiMessages + `}`, "zai", "low"},
+		{"the Responses API reaches Z.ai through the same adapter", "/v1/responses", "/medium", `{"model":"zai/glm-5.3","input":"hi","reasoning":{"effort":"max"}}`, "zai", "low"},
+		{"without a ceiling the adapter's own mapping stands", "/v1/chat/completions", "", `{"model":"zai/glm-5.3","reasoning":{"effort":"medium"},` + hiMessages + `}`, "zai", "high"},
+		{"review request: DeepSeek takes xhigh as max", "/v1/chat/completions", "/xhigh", `{"model":"deepseek/deepseek-v4","reasoning_effort":"max",` + hiMessages + `}`, "deepseek", "high"},
+		{"DeepSeek has no level between none and high", "/v1/chat/completions", "/medium", `{"model":"deepseek/deepseek-v4","reasoning":{"effort":"low"},` + hiMessages + `}`, "deepseek", "none"},
+		{"DeepSeek rounds up within the ceiling", "/v1/chat/completions", "/high", `{"model":"deepseek/deepseek-v4","reasoning":{"effort":"low"},` + hiMessages + `}`, "deepseek", "high"},
+		{"DeepSeek without a ceiling", "/v1/chat/completions", "", `{"model":"deepseek/deepseek-v4","reasoning":{"effort":"xhigh"},` + hiMessages + `}`, "deepseek", "max"},
+		{"GPT-5.1 has no minimal, and none is within the ceiling", "/v1/chat/completions", "/minimal", `{"model":"openai/gpt-5.1","reasoning_effort":"minimal",` + hiMessages + `}`, "openai", "none"},
+		{"GPT-5.1 with a nested effort above the ceiling", "/v1/chat/completions", "/minimal", `{"model":"openai/gpt-5.1","reasoning":{"effort":"high"},` + hiMessages + `}`, "openai", "none"},
+		{"GPT-5 cannot think less than minimal", "/v1/chat/completions", "/off", `{"model":"openai/gpt-5","reasoning_effort":"high",` + hiMessages + `}`, "openai", "minimal"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newUpstreamFixture(t, cappedRows, nil)
+			rec := f.post(t, tt.userPath, tt.path, tt.body)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.Equal(t, tt.want, openAIEffort(f.sent(t, tt.upstream)))
+		})
+	}
 }
 
 // A ceiling on "/" binds every request: one with no user path at all, and

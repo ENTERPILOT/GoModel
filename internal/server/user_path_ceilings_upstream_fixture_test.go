@@ -18,10 +18,12 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/anthropic"
 	"github.com/enterpilot/gomodel/internal/providers/cohere"
+	"github.com/enterpilot/gomodel/internal/providers/deepseek"
 	"github.com/enterpilot/gomodel/internal/providers/gemini"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 	"github.com/enterpilot/gomodel/internal/providers/opencodego"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/enterpilot/gomodel/internal/providers/zai"
 	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
@@ -47,6 +49,8 @@ var upstreamModels = map[string]string{
 	"gemini/gemini-2.5-flash":      "gemini",
 	"cohere/command-a-reasoning":   "cohere",
 	"opencode_go/kimi-k2-thinking": "opencode_go",
+	"zai/glm-5.3":                  "zai",
+	"deepseek/deepseek-v4":         "deepseek",
 }
 
 // upstreamRouter is a RoutableProvider over the real provider adapters, each
@@ -190,6 +194,8 @@ func newUpstreamFixture(t *testing.T, rows []users.User, models []virtualmodels.
 		"gemini":      gemini.New(providers.ProviderConfig{APIKey: "k", BaseURL: server("gemini", geminiContentJSON), APIMode: "native"}, opts),
 		"cohere":      cohere.New(providers.ProviderConfig{APIKey: "k", BaseURL: server("cohere", cohereChatJSON)}, opts),
 		"opencode_go": opencodego.New(providers.ProviderConfig{APIKey: "k", BaseURL: server("opencode_go", providertest.ChatCompletionJSON)}, opts),
+		"zai":         zai.New(providers.ProviderConfig{APIKey: "k", BaseURL: server("zai", providertest.ChatCompletionJSON)}, opts),
+		"deepseek":    deepseek.New(providers.ProviderConfig{APIKey: "k", BaseURL: server("deepseek", providertest.ChatCompletionJSON)}, opts),
 	}}
 	f.handler = newHandlerWithAuthorizer(router, nil, nil, nil, vmService, vmService, nil, vmService, nil)
 	f.resolve = WorkflowResolutionWithResolverAndPolicy(router, vmService, nil)

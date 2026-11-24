@@ -195,7 +195,12 @@ the request sends and never adds one, because adding an effort would switch
 reasoning on for requests that did not ask for it. A request without an effort
 therefore runs at the model's default, and a model that cannot think less than
 some level (Gemini 3 and 4, OpenAI o-series, OpenCode Zen, Claude Fable 5.x,
-Mythos 5.x, and Opus 5.5) still gets that level under a lower ceiling.
+Mythos 5.x, and Opus 5.5) still gets that level under a lower ceiling. A model
+that takes only some of the levels gets the highest one it takes within the
+ceiling, never the next one up: under a `medium` ceiling Z.ai's GLM-5.3, which
+takes `low`, `high`, and `max`, gets `low`, and
+[DeepSeek](/providers/deepseek), whose only levels are `high` and `max`, runs
+with reasoning off.
 
 Besides `reasoning_effort` and `reasoning.effort`, an effort ceiling checks the
 provider-specific reasoning controls that reach upstreams, at the top level of

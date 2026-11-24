@@ -195,7 +195,11 @@ nigdy go nie dodaje, bo dodany effort włączyłby reasoning w requestach, któr
 to nie prosiły. Request bez effortu działa więc z domyślnym ustawieniem modelu,
 a model, który nie potrafi myśleć mniej niż na pewnym poziomie (Gemini 3 i 4,
 OpenAI seria o, OpenCode Zen, Claude Fable 5.x, Mythos 5.x i Opus 5.5), dostaje
-ten poziom także przy niższym limicie.
+ten poziom także przy niższym limicie. Model, który przyjmuje tylko część
+poziomów, dostaje najwyższy z tych, które mieszczą się w limicie, nigdy
+następny wyższy: przy limicie `medium` GLM-5.3 od Z.ai, który przyjmuje `low`,
+`high` i `max`, dostaje `low`, a [DeepSeek](/pl/providers/deepseek), którego
+jedyne poziomy to `high` i `max`, działa z wyłączonym reasoningiem.
 
 Oprócz `reasoning_effort` i `reasoning.effort` limit effortu sprawdza
 specyficzne dla providerów sterowania reasoningiem, które docierają do
