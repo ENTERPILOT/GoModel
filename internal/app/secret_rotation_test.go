@@ -150,35 +150,52 @@ func TestSecretRotationWithoutReloadHook(t *testing.T) {
 
 func TestSecretRotationWatchesNotifications(t *testing.T) {
 	h := newRotationHarness(t, nil)
-	// Hold the first check until every notification is sent. Otherwise fast
-	// checks keep pace with the loop below and each one consumes another
-	// notification, so the count has no bound.
-	release := make(chan struct{})
+	// Hold the first check until the burst below is sent, so the burst arrives
+	// while a check runs. Unheld, fast checks keep pace with the notifications
+	// and the count has no bound.
+	entered := make(chan struct{})
+	markEntered := sync.OnceFunc(func() { close(entered) })
+	gate := make(chan struct{})
+	openGate := sync.OnceFunc(func() { close(gate) })
+	defer openGate()
 	plan := h.rotation.planKeys
 	h.rotation.planKeys = func(recheck *config.SecretRecheck) keySwap {
-		<-release
+		markEntered()
+		<-gate
 		return plan(recheck)
 	}
 	h.rotation.start(t.Context())
 	t.Cleanup(func() { assert.NoError(t, h.rotation.Close()) })
+	awaitReload := func(msg string) {
+		t.Helper()
+		select {
+		case <-h.reloads:
+		case <-time.After(5 * time.Second):
+			require.FailNow(t, msg)
+		}
+	}
 
 	h.vault.set("dsn", "d2")
-	for range 50 {
+	h.rotation.secrets.NotifyChanged()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "NotifyChanged did not trigger a re-check")
+	}
+	for range 49 {
 		h.rotation.secrets.NotifyChanged()
 	}
-	close(release)
-	select {
-	case <-h.reloads:
-	case <-time.After(5 * time.Second):
-		t.Fatal("NotifyChanged did not trigger a re-check")
-	}
+	openGate()
 
-	// Close waits for a check in progress, so the count is final here: the
-	// fifty notifications coalesced into at most two checks (the one running
-	// and one pending).
+	// The burst coalesced into one pending notification: the check that was
+	// running reloads, then exactly one more does.
+	awaitReload("the running check did not finish")
+	awaitReload("the notifications sent during a check were lost")
+
+	// Close waits for a check in progress, so the count is final here.
 	require.NoError(t, h.rotation.Close())
 	require.NoError(t, h.rotation.Close(), "Close is idempotent")
-	assert.LessOrEqual(t, h.planned.Load(), int32(2))
+	assert.Equal(t, int32(2), h.planned.Load())
 }
 
 // Generations share one notifier, so only the serving generation may listen:
