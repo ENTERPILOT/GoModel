@@ -13,12 +13,12 @@ import (
 )
 
 func TestMongoRequestCountLookup(t *testing.T) {
-	stage, err := bson.MarshalExtJSON(mongoRequestCountLookup("custom_audit_logs"), false, false)
+	stage, err := bson.MarshalExtJSON(mongoRequestCountLookup("custom_request_logs"), false, false)
 	require.NoError(t, err)
 
 	encoded := string(stage)
 	for _, want := range []string{
-		`"from":"custom_audit_logs"`,
+		`"from":"custom_request_logs"`,
 		`"$ifNull":["$latest.session_id",""]`,
 		`"$ne":["$$sid",""]`,
 		`"$eq":["$session_id","$$sid"]`,

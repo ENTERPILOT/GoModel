@@ -18,10 +18,13 @@
   rowAnchorID,
   rowIsManaged,
   rowRedirectCanRemove,
+  rowSlowdown,
   rowUpstreamTimeouts,
+  slowdownLabel,
   upstreamTimeoutsLabel,
 } from "./displayRows.js";
 import {
+  aliasRouting,
   maskingFailsOver,
   maskingRoutingKind,
   maskingRoutingLabel,
@@ -30,7 +33,20 @@ import {
   import ModelDetails from "./ModelDetails.svelte";
   import { modelDetailsState } from "./modelDetails.svelte.js";
   import { rowHasModelDetails } from "./modelDetails.js";
-  import { ChevronRight, CircleDollarSign, Gauge, Pencil, ShieldCheck, Split, Trash2 } from "lucide";
+  import {
+    Activity,
+    ArrowRight,
+    ChevronRight,
+    CircleDollarSign,
+    Gauge,
+    Pencil,
+    PiggyBank,
+    Puzzle,
+    Repeat,
+    ShieldCheck,
+    Split,
+    Trash2,
+  } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   // columns: the active category's column spec from categoryColumns.js
@@ -44,14 +60,18 @@ import {
   const expanded = $derived(detailsAvailable && modelDetailsState.isExpanded(row));
   const detailsID = $derived("model-details-" + encodeURIComponent(String(row.key || "")));
 
+  // A virtual model reads on one line: its name, how it picks a target, and
+  // the targets. Each strategy has its own icon so a list of them scans fast.
+  const STRATEGY_ICONS = {
+    round_robin: Repeat,
+    cost: PiggyBank,
+    failover: ShieldCheck,
+    adaptive: Activity,
+    plugin: Puzzle,
+  };
+  const aliasRoute = $derived(row.is_alias ? aliasRouting(row.alias) : null);
+
   const pricing = $derived(pricingOverrides.modelRowPricing(row));
-  const configuredSlowdown = $derived(
-    row.is_alias
-      ? row.alias && row.alias.slowdown
-      : row.masking_alias && row.masking_alias.slowdown != null
-        ? row.masking_alias.slowdown
-        : row.access && row.access.override && row.access.override.slowdown,
-  );
   // What the virtual model over this real model does with its requests: the
   // icon, the secondary line, and the edit/remove labels all follow it.
   const globalFailover = $derived(runtimeConfig.booleanFlag("FAILOVER_ENABLED", true));
@@ -97,9 +117,7 @@ import {
         : m.models_removing_redirect({ model: row.display_name }),
   );
 
-  const slowdown = $derived(
-    Number(configuredSlowdown == null ? 0 : configuredSlowdown),
-  );
+  const slowdown = $derived(slowdownLabel(rowSlowdown(row)));
   const timeoutsLabel = $derived(upstreamTimeoutsLabel(rowUpstreamTimeouts(row)));
 </script>
 
@@ -125,13 +143,6 @@ import {
         {:else}
           <span class="mono font-size-md"><HighlightText text={row.display_name} needle={modelsStore.filter} /></span>
         {/if}
-        {#if row.is_alias}
-          <span class="model-kind-icon" role="img" aria-label={m.models_virtual_model()} title={m.models_virtual_model()}>
-            <svg class="model-kind-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"></path>
-            </svg>
-          </span>
-        {/if}
         {#if !row.is_alias && row.masking_alias}
           <span class="model-kind-icon" role="img" aria-label={routingTitle} title={routingTitle}>
             {#if routingKind === "failover"}
@@ -150,12 +161,23 @@ import {
         {#if rowIsManaged(row)}
           <span class="alias-kind-badge" title={m.models_managed_config()}>{m.models_config()}</span>
         {/if}
+        {#if aliasRoute}
+          {#if aliasRoute.kind}
+            <span class="alias-strategy">
+              <Icon icon={STRATEGY_ICONS[aliasRoute.kind] || Split} class="alias-route-icon" />
+              {aliasRoute.label}
+            </span>
+          {:else}
+            <span class="alias-strategy" role="img" aria-label={m.models_virtual_model()}>
+              <Icon icon={ArrowRight} class="alias-route-icon" />
+            </span>
+          {/if}
+          <span class="alias-targets mono" title={aliasRoute.all}>
+            <span aria-hidden="true"><HighlightText text={aliasRoute.targets} needle={modelsStore.filter} /></span>
+            <span class="alias-targets-full">{m.models_targets()}: {aliasRoute.all}</span>
+          </span>
+        {/if}
       </div>
-      {#if row.is_alias}
-        <div class="model-name-secondary">
-          {m.models_targets()} <span class="mono font-size-md"><HighlightText text={row.secondary_name} needle={modelsStore.filter} /></span>
-        </div>
-      {/if}
       {#if !row.is_alias && row.masking_alias}
         <div class="model-name-secondary">
           {routingPrefix} <span class="mono font-size-md">{maskingRoutingLabel(row.masking_alias, routingKind)}</span>
@@ -171,9 +193,9 @@ import {
           {/if}
         </div>
       {/if}
-      {#if slowdown > 0}
+      {#if slowdown}
         <div class="model-name-secondary">
-          {m.models_slowdown()} <span class="mono font-size-md">{m.models_inference_time({ value: slowdown })}</span>
+          {m.models_slowdown()} <span class="mono font-size-md">{slowdown}</span>
         </div>
       {/if}
       {#if timeoutsLabel}
@@ -288,6 +310,49 @@ import {
     color: var(--text-muted);
   }
 
+  .alias-strategy {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  /* The full target list, visually hidden: assistive tech reads it in place
+     of the shortened text, which a pointer user expands with the title. */
+  .alias-targets-full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* The targets take what is left of the line and cut off with an ellipsis
+     rather than wrap; the title carries the full list. */
+  .alias-targets {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* :global so the rule reaches the SVG rendered by the Icon component. */
+  .model-name-primary :global(.alias-route-icon) {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    color: var(--accent);
+  }
+
   .model-details-toggle {
     appearance: none;
     display: inline-flex;
@@ -379,6 +444,12 @@ import {
     .model-name-primary {
         flex-direction: column;
         align-items: flex-start;
+      }
+
+    /* Stacked, the targets get a line of their own. */
+    .alias-targets {
+        flex: none;
+        max-width: 100%;
       }
 
     .model-row-actions {

@@ -100,7 +100,7 @@ func readerDialectFor(dialect sqlx.Dialect) readerDialect {
 		return readerDialect{
 			like:               "ILIKE",
 			idColumn:           "id::text",
-			attemptIDColumn:    "audit_log_id::text",
+			attemptIDColumn:    "request_log_id::text",
 			userPath:           `user_path COLLATE "C"`,
 			requestedModel:     `requested_model COLLATE "C"`,
 			resolvedModel:      `resolved_model COLLATE "C"`,
@@ -114,7 +114,7 @@ func readerDialectFor(dialect sqlx.Dialect) readerDialect {
 	return readerDialect{
 		like:               "LIKE",
 		idColumn:           "id",
-		attemptIDColumn:    "audit_log_id",
+		attemptIDColumn:    "request_log_id",
 		userPath:           "user_path",
 		requestedModel:     "requested_model",
 		resolvedModel:      "resolved_model",
@@ -134,10 +134,10 @@ const logColumns = `id, timestamp, duration_ns, requested_model, resolved_model,
 	stream, error_type, data`
 
 const selectLogColumns = `SELECT ` + logColumns + `
-	FROM audit_logs`
+	FROM request_logs`
 
 // qualifiedLogColumns is logColumns with a table alias on every name, for the
-// queries that join audit_logs against a derived table carrying its own id.
+// queries that join request_logs against a derived table carrying its own id.
 func qualifiedLogColumns(alias string) string {
 	names := strings.FieldsFunc(logColumns, func(r rune) bool {
 		return r == ',' || r == ' ' || r == '\n' || r == '\t'
@@ -159,7 +159,7 @@ func (r *SQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogLis
 	where := sqlutil.BuildWhereClause(conditions)
 
 	var total int
-	if err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs"+where, args...).Scan(&total); err != nil {
+	if err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM request_logs"+where, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("failed to count request log entries: %w", err)
 	}
 
@@ -370,7 +370,7 @@ func (r *SQLReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error
 func (r *SQLReader) GetInteractionParent(ctx context.Context, id string) (*InteractionParent, error) {
 	var parent InteractionParent
 	err := r.db.QueryRow(ctx,
-		"SELECT COALESCE(user_path, ''), COALESCE(session_id, '') FROM audit_logs WHERE "+
+		"SELECT COALESCE(user_path, ''), COALESCE(session_id, '') FROM request_logs WHERE "+
 			r.dialect.idColumn+" = ? LIMIT 1", id,
 	).Scan(&parent.UserPath, &parent.SessionID)
 	if errors.Is(err, sqlx.ErrNoRows) {
@@ -446,7 +446,7 @@ func (r *SQLReader) loadAttempts(ctx context.Context, entries []LogEntry, bodies
 		return nil
 	}
 
-	// Batch all entries into a single query keyed by audit_log_id to avoid an
+	// Batch all entries into a single query keyed by request_log_id to avoid an
 	// N+1 read (one query per returned log) when hydrating a page of entries.
 	// A page is capped at 100 rows, well inside SQLite's parameter limit.
 	ids := make([]any, len(entries))
@@ -464,9 +464,9 @@ func (r *SQLReader) loadAttempts(ctx context.Context, entries []LogEntry, bodies
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT %s, seq, kind, provider_type, provider_name, model, status_code, success,
 			error_type, error_code, error_message, %s, started_at, duration_ns
-		FROM audit_log_attempts
+		FROM request_log_attempts
 		WHERE %s IN (%s)
-		ORDER BY audit_log_id ASC, seq ASC
+		ORDER BY request_log_id ASC, seq ASC
 	`, r.dialect.attemptIDColumn, responseColumns, r.dialect.attemptIDColumn, placeholders), ids...)
 	if err != nil {
 		// A database written before attempts existed has no such table; its
@@ -598,7 +598,7 @@ func isMissingRequestLogAttemptsTable(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "audit_log_attempts") &&
+	return strings.Contains(message, "request_log_attempts") &&
 		(strings.Contains(message, "no such table") || strings.Contains(message, "does not exist"))
 }
 

@@ -60,7 +60,7 @@ func (r *SQLReader) GetSessions(ctx context.Context, params LogQueryParams) (*Se
 	// no threads at all; past the last page the count still has to be made.
 	if len(sessions) == 0 && offset > 0 {
 		if err := r.db.QueryRow(ctx,
-			"SELECT COUNT(DISTINCT "+requestLogThreadKey+") FROM audit_logs"+where, args...,
+			"SELECT COUNT(DISTINCT "+requestLogThreadKey+") FROM request_logs"+where, args...,
 		).Scan(&total); err != nil {
 			return nil, fmt.Errorf("failed to count request log sessions: %w", err)
 		}
@@ -81,7 +81,7 @@ func sessionsQuery(where string) string {
 				PARTITION BY ` + requestLogThreadKey + `
 				ORDER BY timestamp DESC, id DESC
 			) AS rn
-		FROM audit_logs` + where + `
+		FROM request_logs` + where + `
 	), heads AS (
 		SELECT id, last_ts FROM ranked WHERE rn = 1
 	), page AS (
@@ -90,11 +90,11 @@ func sessionsQuery(where string) string {
 	)
 	SELECT ` + qualifiedLogColumns("l") + `,
 		CASE WHEN NULLIF(l.session_id, '') IS NULL THEN 1 ELSE (
-			SELECT COUNT(*) FROM audit_logs session_entries
+			SELECT COUNT(*) FROM request_logs session_entries
 			WHERE session_entries.session_id = l.session_id
 		) END AS request_count,
 		(SELECT COUNT(*) FROM heads) AS total
-	FROM page h JOIN audit_logs l ON l.id = h.id
+	FROM page h JOIN request_logs l ON l.id = h.id
 	ORDER BY h.last_ts DESC, h.id DESC`
 }
 

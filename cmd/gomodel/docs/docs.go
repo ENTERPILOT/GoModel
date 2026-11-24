@@ -10357,6 +10357,14 @@ const docTemplate = `{
                 "effective_enabled": {
                     "type": "boolean"
                 },
+                "model_policy": {
+                    "description": "ModelPolicy is the model-wide policy row (source \"gpt-4o\"), if any. Its\nper-model values (slowdown, upstream timeouts) apply wherever Override\nleaves them unset.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/virtualmodels.VirtualModel"
+                        }
+                    ]
+                },
                 "override": {
                     "$ref": "#/definitions/virtualmodels.VirtualModel"
                 },
@@ -14155,7 +14163,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "attempts": {
-                    "description": "Attempts captures provider calls made for this logical request. SQL\nstores split this into audit_log_attempts; Mongo stores it embedded.",
+                    "description": "Attempts captures provider calls made for this logical request. SQL\nstores split this into request_log_attempts; Mongo stores it embedded.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/requestlog.AttemptSnapshot"

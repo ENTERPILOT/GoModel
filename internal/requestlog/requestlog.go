@@ -174,7 +174,7 @@ type LogData struct {
 	Failover *FailoverSnapshot `json:"failover,omitempty" bson:"failover,omitempty"`
 
 	// Attempts captures provider calls made for this logical request. SQL
-	// stores split this into audit_log_attempts; Mongo stores it embedded.
+	// stores split this into request_log_attempts; Mongo stores it embedded.
 	Attempts []AttemptSnapshot `json:"attempts,omitempty" bson:"attempts,omitempty"`
 
 	// RequestRevisions captures the ingress request-rewrite chain: one entry

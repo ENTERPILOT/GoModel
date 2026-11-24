@@ -15,7 +15,8 @@ import {
 import {
   aliasStateClass,
   aliasStateText,
-  aliasTargetLabel,
+  aliasSearchText,
+  maskingRoutingKind,
   modelAccessSummary,
 } from "./routing.js";
 
@@ -107,7 +108,7 @@ export function buildDisplayModels({
     rows.push({
       key: "alias:" + alias.name,
       display_name: alias.name,
-      secondary_name: aliasTargetLabel(alias),
+      secondary_name: aliasSearchText(alias),
       provider_name: targetModel ? targetModel.provider_name || "" : "",
       provider_type: targetModel
         ? targetModel.provider_type || alias.provider_type || ""
@@ -533,27 +534,73 @@ export function modelOverrideEditButtonLabel(subject, hasOverride) {
     : m.models_edit_action({ subject: value });
 }
 
-// rowUpstreamTimeouts resolves the per-attempt upstream timeouts a row shows,
-// field by field: an alias row shows its own; a model row replaced by a
-// masking redirect shows the redirect's, since requests never reach the
-// model's own policy; any other model row shows its own policy. Null means
-// inherited.
-export function rowUpstreamTimeouts(row) {
-  const sources = row && row.is_alias
-    ? [row.alias]
-    : row && row.masking_alias
-      ? [row.masking_alias]
-      : [row && row.access && row.access.override];
-  const pick = (field) => {
-    for (const source of sources) {
-      const value = source && source[field];
-      if (value != null && value !== "") return Number(value);
+// rowPolicySources lists the rows a table row takes per-model values
+// (slowdown, upstream timeouts) from, most specific first. An alias row shows
+// its own. A model row shows its exact policy, then the model-wide one
+// (source "gpt-4o"), which the gateway applies field by field wherever the
+// exact policy leaves a value unset. A masking redirect's values come before
+// them while it still serves the model (failover or balancing); one that
+// sends requests elsewhere replaces them, since they are never reached.
+function rowPolicySources(row) {
+  if (row && row.is_alias) return [row.alias];
+  const access = (row && row.access) || {};
+  const policies = [access.override, access.model_policy];
+  const masking = row && row.masking_alias;
+  if (!masking) return policies;
+  return maskingRoutingKind(masking) === "redirect"
+    ? [masking]
+    : [masking, ...policies];
+}
+
+// pickPolicyValue returns the first value sources set for field, and the
+// name of the model-wide policy when the value is inherited from it.
+function pickPolicyValue(row, sources, field) {
+  const modelPolicy = row && row.access && row.access.model_policy;
+  for (const source of sources) {
+    const value = source && source[field];
+    if (value != null && value !== "") {
+      return {
+        value: Number(value),
+        source: source === modelPolicy ? String(source.source || "") : "",
+      };
     }
-    return null;
-  };
+  }
+  return { value: null, source: "" };
+}
+
+// inheritedSuffix marks a value a row takes from another policy.
+function inheritedSuffix(source) {
+  return source ? " (" + m.models_inherited_from({ source }) + ")" : "";
+}
+
+// rowSlowdown resolves the slowdown factor a row shows (see
+// rowPolicySources). The source names the model-wide policy an inherited
+// value comes from.
+export function rowSlowdown(row) {
+  return pickPolicyValue(row, rowPolicySources(row), "slowdown");
+}
+
+// slowdownLabel renders a row's slowdown factor, or "" when none is active.
+export function slowdownLabel(slowdown) {
+  if (!slowdown || !(slowdown.value > 0)) return "";
+  return (
+    m.models_inference_time({ value: slowdown.value }) +
+    inheritedSuffix(slowdown.source)
+  );
+}
+
+// rowUpstreamTimeouts resolves the per-attempt upstream timeouts a row shows,
+// field by field (see rowPolicySources). Null means the gateway default; a
+// *_source names the model-wide policy an inherited value comes from.
+export function rowUpstreamTimeouts(row) {
+  const sources = rowPolicySources(row);
+  const timeout = pickPolicyValue(row, sources, "timeout");
+  const headers = pickPolicyValue(row, sources, "response_header_timeout");
   return {
-    timeout: pick("timeout"),
-    response_header_timeout: pick("response_header_timeout"),
+    timeout: timeout.value,
+    timeout_source: timeout.source,
+    response_header_timeout: headers.value,
+    response_header_timeout_source: headers.source,
   };
 }
 
@@ -561,11 +608,15 @@ export function rowUpstreamTimeouts(row) {
 export function upstreamTimeoutsLabel(timeouts) {
   const parts = [];
   if (timeouts && timeouts.timeout != null) {
-    parts.push(m.models_timeout_per_attempt({ value: timeouts.timeout }));
+    parts.push(
+      m.models_timeout_per_attempt({ value: timeouts.timeout }) +
+        inheritedSuffix(timeouts.timeout_source),
+    );
   }
   if (timeouts && timeouts.response_header_timeout != null) {
     parts.push(
-      m.models_timeout_headers({ value: timeouts.response_header_timeout }),
+      m.models_timeout_headers({ value: timeouts.response_header_timeout }) +
+        inheritedSuffix(timeouts.response_header_timeout_source),
     );
   }
   return parts.join(" · ");

@@ -49,7 +49,7 @@ func (r *SQLReader) GetRequestStats(ctx context.Context, params RequestStatsPara
 		SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END),
 		COALESCE(SUM(CASE WHEN ` + latencyPredicate + ` THEN duration_ns ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN ` + latencyPredicate + ` THEN 1 ELSE 0 END), 0)
-		FROM audit_logs` + sqlutil.BuildWhereClause(conditions) + `
+		FROM request_logs` + sqlutil.BuildWhereClause(conditions) + `
 		GROUP BY hour, prov`
 
 	rows, err := r.db.Query(ctx, query, args...)

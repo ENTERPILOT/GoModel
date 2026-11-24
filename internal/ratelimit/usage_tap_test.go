@@ -66,3 +66,28 @@ func TestNewUsageTapWithoutServiceReturnsInner(t *testing.T) {
 	got = NewUsageTap(nil, nil)
 	require.Nil(t, got)
 }
+
+type stampingLogger struct {
+	recordingLogger
+	stamped []*usage.UsageEntry
+}
+
+func (l *stampingLogger) StampBilling(entry *usage.UsageEntry) { l.stamped = append(l.stamped, entry) }
+
+// Stamping an entry's billing fields reaches the taps beneath this one and
+// charges no token window: the entry is not recorded yet.
+func TestUsageTapForwardsBillingStampWithoutChargingTokens(t *testing.T) {
+	service := newTestService(t, Rule{
+		Subject:       "/team",
+		PeriodSeconds: PeriodMinuteSeconds,
+		MaxTokens:     new(int64(1000)),
+	})
+	inner := &stampingLogger{}
+	entry := &usage.UsageEntry{UserPath: "/team/alice", TotalTokens: 40}
+
+	usage.StampBilling(NewUsageTap(inner, service), entry)
+
+	require.Equal(t, []*usage.UsageEntry{entry}, inner.stamped)
+	require.Empty(t, inner.entries)
+	require.Zero(t, service.Statuses(time.Now().UTC())[0].TokensUsed)
+}

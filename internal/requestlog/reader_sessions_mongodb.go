@@ -32,6 +32,7 @@ var mongoThreadKeyExpr = bson.D{{Key: "$cond", Value: bson.A{
 // between (retention runs continuously).
 func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) (*SessionListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
+	collection := r.logs(ctx)
 
 	matchFilters, err := mongoLogMatchFilters(params)
 	if err != nil {
@@ -61,7 +62,7 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 				bson.D{{Key: "$skip", Value: offset}},
 				bson.D{{Key: "$limit", Value: limit}},
 				bson.D{{Key: "$lookup", Value: bson.D{
-					{Key: "from", Value: r.collection.Name()},
+					{Key: "from", Value: collection.Name()},
 					{Key: "localField", Value: "latest_id"},
 					{Key: "foreignField", Value: "_id"},
 					{Key: "as", Value: "latest"},
@@ -71,7 +72,7 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 				// known. Deliberately omit the active filters to mirror the
 				// dashboard's unfiltered session_id expansion. Sessionless rows
 				// remain singletons and skip this match via the non-empty sid guard.
-				mongoRequestCountLookup(r.collection.Name()),
+				mongoRequestCountLookup(collection.Name()),
 			}},
 			{Key: "total", Value: bson.A{
 				bson.D{{Key: "$count", Value: "count"}},
@@ -79,7 +80,7 @@ func (r *MongoDBReader) GetSessions(ctx context.Context, params LogQueryParams) 
 		}}},
 	)
 
-	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	cursor, err := collection.Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, fmt.Errorf("failed to aggregate request log sessions: %w", err)
 	}

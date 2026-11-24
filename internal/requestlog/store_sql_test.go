@@ -94,7 +94,7 @@ func TestSQLStoreWriteBatchIgnoresDuplicateIDs(t *testing.T) {
 
 		// A retried flush must not fail or duplicate the row.
 		var count int
-		err := db.QueryRow(ctx, `SELECT COUNT(*) FROM audit_logs`).Scan(&count)
+		err := db.QueryRow(ctx, `SELECT COUNT(*) FROM request_logs`).Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, 1, count)
 	})
@@ -116,7 +116,7 @@ func TestSQLStoreWriteBatchChunksBeyondParameterLimit(t *testing.T) {
 		require.NoError(t, err)
 
 		var count int
-		err = db.QueryRow(ctx, `SELECT COUNT(*) FROM audit_logs`).Scan(&count)
+		err = db.QueryRow(ctx, `SELECT COUNT(*) FROM request_logs`).Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, total, count)
 	})
@@ -139,10 +139,10 @@ func TestSQLStoreCleanupDropsEntriesPastRetention(t *testing.T) {
 		store.cleanup()
 
 		var count int
-		err = db.QueryRow(ctx, `SELECT COUNT(*) FROM audit_logs WHERE id = ?`, "stale").Scan(&count)
+		err = db.QueryRow(ctx, `SELECT COUNT(*) FROM request_logs WHERE id = ?`, "stale").Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, 0, count)
-		err = db.QueryRow(ctx, `SELECT COUNT(*) FROM audit_logs WHERE id = ?`, "fresh").Scan(&count)
+		err = db.QueryRow(ctx, `SELECT COUNT(*) FROM request_logs WHERE id = ?`, "fresh").Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, 1, count)
 	})
@@ -163,8 +163,8 @@ func TestNewSQLStoreRenamesLegacyModelColumn(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
 		// The column was called `model` before requested/resolved were split.
-		err := db.Schema(ctx, `
-			CREATE TABLE audit_logs (
+		err := createLegacyTables(ctx, db, `
+			CREATE TABLE request_logs (
 				id TEXT PRIMARY KEY,
 				timestamp `+sqlx.TypeTimestamp+` NOT NULL,
 				model TEXT,
@@ -185,19 +185,19 @@ func TestNewSQLStoreDropsLegacyExecutionPlanIndex(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
 		// Databases created before v0.1.17 carry the pre-rename column and index.
-		err := db.Schema(ctx, `
-			CREATE TABLE audit_logs (
+		err := createLegacyTables(ctx, db, `
+			CREATE TABLE request_logs (
 				id TEXT PRIMARY KEY,
 				timestamp `+sqlx.TypeTimestamp+` NOT NULL,
 				execution_plan_version_id TEXT,
 				status_code INTEGER DEFAULT 0
 			)`,
-			`CREATE INDEX idx_audit_execution_plan_version_id ON audit_logs(execution_plan_version_id)`,
+			`CREATE INDEX idx_audit_execution_plan_version_id ON request_logs(execution_plan_version_id)`,
 		)
 		require.NoError(t, err)
 		startSQLStore(t, db)
 		// Recreating the index must succeed, proving the startup drop removed it.
-		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_execution_plan_version_id ON audit_logs(execution_plan_version_id)`)
+		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_execution_plan_version_id ON request_logs(execution_plan_version_id)`)
 		require.NoError(t, err)
 	})
 }
@@ -206,22 +206,22 @@ func TestNewSQLStoreReplacesSingleColumnUserPathIndex(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
 		// Databases created before the composite index carry the single-column one.
-		err := db.Schema(ctx, `
-			CREATE TABLE audit_logs (
+		err := createLegacyTables(ctx, db, `
+			CREATE TABLE request_logs (
 				id TEXT PRIMARY KEY,
 				timestamp `+sqlx.TypeTimestamp+` NOT NULL,
 				user_path TEXT,
 				status_code INTEGER DEFAULT 0
 			)`,
-			`CREATE INDEX idx_audit_user_path ON audit_logs(user_path)`,
+			`CREATE INDEX idx_audit_user_path ON request_logs(user_path)`,
 		)
 		require.NoError(t, err)
 		startSQLStore(t, db)
 		// Recreating the old index must succeed, proving the startup drop removed it.
-		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_user_path ON audit_logs(user_path)`)
+		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_user_path ON request_logs(user_path)`)
 		require.NoError(t, err)
 		// And the composite replacement must now exist.
-		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_user_path_timestamp ON audit_logs(user_path, timestamp)`)
+		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_user_path_timestamp ON request_logs(user_path, timestamp)`)
 		require.Error(t, err)
 	})
 }
@@ -292,7 +292,7 @@ func TestUserPathIndexesMatchReaderExpression(t *testing.T) {
 			column := readerDialectFor(dialect).userPath
 			want := []string{
 				"DROP INDEX IF EXISTS idx_audit_user_path",
-				"CREATE INDEX IF NOT EXISTS idx_audit_user_path_timestamp ON audit_logs(" + column + ", timestamp)",
+				"CREATE INDEX IF NOT EXISTS idx_audit_user_path_timestamp ON request_logs(" + column + ", timestamp)",
 			}
 			require.Equal(t, want, userPathIndexes(dialect))
 		})
@@ -320,14 +320,14 @@ func TestModelIndexesMatchReaderExpressions(t *testing.T) {
 func TestNewSQLStoreReplacesSingleColumnRequestedModelIndex(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
-		err := db.Schema(ctx, `
-			CREATE TABLE audit_logs (
+		err := createLegacyTables(ctx, db, `
+			CREATE TABLE request_logs (
 				id TEXT PRIMARY KEY,
 				timestamp `+sqlx.TypeTimestamp+` NOT NULL,
 				requested_model TEXT,
 				status_code INTEGER DEFAULT 0
 			)`,
-			`CREATE INDEX idx_audit_requested_model ON audit_logs(requested_model)`,
+			`CREATE INDEX idx_audit_requested_model ON request_logs(requested_model)`,
 		)
 		require.NoError(t, err)
 		store, err := NewSQLStore(ctx, db, 0)
@@ -336,9 +336,9 @@ func TestNewSQLStoreReplacesSingleColumnRequestedModelIndex(t *testing.T) {
 		// PostgreSQL builds the replacements in the background, then drops the old index.
 		store.indexBuild.Wait()
 		// Recreating the old index must succeed, proving the drop removed it.
-		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_requested_model ON audit_logs(requested_model)`)
+		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_requested_model ON request_logs(requested_model)`)
 		require.NoError(t, err)
-		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_resolved_model_timestamp ON audit_logs(resolved_model, timestamp)`)
+		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_resolved_model_timestamp ON request_logs(resolved_model, timestamp)`)
 		require.Error(t, err)
 	})
 }
@@ -380,7 +380,7 @@ func TestSQLStoreWriteBatchChunksAttemptsBeyondParameterLimit(t *testing.T) {
 		require.NoError(t, store.WriteBatch(ctx, entries))
 
 		var count int
-		err := db.QueryRow(ctx, `SELECT COUNT(*) FROM audit_log_attempts`).Scan(&count)
+		err := db.QueryRow(ctx, `SELECT COUNT(*) FROM request_log_attempts`).Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, entryCount*attemptsPerEntry, count)
 	})
@@ -396,10 +396,10 @@ func TestSQLStoreWriteBatchCommitsEntriesWithTheirAttempts(t *testing.T) {
 	runSQLStoreTest(t, 0, func(t *testing.T, store *SQLStore, db sqlx.DB) {
 		ctx := context.Background()
 		now := time.Unix(1700000000, 0).UTC()
-		// The drop needs a lock on audit_logs through the foreign key, and a
+		// The drop needs a lock on request_logs through the foreign key, and a
 		// background index build still running there deadlocks with it.
 		store.indexBuild.Wait()
-		_, err := db.Exec(ctx, `DROP TABLE audit_log_attempts`)
+		_, err := db.Exec(ctx, `DROP TABLE request_log_attempts`)
 		require.NoError(t, err)
 
 		withAttempt := testLogEntry("with-attempt", now)
@@ -407,7 +407,7 @@ func TestSQLStoreWriteBatchCommitsEntriesWithTheirAttempts(t *testing.T) {
 		require.Error(t, store.WriteBatch(ctx, []*LogEntry{withAttempt}))
 
 		var count int
-		require.NoError(t, db.QueryRow(ctx, `SELECT COUNT(*) FROM audit_logs`).Scan(&count))
+		require.NoError(t, db.QueryRow(ctx, `SELECT COUNT(*) FROM request_logs`).Scan(&count))
 		assert.Zero(t, count, "the entry is rolled back with its attempts")
 	})
 }

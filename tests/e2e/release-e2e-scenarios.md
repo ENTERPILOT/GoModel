@@ -3809,7 +3809,7 @@ if jq -e '.providers[] | select(.name == "fireworks") | (.status != "healthy") a
   exit 0
 fi
 FIREWORKS_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
-  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("gpt-oss-120b$"))) + .)[0]')
+  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("deepseek-v4p1-flash$"))) + .)[0]')
 RESP_FILE="$QA_RUN_DIR/s153.chat.json"
 curl -fsS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
@@ -3833,7 +3833,7 @@ if jq -e '.providers[] | select(.name == "fireworks") | (.status != "healthy") a
   exit 0
 fi
 FIREWORKS_MODEL=$(curl -fsS "$BASE_URL/v1/models" \
-  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("gpt-oss-120b$"))) + .)[0]')
+  | jq -er '[.data[].id | select(startswith("fireworks/"))] | (map(select(test("deepseek-v4p1-flash$"))) + .)[0]')
 SSE_FILE="$QA_RUN_DIR/s154.chat.sse"
 curl -fsS --no-buffer "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
@@ -5053,24 +5053,29 @@ curl -fsS -X PUT "$BASE_URL/admin/provider-credentials" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"$PC_NAME\",\"type\":\"openai\",\"api_keys\":[\"sk-qa-secret-$QA_SUFFIX\"],\"base_url\":\"https://example.invalid/v1\",\"models\":[\"qa-cred-model-$QA_SUFFIX\"]}" \
   > "$BODY_FILE"
-jq -e --arg n "$PC_NAME" --arg m "qa-cred-model-$QA_SUFFIX" '
+PC_KEY="sk-qa-secret-$QA_SUFFIX"
+PC_MASK="${PC_KEY:0:5}***********${PC_KEY: -3}#1"
+jq -e --arg n "$PC_NAME" --arg m "qa-cred-model-$QA_SUFFIX" --arg mask "$PC_MASK" '
   .name == $n and .type == "openai" and .managed == false and .enabled == true
-  and (.api_keys | length == 1 and .[0] == "***********")
+  and (.api_keys == [$mask])
   and (.base_url == "https://example.invalid/v1")
   and (.models | index($m) != null)
 ' "$BODY_FILE" >/dev/null
 
 curl -fsS "$BASE_URL/admin/provider-credentials" \
-  | jq -e --arg n "$PC_NAME" 'any(.[]?; .name == $n and .managed == false and (.api_keys[0] == "***********"))' >/dev/null
+  | jq -e --arg n "$PC_NAME" --arg mask "$PC_MASK" 'any(.[]?; .name == $n and .managed == false and .api_keys == [$mask])' >/dev/null
 
 curl -fsS "$BASE_URL/admin/models" \
   | jq -e --arg n "$PC_NAME" --arg m "qa-cred-model-$QA_SUFFIX" 'any(.[]?; .provider_name == $n and .model.id == $m)' >/dev/null
 
-# Re-submitting the mask preserves the stored key (older dashboards send "***").
-curl -fsS -X PUT "$BASE_URL/admin/provider-credentials" \
-  -H 'Content-Type: application/json' \
-  -d "{\"name\":\"$PC_NAME\",\"type\":\"openai\",\"api_keys\":[\"***********\"],\"base_url\":\"https://example.invalid/v1\",\"models\":[\"qa-cred-model-$QA_SUFFIX\"]}" \
-  | jq -e --arg n "$PC_NAME" '.name == $n and (.api_keys[0] == "***********")' >/dev/null
+# Re-submitting a mask preserves the stored key: the slot-numbered mask the
+# API returns, and the bare mask older dashboards send.
+for MASK in "$PC_MASK" "***********"; do
+  curl -fsS -X PUT "$BASE_URL/admin/provider-credentials" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$PC_NAME\",\"type\":\"openai\",\"api_keys\":[\"$MASK\"],\"base_url\":\"https://example.invalid/v1\",\"models\":[\"qa-cred-model-$QA_SUFFIX\"]}" \
+    | jq -e --arg n "$PC_NAME" --arg mask "$PC_MASK" '.name == $n and .api_keys == [$mask]' >/dev/null
+done
 
 curl -fsS -o /dev/null -w '%{http_code}' -X DELETE "$BASE_URL/admin/provider-credentials/$PC_NAME" \
   | jq -R -e '. == "204"' >/dev/null
@@ -5184,15 +5189,17 @@ list with redaction, and delete.
 
 ```bash
 PC_NAME="qa-cred-parity-$QA_SUFFIX"
+PC_KEY="sk-qa-parity-$QA_SUFFIX"
+PC_MASK="${PC_KEY:0:5}***********${PC_KEY: -3}#1"
 
 for URL in "$PG_BASE_URL" "$MONGO_BASE_URL"; do
   curl -fsS -X PUT "$URL/admin/provider-credentials" \
     -H 'Content-Type: application/json' \
-    -d "{\"name\":\"$PC_NAME\",\"type\":\"openai\",\"api_keys\":[\"sk-qa-parity-$QA_SUFFIX\"],\"models\":[\"qa-cred-parity-model-$QA_SUFFIX\"]}" \
-    | jq -e --arg n "$PC_NAME" '.name == $n and .managed == false and (.api_keys[0] == "***********")' >/dev/null
+    -d "{\"name\":\"$PC_NAME\",\"type\":\"openai\",\"api_keys\":[\"$PC_KEY\"],\"models\":[\"qa-cred-parity-model-$QA_SUFFIX\"]}" \
+    | jq -e --arg n "$PC_NAME" --arg mask "$PC_MASK" '.name == $n and .managed == false and .api_keys == [$mask]' >/dev/null
 
   curl -fsS "$URL/admin/provider-credentials" \
-    | jq -e --arg n "$PC_NAME" 'any(.[]?; .name == $n and .managed == false and (.api_keys[0] == "***********"))' >/dev/null
+    | jq -e --arg n "$PC_NAME" --arg mask "$PC_MASK" 'any(.[]?; .name == $n and .managed == false and .api_keys == [$mask])' >/dev/null
 
   curl -fsS -o /dev/null -w '%{http_code}' -X DELETE "$URL/admin/provider-credentials/$PC_NAME" \
     | jq -R -e '. == "204"' >/dev/null
@@ -7894,7 +7901,7 @@ reencrypt() {
 scratch_gateway_start "$DIR" 18087
 curl -fsS -X PUT "$GW/admin/provider-credentials" -H 'Content-Type: application/json' \
   -d "{\"name\":\"qa-enc-gem\",\"type\":\"gemini\",\"api_keys\":[\"$GEMINI_API_KEY\"],\"models\":[\"gemini-3.5-flash-lite\"]}" \
-  | jq -e '.api_keys == ["***********"]' >/dev/null
+  | jq -e '.api_keys | length == 1 and (.[0] | test("^.{5}[*]{11}.{3}#1$"))' >/dev/null
 [ "$(holds provider_credentials api_keys "$GEMINI_API_KEY")" = 1 ]
 scratch_gateway_stop "$DIR"
 

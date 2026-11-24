@@ -432,9 +432,15 @@ ausgerichtet sind.
 Ketten müssen zyklenfrei sein (`a -> b -> a` wird mit ausgeschriebenem Zyklus
 abgelehnt) und dürfen höchstens 8 virtuelle Modelle tief sein. Beide Regeln
 werden beim Speichern im Dashboard und beim Start für deklarative Einträge
-durchgesetzt. Ein Ziel muss beim Speichern existieren – erstellen Sie zuerst das
-innere virtuelle Modell –, und ein virtuelles Modell, durch das andere verketten,
-kann nicht gelöscht oder umbenannt werden, bis diese neu ausgerichtet sind.
+durchgesetzt. Ein Ziel, das im Dashboard oder über die Admin-API hinzugefügt
+wird, muss in diesem Moment existieren – erstellen Sie zuerst das innere
+virtuelle Modell –, und ein virtuelles Modell, durch das andere verketten, kann
+nicht gelöscht oder umbenannt werden, bis diese neu ausgerichtet sind.
+
+Ein Ziel, das später verschwindet, weil sein Modell eingestellt oder sein
+Provider entfernt wurde, blockiert das Speichern nicht: Sie können das virtuelle
+Modell weiterhin deaktivieren, umbenennen oder bearbeiten, und Anfragen
+überspringen das fehlende Ziel, bis Sie es entfernen.
 
 ## Einen Redirect umbenennen oder neu ausrichten
 

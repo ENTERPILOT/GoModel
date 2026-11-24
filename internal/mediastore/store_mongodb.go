@@ -30,7 +30,7 @@ func (d *mongoObjectDocument) object() *Object {
 	return &Object{
 		ID:          d.ID,
 		Kind:        Kind(d.Kind),
-		Source:      Source(d.Source),
+		Source:      storedSource(d.Source),
 		ContentType: d.ContentType,
 		Bytes:       d.Bytes,
 		StorageKey:  d.StorageKey,

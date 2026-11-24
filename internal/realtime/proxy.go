@@ -165,8 +165,14 @@ func relay(ctx context.Context, client, upstream *websocket.Conn, hooks Hooks) e
 	}()
 
 	first := <-done
-	cancel()
+	// A Read whose context ends drops its connection without a close frame, so
+	// a peer's close is mirrored before cancelling or its code could be lost.
+	// Any other failure cancels first: a dead peer would stall the handshake.
+	if _, closed := errors.AsType[websocket.CloseError](first); !closed {
+		cancel()
+	}
 	closeBoth(client, upstream, first)
+	cancel()
 	<-done
 	<-done
 

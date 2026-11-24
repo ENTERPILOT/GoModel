@@ -47,7 +47,7 @@ func (r *SQLReader) queryLastUsedBatch(ctx context.Context, keyIDs []string) (ma
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(keyIDs)), ",")
 
 	rows, err := r.db.Query(ctx, `
-		SELECT auth_key_id, MAX(timestamp) FROM audit_logs
+		SELECT auth_key_id, MAX(timestamp) FROM request_logs
 		WHERE auth_key_id IN (`+placeholders+`)
 		GROUP BY auth_key_id
 	`, args...)

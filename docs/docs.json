@@ -211,6 +211,7 @@
                                     "features/budgets",
                                     "features/rate-limits",
                                     "features/cost-tracking",
+                                    "features/response-cost",
                                     "features/labelling",
                                     "features/cache",
                                     "features/failover"
@@ -400,6 +401,7 @@
                                     "de/features/budgets",
                                     "de/features/rate-limits",
                                     "de/features/cost-tracking",
+                                    "de/features/response-cost",
                                     "de/features/labelling",
                                     "de/features/cache",
                                     "de/features/failover"
@@ -581,6 +583,7 @@
                                     "zh/features/budgets",
                                     "zh/features/rate-limits",
                                     "zh/features/cost-tracking",
+                                    "zh/features/response-cost",
                                     "zh/features/labelling",
                                     "zh/features/cache",
                                     "zh/features/failover"
@@ -762,6 +765,7 @@
                                     "pl/features/budgets",
                                     "pl/features/rate-limits",
                                     "pl/features/cost-tracking",
+                                    "pl/features/response-cost",
                                     "pl/features/labelling",
                                     "pl/features/cache",
                                     "pl/features/failover"

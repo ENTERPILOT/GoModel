@@ -155,6 +155,10 @@ GoModel takes the deepest configured path that covers the request's user path (`
 
 The default is none: without `user_path_markups`, `markups` applies to everyone. With `markups_enabled: false`, `user_path_markups` is ignored like `markups`, and GoModel logs a warning at startup. A rule from `user_path_markups` is recorded in `markup_selector` as `<user path>:<selector>`, for example `/acme:openai/gpt-5`, so the request log shows which customer rule was billed. User paths are normalized as on requests, so `acme/` and `/acme` are the same key; `/` is rejected, since `markups` already covers it.
 
+## Return the cost with each response
+
+GoModel can return the cost it calculated for a request to the client that made it: `usage.cost` in the response, in OpenRouter's shape, and `X-GoModel-Cost` headers on buffered answers. It is off by default (`USAGE_RESPONSE_COST_ENABLED`). With markups enabled the client gets the billed cost, and the provider's own cost fields are removed. See [Response cost](/features/response-cost) for the setup, client examples, the endpoints covered and the limits.
+
 ## Dashboard totals
 
 - **Estimated Cost** — spend on live provider requests; cache hits are excluded.
