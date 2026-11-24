@@ -165,3 +165,67 @@ func TestTransportOwnedEndpointsKeepHeaderUserPath(t *testing.T) {
 		})
 	}
 }
+
+// TestUserPathHeaderMasterKeyOnly covers USER_PATH_HEADER_MASTER_KEY_ONLY: a
+// managed key without a bound path loses the path it asserts through the
+// header, on ingress-managed and transport-owned endpoints alike, while the
+// master key keeps it and a bound key still uses its own. With the setting off
+// an unbound key keeps the header path, as before.
+func TestUserPathHeaderMasterKeyOnly(t *testing.T) {
+	authenticator := mockAuthenticator{
+		enabled:   true,
+		tokenToID: map[string]string{"sk_bound": "key-bound", "sk_unbound": "key-unbound"},
+		tokenPath: map[string]string{"sk_bound": "/team/bound"},
+	}
+	tests := []struct {
+		name           string
+		path           string
+		token          string
+		masterKeyOnly  bool
+		want           string
+		wantHeaderKept bool
+	}{
+		{name: "setting off: unbound key keeps header path", path: "/v1/chat/completions", token: "sk_unbound", want: "/tenant/b", wantHeaderKept: true},
+		{name: "unbound key loses header path", path: "/v1/chat/completions", token: "sk_unbound", masterKeyOnly: true},
+		{name: "unbound key loses header path on /mcp", path: "/mcp", token: "sk_unbound", masterKeyOnly: true},
+		{name: "unbound key loses header path on realtime", path: "/v1/realtime", token: "sk_unbound", masterKeyOnly: true},
+		{name: "master key keeps header path", path: "/v1/chat/completions", token: "master-key", masterKeyOnly: true, want: "/tenant/b", wantHeaderKept: true},
+		{name: "master key keeps header path on /mcp", path: "/mcp", token: "master-key", masterKeyOnly: true, want: "/tenant/b", wantHeaderKept: true},
+		{name: "bound key uses its own path", path: "/v1/chat/completions", token: "sk_bound", masterKeyOnly: true, want: "/team/bound", wantHeaderKept: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				got          string
+				snapshotPath string
+				headerValue  string
+			)
+			auth := NewAuthMiddleware(AuthMiddlewareConfig{
+				MasterKey:                   "master-key",
+				Authenticator:               authenticator,
+				UserPathHeaderMasterKeyOnly: tt.masterKeyOnly,
+			})(func(c *echo.Context) error {
+				ctx := c.Request().Context()
+				got = core.UserPathFromContext(ctx)
+				if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
+					snapshotPath = snapshot.UserPath
+				}
+				headerValue = c.Request().Header.Get(core.UserPathHeader)
+				return c.String(http.StatusOK, "ok")
+			})
+			chain := RequestSnapshotCapture()(auth)
+
+			c, rec := echotest.Post(t, tt.path, `{}`,
+				echotest.WithHeader("Authorization", "Bearer "+tt.token),
+				echotest.WithHeader(core.UserPathHeader, "/tenant/b"))
+
+			require.NoError(t, chain(c))
+			require.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, tt.want, got)
+			if !tt.wantHeaderKept {
+				assert.Empty(t, headerValue, "the asserted header must not reach handlers or upstreams")
+				assert.Empty(t, snapshotPath)
+			}
+		})
+	}
+}

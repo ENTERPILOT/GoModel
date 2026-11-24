@@ -541,6 +541,13 @@ including with the master key, it comes from the `X-GoModel-User-Path` header
 (or the header named by `USER_PATH_HEADER`), which is a quick way to check what
 a given subtree sees.
 
+<Warning>
+  A managed key without a bound path can send any path in that header, so
+  `user_paths` does not restrict it. Multi-tenant setups must bind every key to
+  a `user_path` or set `USER_PATH_HEADER_MASTER_KEY_ONLY=true`, which makes
+  unbound keys ignore the header.
+</Warning>
+
 Hidden servers are left out of `tools/list`, and `/mcp/{slug}` returns 404 for
 them. Like tool filters, visibility edits apply without reconnecting to the
 server and are checked on every call, so they also reach MCP sessions that are

@@ -238,6 +238,9 @@ niego:
   i klucze zarządzane bez powiązanej ścieżki wybierają ścieżkę przez
   [nagłówek user path](/pl/features/user-path), więc mogą czytać każdą partycję;
   to samo dotyczy wszystkich wywołujących, gdy uwierzytelnianie jest wyłączone.
+  Wdrożenia multi-tenant muszą przypisać `user_path` każdemu kluczowi albo
+  ustawić `USER_PATH_HEADER_MASTER_KEY_ONLY=true`, aby klucze bez ścieżki
+  ignorowały nagłówek.
 </Warning>
 
 Zmiana ustawienia powoduje chybienia dla istniejących wpisów: nigdy nie są one

@@ -48,6 +48,25 @@ Jeśli klucz API ma własny `user_path`, wygrywa klucz. GoModel nadpisuje
 wartość nagłówka ścieżką przypisaną do klucza, zanim zostaną uruchomione dopasowanie workflow, logowanie requestów,
 śledzenie użycia i kontrole dostępu do modeli.
 
+### Klucze bez przypisanej ścieżki
+
+Domyślnie klucz główny **oraz klucze zarządzane bez `user_path`** mogą wysłać w
+nagłówku dowolną ścieżkę. Dla takich kluczy limity szybkości i budżety per
+ścieżka, [partycja cache'u per ścieżka](/pl/features/cache) oraz MCP
+[`user_paths`](/pl/features/mcp-gateway) nie są granicą: wywołujący sam wybiera
+ścieżkę, do której pasują reguły.
+
+Wdrożenia multi-tenant muszą przypisać `user_path` każdemu kluczowi albo sprawić,
+by klucze bez ścieżki ignorowały nagłówek:
+
+```bash
+USER_PATH_HEADER_MASTER_KEY_ONLY=true # domyślnie: false
+```
+
+Albo ustaw `server.user_path_header_master_key_only: true`. Requesty z klucza bez
+ścieżki są wtedy obsługiwane tak, jakby nie wysłały nagłówka. Klucz główny nadal
+może wybrać ścieżkę, a klucze z przypisaną ścieżką działają bez zmian.
+
 ## Zakres dostępu
 
 Przypisany do klucza `user_path` jest też **zakresem dostępu** klucza: poddrzewem, które

@@ -545,6 +545,14 @@ W przeciwnym razie, także przy master key, pochodzi z nagłówka `X-GoModel-Use
 (lub nagłówka wskazanego przez `USER_PATH_HEADER`), co jest szybkim sposobem na
 sprawdzenie, co widzi dane poddrzewo.
 
+<Warning>
+  Klucz zarządzany bez przypisanej ścieżki może wysłać w tym nagłówku dowolną
+  ścieżkę, więc `user_paths` go nie ogranicza. Wdrożenia multi-tenant muszą
+  przypisać `user_path` każdemu kluczowi albo ustawić
+  `USER_PATH_HEADER_MASTER_KEY_ONLY=true`, aby klucze bez ścieżki ignorowały
+  nagłówek.
+</Warning>
+
 Ukryte serwery są pomijane w `tools/list`, a `/mcp/{slug}` zwraca dla nich 404.
 Podobnie jak filtry narzędzi, zmiany widoczności obowiązują bez ponownego łączenia
 z serwerem i są sprawdzane przy każdym wywołaniu, więc obejmują też już otwarte sesje MCP.
