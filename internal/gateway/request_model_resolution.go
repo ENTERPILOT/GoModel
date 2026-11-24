@@ -171,6 +171,9 @@ func ResolveRequestModelWithAuthorizer(
 	if timeoutsResolver, ok := resolver.(ModelTimeoutsResolver); ok {
 		resolution.Timeouts = timeoutsResolver.ResolveTimeouts(ctx, requested, resolvedSelector, route)
 	}
+	if retryResolver, ok := resolver.(ModelRetryRulesResolver); ok {
+		resolution.RetryRules = retryResolver.ResolveRetryRules(ctx, requested, resolvedSelector, route)
+	}
 	resolution.CacheDerivedSelectors()
 	return resolution, nil
 }

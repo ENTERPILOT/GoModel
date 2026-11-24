@@ -50,6 +50,9 @@ type upsertVirtualModelRequest struct {
 	// ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in
 	// seconds (1 to 86400), for every upstream attempt. Omitted inherits.
 	ResponseHeaderTimeout *int `json:"response_header_timeout,omitempty"`
+	// RetryRules overrides gateway retry behavior per upstream HTTP status.
+	// Omitted inherits; max_retries 0 disables retries for that status.
+	RetryRules []virtualmodels.RetryRule `json:"retry_rules,omitempty"`
 	// ReasoningEffort forces the reasoning effort sent upstream ("none",
 	// "minimal", "low", "medium", "high", "xhigh", or "max"); empty keeps the
 	// client's value.
@@ -204,6 +207,7 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 		Slowdown:              req.Slowdown,
 		Timeout:               req.Timeout,
 		ResponseHeaderTimeout: req.ResponseHeaderTimeout,
+		RetryRules:            req.RetryRules,
 		ReasoningEffort:       req.ReasoningEffort,
 		Params:                req.Params,
 		DefaultParams:         req.DefaultParams,

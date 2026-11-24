@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // ErrCircuitOpen is wrapped by the error returned when an open circuit
@@ -240,11 +241,50 @@ func (c *Client) failAfterRetries(scope requestScope) error {
 // attempt 0) and finalises the scope if the context cancels mid-wait. The
 // caller should return early when this returns a non-nil error.
 func (c *Client) waitForRetryAttempt(ctx context.Context, scope requestScope, attempt int) error {
-	if err := c.waitForRetry(ctx, attempt); err != nil {
+	return c.waitForRetryAttemptWithDelay(ctx, scope, attempt, 0)
+}
+
+// waitForRetryAttemptWithDelay is waitForRetryAttempt with a fixed delay from
+// a per-status retry rule. A non-positive delay falls back to the configured
+// exponential backoff.
+func (c *Client) waitForRetryAttemptWithDelay(ctx context.Context, scope requestScope, attempt int, delay time.Duration) error {
+	if err := c.waitForRetryWithDelay(ctx, attempt, delay); err != nil {
 		c.finishRequest(scope, 0, err)
 		return err
 	}
 	return nil
+}
+
+// retryRulesForContext returns the per-status retry rules in effect: explicit
+// context overrides first, then the ones resolved for the request's model.
+func (c *Client) retryRulesForContext(ctx context.Context) []httpclient.AttemptRetryRule {
+	if rules := httpclient.AttemptRetryRulesFromContext(ctx); len(rules) > 0 {
+		return rules
+	}
+	workflow := core.GetWorkflow(ctx)
+	if workflow == nil || workflow.Resolution == nil || len(workflow.Resolution.RetryRules) == 0 {
+		return nil
+	}
+	resolved := workflow.Resolution.RetryRules
+	rules := make([]httpclient.AttemptRetryRule, len(resolved))
+	for i, rule := range resolved {
+		rules[i] = httpclient.AttemptRetryRule{
+			Status:     rule.Status,
+			MaxRetries: rule.MaxRetries,
+			Delay:      rule.Delay,
+		}
+	}
+	return rules
+}
+
+// ruleForStatus returns the retry rule for status, if one was configured.
+func ruleForStatus(rules []httpclient.AttemptRetryRule, status int) (httpclient.AttemptRetryRule, bool) {
+	for _, rule := range rules {
+		if rule.Status == status {
+			return rule, true
+		}
+	}
+	return httpclient.AttemptRetryRule{}, false
 }
 
 func (c *Client) recordCircuitBreakerCompletion(scope requestScope, statusCode int, err error) {
@@ -291,13 +331,16 @@ func (c *Client) maxAttempts() int {
 	return maxAttempts
 }
 
-func (c *Client) waitForRetry(ctx context.Context, attempt int) error {
+func (c *Client) waitForRetryWithDelay(ctx context.Context, attempt int, delay time.Duration) error {
 	if attempt <= 0 {
 		return nil
 	}
+	if delay <= 0 {
+		delay = c.calculateBackoff(attempt)
+	}
 	// A stopped timer releases its resources immediately; time.After would
 	// keep the timer alive until it fires even after the context is cancelled.
-	timer := time.NewTimer(c.calculateBackoff(attempt))
+	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():

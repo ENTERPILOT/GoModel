@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-json"
 
@@ -75,16 +76,27 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 	var lastErr error
 	var lastStatusCode int
 	lastErrFromTransport := false
+	rules := c.retryRulesForContext(ctx)
 	maxAttempts := c.maxAttempts()
+	// A configured rule may allow more retries for its status than the global
+	// policy; size the loop to the largest budget so the per-status check below
+	// is the only limit that matters. Raw-body requests are never replayed.
+	for _, rule := range rules {
+		if budget := rule.MaxRetries + 1; budget > maxAttempts {
+			maxAttempts = budget
+		}
+	}
 	if req.RawBodyReader != nil {
 		maxAttempts = 1
 	}
+	var nextDelay time.Duration
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if err := c.waitForRetryAttempt(ctx, scope, attempt); err != nil {
+		if err := c.waitForRetryAttemptWithDelay(ctx, scope, attempt, nextDelay); err != nil {
 			closeRawBodyReader(req)
 			return nil, err
 		}
+		nextDelay = 0
 
 		resp, err := c.doRequest(ctx, req)
 		if err != nil {
@@ -109,14 +121,24 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 			continue
 		}
 
-		// Check for retryable status codes
-		if c.isRetryable(resp.StatusCode) {
+		// Check for retryable status codes. A configured rule decides both
+		// whether this status retries and how many times: max_retries 0
+		// disables retries even when the gateway policy would retry it.
+		rule, hasRule := ruleForStatus(rules, resp.StatusCode)
+		retryable := c.isRetryable(resp.StatusCode)
+		if hasRule {
+			retryable = rule.MaxRetries > 0
+		}
+		if retryable {
 			lastErr = attachResponseHeaders(core.ParseProviderError(c.config.ProviderName, resp.StatusCode, resp.Body, nil), resp.Header)
 			lastStatusCode = resp.StatusCode
 			lastErrFromTransport = false
-			if scope.halfOpenProbe {
+			if scope.halfOpenProbe || (hasRule && attempt >= rule.MaxRetries) {
 				c.completeScope(scope, lastStatusCode, lastErr, nil)
 				return nil, lastErr
+			}
+			if hasRule {
+				nextDelay = rule.Delay
 			}
 			continue
 		}
@@ -134,7 +156,15 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 			lastErr = attachResponseHeaders(embedded, resp.Header)
 			lastStatusCode = embedded.StatusCode
 			lastErrFromTransport = false
-			if c.isRetryable(embedded.StatusCode) && !scope.halfOpenProbe {
+			embeddedRule, hasEmbeddedRule := ruleForStatus(rules, embedded.StatusCode)
+			embeddedRetryable := c.isRetryable(embedded.StatusCode)
+			if hasEmbeddedRule {
+				embeddedRetryable = embeddedRule.MaxRetries > 0
+			}
+			if embeddedRetryable && !scope.halfOpenProbe && (!hasEmbeddedRule || attempt < embeddedRule.MaxRetries) {
+				if hasEmbeddedRule {
+					nextDelay = embeddedRule.Delay
+				}
 				continue
 			}
 			c.completeScope(scope, lastStatusCode, lastErr, nil)
@@ -285,12 +315,22 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 	if canRetryPassthrough(req) {
 		maxAttempts = c.maxAttempts()
 	}
+	rules := c.retryRulesForContext(ctx)
+	for _, rule := range rules {
+		if canRetryPassthrough(req) {
+			if budget := rule.MaxRetries + 1; budget > maxAttempts {
+				maxAttempts = budget
+			}
+		}
+	}
+	var nextDelay time.Duration
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if err := c.waitForRetryAttempt(ctx, scope, attempt); err != nil {
+		if err := c.waitForRetryAttemptWithDelay(ctx, scope, attempt, nextDelay); err != nil {
 			closeRawBodyReader(req)
 			return nil, err
 		}
+		nextDelay = 0
 
 		resp, err := c.doHTTPRequest(ctx, req)
 		if err != nil {
@@ -309,11 +349,18 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 			continue
 		}
 
+		rule, hasRule := ruleForStatus(rules, resp.StatusCode)
 		retryable := c.isRetryable(resp.StatusCode)
+		if hasRule {
+			retryable = rule.MaxRetries > 0
+		}
 		if retryable {
-			if scope.halfOpenProbe || attempt == maxAttempts-1 {
+			if scope.halfOpenProbe || attempt == maxAttempts-1 || (hasRule && attempt >= rule.MaxRetries) {
 				c.completeScope(scope, resp.StatusCode, nil, nil)
 				return resp, nil
+			}
+			if hasRule {
+				nextDelay = rule.Delay
 			}
 			_ = resp.Body.Close()
 			continue

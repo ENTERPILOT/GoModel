@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
@@ -380,6 +381,56 @@ func TestUpsertVirtualModelTimeouts(t *testing.T) {
 		},
 		{name: "zero rejected", fields: `"timeout":0`, wantStatus: http.StatusBadRequest},
 		{name: "above maximum rejected", fields: `"response_header_timeout":86401`, wantStatus: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newVMHandler(t)
+			body := `{"source":"extract","target_model":"openai/gpt-4o"`
+			if tt.fields != "" {
+				body += "," + tt.fields
+			}
+			body += "}"
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", body)
+			err := h.UpsertVirtualModel(c)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			if tt.wantView != nil {
+				tt.wantView(t, echotest.Decode[virtualmodels.View](t, rec))
+			}
+		})
+	}
+}
+
+func TestUpsertVirtualModelRetryRules(t *testing.T) {
+	tests := []struct {
+		name       string
+		fields     string
+		wantStatus int
+		wantView   func(t *testing.T, view virtualmodels.View)
+	}{
+		{
+			name:       "set",
+			fields:     `"retry_rules":[{"status":429,"max_retries":2,"delay":1000000000},{"status":503,"max_retries":0}]`,
+			wantStatus: http.StatusOK,
+			wantView: func(t *testing.T, view virtualmodels.View) {
+				assert.Equal(t, []virtualmodels.RetryRule{
+					{Status: 429, MaxRetries: 2, Delay: time.Second},
+					{Status: 503, MaxRetries: 0},
+				}, view.RetryRules)
+			},
+		},
+		{
+			name:       "omitted inherits",
+			wantStatus: http.StatusOK,
+			wantView: func(t *testing.T, view virtualmodels.View) {
+				assert.Empty(t, view.RetryRules)
+			},
+		},
+		{name: "invalid status rejected", fields: `"retry_rules":[{"status":399,"max_retries":2}]`, wantStatus: http.StatusBadRequest},
+		{name: "negative retries rejected", fields: `"retry_rules":[{"status":429,"max_retries":-1}]`, wantStatus: http.StatusBadRequest},
+		{name: "negative delay rejected", fields: `"retry_rules":[{"status":429,"delay":-1}]`, wantStatus: http.StatusBadRequest},
+		{name: "duplicate status rejected", fields: `"retry_rules":[{"status":429},{"status":429}]`, wantStatus: http.StatusBadRequest},
 	}
 
 	for _, tt := range tests {

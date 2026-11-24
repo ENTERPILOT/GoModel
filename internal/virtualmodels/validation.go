@@ -42,6 +42,9 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 	if err := validateTimeouts(vm); err != nil {
 		return VirtualModel{}, nil, err
 	}
+	if err := validateRetryRules(vm); err != nil {
+		return VirtualModel{}, nil, err
+	}
 	if err := normalizeOverrides(&vm); err != nil {
 		return VirtualModel{}, nil, err
 	}
@@ -121,6 +124,9 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	if err := validateTimeouts(vm); err != nil {
 		return VirtualModel{}, err
 	}
+	if err := validateRetryRules(vm); err != nil {
+		return VirtualModel{}, err
+	}
 	if err := normalizeOverrides(&vm); err != nil {
 		return VirtualModel{}, err
 	}
@@ -176,6 +182,9 @@ func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
 	if err := validateTimeouts(vm); err != nil {
 		return VirtualModel{}, err
 	}
+	if err := validateRetryRules(vm); err != nil {
+		return VirtualModel{}, err
+	}
 	if err := normalizeOverrides(&vm); err != nil {
 		return VirtualModel{}, err
 	}
@@ -227,6 +236,8 @@ func validatePolicyOverrideScope(vm VirtualModel, model string) error {
 	switch {
 	case vm.setsTimeouts():
 		return newValidationError("timeout and response_header_timeout can only be configured for a model or redirect", nil)
+	case len(vm.RetryRules) > 0:
+		return newValidationError("retry_rules can only be configured for a model or redirect", nil)
 	case vm.ReasoningEffort != "":
 		return newValidationError("reasoning_effort can only be configured for a model or redirect", nil)
 	case len(vm.Params) > 0:
@@ -244,6 +255,27 @@ func validateSlowdown(configured *float64) error {
 	factor := *configured
 	if math.IsNaN(factor) || math.IsInf(factor, 0) || factor < MinSlowdownFactor || factor > MaxSlowdownFactor {
 		return newValidationError(fmt.Sprintf("slowdown must be 0 (disabled) or between %.1f and %.0f", MinSlowdownFactor, MaxSlowdownFactor), nil)
+	}
+	return nil
+}
+
+func validateRetryRules(vm VirtualModel) error {
+	seen := make(map[int]struct{}, len(vm.RetryRules))
+	for i, rule := range vm.RetryRules {
+		prefix := fmt.Sprintf("retry_rules[%d]", i)
+		if rule.Status < 400 || rule.Status > 599 {
+			return newValidationError(prefix+".status must be an HTTP error status between 400 and 599", nil)
+		}
+		if rule.MaxRetries < 0 {
+			return newValidationError(prefix+".max_retries cannot be negative", nil)
+		}
+		if rule.Delay < 0 {
+			return newValidationError(prefix+".delay cannot be negative", nil)
+		}
+		if _, dup := seen[rule.Status]; dup {
+			return newValidationError(prefix+".status duplicates an earlier rule", nil)
+		}
+		seen[rule.Status] = struct{}{}
 	}
 	return nil
 }

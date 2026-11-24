@@ -13,21 +13,22 @@ import (
 )
 
 type mongoVirtualModelDocument struct {
-	ID              string   `bson:"_id"`
-	Targets         []Target `bson:"targets,omitempty"`
-	Strategy        string   `bson:"strategy,omitempty"`
-	StrategyPlugin  string   `bson:"strategy_plugin,omitempty"`
-	StrategyConfig  bson.M   `bson:"strategy_config,omitempty"`
-	SessionAffinity *bool    `bson:"session_affinity,omitempty"`
-	Failover        *bool    `bson:"failover,omitempty"`
-	ProviderName    string   `bson:"provider_name,omitempty"`
-	Model           string   `bson:"model,omitempty"`
-	UserPaths       []string `bson:"user_paths,omitempty"`
-	Description     string   `bson:"description,omitempty"`
-	Slowdown        *float64 `bson:"slowdown,omitempty"`
-	Timeout         *int     `bson:"timeout,omitempty"`
-	HeaderTimeout   *int     `bson:"response_header_timeout,omitempty"`
-	ReasoningEffort string   `bson:"reasoning_effort,omitempty"`
+	ID              string      `bson:"_id"`
+	Targets         []Target    `bson:"targets,omitempty"`
+	Strategy        string      `bson:"strategy,omitempty"`
+	StrategyPlugin  string      `bson:"strategy_plugin,omitempty"`
+	StrategyConfig  bson.M      `bson:"strategy_config,omitempty"`
+	SessionAffinity *bool       `bson:"session_affinity,omitempty"`
+	Failover        *bool       `bson:"failover,omitempty"`
+	ProviderName    string      `bson:"provider_name,omitempty"`
+	Model           string      `bson:"model,omitempty"`
+	UserPaths       []string    `bson:"user_paths,omitempty"`
+	Description     string      `bson:"description,omitempty"`
+	Slowdown        *float64    `bson:"slowdown,omitempty"`
+	Timeout         *int        `bson:"timeout,omitempty"`
+	HeaderTimeout   *int        `bson:"response_header_timeout,omitempty"`
+	RetryRules      []RetryRule `bson:"retry_rules,omitempty"`
+	ReasoningEffort string      `bson:"reasoning_effort,omitempty"`
 	// Params and DefaultParams are stored as JSON text so numbers keep their
 	// exact configured form; a document would go through float64.
 	Params        string    `bson:"params,omitempty"`
@@ -133,6 +134,7 @@ func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
 			"slowdown":                vm.Slowdown,
 			"timeout":                 vm.Timeout,
 			"response_header_timeout": vm.ResponseHeaderTimeout,
+			"retry_rules":             vm.RetryRules,
 			"reasoning_effort":        vm.ReasoningEffort,
 			"params":                  paramsJSON,
 			"default_params":          defaultParamsJSON,
@@ -186,6 +188,7 @@ func virtualModelFromMongo(doc mongoVirtualModelDocument) (VirtualModel, error) 
 		Slowdown:              doc.Slowdown,
 		Timeout:               doc.Timeout,
 		ResponseHeaderTimeout: doc.HeaderTimeout,
+		RetryRules:            doc.RetryRules,
 		ReasoningEffort:       doc.ReasoningEffort,
 		Params:                params,
 		DefaultParams:         defaultParams,

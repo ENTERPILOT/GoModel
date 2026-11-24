@@ -44,6 +44,13 @@ type ModelTimeoutsResolver interface {
 	ResolveTimeouts(ctx context.Context, requested core.RequestedModelSelector, resolved core.ModelSelector, route []string) core.UpstreamTimeouts
 }
 
+// ModelRetryRulesResolver optionally resolves the per-status upstream retry
+// rules for a requested/resolved model pair; route is the virtual-model path
+// resolution recorded. The context carries the effective user path.
+type ModelRetryRulesResolver interface {
+	ResolveRetryRules(ctx context.Context, requested core.RequestedModelSelector, resolved core.ModelSelector, route []string) core.UpstreamRetryRules
+}
+
 // ModelRequestOverridesResolver optionally resolves the operator-forced
 // reasoning effort and request parameters for one provider attempt:
 // resolution is the request's model resolution and attempt the concrete model

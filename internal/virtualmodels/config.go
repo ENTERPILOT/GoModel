@@ -54,6 +54,7 @@ func configModel(entry config.VirtualModelConfig) (VirtualModel, error) {
 		Slowdown:              entry.Slowdown,
 		Timeout:               entry.Timeout,
 		ResponseHeaderTimeout: entry.ResponseHeaderTimeout,
+		RetryRules:            configRetryRules(entry.RetryRules),
 		ReasoningEffort:       entry.ReasoningEffort,
 		Params:                params,
 		DefaultParams:         defaultParams,
@@ -81,4 +82,20 @@ func configTargets(entry config.VirtualModelConfig) []Target {
 		return []Target{{Model: entry.Target}}
 	}
 	return nil
+}
+
+// configRetryRules maps declarative retry rules to internal ones.
+func configRetryRules(entries []config.RetryRuleConfig) []RetryRule {
+	if len(entries) == 0 {
+		return nil
+	}
+	rules := make([]RetryRule, len(entries))
+	for i, entry := range entries {
+		rules[i] = RetryRule{
+			Status:     entry.Status,
+			MaxRetries: entry.MaxRetries,
+			Delay:      entry.Delay,
+		}
+	}
+	return rules
 }

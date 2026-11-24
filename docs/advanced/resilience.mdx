@@ -60,8 +60,10 @@ the full timeout.
 
 **Retries** fire on transport errors (connection refused, resets, DNS
 failures) and, by default, on `429`, `502`, `503`, `504`, `522`, and `524` responses. Other statuses —
-including `500` — are returned to the caller without retrying. The following paths
-retry less than the table suggests:
+including `500` — are returned to the caller without retrying. A virtual model can
+[override retry behavior per status](/features/virtual-models#set-retry-rules-per-status),
+including disabling retries for a status that would otherwise be retried. The
+following paths retry less than the table suggests:
 
 - **Local HTTP client timeouts** return immediately without retrying. An
   expired overall request context also prevents further attempts. To give one

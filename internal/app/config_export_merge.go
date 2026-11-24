@@ -88,6 +88,7 @@ func exportVirtualModels(declared []config.VirtualModelConfig, stored []virtualm
 			Slowdown:              model.Slowdown,
 			Timeout:               model.Timeout,
 			ResponseHeaderTimeout: model.ResponseHeaderTimeout,
+			RetryRules:            exportedRetryRules(model.RetryRules),
 			ReasoningEffort:       model.ReasoningEffort,
 			Params:                params,
 			DefaultParams:         defaultParams,
@@ -405,4 +406,20 @@ func isBudgetPeriodName(label string) bool {
 func isRateLimitPeriodName(label string) bool {
 	_, ok := ratelimit.PeriodSecondsFromName(label)
 	return ok
+}
+
+// exportedRetryRules maps internal retry rules back to config form.
+func exportedRetryRules(rules []virtualmodels.RetryRule) []config.RetryRuleConfig {
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make([]config.RetryRuleConfig, len(rules))
+	for i, rule := range rules {
+		out[i] = config.RetryRuleConfig{
+			Status:     rule.Status,
+			MaxRetries: rule.MaxRetries,
+			Delay:      rule.Delay,
+		}
+	}
+	return out
 }

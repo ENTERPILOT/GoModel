@@ -112,3 +112,26 @@ func (v *headerTimeoutVariants) closeIdleConnections() {
 		rt.CloseIdleConnections()
 	}
 }
+
+// AttemptRetryRule overrides retry behavior for one upstream HTTP status on
+// attempts made with a context. Operators set these per virtual model; they
+// never come from callers. A zero MaxRetries disables retries for the status.
+type AttemptRetryRule struct {
+	Status     int
+	MaxRetries int
+	Delay      time.Duration
+}
+
+type attemptRetryRulesKey struct{}
+
+// WithAttemptRetryRules attaches per-status retry overrides to ctx. An empty
+// list removes any inherited overrides so the gateway-wide policy applies.
+func WithAttemptRetryRules(ctx context.Context, rules []AttemptRetryRule) context.Context {
+	return context.WithValue(ctx, attemptRetryRulesKey{}, rules)
+}
+
+// AttemptRetryRulesFromContext returns the overrides attached to ctx.
+func AttemptRetryRulesFromContext(ctx context.Context) []AttemptRetryRule {
+	rules, _ := ctx.Value(attemptRetryRulesKey{}).([]AttemptRetryRule)
+	return rules
+}

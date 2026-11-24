@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/requestparams"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
@@ -17,11 +18,15 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		ctx := context.Background()
 
 		redirect := VirtualModel{
-			Source:          "fast",
-			Targets:         []Target{{Provider: "openai", Model: "gpt-4o", ReasoningEffort: "high"}},
-			Description:     "primary",
-			Slowdown:        new(0.4),
-			Timeout:         new(30),
+			Source:      "fast",
+			Targets:     []Target{{Provider: "openai", Model: "gpt-4o", ReasoningEffort: "high"}},
+			Description: "primary",
+			Slowdown:    new(0.4),
+			Timeout:     new(30),
+			RetryRules: []RetryRule{
+				{Status: 429, MaxRetries: 2, Delay: time.Second},
+				{Status: 500, MaxRetries: 0},
+			},
 			ReasoningEffort: "medium",
 			Params:          requestparams.Set{"chat_template_kwargs": json.RawMessage(`{"enable_thinking":true}`), "stale": nil},
 			DefaultParams:   requestparams.Set{"temperature": json.RawMessage(`1`), "stop": json.RawMessage(`["a","b"]`)},
@@ -68,6 +73,10 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		require.NotNil(t, gotRedirect.Timeout)
 		assert.Equal(t, 30, *gotRedirect.Timeout)
 		assert.Nil(t, gotRedirect.ResponseHeaderTimeout)
+		assert.Equal(t, []RetryRule{
+			{Status: 429, MaxRetries: 2, Delay: time.Second},
+			{Status: 500, MaxRetries: 0},
+		}, gotRedirect.RetryRules)
 		assert.Equal(t, "medium", gotRedirect.ReasoningEffort)
 		require.Len(t, gotRedirect.Params, 2)
 		assert.JSONEq(t, `{"enable_thinking":true}`, string(gotRedirect.Params["chat_template_kwargs"]))

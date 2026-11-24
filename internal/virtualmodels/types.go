@@ -48,6 +48,16 @@ func (t Target) selector() (core.ModelSelector, error) {
 	return core.ParseModelSelector(t.Model, t.Provider)
 }
 
+// RetryRule overrides retry behavior for one upstream HTTP status. MaxRetries
+// zero explicitly disables retries for that status, handing the failure to
+// the gateway's failover policy. Delay is a fixed wait before each retry;
+// zero waits the configured gateway backoff.
+type RetryRule struct {
+	Status     int           `json:"status" bson:"status"`
+	MaxRetries int           `json:"max_retries,omitempty" bson:"max_retries,omitempty"`
+	Delay      time.Duration `json:"delay,omitempty" bson:"delay,omitempty"`
+}
+
 // VirtualModel is one operator-defined model entry.
 type VirtualModel struct {
 	Source   string   `json:"source" bson:"_id"`
@@ -73,6 +83,10 @@ type VirtualModel struct {
 	// ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in
 	// seconds, for every upstream attempt. Nil inherits.
 	ResponseHeaderTimeout *int `json:"response_header_timeout,omitempty" bson:"response_header_timeout,omitempty"`
+	// RetryRules overrides gateway retry behavior per upstream HTTP status.
+	// Nil inherits; a rule with MaxRetries zero disables retries for its
+	// status. Each retry gets the per-attempt timeout above.
+	RetryRules []RetryRule `json:"retry_rules,omitempty" bson:"retry_rules,omitempty"`
 	// ReasoningEffort, when set, replaces the reasoning effort of every
 	// request sent upstream through this redirect or to this model, whatever
 	// the client asked for. Empty leaves the client's value untouched.
@@ -170,6 +184,9 @@ func (v VirtualModel) clone() VirtualModel {
 	}
 	v.Timeout = cloneIntPtr(v.Timeout)
 	v.ResponseHeaderTimeout = cloneIntPtr(v.ResponseHeaderTimeout)
+	if len(v.RetryRules) > 0 {
+		v.RetryRules = append([]RetryRule(nil), v.RetryRules...)
+	}
 	if len(v.Targets) > 0 {
 		v.Targets = append([]Target(nil), v.Targets...)
 	}
@@ -235,6 +252,7 @@ type View struct {
 	// ResponseHeaderTimeout is the per-attempt wait for upstream response
 	// headers in seconds; omitted inherits.
 	ResponseHeaderTimeout *int              `json:"response_header_timeout,omitempty"`
+	RetryRules            []RetryRule       `json:"retry_rules,omitempty"`
 	ReasoningEffort       string            `json:"reasoning_effort,omitempty"`
 	Params                requestparams.Set `json:"params,omitempty" swaggertype:"object"`
 	DefaultParams         requestparams.Set `json:"default_params,omitempty" swaggertype:"object"`

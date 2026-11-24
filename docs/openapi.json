@@ -15874,6 +15874,13 @@
             "minimum": 1,
             "maximum": 86400
           },
+          "retry_rules": {
+            "description": "RetryRules overrides gateway retry behavior per upstream HTTP status.\nOmitted inherits; max_retries 0 disables retries for that status.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/virtualmodels.RetryRule"
+            }
+          },
           "session_affinity": {
             "description": "SessionAffinity keeps a detected session on the target that served it\nbefore. Omitted means enabled; false restores stateless balancing.",
             "type": "boolean"
@@ -20435,6 +20442,12 @@
             "minimum": 1,
             "maximum": 86400
           },
+          "retry_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/virtualmodels.RetryRule"
+            }
+          },
           "scope_kind": {
             "type": "string"
           },
@@ -20929,6 +20942,71 @@
             "format": "date-time"
           }
         }
+      },
+      "virtualmodels.RetryRule": {
+        "type": "object",
+        "properties": {
+          "delay": {
+            "$ref": "#/components/schemas/time.Duration"
+          },
+          "max_retries": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "integer"
+          }
+        }
+      },
+      "time.Duration": {
+        "type": "integer",
+        "enum": [
+          -9223372036854776000,
+          9223372036854776000,
+          1,
+          1000,
+          1000000,
+          1000000000,
+          60000000000,
+          3600000000000,
+          -9223372036854776000,
+          9223372036854776000,
+          1,
+          1000,
+          1000000,
+          1000000000,
+          60000000000,
+          3600000000000,
+          1,
+          1000,
+          1000000,
+          1000000000,
+          60000000000,
+          3600000000000
+        ],
+        "x-enum-varnames": [
+          "minDuration",
+          "maxDuration",
+          "Nanosecond",
+          "Microsecond",
+          "Millisecond",
+          "Second",
+          "Minute",
+          "Hour",
+          "minDuration",
+          "maxDuration",
+          "Nanosecond",
+          "Microsecond",
+          "Millisecond",
+          "Second",
+          "Minute",
+          "Hour",
+          "Nanosecond",
+          "Microsecond",
+          "Millisecond",
+          "Second",
+          "Minute",
+          "Hour"
+        ]
       }
     }
   }

@@ -20,6 +20,10 @@ type RequestModelResolution struct {
 	// virtual model or model policy that matched. Zero fields inherit the
 	// gateway-wide HTTP timeouts.
 	Timeouts UpstreamTimeouts
+	// RetryRules are per-status upstream retry rules configured on the virtual
+	// model or model policy that matched. Empty means keep the gateway retry
+	// policy. Each retry gets the per-attempt timeout above.
+	RetryRules UpstreamRetryRules
 	// VirtualModelPath lists the virtual models routing passed through to
 	// reach ResolvedSelector, outermost first. It is empty when no virtual
 	// model applied.
@@ -44,6 +48,28 @@ type RequestModelResolution struct {
 type UpstreamTimeouts struct {
 	Timeout               time.Duration
 	ResponseHeaderTimeout time.Duration
+}
+
+// UpstreamRetryRule overrides retry behavior for one upstream HTTP status.
+// A rule with MaxRetries zero explicitly disables retries for its status.
+type UpstreamRetryRule struct {
+	Status     int
+	MaxRetries int
+	Delay      time.Duration
+}
+
+// UpstreamRetryRules holds the per-status retry rules resolved for one
+// request. An empty slice keeps the gateway-wide retry policy.
+type UpstreamRetryRules []UpstreamRetryRule
+
+// RuleForStatus returns the rule matching status, if one was configured.
+func (rules UpstreamRetryRules) RuleForStatus(status int) (UpstreamRetryRule, bool) {
+	for _, rule := range rules {
+		if rule.Status == status {
+			return rule, true
+		}
+	}
+	return UpstreamRetryRule{}, false
 }
 
 // CacheDerivedSelectors precomputes the strings returned by

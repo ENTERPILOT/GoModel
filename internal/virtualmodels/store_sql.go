@@ -31,6 +31,7 @@ var sqlSchema = []string{
 		slowdown DOUBLE PRECISION DEFAULT NULL,
 		timeout_seconds INTEGER DEFAULT NULL,
 		response_header_timeout_seconds INTEGER DEFAULT NULL,
+		retry_rules TEXT NOT NULL DEFAULT '[]',
 		reasoning_effort TEXT NOT NULL DEFAULT '',
 		params TEXT NOT NULL DEFAULT '',
 		default_params TEXT NOT NULL DEFAULT '',
@@ -56,19 +57,20 @@ var virtualModelMigrations = []string{
 	"ALTER TABLE virtual_models ADD COLUMN default_params TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN timeout_seconds INTEGER DEFAULT NULL",
 	"ALTER TABLE virtual_models ADD COLUMN response_header_timeout_seconds INTEGER DEFAULT NULL",
+	"ALTER TABLE virtual_models ADD COLUMN retry_rules TEXT NOT NULL DEFAULT '[]'",
 }
 
 const selectVirtualModelColumns = `
 	SELECT source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths,
-		description, slowdown, timeout_seconds, response_header_timeout_seconds, reasoning_effort, params, default_params, enabled, created_at, updated_at
+		description, slowdown, timeout_seconds, response_header_timeout_seconds, retry_rules, reasoning_effort, params, default_params, enabled, created_at, updated_at
 	FROM virtual_models
 `
 
 const upsertVirtualModelSQL = `
 	INSERT INTO virtual_models (
-		source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths, description, slowdown, timeout_seconds, response_header_timeout_seconds, reasoning_effort, params, default_params, enabled, created_at, updated_at
+		source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths, description, slowdown, timeout_seconds, response_header_timeout_seconds, retry_rules, reasoning_effort, params, default_params, enabled, created_at, updated_at
 	)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(source) DO UPDATE SET
 		targets = excluded.targets,
 		strategy = excluded.strategy,
@@ -83,6 +85,7 @@ const upsertVirtualModelSQL = `
 		slowdown = excluded.slowdown,
 		timeout_seconds = excluded.timeout_seconds,
 		response_header_timeout_seconds = excluded.response_header_timeout_seconds,
+		retry_rules = excluded.retry_rules,
 		reasoning_effort = excluded.reasoning_effort,
 		params = excluded.params,
 		default_params = excluded.default_params,
@@ -182,6 +185,10 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	retryRulesJSON, err := encodeRetryRules(vm.RetryRules)
+	if err != nil {
+		return nil, err
+	}
 	return []any{
 		strings.TrimSpace(vm.Source),
 		targetsJSON,
@@ -197,6 +204,7 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 		vm.Slowdown,
 		vm.Timeout,
 		vm.ResponseHeaderTimeout,
+		retryRulesJSON,
 		vm.ReasoningEffort,
 		paramsJSON,
 		defaultParamsJSON,
@@ -208,7 +216,7 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 
 func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 	var vm VirtualModel
-	var targets, userPaths, strategyConfig, params, defaultParams []byte
+	var targets, userPaths, strategyConfig, params, defaultParams, retryRules []byte
 	var sessionAffinity, failover string
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
@@ -226,6 +234,7 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 		&vm.Slowdown,
 		&vm.Timeout,
 		&vm.ResponseHeaderTimeout,
+		&retryRules,
 		&vm.ReasoningEffort,
 		&params,
 		&defaultParams,
@@ -243,6 +252,9 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 		return VirtualModel{}, fmt.Errorf("decode user_paths: %w", err)
 	}
 	if vm.StrategyConfig, err = decodeStrategyConfig(strategyConfig); err != nil {
+		return VirtualModel{}, err
+	}
+	if vm.RetryRules, err = decodeRetryRules(retryRules); err != nil {
 		return VirtualModel{}, err
 	}
 	if vm.Params, err = decodeParams("params", params); err != nil {
