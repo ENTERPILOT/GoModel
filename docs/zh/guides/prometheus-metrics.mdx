@@ -85,6 +85,7 @@ METRICS_ENDPOINT=/internal/prometheus
 | -------------------------------- | ---------- | --------------------------------------------------- |
 | `METRICS_ENABLED`                | `false`    | 启用/禁用指标采集                                   |
 | `METRICS_ENDPOINT`               | `/metrics` | 指标端点的 HTTP 路径                                |
+| `METRICS_REQUIRE_AUTH`           | `false`    | 指标端点需要 Bearer 凭据                             |
 | `METRICS_CALLER_USER_PATH`       | `false`    | 将用户路径加入[调用方指标](#调用方维度)             |
 | `METRICS_CALLER_USER_PATH_DEPTH` | `2`        | 保留的用户路径前几段                                |
 | `METRICS_CALLER_AUTH_KEY`        | `false`    | 加入托管 API Key 的名称                             |
@@ -262,7 +263,22 @@ try {
 
 ### 暴露指标端点
 
-与其他 HTTP 端点一样，配置主密钥后，`/metrics` 端点受主密钥认证保护。如果未配置主密钥，则无需认证即可访问该端点，Prometheus 可以在没有凭据的情况下抓取指标。
+默认情况下，即使配置了主密钥或托管 API 密钥，指标端点也会跳过认证，以便 Prometheus 无需凭据即可抓取。此时任何能访问网关的人都可以读取它，包括通过将 `/` 路由到 GoModel 的 Ingress。
+
+设置 `METRICS_REQUIRE_AUTH=true`（`metrics.require_auth: true`）可让它使用网关常规的 Bearer 认证：主密钥或任意托管 API 密钥均可通过。建议为 Prometheus 使用专用的托管密钥，而不是主密钥。网关未配置认证时，该设置不起作用。
+
+```yaml
+scrape_configs:
+  - job_name: "gomodel"
+    static_configs:
+      - targets: ["gomodel:8080"]
+    metrics_path: "/metrics"
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/gomodel-token
+```
+
+使用 Prometheus Operator 时，在 ServiceMonitor 端点上设置相同的凭据（`authorization.credentials` 引用 Secret 中的键）；Helm chart 通过 `metrics.serviceMonitor.bearerTokenSecret` 完成此配置。该 Secret 必须位于 ServiceMonitor 所在的命名空间。
 
 如果需要进一步保护指标端点：
 
