@@ -1,10 +1,13 @@
 package dashboardlogin
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,11 +19,16 @@ import (
 	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
+// recordedEvents collects authentication events. Recorders are called from
+// request goroutines; tests read events once those have returned.
 type recordedEvents struct {
+	mu     sync.Mutex
 	events []ext.AuthenticationEvent
 }
 
 func (r *recordedEvents) RecordAuthenticationEvent(event ext.AuthenticationEvent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.events = append(r.events, event)
 }
 
@@ -168,6 +176,59 @@ func TestSignInLocksOutAClientAfterRepeatedFailures(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, signIn(t, h, right, echotest.WithRemoteAddr("198.51.100.9:4321")).Code,
 		"another client still signs in")
+}
+
+// gatedBody holds a sign-in at its body read until the gate opens, reporting
+// first that the request got that far.
+type gatedBody struct {
+	arrived func()
+	gate    <-chan struct{}
+	body    io.Reader
+}
+
+func (b *gatedBody) Read(p []byte) (int, error) {
+	b.arrived()
+	<-b.gate
+	return b.body.Read(p)
+}
+
+// Requests sent together must not all have their password checked before any
+// of them counts against the limit.
+func TestSignInLimitHoldsForConcurrentRequests(t *testing.T) {
+	h, _ := newTestHandler(t, "/")
+	const requests = 4 * maxFailedAttempts
+	gate := make(chan struct{})
+	var arrived, finished sync.WaitGroup
+	var checked, refused atomic.Int32
+	errs := make([]error, requests)
+
+	for i := range requests {
+		arrived.Add(1)
+		finished.Go(func() {
+			// Either the body read or the response marks the request as
+			// having passed, or been stopped at, the limit.
+			arrive := sync.OnceFunc(arrived.Done)
+			defer arrive()
+			body := &gatedBody{arrived: arrive, gate: gate, body: strings.NewReader(`{"username":"admin","password":"wrong"}`)}
+			c, rec := echotest.Request(t, http.MethodPost, SessionPath, body, echotest.WithRemoteAddr("203.0.113.7:4321"))
+			errs[i] = h.SignIn(c)
+			switch rec.Code {
+			case http.StatusUnauthorized:
+				checked.Add(1)
+			case http.StatusTooManyRequests:
+				refused.Add(1)
+			}
+		})
+	}
+	arrived.Wait()
+	close(gate)
+	finished.Wait()
+
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
+	assert.EqualValues(t, maxFailedAttempts, checked.Load(), "only the allowed attempts have their password checked")
+	assert.EqualValues(t, requests-maxFailedAttempts, refused.Load())
 }
 
 func TestSignInSuccessForgetsEarlierFailures(t *testing.T) {

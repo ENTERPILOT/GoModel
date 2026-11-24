@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	// maxFailedAttempts failed sign-ins from one client within attemptWindow
-	// lock that client out until the window ends.
+	// maxFailedAttempts sign-ins from one client within attemptWindow, none
+	// of them successful, lock that client out until the window ends.
 	maxFailedAttempts = 10
 	attemptWindow     = 15 * time.Minute
 	// maxTrackedClients bounds the memory an attacker rotating addresses can
@@ -16,16 +16,16 @@ const (
 	maxTrackedClients = 10000
 )
 
-// attemptLimiter slows password guessing by counting failed sign-ins per
-// client address. It is per process: replicas count separately, which only
-// multiplies an attacker's budget by the replica count.
+// attemptLimiter slows password guessing by counting sign-in attempts per
+// client address until one succeeds. It is per process: replicas count
+// separately, which only multiplies an attacker's budget by the replica count.
 type attemptLimiter struct {
 	mu      sync.Mutex
 	clients map[string]*attemptRecord
 }
 
 type attemptRecord struct {
-	failures int
+	attempts int
 	expires  time.Time
 }
 
@@ -33,39 +33,30 @@ func newAttemptLimiter() *attemptLimiter {
 	return &attemptLimiter{clients: make(map[string]*attemptRecord)}
 }
 
-// retryAfter returns how long the client must wait before signing in again,
-// or zero when it may try now.
-func (l *attemptLimiter) retryAfter(clientIP string, now time.Time) time.Duration {
-	key := clientKey(clientIP)
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	record, tracked := l.clients[key]
-	if tracked && !now.Before(record.expires) {
-		delete(l.clients, key)
-		tracked = false
-	}
-	switch {
-	case tracked && record.failures >= maxFailedAttempts:
-		return record.expires.Sub(now)
-	case !tracked && len(l.clients) >= maxTrackedClients && !l.sweep(now):
-		return attemptWindow
-	}
-	return 0
-}
-
-// fail records a failed sign-in.
-func (l *attemptLimiter) fail(clientIP string, now time.Time) {
+// admit counts a sign-in attempt and returns zero, or returns how long the
+// client must wait when it has none left. The attempt is counted on the way
+// in, not once its password proves wrong, so requests a client sends at the
+// same time cannot all be checked before any of them counts.
+func (l *attemptLimiter) admit(clientIP string, now time.Time) time.Duration {
 	key := clientKey(clientIP)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if record, tracked := l.clients[key]; tracked && now.Before(record.expires) {
-		record.failures++
-		return
+		if record.attempts >= maxFailedAttempts {
+			return record.expires.Sub(now)
+		}
+		record.attempts++
+		return 0
 	}
-	l.clients[key] = &attemptRecord{failures: 1, expires: now.Add(attemptWindow)}
+	// Untracked, or tracked by a record that expired and is replaced below.
+	if _, expired := l.clients[key]; !expired && len(l.clients) >= maxTrackedClients && !l.sweep(now) {
+		return attemptWindow
+	}
+	l.clients[key] = &attemptRecord{attempts: 1, expires: now.Add(attemptWindow)}
+	return 0
 }
 
-// reset forgets a client's failures after it signed in.
+// reset forgets a client's attempts after it signed in.
 func (l *attemptLimiter) reset(clientIP string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

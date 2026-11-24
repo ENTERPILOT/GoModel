@@ -100,7 +100,7 @@ func (h *Handler) SignIn(c *echo.Context) error {
 
 	now := h.service.now()
 	clientIP := c.RealIP()
-	if wait := h.service.attempts.retryAfter(clientIP, now); wait > 0 {
+	if wait := h.service.attempts.admit(clientIP, now); wait > 0 {
 		// Not recorded: the failures that caused the lockout already are, and
 		// a locked-out client must not be able to fill the request log.
 		c.Response().Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
@@ -113,7 +113,6 @@ func (h *Handler) SignIn(c *echo.Context) error {
 		return writeError(c, core.NewInvalidRequestError("expected a JSON body with username and password", nil))
 	}
 	if !h.service.credentialsMatch(input.Username, input.Password) {
-		h.service.attempts.fail(clientIP, now)
 		h.record(c, "login", "failure", "invalid_credentials")
 		return writeError(c, core.NewAuthenticationError("", "invalid username or password").WithCode("invalid_sign_in"))
 	}
