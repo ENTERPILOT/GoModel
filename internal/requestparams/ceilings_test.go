@@ -375,8 +375,8 @@ func TestTokenCeilingBoundsLimitsInsideExtraBody(t *testing.T) {
 	}{
 		{"a limit above the ceiling", `{"max_tokens":50000,"top_k":20}`, `{"max_tokens":100,"top_k":20}`},
 		{"every spelling, in any letter case", `{"MAX_TOKENS":9000,"max_completion_tokens":9000,"Max_Output_Tokens":9000}`, `{"MAX_TOKENS":100,"max_completion_tokens":100,"Max_Output_Tokens":100}`},
-		{"a null would lift the limit once merged", `{"max_tokens":null}`, `{"max_tokens":100}`},
-		{"a value that is no limit", `{"max_tokens":"all"}`, `{"max_tokens":100}`},
+		{"a null would lift the limit once merged, so it is dropped", `{"max_tokens":null,"top_k":20}`, `{"top_k":20}`},
+		{"a value that is no limit is dropped", `{"max_tokens":"all","MAX_TOKENS":0,"max_completion_tokens":1.5}`, `{}`},
 		{"a limit within the ceiling is the client's own", `{"max_tokens":64,"top_k":20}`, `{"max_tokens":64,"top_k":20}`},
 		{"no limit inside", `{"top_k":20}`, `{"top_k":20}`},
 	}
@@ -412,6 +412,7 @@ func TestTokenCeilingBoundsLimitsInsideExtraBody(t *testing.T) {
 				assert.JSONEq(t, `{"max_tokens":100}`, string(value))
 			}
 		}
+		require.Len(t, capped.ExtraFields.LookupAll("Extra_Body"), 1)
 		assert.Len(t, capped.ExtraFields.LookupAll("extra_body"), 2)
 	})
 

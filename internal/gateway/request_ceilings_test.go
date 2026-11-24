@@ -136,6 +136,23 @@ func TestChatRequestWithCeilingsReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestEffortCeilingKeepsTheOtherMembersOfAReasoningObjectInExtraBody(t *testing.T) {
+	ceilings := requestparams.Ceilings{ReasoningEffort: "low"}
+
+	req := &core.ChatRequest{Model: "m", ExtraFields: rawFields(t, `{"extra_body":{"reasoning":{"effort":"high","summary":"auto"},"top_k":20}}`)}
+	capped, err := ChatRequestWithCeilings(req, ceilings)
+	require.NoError(t, err)
+	require.NotNil(t, capped.Reasoning)
+	assert.Equal(t, "low", capped.Reasoning.Effort)
+	assert.JSONEq(t, `{"reasoning":{"summary":"auto"},"top_k":20}`, string(capped.ExtraFields.Lookup("extra_body")))
+
+	withoutEffort := &core.ChatRequest{Model: "m", Reasoning: &core.Reasoning{Effort: "high"}, ExtraFields: rawFields(t, `{"extra_body":{"reasoning":{"summary":"auto"}}}`)}
+	capped, err = ChatRequestWithCeilings(withoutEffort, ceilings)
+	require.NoError(t, err)
+	assert.Equal(t, "low", capped.Reasoning.Effort)
+	assert.JSONEq(t, `{"reasoning":{"summary":"auto"}}`, string(capped.ExtraFields.Lookup("extra_body")), "an object that sets no effort is no control")
+}
+
 func TestResponsesRequestWithCeilings(t *testing.T) {
 	ceilings := requestparams.Ceilings{ReasoningEffort: "medium", OutputTokens: 100}
 

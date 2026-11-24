@@ -191,9 +191,11 @@ const extraBodyField = "extra_body"
 
 // capExtraBodyTokens returns fields with every token limit inside an
 // extra_body member within limit, in any letter case and every occurrence
-// of a repeated member. One that is not a whole number from 1 to limit is
-// replaced by limit, null included: merged over the capped member, it would
-// lift the limit. capped is false when nothing changed.
+// of a repeated member. A whole number above limit is lowered to it. A
+// value that is no limit (null, a string, a fraction, a number below 1) is
+// dropped: merged over the capped member it would lift the limit, and
+// writing limit there could raise a lower one the request sets. capped is
+// false when nothing changed.
 func capExtraBodyTokens(fields core.UnknownJSONFields, limit int) (_ core.UnknownJSONFields, capped bool) {
 	rewritten := fields.Rewritten(func(name string, value json.RawMessage) json.RawMessage {
 		if !strings.EqualFold(name, extraBodyField) {
@@ -202,6 +204,9 @@ func capExtraBodyTokens(fields core.UnknownJSONFields, limit int) (_ core.Unknow
 		body, changed := core.RewriteJSONObject(value, func(member string, raw json.RawMessage) json.RawMessage {
 			if !isTokenLimitSpelling(member) || isTokenLimitWithin(raw, limit) {
 				return raw
+			}
+			if n, err := strconv.Atoi(string(bytes.TrimSpace(raw))); err != nil || n < 1 {
+				return nil
 			}
 			return json.RawMessage(strconv.Itoa(limit))
 		})

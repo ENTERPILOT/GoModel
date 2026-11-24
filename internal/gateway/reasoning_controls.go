@@ -86,13 +86,19 @@ var (
 	// clientControls are every reasoning control a request carries next to
 	// the typed reasoning.effort. A re-cased "reasoning" is one of them: the
 	// decoder reads it into the typed field and keeps the member too. Inside
-	// extra_body a "reasoning" object is one in any spelling, since the
-	// decoder reads none of it.
+	// extra_body the decoder reads none of a "reasoning" object, so only its
+	// effort is a control there and its other members stay.
 	clientControls = &controls{
-		reader: clientBodyControls,
+		reader: func(name string) effortReader {
+			if name == "reasoning" {
+				return readReasoningObjectEffort
+			}
+			return bodyControls(name)
+		},
 		objects: map[string]*controls{
 			chatTemplateKwargsField: templateControls,
-			"extra_body": {reader: clientBodyControls, objects: map[string]*controls{
+			"extra_body": {reader: bodyControls, objects: map[string]*controls{
+				"reasoning":             {reader: readers(readFlatEffort, "effort")},
 				chatTemplateKwargsField: templateControls,
 				"google":                googleControls,
 			}},
@@ -107,15 +113,6 @@ var (
 		},
 	}
 )
-
-// clientBodyControls reads a "reasoning" object next to what bodyControls
-// reads.
-func clientBodyControls(name string) effortReader {
-	if name == "reasoning" {
-		return readReasoningObjectEffort
-	}
-	return bodyControls(name)
-}
 
 // bodyControls reads the flat reasoning_effort and the provider-specific
 // controls, at the top level of the body or inside extra_body.
