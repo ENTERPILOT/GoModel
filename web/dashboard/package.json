@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "chart.js": "^4.6.1",
-    "lucide": "^1.72.0",
+    "lucide": "^1.74.0",
     "svelte": "^5.57.3"
   },
   "devDependencies": {
