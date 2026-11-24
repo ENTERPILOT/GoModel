@@ -150,6 +150,15 @@ func TestSecretRotationWithoutReloadHook(t *testing.T) {
 
 func TestSecretRotationWatchesNotifications(t *testing.T) {
 	h := newRotationHarness(t, nil)
+	// Hold the first check until every notification is sent. Otherwise fast
+	// checks keep pace with the loop below and each one consumes another
+	// notification, so the count has no bound.
+	release := make(chan struct{})
+	plan := h.rotation.planKeys
+	h.rotation.planKeys = func(recheck *config.SecretRecheck) keySwap {
+		<-release
+		return plan(recheck)
+	}
 	h.rotation.start(t.Context())
 	t.Cleanup(func() { assert.NoError(t, h.rotation.Close()) })
 
@@ -157,6 +166,7 @@ func TestSecretRotationWatchesNotifications(t *testing.T) {
 	for range 50 {
 		h.rotation.secrets.NotifyChanged()
 	}
+	close(release)
 	select {
 	case <-h.reloads:
 	case <-time.After(5 * time.Second):
