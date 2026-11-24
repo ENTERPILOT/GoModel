@@ -198,7 +198,9 @@ die Obergrenze höchstens so hoch sein, wie das Modell akzeptiert. Ein
 Limit, das nur in einer Schreibweise gesendet wird, die der Endpunkt nicht
 kennt (`max_output_tokens` bei Chat Completions, `max_tokens` bei der Responses
 API), wird in das eigene Feld des Endpunkts übernommen, und ein Wert, der keine
-ganze Zahl ab 1 ist, wird durch die Obergrenze ersetzt. Ein Limit, dessen Name
+ganze Zahl ab 1 ist, wird durch die Obergrenze ersetzt. Innerhalb von
+`extra_body` wird ein solcher Wert stattdessen entfernt, damit er das Limit,
+das der Request auf oberster Ebene setzt, nicht aufheben kann. Ein Limit, dessen Name
 in anderer Groß-/Kleinschreibung steht (`MAX_TOKENS`), wird nicht upstream
 gesendet; liegt es innerhalb der Obergrenze, senkt es zuvor das Limit des
 Requests, sodass eine Obergrenze nie ein vom Client gesendetes Limit anhebt. Die

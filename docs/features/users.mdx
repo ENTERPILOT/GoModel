@@ -187,7 +187,9 @@ model without a known maximum, keep the ceiling at or below what the model
 accepts. A limit sent only in a spelling the
 endpoint does not have (`max_output_tokens` on Chat Completions, `max_tokens`
 on the Responses API) is moved to the endpoint's own field, and a value that is
-not a whole number of at least 1 is replaced by the ceiling. A limit whose name
+not a whole number of at least 1 is replaced by the ceiling. Inside
+`extra_body` such a value is dropped instead, so that it cannot lift the limit
+the request sets at the top level. A limit whose name
 is in another letter case (`MAX_TOKENS`) is not sent upstream; when it is within
 the ceiling it lowers the request's limit first, so a ceiling never raises a
 limit the client sent. The effort ceiling only lowers an effort

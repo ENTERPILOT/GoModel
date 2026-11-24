@@ -186,7 +186,9 @@ odrzuciłby limit; dla modelu bez znanego maksimum ustaw limit nie wyżej, niż
 model przyjmuje. Limit wysłany tylko w pisowni, której endpoint nie ma
 (`max_output_tokens` w Chat Completions, `max_tokens` w Responses API), jest
 przenoszony do własnego pola endpointu, a wartość, która nie jest liczbą
-całkowitą równą co najmniej 1, jest zastępowana limitem. Limit, którego nazwa
+całkowitą równą co najmniej 1, jest zastępowana limitem. Wewnątrz `extra_body`
+taka wartość jest zamiast tego usuwana, aby nie mogła znieść limitu, który
+request ustawia na najwyższym poziomie. Limit, którego nazwa
 ma inną wielkość liter (`MAX_TOKENS`), nie jest wysyłany do upstreamu; jeśli
 mieści się w limicie, najpierw obniża limit requestu, więc limit nigdy nie
 podnosi wartości wysłanej przez klienta. Limit effortu tylko

@@ -50,6 +50,15 @@ func TestChatRequestTranslatesReasoningEffortToThinking(t *testing.T) {
 			extras: map[string]json.RawMessage{"thinking": json.RawMessage(`{"type":"enabled","token_budget":500}`)},
 			want:   `{"type":"enabled","token_budget":500}`,
 		},
+		{
+			name: "review request: a null control is no control", model: reasoner, effort: "none",
+			extras: map[string]json.RawMessage{"thinking": json.RawMessage(`null`)},
+			want:   `{"type":"disabled"}`,
+		},
+		{
+			name: "a null control without an effort is left out", model: reasoner,
+			extras: map[string]json.RawMessage{"thinking": json.RawMessage(` null `)},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
