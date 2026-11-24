@@ -551,10 +551,11 @@ gdy skonfigurowany jest master key.
   `GOMODEL_MASTER_KEY` jest pusty, zamiast pozostawać otwarte.
 - Dostęp do API modeli się nie zmienia. Master key i zarządzane klucze API
   działają dalej, również na `/admin/*`, a gateway bez żadnego z nich nadal
-  obsługuje requesty do modeli bez uwierzytelniania.
+  obsługuje requesty do modeli bez uwierzytelniania. Sesja uwierzytelnia też
+  requesty do modeli wysyłane z Playgroundu w dashboardzie.
 - Dziesięć nieudanych prób logowania z jednego adresu klienta blokuje ten adres
-  na maksymalnie 15 minut. Zalogowania i wylogowania są zapisywane w logu
-  requestów.
+  na maksymalnie 15 minut; każda replika liczy osobno. Zalogowania i
+  wylogowania są zapisywane w logu requestów.
 - Sesje są bezstanowe: repliki uruchomione z tą samą nazwą użytkownika i hasłem
   akceptują nawzajem swoje sesje. Zmiana którejkolwiek z tych wartości kończy
   wszystkie sesje. Wylogowanie usuwa ciasteczko tylko w danej przeglądarce.

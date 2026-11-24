@@ -546,9 +546,11 @@ while a master key is configured.
   `GOMODEL_MASTER_KEY` is empty, instead of staying open.
 - Model API access does not change. The master key and managed API keys keep
   working, on `/admin/*` too, and a gateway with neither still serves model
-  requests without a credential.
+  requests without a credential. A session also authenticates the model calls
+  the dashboard's playground makes.
 - Ten failed sign-ins from one client address lock that address out for up to
-  15 minutes. Sign-ins and sign-outs are recorded in the request log.
+  15 minutes; each replica counts on its own. Sign-ins and sign-outs are
+  recorded in the request log.
 - Sessions are stateless: replicas started with the same username and password
   accept each other's sessions. Changing either value ends every session.
   Signing out clears the cookie in that browser only.

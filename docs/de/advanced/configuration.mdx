@@ -584,8 +584,8 @@ admin:
 ```
 
 Die Anmeldung startet eine 24-stündige Sitzung, die in einem `HttpOnly`-Cookie
-mit `SameSite=Strict` liegt. Eine Sitzung darf dasselbe wie ein verwalteter Key
-mit Dashboard-Zugriff und ohne User-Path: alles im Dashboard, außer
+mit `SameSite=Strict` liegt. Eine Sitzung hat dieselben Rechte wie ein
+verwalteter Key mit Dashboard-Zugriff und ohne User-Path: alles im Dashboard, außer
 [Secret-Referenzen](/de/advanced/secret-references#im-dashboard-verwaltete-zugangsdaten)
 hinzuzufügen, solange ein Master-Key konfiguriert ist.
 
@@ -595,10 +595,12 @@ hinzuzufügen, solange ein Master-Key konfiguriert ist.
   `GOMODEL_MASTER_KEY` leer ist, statt offen zu bleiben.
 - Der Zugriff auf die Modell-API ändert sich nicht. Master-Key und verwaltete
   API-Keys funktionieren weiterhin, auch auf `/admin/*`, und ein Gateway ohne
-  beides beantwortet Modell-Requests weiterhin ohne Zugangsdaten.
+  beides beantwortet Modell-Requests weiterhin ohne Zugangsdaten. Eine Sitzung
+  authentifiziert außerdem die Modell-Requests, die der Playground des
+  Dashboards sendet.
 - Zehn fehlgeschlagene Anmeldungen von einer Client-Adresse sperren diese
-  Adresse für bis zu 15 Minuten. An- und Abmeldungen werden im Request-Log
-  festgehalten.
+  Adresse für bis zu 15 Minuten; jedes Replikat zählt für sich. An- und
+  Abmeldungen werden im Request-Log festgehalten.
 - Sitzungen sind zustandslos: Replikate, die mit demselben Benutzernamen und
   Passwort gestartet wurden, akzeptieren die Sitzungen der anderen. Eine
   Änderung eines der beiden Werte beendet alle Sitzungen. Die Abmeldung löscht
