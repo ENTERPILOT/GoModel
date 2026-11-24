@@ -520,9 +520,11 @@ outside the replay window, the dashboard reloads from the normal REST APIs.
 #### Dashboard login
 
 Without a password, the dashboard asks for an API key (the master key, or a
-managed key with dashboard access), and is open on a gateway that has no master
-key. Set `DASHBOARD_PASSWORD` to sign in with a username and password instead,
-so the people who use the dashboard do not need the master key:
+managed key with dashboard access). With an empty `GOMODEL_MASTER_KEY` it is
+open instead, unless the master key is
+[disabled](#disabling-the-master-key) or an authentication extension is
+configured. Set `DASHBOARD_PASSWORD` to sign in with a username and password
+instead, so the people who use the dashboard do not need the master key:
 
 ```bash
 DASHBOARD_PASSWORD=change-me

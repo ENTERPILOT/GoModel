@@ -525,9 +525,12 @@ spoza okna odtwarzania, dashboard przeładuje dane przez standardowe REST API.
 #### Logowanie do dashboardu
 
 Bez hasła dashboard prosi o klucz API (master key albo zarządzany klucz z
-dostępem do dashboardu), a na gatewayu bez master key jest otwarty. Ustaw
-`DASHBOARD_PASSWORD`, żeby logować się nazwą użytkownika i hasłem, tak aby
-osoby korzystające z dashboardu nie potrzebowały master key:
+dostępem do dashboardu). Przy pustym `GOMODEL_MASTER_KEY` jest natomiast
+otwarty, chyba że master key jest
+[wyłączony](#wyłączanie-master-key) albo skonfigurowano rozszerzenie
+uwierzytelniające. Ustaw `DASHBOARD_PASSWORD`, żeby logować się nazwą
+użytkownika i hasłem, tak aby osoby korzystające z dashboardu nie potrzebowały
+master key:
 
 ```bash
 DASHBOARD_PASSWORD=change-me
