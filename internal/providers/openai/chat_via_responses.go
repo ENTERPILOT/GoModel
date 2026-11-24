@@ -146,8 +146,8 @@ func carriesChatOnlyFields(fields core.UnknownJSONFields, assistantMessage bool)
 }
 
 // sentEffort returns the reasoning effort OpenAI is sent for req on either
-// route: the requested one as the model takes it, or "" when req asks for
-// none.
+// route: the requested one as the model takes it, or "" when req names no
+// effort.
 func sentEffort(req *core.ChatRequest) string {
 	effort := requestedEffort(req)
 	if effort == "" {
