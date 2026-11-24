@@ -43,15 +43,33 @@ func TestAttemptLimiterReleaseGivesBackOneAttempt(t *testing.T) {
 	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
 	const client = "203.0.113.7"
 
-	limiter.release(client) // an untracked client has nothing to give back
+	limiter.release(client, now) // an untracked client has nothing to give back
 	for range maxFailedAttempts {
 		limiter.admit(client, now)
 	}
 	require.NotZero(t, limiter.admit(client, now))
 
-	limiter.release(client)
+	limiter.release(client, now)
 	assert.Zero(t, limiter.admit(client, now), "the released attempt is available again")
 	assert.NotZero(t, limiter.admit(client, now), "and only that one")
+}
+
+// A sign-in admitted in one window and turned away after the next one began
+// must not take an attempt off the new window's count.
+func TestAttemptLimiterReleaseLeavesALaterWindowAlone(t *testing.T) {
+	limiter := newAttemptLimiter()
+	admitted := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	later := admitted.Add(attemptWindow)
+	const client = "203.0.113.7"
+
+	limiter.admit(client, admitted)
+	for range maxFailedAttempts {
+		limiter.admit(client, later)
+	}
+	require.NotZero(t, limiter.admit(client, later))
+
+	limiter.release(client, admitted)
+	assert.NotZero(t, limiter.admit(client, later), "the new window keeps every attempt it counted")
 }
 
 func TestAttemptLimiterCountsAnIPv6SubnetAsOneClient(t *testing.T) {
