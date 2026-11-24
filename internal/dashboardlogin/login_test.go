@@ -68,9 +68,28 @@ func TestCredentialsMatch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, service.credentialsMatch(tt.username, tt.password))
+			got, err := service.credentialsMatch(tt.username, tt.password)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+// Password checks run one at a time; a sign-in that would only join a long
+// line behind them is refused unchecked instead of held open.
+func TestCredentialsMatchRefusesWhenTooManyAreWaiting(t *testing.T) {
+	service := newTestService(t)
+	for range maxPendingChecks {
+		service.checks <- struct{}{}
+	}
+
+	_, err := service.credentialsMatch(testUsername, testPassword)
+	require.ErrorIs(t, err, errBusy)
+
+	<-service.checks
+	got, err := service.credentialsMatch(testUsername, testPassword)
+	require.NoError(t, err)
+	assert.True(t, got)
 }
 
 func TestSessionTokenLifetime(t *testing.T) {

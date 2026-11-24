@@ -3207,6 +3207,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
                     }
                 }
             },

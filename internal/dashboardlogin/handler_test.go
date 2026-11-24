@@ -199,7 +199,7 @@ func TestSignInLimitHoldsForConcurrentRequests(t *testing.T) {
 	const requests = 4 * maxFailedAttempts
 	gate := make(chan struct{})
 	var arrived, finished sync.WaitGroup
-	var checked, refused atomic.Int32
+	var admitted, refused atomic.Int32
 	errs := make([]error, requests)
 
 	for i := range requests {
@@ -213,8 +213,9 @@ func TestSignInLimitHoldsForConcurrentRequests(t *testing.T) {
 			c, rec := echotest.Request(t, http.MethodPost, SessionPath, body, echotest.WithRemoteAddr("203.0.113.7:4321"))
 			errs[i] = h.SignIn(c)
 			switch rec.Code {
-			case http.StatusUnauthorized:
-				checked.Add(1)
+			case http.StatusUnauthorized, http.StatusServiceUnavailable:
+				// Checked, or turned away from the line for the check.
+				admitted.Add(1)
 			case http.StatusTooManyRequests:
 				refused.Add(1)
 			}
@@ -227,8 +228,23 @@ func TestSignInLimitHoldsForConcurrentRequests(t *testing.T) {
 	for _, err := range errs {
 		require.NoError(t, err)
 	}
-	assert.EqualValues(t, maxFailedAttempts, checked.Load(), "only the allowed attempts have their password checked")
+	assert.EqualValues(t, maxFailedAttempts, admitted.Load(), "only the allowed attempts get as far as the password check")
 	assert.EqualValues(t, requests-maxFailedAttempts, refused.Load())
+}
+
+func TestSignInAsksToRetryWhenTooManyAreWaiting(t *testing.T) {
+	h, events := newTestHandler(t, "/")
+	for range maxPendingChecks {
+		h.service.checks <- struct{}{}
+	}
+
+	rec := signIn(t, h, credentials{Username: testUsername, Password: testPassword})
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Equal(t, "sign_in_busy", errorCode(t, rec))
+	assert.Equal(t, "1", rec.Header().Get("Retry-After"))
+	assert.Empty(t, rec.Result().Cookies())
+	assert.Empty(t, events.events)
 }
 
 func TestSignInSuccessForgetsEarlierFailures(t *testing.T) {

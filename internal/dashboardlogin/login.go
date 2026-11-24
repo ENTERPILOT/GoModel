@@ -48,7 +48,15 @@ const (
 	keyThreads = 1
 	keyLength  = 32
 	keySalt    = "gomodel/dashboard-session/v1\x00"
+
+	// maxPendingChecks bounds the sign-ins waiting for their password to be
+	// checked. Checks run one at a time, so a longer line would only hold
+	// requests open behind a flood; past it a sign-in is told to retry.
+	maxPendingChecks = 4
 )
+
+// errBusy reports that too many sign-ins are waiting to be checked.
+var errBusy = errors.New("too many sign-ins in progress")
 
 // Service verifies dashboard credentials and the sessions issued for them. It
 // is safe for concurrent use.
@@ -56,8 +64,9 @@ type Service struct {
 	username string
 	key      []byte
 	// deriving admits one key derivation at a time: each takes keyMemory,
-	// and sign-ins are rare.
+	// and sign-ins are rare. checks holds a slot per sign-in waiting for it.
 	deriving sync.Mutex
+	checks   chan struct{}
 	attempts *attemptLimiter
 	recorder atomic.Pointer[ext.AuthenticationEventRecorder]
 	now      func() time.Time
@@ -75,6 +84,7 @@ func New(username, password string) (*Service, error) {
 	return &Service{
 		username: username,
 		key:      deriveKey(username, password),
+		checks:   make(chan struct{}, maxPendingChecks),
 		attempts: newAttemptLimiter(),
 		now:      time.Now,
 	}, nil
@@ -133,13 +143,20 @@ func (s *Service) session(request *http.Request) (time.Time, bool) {
 // configured ones. The password is never compared directly: it is stretched
 // into the key the configured password produced, and the keys are compared in
 // constant time. Both values are always checked, so a wrong username answers
-// no faster than a wrong password.
-func (s *Service) credentialsMatch(username, password string) bool {
+// no faster than a wrong password. It returns errBusy, without checking, when
+// maxPendingChecks sign-ins are already waiting.
+func (s *Service) credentialsMatch(username, password string) (bool, error) {
+	select {
+	case s.checks <- struct{}{}:
+		defer func() { <-s.checks }()
+	default:
+		return false, errBusy
+	}
 	usernameOK := subtle.ConstantTimeCompare([]byte(strings.TrimSpace(username)), []byte(s.username))
 	s.deriving.Lock()
 	key := deriveKey(s.username, password)
 	s.deriving.Unlock()
-	return usernameOK&subtle.ConstantTimeCompare(key, s.key) == 1
+	return usernameOK&subtle.ConstantTimeCompare(key, s.key) == 1, nil
 }
 
 // issue returns a session token and the time it expires.

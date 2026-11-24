@@ -90,6 +90,7 @@ func (h *Handler) Session(c *echo.Context) error {
 // @Failure      401  {object}  core.GatewayError
 // @Failure      403  {object}  core.GatewayError
 // @Failure      429  {object}  core.GatewayError
+// @Failure      503  {object}  core.GatewayError
 // @Router       /admin/session [post]
 func (h *Handler) SignIn(c *echo.Context) error {
 	request := c.Request()
@@ -112,7 +113,12 @@ func (h *Handler) SignIn(c *echo.Context) error {
 	if err != nil || len(body) > maxCredentialsBytes || json.Unmarshal(body, &input) != nil {
 		return writeError(c, core.NewInvalidRequestError("expected a JSON body with username and password", nil))
 	}
-	if !h.service.credentialsMatch(input.Username, input.Password) {
+	match, err := h.service.credentialsMatch(input.Username, input.Password)
+	if err != nil {
+		c.Response().Header().Set("Retry-After", "1")
+		return writeError(c, core.NewInvalidRequestErrorWithStatus(http.StatusServiceUnavailable, "too many sign-ins in progress; try again", nil).WithCode("sign_in_busy"))
+	}
+	if !match {
 		h.record(c, "login", "failure", "invalid_credentials")
 		return writeError(c, core.NewAuthenticationError("", "invalid username or password").WithCode("invalid_sign_in"))
 	}
