@@ -1,20 +1,26 @@
 name: CI
 
-# Changes that touch only docs/, helm/ or Markdown files skip this workflow:
-# docs.yml and helm.yml check those.
+# Changes that touch only docs/, helm/ or Markdown files skip this workflow.
+# docs.yml validates docs/ and helm.yml the chart; other Markdown has no check.
+# docs/example_plugins stays in: it is Go code the e2e suite builds and loads.
+# Later patterns win, so the order matters.
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "helm/**"
-      - "**/*.md"
+    paths:
+      - "**"
+      - "!docs/**"
+      - "docs/example_plugins/**"
+      - "!helm/**"
+      - "!**/*.md"
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "helm/**"
-      - "**/*.md"
+    paths:
+      - "**"
+      - "!docs/**"
+      - "docs/example_plugins/**"
+      - "!helm/**"
+      - "!**/*.md"
 
 # Cancel redundant runs on the same branch
 concurrency:
@@ -58,8 +64,10 @@ jobs:
             echo "source=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          changed=$(git diff --name-only HEAD^1 HEAD)
-          if grep -qvE '(_test\.go$|^tests/|/testdata/)' <<< "$changed"; then
+          # --no-renames lists both sides of a rename, so moving a source file
+          # into a test path still counts as a source change.
+          changed=$(git diff --name-only --no-renames HEAD^1 HEAD)
+          if grep -qvE '(_test\.go$|^tests/|(^|/)testdata/)' <<< "$changed"; then
             echo "source=true" >> "$GITHUB_OUTPUT"
           else
             echo "source=false" >> "$GITHUB_OUTPUT"

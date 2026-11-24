@@ -1,16 +1,16 @@
 name: CodeQL
 
+# Pull requests that change only prose skip the scan. Pushes to main are never
+# filtered: code scanning compares a pull request with the analysis of its base
+# commit, and a skipped push leaves that commit without one.
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
   pull_request:
     branches: [main]
     paths-ignore:
-      - "docs/**"
       - "**/*.md"
+      - "**/*.mdx"
   schedule:
     - cron: "31 3 * * 1"
 
