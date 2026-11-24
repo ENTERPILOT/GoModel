@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/goccy/go-json"
 
@@ -60,9 +61,9 @@ func (c Ceilings) Tighten(other Ceilings) Ceilings {
 // own max_output_tokens when that is within the ceiling (chat has no such
 // member, so alone it would limit nothing upstream), otherwise the ceiling,
 // or the model's own maximum when that is lower. Every spelling the request
-// does carry is lowered to the ceiling in place. The request is never
-// mutated: the result is req itself when it is already within the ceiling and
-// spells no limit in another letter case.
+// does carry is lowered to the ceiling in place, one inside extra_body
+// included. The request is never mutated: the result is req itself when it
+// is already within the ceiling and spells no limit in another letter case.
 func CapChatTokens(req *core.ChatRequest, ceilings Ceilings) (*core.ChatRequest, error) {
 	limit := ceilings.OutputTokens
 	if req == nil || limit <= 0 {
@@ -72,6 +73,11 @@ func CapChatTokens(req *core.ChatRequest, ceilings Ceilings) (*core.ChatRequest,
 		limit = lowestTokenLimit(req.ExtraFields, limit, respelled)
 		cloned := *req
 		cloned.ExtraFields = req.ExtraFields.Without(respelled...)
+		req = &cloned
+	}
+	if fields, capped := capExtraBodyTokens(req.ExtraFields, limit); capped {
+		cloned := *req
+		cloned.ExtraFields = fields
 		req = &cloned
 	}
 	if req.MaxTokens == nil && !carriesTokenLimit(req.ExtraFields, "max_completion_tokens") {
@@ -98,6 +104,11 @@ func CapResponsesTokens(req *core.ResponsesRequest, ceilings Ceilings) (*core.Re
 		limit = lowestTokenLimit(req.ExtraFields, limit, respelled)
 		cloned := *req
 		cloned.ExtraFields = req.ExtraFields.Without(respelled...)
+		req = &cloned
+	}
+	if fields, capped := capExtraBodyTokens(req.ExtraFields, limit); capped {
+		cloned := *req
+		cloned.ExtraFields = fields
 		req = &cloned
 	}
 	if req.MaxOutputTokens == nil {
@@ -159,13 +170,51 @@ func filledTokenLimit(fields core.UnknownJSONFields, limit int, ceilings Ceiling
 // boundedTokenLimit).
 func carriesTokenLimitWithin(fields core.UnknownJSONFields, limit int, keys []string) bool {
 	for _, key := range keys {
-		for _, raw := range fields.LookupAll(key) {
-			if n, err := strconv.Atoi(string(bytes.TrimSpace(raw))); err == nil && n >= 1 && n <= limit {
-				return true
-			}
+		if slices.ContainsFunc(fields.LookupAll(key), func(raw json.RawMessage) bool { return isTokenLimitWithin(raw, limit) }) {
+			return true
 		}
 	}
 	return false
+}
+
+// isTokenLimitWithin reports whether raw is a whole number from 1 to limit.
+func isTokenLimitWithin(raw json.RawMessage, limit int) bool {
+	n, err := strconv.Atoi(string(bytes.TrimSpace(raw)))
+	return err == nil && n >= 1 && n <= limit
+}
+
+// extraBodyField is the member a client library folds into the request it
+// sends. One that arrives as a member of its own is forwarded as it is, and
+// an upstream that is itself a proxy merges it into the body it sends on, so
+// a token limit inside it is one more spelling of the limit.
+const extraBodyField = "extra_body"
+
+// capExtraBodyTokens returns fields with every token limit inside an
+// extra_body member within limit, in any letter case and every occurrence
+// of a repeated member. One that is not a whole number from 1 to limit is
+// replaced by limit, null included: merged over the capped member, it would
+// lift the limit. capped is false when nothing changed.
+func capExtraBodyTokens(fields core.UnknownJSONFields, limit int) (_ core.UnknownJSONFields, capped bool) {
+	rewritten := fields.Rewritten(func(name string, value json.RawMessage) json.RawMessage {
+		if !strings.EqualFold(name, extraBodyField) {
+			return value
+		}
+		body, changed := core.RewriteJSONObject(value, func(member string, raw json.RawMessage) json.RawMessage {
+			if !isTokenLimitSpelling(member) || isTokenLimitWithin(raw, limit) {
+				return raw
+			}
+			return json.RawMessage(strconv.Itoa(limit))
+		})
+		capped = capped || changed
+		return body
+	})
+	return rewritten, capped
+}
+
+// isTokenLimitSpelling reports whether name spells a token limit in any
+// letter case.
+func isTokenLimitSpelling(name string) bool {
+	return slices.ContainsFunc(tokenLimitSpellings, func(key string) bool { return strings.EqualFold(key, name) })
 }
 
 // forcedTokenLimit is the parameter set that writes limit as the request's

@@ -367,6 +367,63 @@ func TestCapChatTokensBoundsEveryOccurrenceOfARepeatedMember(t *testing.T) {
 	}
 }
 
+func TestTokenCeilingBoundsLimitsInsideExtraBody(t *testing.T) {
+	tests := []struct {
+		name      string
+		extraBody string
+		want      string
+	}{
+		{"a limit above the ceiling", `{"max_tokens":50000,"top_k":20}`, `{"max_tokens":100,"top_k":20}`},
+		{"every spelling, in any letter case", `{"MAX_TOKENS":9000,"max_completion_tokens":9000,"Max_Output_Tokens":9000}`, `{"MAX_TOKENS":100,"max_completion_tokens":100,"Max_Output_Tokens":100}`},
+		{"a null would lift the limit once merged", `{"max_tokens":null}`, `{"max_tokens":100}`},
+		{"a value that is no limit", `{"max_tokens":"all"}`, `{"max_tokens":100}`},
+		{"a limit within the ceiling is the client's own", `{"max_tokens":64,"top_k":20}`, `{"max_tokens":64,"top_k":20}`},
+		{"no limit inside", `{"top_k":20}`, `{"top_k":20}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{"model":"m","max_tokens":50,"extra_body":` + tt.extraBody + `}`
+			var chat core.ChatRequest
+			require.NoError(t, json.Unmarshal([]byte(body), &chat))
+			cappedChat, err := CapChatTokens(&chat, Ceilings{OutputTokens: 100})
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.want, string(cappedChat.ExtraFields.Lookup("extra_body")))
+			require.NotNil(t, cappedChat.MaxTokens)
+			assert.Equal(t, 50, *cappedChat.MaxTokens)
+
+			body = `{"model":"m","input":"hi","extra_body":` + tt.extraBody + `}`
+			var responses core.ResponsesRequest
+			require.NoError(t, json.Unmarshal([]byte(body), &responses))
+			cappedResponses, err := CapResponsesTokens(&responses, Ceilings{OutputTokens: 100})
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.want, string(cappedResponses.ExtraFields.Lookup("extra_body")))
+			require.NotNil(t, cappedResponses.MaxOutputTokens)
+			assert.Equal(t, 100, *cappedResponses.MaxOutputTokens)
+		})
+	}
+
+	t.Run("every occurrence of a repeated or re-cased extra_body", func(t *testing.T) {
+		var req core.ChatRequest
+		require.NoError(t, json.Unmarshal([]byte(`{"model":"m","extra_body":{"max_tokens":9000},"Extra_Body":{"max_tokens":8000},"extra_body":{"max_tokens":7000}}`), &req))
+		capped, err := CapChatTokens(&req, Ceilings{OutputTokens: 100})
+		require.NoError(t, err)
+		for _, name := range []string{"extra_body", "Extra_Body"} {
+			for _, value := range capped.ExtraFields.LookupAll(name) {
+				assert.JSONEq(t, `{"max_tokens":100}`, string(value))
+			}
+		}
+		assert.Len(t, capped.ExtraFields.LookupAll("extra_body"), 2)
+	})
+
+	t.Run("a request within the ceiling is returned as it is", func(t *testing.T) {
+		var req core.ChatRequest
+		require.NoError(t, json.Unmarshal([]byte(`{"model":"m","max_tokens":50,"extra_body":{"max_tokens":64}}`), &req))
+		capped, err := CapChatTokens(&req, Ceilings{OutputTokens: 100})
+		require.NoError(t, err)
+		assert.Same(t, &req, capped)
+	})
+}
+
 func TestReasoningEffortLevelsCannotBeChangedFromOutside(t *testing.T) {
 	levels := ReasoningEffortLevels()
 	require.Equal(t, []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}, levels)

@@ -174,8 +174,13 @@ applies, so a child can tighten its group's ceiling but setting a higher one on
 a child changes nothing. Efforts use the scale `none`, `minimal`, `low`,
 `medium`, `high`, `xhigh`, `max`. The token ceiling covers `max_tokens`,
 `max_completion_tokens`, and `max_output_tokens` in whichever spelling the
-client used, and a request that sends no limit gets the ceiling as its limit,
-in the field the upstream model takes. When the model catalogue knows the
+client used, inside `extra_body` too, and a request that sends no limit gets
+the ceiling as its limit, in the field the upstream model takes. The gateway
+picks that field by model name: for a deployment it cannot recognize as an
+OpenAI reasoning model, such as an Azure deployment with a name of your own,
+set `default_params.max_completion_tokens` on the
+[model](/features/virtual-models#set-request-parameters), so that requests
+carry the limit in the field the deployment takes. When the model catalogue knows the
 model's own output maximum and it is lower than the ceiling, that maximum is
 the limit such a request gets, since the model would refuse the ceiling; for a
 model without a known maximum, keep the ceiling at or below what the model
@@ -258,7 +263,10 @@ Batches, Realtime sessions (`/v1/realtime`), and provider passthrough under
 that may also use them can bypass the policy, so deny those endpoints to keys
 you cap. The
 [ChatGPT](/providers/chatgpt) provider accepts no output token limit, so
-`max_output_tokens` is not enforced on its models.
+`max_output_tokens` is not enforced on its models. The token ceiling bounds
+each answer: a Chat Completions request that asks for several choices (`n`)
+can receive that many times the ceiling. Where that matters, force `n` with
+the model's [`params`](/features/virtual-models#set-request-parameters).
 </Warning>
 
 A policy on `/` binds every request, including those with no user path (the

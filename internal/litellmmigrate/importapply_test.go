@@ -28,6 +28,9 @@ type fakeAdmin struct {
 	// off lists admin paths whose feature is turned off; GETs of the others
 	// succeed and are not recorded.
 	off map[string]bool
+	// users is the body GET /admin/users answers with; an empty list when
+	// unset.
+	users string
 }
 
 func (f *fakeAdmin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +48,14 @@ func (f *fakeAdmin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, `{"error":{"message":"budgets feature is unavailable"}}`)
 			return
 		}
-		_, _ = io.WriteString(w, `[]`)
+		switch {
+		case r.URL.Path != "/admin/users":
+			_, _ = io.WriteString(w, `[]`)
+		case f.users != "":
+			_, _ = io.WriteString(w, f.users)
+		default:
+			_, _ = io.WriteString(w, `{"users":[]}`)
+		}
 		return
 	}
 	call := adminCall{Method: r.Method, Path: r.URL.Path, Auth: r.Header.Get("Authorization")}
@@ -70,6 +80,42 @@ func applyTestPlan() *ImportPlan {
 			{Name: "old", ImportedFrom: "litellm", SecretHash: "h-old", UserPath: "/team/old"},
 		},
 	}
+}
+
+func TestApply_KeepsTheRequestPolicyAPathAlreadyHas(t *testing.T) {
+	admin := &fakeAdmin{users: `{"users":[
+		{"user_path":"/","allowed_models":[]},
+		{"user_path":"/team","allowed_models":["openai/gpt-4o-mini"],"default_model":"team-model","max_reasoning_effort":"medium","max_output_tokens":8192,
+		 "request_policy":{"default_model":"team-model","max_output_tokens":4096,"max_output_tokens_from":"/"}},
+		{"user_path":"/other","allowed_models":[],"max_output_tokens":100}
+	]}`}
+	server := httptest.NewServer(admin)
+	defer server.Close()
+
+	plan := &ImportPlan{Policies: []PolicyImport{
+		{UserPath: "/team", AllowedModels: []string{"openai/gpt-4o"}, Description: "Migrated from LiteLLM team team"},
+		{UserPath: "/new", AllowedModels: []string{"openai/gpt-4o"}},
+	}}
+	result, err := Apply(context.Background(), server.Client(), server.URL, "sk-admin", plan)
+	require.NoError(t, err)
+	assert.Equal(t, 2, result.Policies)
+
+	require.Len(t, admin.calls, 2)
+	assert.Equal(t, map[string]any{
+		"user_path": "/team", "allowed_models": []any{"openai/gpt-4o"}, "description": "Migrated from LiteLLM team team",
+		"default_model": "team-model", "max_reasoning_effort": "medium", "max_output_tokens": float64(8192),
+	}, admin.calls[0].Body, "the path's own policy is sent back, not the one it inherits")
+	assert.Equal(t, map[string]any{"user_path": "/new", "allowed_models": []any{"openai/gpt-4o"}}, admin.calls[1].Body)
+}
+
+func TestApply_WritesNothingWhenTheUserPathsCannotBeRead(t *testing.T) {
+	admin := &fakeAdmin{users: `not json`}
+	server := httptest.NewServer(admin)
+	defer server.Close()
+
+	_, err := Apply(context.Background(), server.Client(), server.URL, "sk-admin", applyTestPlan())
+	require.ErrorContains(t, err, "nothing was written")
+	assert.Empty(t, admin.calls)
 }
 
 func TestApply_WritesPlanInOrder(t *testing.T) {

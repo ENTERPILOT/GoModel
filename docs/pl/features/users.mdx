@@ -173,9 +173,14 @@ users:
 więc dziecko może zaostrzyć limit swojej grupy, a wyższy limit ustawiony na
 dziecku niczego nie zmienia. Efforty używają skali `none`, `minimal`, `low`,
 `medium`, `high`, `xhigh`, `max`. Limit tokenów obejmuje `max_tokens`,
-`max_completion_tokens` i `max_output_tokens` w pisowni użytej przez klienta, a
-request bez limitu dostaje limit jako swój limit, w polu, którego oczekuje
-model upstream. Gdy katalog modeli zna własne maksimum tokenów wyjściowych
+`max_completion_tokens` i `max_output_tokens` w pisowni użytej przez klienta,
+także wewnątrz `extra_body`, a request bez limitu dostaje limit jako swój
+limit, w polu, którego oczekuje model upstream. Gateway wybiera to pole po
+nazwie modelu: dla deploymentu, którego nie potrafi rozpoznać jako modelu
+reasoning OpenAI, na przykład deploymentu Azure z własną nazwą, ustaw
+`default_params.max_completion_tokens` na
+[modelu](/pl/features/virtual-models#ustawianie-parametrów-żądania), aby
+requesty niosły limit w polu, którego oczekuje deployment. Gdy katalog modeli zna własne maksimum tokenów wyjściowych
 modelu i jest ono niższe od limitu, taki request dostaje to maksimum, bo model
 odrzuciłby limit; dla modelu bez znanego maksimum ustaw limit nie wyżej, niż
 model przyjmuje. Limit wysłany tylko w pisowni, której endpoint nie ma
@@ -261,7 +266,10 @@ Batche, sesje Realtime (`/v1/realtime`) i passthrough providera pod `/p/`
 klucz, który może też ich używać, może obejść politykę, więc zablokuj te
 endpointy kluczom, które ograniczasz. Provider [ChatGPT](/pl/providers/chatgpt) nie przyjmuje limitu
 tokenów wyjściowych, więc `max_output_tokens` nie jest egzekwowany na jego
-modelach.
+modelach. Limit tokenów ogranicza każdą odpowiedź z osobna: request Chat
+Completions, który prosi o kilka wariantów odpowiedzi (`n`), może dostać tyle
+razy więcej, niż wynosi limit. Tam, gdzie to ma znaczenie, wymuś `n` przez
+[`params`](/pl/features/virtual-models#ustawianie-parametrów-żądania) modelu.
 </Warning>
 
 Polityka na `/` obowiązuje każdy request, także bez ścieżki użytkownika (master

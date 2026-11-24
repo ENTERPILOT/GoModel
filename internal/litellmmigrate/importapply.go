@@ -28,7 +28,8 @@ type ApplyResult struct {
 // adminKey. Policies, budgets, and rate limits go first, and a key whose
 // path or an ancestor's rule was rejected is held back, so no key is ever
 // less restricted than in LiteLLM. Every write is an upsert, so Apply can be
-// re-run. It first checks that adminKey is a global admin credential and
+// re-run; a re-run keeps the request policy a path was given since. It first
+// checks that adminKey is a global admin credential and
 // that GoModel has every feature the plan needs, and fails without writing
 // anything if not; after that, a rejected write is recorded and the rest
 // continue.
@@ -41,9 +42,20 @@ func Apply(ctx context.Context, client *http.Client, baseURL, adminKey string, p
 	if err := a.checkFeatures(plan); err != nil {
 		return result, err
 	}
+	var kept map[string]requestPolicy
+	if len(plan.Policies) > 0 {
+		var err error
+		if kept, err = a.requestPolicies(); err != nil {
+			return result, fmt.Errorf("read the user paths GoModel has, so nothing was written: %w", err)
+		}
+	}
 	failedPaths := map[string]bool{}
 	for _, policy := range plan.Policies {
-		if a.send(http.MethodPut, "/users", policy, "policy "+policy.UserPath, &result) {
+		row := struct {
+			PolicyImport
+			requestPolicy
+		}{policy, kept[policy.UserPath]}
+		if a.send(http.MethodPut, "/users", row, "policy "+policy.UserPath, &result) {
 			result.Policies++
 		} else {
 			failedPaths[policy.UserPath] = true
@@ -166,6 +178,12 @@ func (a applier) checkFeatures(plan *ImportPlan) error {
 }
 
 func (a applier) get(path string) error {
+	return a.getJSON(path, nil)
+}
+
+// getJSON reads one admin resource into into, or only checks that it
+// answers when into is nil.
+func (a applier) getJSON(path string, into any) error {
 	req, err := http.NewRequestWithContext(a.ctx, http.MethodGet, a.base+path, nil)
 	if err != nil {
 		return err
@@ -181,8 +199,42 @@ func (a applier) get(path string) error {
 	if resp.StatusCode != http.StatusOK {
 		return errors.New(errorMessage(resp))
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return nil
+	if into == nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(into)
+}
+
+// requestPolicy is the part of a user-path row LiteLLM has no counterpart
+// for: the default model and the request ceilings an operator sets in
+// GoModel. PUT /admin/users replaces the whole row, so a policy write sends
+// back what the path carries; without it, a re-run would clear them.
+type requestPolicy struct {
+	DefaultModel       string `json:"default_model,omitempty"`
+	MaxReasoningEffort string `json:"max_reasoning_effort,omitempty"`
+	MaxOutputTokens    int    `json:"max_output_tokens,omitempty"`
+}
+
+// requestPolicies returns the request policy of every user path GoModel has
+// a row for.
+func (a applier) requestPolicies() (map[string]requestPolicy, error) {
+	var list struct {
+		Users []struct {
+			UserPath string `json:"user_path"`
+			requestPolicy
+		} `json:"users"`
+	}
+	if err := a.getJSON("/users", &list); err != nil {
+		return nil, err
+	}
+	kept := make(map[string]requestPolicy, len(list.Users))
+	for _, user := range list.Users {
+		if user.requestPolicy != (requestPolicy{}) {
+			kept[user.UserPath] = user.requestPolicy
+		}
+	}
+	return kept, nil
 }
 
 func periodKey(period string, seconds int64) map[string]any {

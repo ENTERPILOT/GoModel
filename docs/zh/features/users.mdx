@@ -141,7 +141,7 @@ users:
 | `/acme/eng/interns/bob` | `reasoning_effort: medium`                    | `low`                                    |
 | `/acme/sales`           | `max_tokens: 32000`                           | `8192`                                   |
 
-**上限**是上界。路径到 `/` 之间最低的上限生效，因此子节点可以收紧其组的上限，而在子节点上设置更高的上限不会改变任何东西。推理强度使用 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 这一刻度。token 上限覆盖 `max_tokens`、`max_completion_tokens` 和 `max_output_tokens`，并沿用客户端使用的写法；未设置上限的请求会以该上限作为其上限，写入上游模型所用的字段。如果模型目录知道该模型自身的最大输出 token 数且它低于上限，这类请求得到的就是这个最大值，因为模型会拒绝该上限；对于没有已知最大值的模型，请把上限设置在模型可接受的范围内。仅以端点没有的写法发送的上限（Chat Completions 上的 `max_output_tokens`、Responses API 上的 `max_tokens`）会被移到该端点自己的字段中；不是大于等于 1 的整数的值会被替换为该上限。名称大小写不同的上限（`MAX_TOKENS`）不会发送到上游；若它在上限之内，会先降低请求的上限，因此上限绝不会提高客户端发送的限制。推理强度上限只会降低请求携带的推理强度，从不添加，因为添加推理强度会为没有要求推理的请求开启推理。因此，没有推理强度的请求按模型默认值运行；无法低于某个级别思考的模型（Gemini 3 和 4、OpenAI o 系列、OpenCode Zen、Claude Fable 5.x、Mythos 5.x 和 Opus 5.5）在更低的上限下仍会收到该级别。
+**上限**是上界。路径到 `/` 之间最低的上限生效，因此子节点可以收紧其组的上限，而在子节点上设置更高的上限不会改变任何东西。推理强度使用 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 这一刻度。token 上限覆盖 `max_tokens`、`max_completion_tokens` 和 `max_output_tokens`，并沿用客户端使用的写法，`extra_body` 内的也包括在内；未设置上限的请求会以该上限作为其上限，写入上游模型所用的字段。网关按模型名称选择这个字段：对于它无法识别为 OpenAI 推理模型的部署（例如使用自定义名称的 Azure 部署），请在该[模型](/zh/features/virtual-models#设置请求参数)上设置 `default_params.max_completion_tokens`，让请求以该部署接受的字段携带上限。如果模型目录知道该模型自身的最大输出 token 数且它低于上限，这类请求得到的就是这个最大值，因为模型会拒绝该上限；对于没有已知最大值的模型，请把上限设置在模型可接受的范围内。仅以端点没有的写法发送的上限（Chat Completions 上的 `max_output_tokens`、Responses API 上的 `max_tokens`）会被移到该端点自己的字段中；不是大于等于 1 的整数的值会被替换为该上限。名称大小写不同的上限（`MAX_TOKENS`）不会发送到上游；若它在上限之内，会先降低请求的上限，因此上限绝不会提高客户端发送的限制。推理强度上限只会降低请求携带的推理强度，从不添加，因为添加推理强度会为没有要求推理的请求开启推理。因此，没有推理强度的请求按模型默认值运行；无法低于某个级别思考的模型（Gemini 3 和 4、OpenAI o 系列、OpenCode Zen、Claude Fable 5.x、Mythos 5.x 和 Opus 5.5）在更低的上限下仍会收到该级别。
 
 除了 `reasoning_effort` 和 `reasoning.effort`，推理强度上限还会检查会到达上游的提供商特定推理控制项，无论它们位于请求体顶层还是 `extra_body` 中，名称不区分大小写，重复成员的每一次出现都会检查：
 
@@ -159,7 +159,7 @@ users:
 上限在[虚拟模型覆盖](/zh/features/virtual-models#强制推理强度)之后生效，作用于每一次尝试，包括故障转移尝试，因此也会约束虚拟模型强制或默认设置的推理强度或 `max_tokens`。它们适用于 Chat Completions、Responses API 和 Anthropic Messages API；在上限之内的 Messages 请求仍会原生转发给 Anthropic，超过上限的请求会改走转换路径以便降低。只有 Anthropic 能读取的请求（例如带有服务器工具历史）没有转换路径，因此会直接在转发的请求体中降低其 `max_tokens`、thinking 预算和 `output_config.effort`。在 `none` 上限下，它的 thinking 会通过 `thinking: {"type": "disabled"}` 关闭；始终思考的模型（Fable 5.x、Mythos 5.x、Opus 5.5）则改为收到 `low`，与转换路径一致。已知限制：Sonnet 5.5 会拒绝 `disabled`，因此发往该模型的这类请求会以 Anthropic 的 `400` 失败。原生转发的请求体若重复其中某个成员或以不同大小写书写，到达 Anthropic 时只保留一个：最低的 `max_tokens`，以及最后一个 `thinking` 和 `output_config`。网关无法降到上限之内的请求体会以 `400` 拒绝，绝不会超过上限转发。嵌入和媒体端点不会被改写。[响应缓存](/zh/features/cache)的条目与生效的上限绑定，因此在设置或修改上限之前缓存的回答不会在新上限下返回。
 
 <Warning>
-批处理、Realtime 会话（`/v1/realtime`）和 `/p/` 下的提供商直通**不受**上限约束：它们的请求体会原样发往上游。受限的密钥如果还能使用它们，就可以绕过该策略，因此请为受限的密钥禁止这些端点。[ChatGPT](/zh/providers/chatgpt) 提供商不接受输出 token 上限，因此 `max_output_tokens` 不会在其模型上强制执行。
+批处理、Realtime 会话（`/v1/realtime`）和 `/p/` 下的提供商直通**不受**上限约束：它们的请求体会原样发往上游。受限的密钥如果还能使用它们，就可以绕过该策略，因此请为受限的密钥禁止这些端点。[ChatGPT](/zh/providers/chatgpt) 提供商不接受输出 token 上限，因此 `max_output_tokens` 不会在其模型上强制执行。token 上限约束的是每一个回答：要求多个候选回答（`n`）的 Chat Completions 请求，得到的输出可以达到上限的相应倍数。如有需要，请用模型的 [`params`](/zh/features/virtual-models#设置请求参数) 强制设置 `n`。
 </Warning>
 
 `/` 上的策略约束每个请求，包括没有用户路径的请求（主密钥，或未绑定路径且未发送请求头的密钥）。未绑定路径的凭据通过[用户路径请求头](/zh/features/user-path)自行选择路径，从而选择其所在子树的策略，因此可以避开树中更下层设置的上限。请通过绑定固定 `user_path` 的 [API 密钥](/zh/features/user-path#api-密钥)把上限绑定到调用方，或将其设置在 `/` 上。

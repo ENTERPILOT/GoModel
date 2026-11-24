@@ -183,8 +183,14 @@ einem Pfad und `/`: Ein Kind kann die Obergrenze seiner Gruppe verschärfen,
 eine höhere Obergrenze am Kind ändert nichts. Efforts nutzen die Skala `none`,
 `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Die Token-Obergrenze deckt
 `max_tokens`, `max_completion_tokens` und `max_output_tokens` ab, in der
-Schreibweise, die der Client verwendet hat, und ein Request ohne Limit erhält
-die Obergrenze als Limit, in dem Feld, das das Upstream-Modell erwartet. Kennt
+Schreibweise, die der Client verwendet hat, auch innerhalb von `extra_body`,
+und ein Request ohne Limit erhält die Obergrenze als Limit, in dem Feld, das
+das Upstream-Modell erwartet. Das Gateway wählt dieses Feld anhand des
+Modellnamens: Für ein Deployment, das es nicht als OpenAI-Reasoning-Modell
+erkennen kann, etwa ein Azure-Deployment mit eigenem Namen, setzen Sie
+`default_params.max_completion_tokens` am
+[Modell](/de/features/virtual-models#request-parameter-setzen), damit Requests
+das Limit in dem Feld tragen, das das Deployment erwartet. Kennt
 der Modellkatalog das eigene Ausgabe-Maximum des Modells und liegt es unter der
 Obergrenze, erhält ein solcher Request dieses Maximum als Limit, da das Modell
 die Obergrenze ablehnen würde; bei einem Modell ohne bekanntes Maximum sollte
@@ -275,7 +281,11 @@ Batches, Realtime-Sessions (`/v1/realtime`) und Provider-Passthrough unter
 Ein begrenzter Key, der sie ebenfalls nutzen darf, kann die Policy umgehen;
 sperren Sie diese Endpunkte daher für Keys, die Sie begrenzen. Der Provider [ChatGPT](/de/providers/chatgpt)
 akzeptiert kein Ausgabe-Token-Limit, daher wird `max_output_tokens` bei seinen
-Modellen nicht durchgesetzt.
+Modellen nicht durchgesetzt. Die Token-Obergrenze begrenzt jede einzelne
+Antwort: Ein Chat-Completions-Request, der mehrere Antwortvarianten anfordert
+(`n`), kann entsprechend ein Vielfaches der Obergrenze erhalten. Wo das zählt,
+erzwingen Sie `n` über die
+[`params`](/de/features/virtual-models#request-parameter-setzen) des Modells.
 </Warning>
 
 Eine Policy auf `/` gilt für jeden Request, auch für Requests ohne User Path
