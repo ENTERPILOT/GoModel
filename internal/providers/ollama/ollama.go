@@ -139,6 +139,7 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		BaseURL:        defaultNativeBaseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
+		Headers:        opts.Headers,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
 	p.nativeClient = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, nativeCfg, p.setNativeHeaders)

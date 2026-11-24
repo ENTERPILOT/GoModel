@@ -639,6 +639,15 @@ providers:
     # Providers without one keep the process-wide HTTP_PROXY / HTTPS_PROXY / NO_PROXY.
     # Equivalent env var: OPENAI_PROXY_URL
     # proxy_url: "socks5://user:pass@10.0.0.1:1080"
+    # Fixed headers sent on every request to this provider's API, after every
+    # other header, for a proxy in front of it that wants its own token or for
+    # static attribution headers. Values accept secret references. Credential,
+    # transport and content headers are refused. Default: none.
+    # Equivalent env var: OPENAI_HEADERS='{"X-Edge-Auth":"${file:/run/secrets/edge-token}"}'
+    # (a JSON object that replaces this map).
+    # headers:
+    #   X-Edge-Auth: "${file:/run/secrets/edge-token}"
+    #   OpenAI-Project: "proj_..."
     # Per-provider resilience overrides (optional).
     # Only specified fields override the global defaults above.
     # resilience:

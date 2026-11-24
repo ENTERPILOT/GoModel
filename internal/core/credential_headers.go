@@ -22,6 +22,7 @@ var credentialHeaders = map[string]struct{}{
 	"xi-api-key":          {}, // ElevenLabs credential header
 	// Keys of the AI gateways and API managers a provider base URL can point
 	// at, which authenticate the gateway to the proxy rather than the provider.
+	// A provider's `headers` may set them; keep edgeCredentialHeaders in step.
 	"helicone-auth":             {},
 	"cf-aig-authorization":      {}, // Cloudflare AI Gateway
 	"x-portkey-api-key":         {},

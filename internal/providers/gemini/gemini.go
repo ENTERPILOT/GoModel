@@ -42,6 +42,7 @@ var Registration = providers.Registration{
 			{Name: providers.CredentialFieldServiceAccountJSONBase64, Advanced: true},
 			{Name: providers.CredentialFieldGCPScope, Advanced: true},
 		},
+		ReservedHeaders: []string{googlecommon.QuotaProjectHeader},
 	},
 }
 
@@ -126,6 +127,7 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 		BaseURL:        baseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
+		Headers:        opts.Headers,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
 	nativeCfg := clientCfg

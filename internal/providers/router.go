@@ -53,6 +53,7 @@ type lookupCaps struct {
 	modelInfo               modelInfoLookup
 	selectorModelInfo       selectorModelInfoLookup
 	refresher               providerModelRefresher
+	headers                 providerHeaderLookup
 }
 
 func resolveLookupCaps(lookup core.ModelLookup) lookupCaps {
@@ -70,6 +71,7 @@ func resolveLookupCaps(lookup core.ModelLookup) lookupCaps {
 	caps.modelInfo, _ = lookup.(modelInfoLookup)
 	caps.selectorModelInfo, _ = lookup.(selectorModelInfoLookup)
 	caps.refresher, _ = lookup.(providerModelRefresher)
+	caps.headers, _ = lookup.(providerHeaderLookup)
 	return caps
 }
 
@@ -81,6 +83,12 @@ type providerTypeRegistry interface {
 // configured name.
 type providerInstanceNamer interface {
 	ProviderInstanceName(provider core.Provider) string
+}
+
+// providerHeaderLookup returns the static headers a registered provider
+// instance was configured with (providers.<name>.headers).
+type providerHeaderLookup interface {
+	ProviderHeaders(provider core.Provider) map[string]string
 }
 
 type providerNameRegistry interface {

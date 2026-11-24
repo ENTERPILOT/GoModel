@@ -109,6 +109,7 @@ const (
 	providerEnvFieldServiceAccountJSONBase64
 	providerEnvFieldGCPScope
 	providerEnvFieldProxyURL
+	providerEnvFieldHeaders
 	providerEnvFieldSessionStickyKeys
 	providerEnvFieldBillable
 	providerEnvFieldInferenceObjective
@@ -156,16 +157,19 @@ type providerEnvValues struct {
 	ServiceAccountJSONBase64 string
 	GCPScope                 string
 	ProxyURL                 string
-	InferenceObjective       string
-	Models                   []string
-	ModelsMode               string
-	ModelFilterInclude       []string
-	ModelFilterExclude       []string
-	ModelFilterMaxPrice      *float64
-	SessionStickyKeys        *bool
-	Billable                 *bool
-	FairnessFromUserPath     *bool
-	WorkloadIdentity         config.WorkloadIdentityConfig
+	// Headers is the `<PROVIDER>_HEADERS` JSON object. Non-nil once the
+	// variable is set, so an empty object still replaces the YAML map.
+	Headers              map[string]string
+	InferenceObjective   string
+	Models               []string
+	ModelsMode           string
+	ModelFilterInclude   []string
+	ModelFilterExclude   []string
+	ModelFilterMaxPrice  *float64
+	SessionStickyKeys    *bool
+	Billable             *bool
+	FairnessFromUserPath *bool
+	WorkloadIdentity     config.WorkloadIdentityConfig
 	// pending holds the settings whose value contains "${", unparsed, until
 	// resolveSettings resolves them. A pending field counts as set.
 	pending map[providerEnvField]envVar
@@ -268,6 +272,7 @@ func (v providerEnvValues) empty() bool {
 		strings.TrimSpace(v.ServiceAccountJSONBase64) == "" &&
 		strings.TrimSpace(v.GCPScope) == "" &&
 		strings.TrimSpace(v.ProxyURL) == "" &&
+		v.Headers == nil &&
 		strings.TrimSpace(v.InferenceObjective) == "" &&
 		v.SessionStickyKeys == nil &&
 		v.Billable == nil &&
@@ -388,6 +393,16 @@ func (v *providerEnvValues) setField(field providerEnvField, index int, key, val
 		v.GCPScope = value
 	case providerEnvFieldProxyURL:
 		v.ProxyURL = value
+	case providerEnvFieldHeaders:
+		headers, err := parseHeadersEnv(value)
+		if err != nil {
+			if v.invalid == nil {
+				// The value is left out: it may hold a secret.
+				v.invalid = fmt.Errorf("%s: %w", key, err)
+			}
+			break
+		}
+		v.Headers = headers
 	case providerEnvFieldSessionStickyKeys:
 		if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
 			v.SessionStickyKeys = &parsed
@@ -463,6 +478,7 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 		{name: "SESSION_STICKY_KEYS", field: providerEnvFieldSessionStickyKeys},
 		{name: "BILLABLE", field: providerEnvFieldBillable},
 		{name: "PROXY_URL", field: providerEnvFieldProxyURL},
+		{name: "HEADERS", field: providerEnvFieldHeaders},
 		{name: "API_VERSION", field: providerEnvFieldAPIVersion},
 		{name: "BASE_URL", field: providerEnvFieldBaseURL},
 		{name: "AUTH_TYPE", field: providerEnvFieldAuthType},
@@ -671,6 +687,7 @@ func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) 
 		ServiceAccountJSONBase64: v.ServiceAccountJSONBase64,
 		GCPScope:                 v.GCPScope,
 		ProxyURL:                 v.ProxyURL,
+		Headers:                  v.Headers,
 		InferenceObjective:       v.InferenceObjective,
 		FairnessFromUserPath:     v.FairnessFromUserPath,
 		Models:                   rawProviderModelsFromIDs(v.Models),
@@ -735,6 +752,11 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	}
 	if values.ProxyURL != "" {
 		existing.ProxyURL = values.ProxyURL
+	}
+	// Env replaces the provider's whole header set rather than merging into
+	// it, so the effective set is never a mix of the two sources.
+	if values.Headers != nil {
+		existing.Headers = values.Headers
 	}
 	if values.InferenceObjective != "" {
 		existing.InferenceObjective = values.InferenceObjective
@@ -828,6 +850,7 @@ func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig)
 	drop("session_sticky_keys", providerEnvFieldSessionStickyKeys, v.SessionStickyKeys != nil, existing.SessionStickyKeys != nil, func() { v.SessionStickyKeys = nil })
 	drop("billable", providerEnvFieldBillable, v.Billable != nil, existing.Billable != nil, func() { v.Billable = nil })
 	drop("fairness_from_user_path", providerEnvFieldFairnessFromUserPath, v.FairnessFromUserPath != nil, existing.FairnessFromUserPath != nil, func() { v.FairnessFromUserPath = nil })
+	drop("headers", providerEnvFieldHeaders, v.Headers != nil, len(existing.Headers) > 0, func() { v.Headers = nil })
 	drop("models", providerEnvFieldModels, len(v.Models) > 0, rawProviderHasResolvedModel(existing), func() { v.Models = nil })
 	drop("model_filter.include", providerEnvFieldModelFilterInclude, len(v.ModelFilterInclude) > 0, len(existing.ModelFilter.Include) > 0, func() { v.ModelFilterInclude = nil })
 	drop("model_filter.exclude", providerEnvFieldModelFilterExclude, len(v.ModelFilterExclude) > 0, len(existing.ModelFilter.Exclude) > 0, func() { v.ModelFilterExclude = nil })

@@ -33,6 +33,8 @@ var Registration = providers.Registration{
 	New:  New,
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL: defaultBaseURL,
+		// A subscription client: the vendor endpoint expects fixed headers.
+		HeadersUnsupported: true,
 	},
 }
 

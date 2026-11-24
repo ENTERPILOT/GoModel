@@ -52,6 +52,11 @@ var Registration = providers.Registration{
 			{Name: providers.CredentialFieldAPIKeys},
 			{Name: providers.CredentialFieldBaseURL},
 		},
+		// Requests go through the AWS SDK, not llmclient, and are SigV4-signed
+		// unless a Bedrock API key is set: a proxy that strips its own header
+		// before forwarding breaks the signature. Refused in both modes until
+		// a signed or unsigned choice is designed.
+		HeadersUnsupported: true,
 	},
 }
 

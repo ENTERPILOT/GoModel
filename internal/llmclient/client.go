@@ -113,6 +113,12 @@ type Config struct {
 	CircuitBreaker config.CircuitBreakerConfig
 	// Hooks provides optional observability callbacks invoked on request start and end.
 	Hooks Hooks
+	// Headers are the operator's static headers for the provider
+	// (providers.<name>.headers). Every request this client sends carries
+	// them, set after all other headers. Configuration validation has already
+	// refused the names that would break authentication or the transport, so
+	// they are applied as given. Values may be secrets: never log them.
+	Headers map[string]string
 }
 
 // DefaultConfig returns default client configuration

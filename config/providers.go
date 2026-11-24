@@ -35,6 +35,13 @@ type RawProviderConfig struct {
 	// Empty keeps the process-wide HTTP_PROXY / HTTPS_PROXY / NO_PROXY
 	// behaviour. Set it via `proxy_url:` or `<PROVIDER>_PROXY_URL`.
 	ProxyURL string `yaml:"proxy_url" export:"url"`
+	// Headers are sent on every request to this provider's API, after every
+	// other header, so nothing a client or a plugin sends replaces them. Use
+	// them for a proxy in front of the provider that wants its own token, or
+	// for fixed routing and attribution headers. Values accept secret
+	// references; names do not. Set it via `headers:` or `<PROVIDER>_HEADERS`
+	// (a JSON object, which replaces the YAML map).
+	Headers map[string]string `yaml:"headers,omitempty" export:"secret"`
 	// InferenceObjective is the trusted llm-d InferenceObjective name injected
 	// into outbound requests. It is ignored by provider types other than llmd.
 	InferenceObjective string `yaml:"inference_objective"`

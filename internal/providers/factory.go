@@ -37,6 +37,11 @@ type ProviderOptions struct {
 	// client down. Retry, circuit breaking and hooks still come from this
 	// struct, so overriding the transport does not change resilience.
 	HTTPClient *http.Client
+	// Headers are the operator's static headers for this provider instance.
+	// A provider passes them to every llmclient.Config it builds for the
+	// provider's API, and to nothing else: a token or identity endpoint must
+	// never receive them.
+	Headers map[string]string
 }
 
 // Keyring returns the key source a provider should authenticate with, falling
@@ -86,6 +91,14 @@ type DiscoveryConfig struct {
 	// WorkloadIdentity names the token exchange grant the provider type
 	// supports for workload identity federation; empty when it supports none.
 	WorkloadIdentity workloadidentity.Grant
+
+	// ReservedHeaders names the headers the adapter sets itself, beyond the
+	// ones no provider may configure, and that `headers` would break by
+	// replacing. Matching ignores case. See validateHeaders.
+	ReservedHeaders []string
+	// HeadersUnsupported refuses `headers` for the type: its requests are
+	// signed, or belong to a vendor client whose headers are fixed.
+	HeadersUnsupported bool
 }
 
 // Registration contains metadata for registering a provider with the factory.
@@ -211,6 +224,7 @@ func (f *ProviderFactory) create(cfg ProviderConfig, keys *Keyring) (core.Provid
 		Resilience: cfg.Resilience,
 		Keys:       keys,
 		HTTPClient: httpClient,
+		Headers:    cfg.Headers,
 	}
 
 	return builder(cfg, opts), nil

@@ -80,13 +80,21 @@ func TestExportYAMLWritesSecretsAsReferences(t *testing.T) {
 }
 
 func TestExportYAMLProviders(t *testing.T) {
-	secrets := vaultSecrets(t, map[string]string{"openai": "sk-vault"})
+	secrets := vaultSecrets(t, map[string]string{"openai": "sk-vault", "edge": "edge-from-vault"})
 	providers := map[string]RawProviderConfig{
 		"openai": {Type: "openai", APIKey: "${vault:openai}", APIKeys: []string{"sk-literal"}, BaseURL: "https://api.openai.com/v1"},
 		"proxied": {
 			Type:     "anthropic",
 			APIKey:   "sk-ant-env",
 			ProxyURL: "socks5://user:proxy-pass@10.0.0.1:1080",
+		},
+		"edge": {
+			Type:   "gemini",
+			APIKey: "${vault:openai}",
+			Headers: map[string]string{
+				"X-Edge-Auth": "Bearer ${vault:edge}",
+				"X-Tenant":    "literal-tenant",
+			},
 		},
 	}
 
@@ -97,7 +105,11 @@ func TestExportYAMLProviders(t *testing.T) {
 	assert.Equal(t, "https://api.openai.com/v1", exportedValue(t, out, "providers", "openai", "base_url"))
 	assert.Equal(t, "${env:ANTHROPIC_API_KEY}", exportedValue(t, out, "providers", "proxied", "api_key"))
 	assert.Equal(t, "${env:GOMODEL_PROVIDERS_PROXIED_PROXY_URL}", exportedValue(t, out, "providers", "proxied", "proxy_url"))
-	for _, secret := range []string{"sk-vault", "sk-literal", "sk-ant-env", "proxy-pass"} {
+	// Header values are secret whatever the name: a reference is kept, a
+	// literal value is written as a variable to set.
+	assert.Equal(t, "Bearer ${vault:edge}", exportedValue(t, out, "providers", "edge", "headers", "X-Edge-Auth"))
+	assert.Equal(t, "${env:GOMODEL_PROVIDERS_EDGE_HEADERS_X_TENANT}", exportedValue(t, out, "providers", "edge", "headers", "X-Tenant"))
+	for _, secret := range []string{"sk-vault", "sk-literal", "sk-ant-env", "proxy-pass", "edge-from-vault", "literal-tenant"} {
 		assert.NotContains(t, out, secret)
 	}
 }
