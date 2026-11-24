@@ -80,6 +80,10 @@ updates:
       default-days: 3
     labels:
       - "dependencies"
+    ignore:
+      # v2.6.0's image cannot be pulled from ghcr.io; see scorecard.yml.
+      - dependency-name: "ossf/scorecard-action"
+        versions: ["2.6.0"]
     groups:
       github-actions:
         patterns:
