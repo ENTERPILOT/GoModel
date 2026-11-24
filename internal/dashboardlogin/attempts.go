@@ -33,40 +33,40 @@ func newAttemptLimiter() *attemptLimiter {
 	return &attemptLimiter{clients: make(map[string]*attemptRecord)}
 }
 
-// admit counts a sign-in attempt and returns zero, or returns how long the
-// client must wait when it has none left. The attempt is counted on the way
-// in, not once its password proves wrong, so requests a client sends at the
-// same time cannot all be checked before any of them counts.
-func (l *attemptLimiter) admit(clientIP string, now time.Time) time.Duration {
+// admit counts a sign-in attempt and returns the record that counted it, or
+// returns how long the client must wait when it has none left. The attempt is
+// counted on the way in, not once its password proves wrong, so requests a
+// client sends at the same time cannot all be checked before any of them
+// counts.
+func (l *attemptLimiter) admit(clientIP string, now time.Time) (*attemptRecord, time.Duration) {
 	key := clientKey(clientIP)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if record, tracked := l.clients[key]; tracked && now.Before(record.expires) {
 		if record.attempts >= maxFailedAttempts {
-			return record.expires.Sub(now)
+			return nil, record.expires.Sub(now)
 		}
 		record.attempts++
-		return 0
+		return record, 0
 	}
 	// Untracked, or tracked by a record that expired and is replaced below.
 	if _, expired := l.clients[key]; !expired && len(l.clients) >= maxTrackedClients && !l.sweep(now) {
-		return attemptWindow
+		return nil, attemptWindow
 	}
-	l.clients[key] = &attemptRecord{attempts: 1, expires: now.Add(attemptWindow)}
-	return 0
+	record := &attemptRecord{attempts: 1, expires: now.Add(attemptWindow)}
+	l.clients[key] = record
+	return record, 0
 }
 
-// release gives back the attempt admit counted at admitted, for a sign-in
-// turned away before its password was checked. A record begun after that
-// moment never counted the attempt, so it is left alone.
-func (l *attemptLimiter) release(clientIP string, admitted time.Time) {
+// release gives back the attempt admit counted in admission, for a sign-in
+// turned away before its password was checked. A record that has since
+// replaced it never counted the attempt, so it is left alone.
+func (l *attemptLimiter) release(clientIP string, admission *attemptRecord) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	record, tracked := l.clients[clientKey(clientIP)]
-	if !tracked || record.attempts == 0 || record.expires.Add(-attemptWindow).After(admitted) {
-		return
+	if record := l.clients[clientKey(clientIP)]; record != nil && record == admission && record.attempts > 0 {
+		record.attempts--
 	}
-	record.attempts--
 }
 
 // reset forgets a client's attempts after it signed in.

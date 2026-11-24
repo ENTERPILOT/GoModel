@@ -9,19 +9,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// admitWait admits one attempt and returns only how long the client must wait.
+func admitWait(limiter *attemptLimiter, clientIP string, now time.Time) time.Duration {
+	_, wait := limiter.admit(clientIP, now)
+	return wait
+}
+
 func TestAttemptLimiterLocksOutAfterRepeatedAttempts(t *testing.T) {
 	limiter := newAttemptLimiter()
 	start := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
 	const client = "203.0.113.7"
 
 	for range maxFailedAttempts {
-		require.Zero(t, limiter.admit(client, start.Add(time.Minute)), "an attempt within the limit is admitted")
+		require.Zero(t, admitWait(limiter, client, start.Add(time.Minute)), "an attempt within the limit is admitted")
 	}
 
-	assert.Equal(t, attemptWindow-time.Minute, limiter.admit(client, start.Add(2*time.Minute)),
+	assert.Equal(t, attemptWindow-time.Minute, admitWait(limiter, client, start.Add(2*time.Minute)),
 		"the lockout lasts until the window that began with the first attempt ends")
-	assert.Zero(t, limiter.admit("203.0.113.8", start.Add(2*time.Minute)), "another client is unaffected")
-	assert.Zero(t, limiter.admit(client, start.Add(time.Minute+attemptWindow)), "the lockout ends with the window")
+	assert.Zero(t, admitWait(limiter, "203.0.113.8", start.Add(2*time.Minute)), "another client is unaffected")
+	assert.Zero(t, admitWait(limiter, client, start.Add(time.Minute+attemptWindow)), "the lockout ends with the window")
 }
 
 func TestAttemptLimiterResetForgetsAttempts(t *testing.T) {
@@ -30,12 +36,12 @@ func TestAttemptLimiterResetForgetsAttempts(t *testing.T) {
 	const client = "203.0.113.7"
 
 	for range maxFailedAttempts {
-		limiter.admit(client, now)
+		admitWait(limiter, client, now)
 	}
-	require.NotZero(t, limiter.admit(client, now))
+	require.NotZero(t, admitWait(limiter, client, now))
 
 	limiter.reset(client)
-	assert.Zero(t, limiter.admit(client, now))
+	assert.Zero(t, admitWait(limiter, client, now))
 }
 
 func TestAttemptLimiterReleaseGivesBackOneAttempt(t *testing.T) {
@@ -43,33 +49,52 @@ func TestAttemptLimiterReleaseGivesBackOneAttempt(t *testing.T) {
 	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
 	const client = "203.0.113.7"
 
-	limiter.release(client, now) // an untracked client has nothing to give back
+	limiter.release(client, nil) // a refused sign-in has nothing to give back
+	var admission *attemptRecord
 	for range maxFailedAttempts {
-		limiter.admit(client, now)
+		admission, _ = limiter.admit(client, now)
 	}
-	require.NotZero(t, limiter.admit(client, now))
+	require.NotNil(t, admission)
+	require.NotZero(t, admitWait(limiter, client, now))
 
-	limiter.release(client, now)
-	assert.Zero(t, limiter.admit(client, now), "the released attempt is available again")
-	assert.NotZero(t, limiter.admit(client, now), "and only that one")
+	limiter.release(client, admission)
+	assert.Zero(t, admitWait(limiter, client, now), "the released attempt is available again")
+	assert.NotZero(t, admitWait(limiter, client, now), "and only that one")
 }
 
-// A sign-in admitted in one window and turned away after the next one began
-// must not take an attempt off the new window's count.
-func TestAttemptLimiterReleaseLeavesALaterWindowAlone(t *testing.T) {
-	limiter := newAttemptLimiter()
-	admitted := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
-	later := admitted.Add(attemptWindow)
+// A sign-in turned away after its record was replaced must not take an
+// attempt off the record that replaced it.
+func TestAttemptLimiterReleaseLeavesAReplacementRecordAlone(t *testing.T) {
+	start := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
 	const client = "203.0.113.7"
-
-	limiter.admit(client, admitted)
-	for range maxFailedAttempts {
-		limiter.admit(client, later)
+	tests := []struct {
+		name string
+		// replace swaps the client's record for a new one and returns the
+		// time the new record's attempts are counted at.
+		replace func(limiter *attemptLimiter) time.Time
+	}{
+		{name: "the window expired", replace: func(*attemptLimiter) time.Time { return start.Add(attemptWindow) }},
+		{name: "a sign-in reset it", replace: func(limiter *attemptLimiter) time.Time {
+			limiter.reset(client)
+			return start
+		}},
 	}
-	require.NotZero(t, limiter.admit(client, later))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			limiter := newAttemptLimiter()
+			stale, _ := limiter.admit(client, start)
+			require.NotNil(t, stale)
 
-	limiter.release(client, admitted)
-	assert.NotZero(t, limiter.admit(client, later), "the new window keeps every attempt it counted")
+			now := tt.replace(limiter)
+			for range maxFailedAttempts {
+				require.Zero(t, admitWait(limiter, client, now))
+			}
+			require.NotZero(t, admitWait(limiter, client, now))
+
+			limiter.release(client, stale)
+			assert.NotZero(t, admitWait(limiter, client, now), "the new record keeps every attempt it counted")
+		})
+	}
 }
 
 func TestAttemptLimiterCountsAnIPv6SubnetAsOneClient(t *testing.T) {
@@ -77,24 +102,24 @@ func TestAttemptLimiterCountsAnIPv6SubnetAsOneClient(t *testing.T) {
 	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
 
 	for i := range maxFailedAttempts {
-		limiter.admit(fmt.Sprintf("2001:db8:1:2::%x", i+1), now)
+		admitWait(limiter, fmt.Sprintf("2001:db8:1:2::%x", i+1), now)
 	}
 
-	assert.NotZero(t, limiter.admit("2001:db8:1:2:ffff::1", now), "an address in the same /64 shares the count")
-	assert.Zero(t, limiter.admit("2001:db8:1:3::1", now), "another /64 does not")
+	assert.NotZero(t, admitWait(limiter, "2001:db8:1:2:ffff::1", now), "an address in the same /64 shares the count")
+	assert.Zero(t, admitWait(limiter, "2001:db8:1:3::1", now), "another /64 does not")
 }
 
 func TestAttemptLimiterRefusesNewClientsWhenFull(t *testing.T) {
 	limiter := newAttemptLimiter()
 	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
 	for i := range maxTrackedClients {
-		limiter.admit(fmt.Sprintf("10.%d.%d.%d", i>>16&0xff, i>>8&0xff, i&0xff), now)
+		admitWait(limiter, fmt.Sprintf("10.%d.%d.%d", i>>16&0xff, i>>8&0xff, i&0xff), now)
 	}
 
-	assert.Equal(t, attemptWindow, limiter.admit("203.0.113.7", now), "an untracked client waits for room")
-	assert.Zero(t, limiter.admit("10.0.0.1", now), "a tracked client under the limit may still try")
-	assert.Zero(t, limiter.admit("203.0.113.7", now.Add(attemptWindow)), "expired records make room")
-	assert.Zero(t, limiter.admit("10.0.0.2", now.Add(attemptWindow)), "a client whose record expired starts over")
+	assert.Equal(t, attemptWindow, admitWait(limiter, "203.0.113.7", now), "an untracked client waits for room")
+	assert.Zero(t, admitWait(limiter, "10.0.0.1", now), "a tracked client under the limit may still try")
+	assert.Zero(t, admitWait(limiter, "203.0.113.7", now.Add(attemptWindow)), "expired records make room")
+	assert.Zero(t, admitWait(limiter, "10.0.0.2", now.Add(attemptWindow)), "a client whose record expired starts over")
 }
 
 func TestClientKey(t *testing.T) {
