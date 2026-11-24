@@ -36,7 +36,7 @@ Die Admin-REST-API-Endpunkte (`/admin/*`) akzeptieren zwei Arten von Zugangsdate
 - **`GOMODEL_MASTER_KEY`** – hat immer Admin-Zugriff.
 - **Ein verwalteter API-Key mit Dashboard-Zugriff** – verwaltete Keys werden standardmäßig *ohne* Dashboard-Zugriff erstellt, sodass ein für Modell-Traffic ausgegebener Key weder das Request-Log lesen noch neue Keys ausstellen oder Gateway-Einstellungen ändern kann. Requests mit einem verwalteten Key ohne diesen Zugriff liefern `403` mit dem Fehlercode `dashboard_access_denied`.
 
-Das Dashboard lässt sich statt mit einem Key auch mit Benutzername und Passwort öffnen: Setzen Sie [`DASHBOARD_PASSWORD`](/de/advanced/configuration#dashboard-anmeldung). Die Anmeldung (`POST /admin/session` mit `username` und `password`) gibt dem Browser ein Sitzungs-Cookie, das `/admin/*` anstelle eines Bearer-Tokens akzeptiert; `DELETE /admin/session` meldet ab.
+Das Dashboard lässt sich statt mit einem Key auch mit Benutzernamen und Passwort öffnen: Setzen Sie [`DASHBOARD_PASSWORD`](/de/advanced/configuration#dashboard-anmeldung). Die Anmeldung (`POST /admin/session` mit `username` und `password`) gibt dem Browser ein Sitzungs-Cookie, das `/admin/*` anstelle eines Bearer-Tokens akzeptiert; `DELETE /admin/session` meldet ab.
 
 <CodeGroup>
 

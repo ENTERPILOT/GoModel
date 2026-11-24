@@ -511,7 +511,7 @@ Przykłady YAML, okresy, dopasowywanie i egzekwowanie w workflowach opisuje stro
 | `ADMIN_ENDPOINTS_ENABLED`             | Włącza administracyjne REST API                  | `true`  |
 | `ADMIN_UI_ENABLED`                    | Włącza UI dashboardu administracyjnego           | `true`  |
 | `DASHBOARD_USERNAME`                  | Nazwa użytkownika do [logowania do dashboardu](#logowanie-do-dashboardu) | `admin` |
-| `DASHBOARD_PASSWORD`                  | Hasło do logowania do dashboardu; ustawienie go włącza logowanie | _(puste, logowanie wyłączone)_ |
+| `DASHBOARD_PASSWORD`                  | Hasło do logowania do dashboardu; ustawienie go włącza logowanie (wymaga `ADMIN_ENDPOINTS_ENABLED=true`) | _(puste, logowanie wyłączone)_ |
 | `DASHBOARD_LIVE_LOGS_ENABLED`         | Streamuje podgląd logu requestów i użycia na żywo w dashboardzie | `true`  |
 | `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | Okno odtwarzania w pamięci dla zdarzeń dashboardu na żywo | `10000` |
 | `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Maksymalna liczba zdarzeń odtwarzanych jednemu ponownie łączącemu się klientowi | `1000`  |
@@ -524,10 +524,10 @@ spoza okna odtwarzania, dashboard przeładuje dane przez standardowe REST API.
 
 #### Logowanie do dashboardu
 
-Domyślnie dashboard prosi o klucz API: master key albo zarządzany klucz z
-dostępem do dashboardu. Ustaw `DASHBOARD_PASSWORD`, żeby logować się nazwą
-użytkownika i hasłem, tak aby osoby korzystające z dashboardu nie potrzebowały
-master key:
+Bez hasła dashboard prosi o klucz API (master key albo zarządzany klucz z
+dostępem do dashboardu), a na gatewayu bez master key jest otwarty. Ustaw
+`DASHBOARD_PASSWORD`, żeby logować się nazwą użytkownika i hasłem, tak aby
+osoby korzystające z dashboardu nie potrzebowały master key:
 
 ```bash
 DASHBOARD_PASSWORD=change-me
@@ -540,14 +540,15 @@ admin:
 ```
 
 Zalogowanie rozpoczyna 24-godzinną sesję przechowywaną w ciasteczku `HttpOnly`,
-`SameSite=Strict`. Sesja może to samo, co zarządzany klucz z dostępem do
-dashboardu i bez user path: wszystko w dashboardzie poza dodawaniem
+`SameSite=Strict`. Sesja ma taki sam zakres uprawnień jak zarządzany klucz z
+dostępem do dashboardu i bez user path: wszystko w dashboardzie poza dodawaniem
 [referencji do sekretów](/pl/advanced/secret-references#dane-uwierzytelniające-zarządzane-z-dashboardu),
 gdy skonfigurowany jest master key.
 
-- Logowanie chroni dashboard i `/admin/*`. Po ustawieniu hasła Admin API wymaga
-  danych uwierzytelniających także wtedy, gdy `GOMODEL_MASTER_KEY` jest pusty,
-  zamiast pozostawać otwarte.
+- Logowanie chroni Admin API (`/admin/*`), które dostarcza wszystko, co pokazuje
+  dashboard; sama strona nadal ładuje się bez danych uwierzytelniających. Po
+  ustawieniu hasła Admin API wymaga danych uwierzytelniających także wtedy, gdy
+  `GOMODEL_MASTER_KEY` jest pusty, zamiast pozostawać otwarte.
 - Dostęp do API modeli się nie zmienia. Master key i zarządzane klucze API
   działają dalej, również na `/admin/*`, a gateway bez żadnego z nich nadal
   obsługuje requesty do modeli bez uwierzytelniania.

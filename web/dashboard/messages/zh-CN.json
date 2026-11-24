@@ -1235,6 +1235,7 @@
   "auth_dialog_close": "关闭认证对话框",
   "auth_dialog_sign_in_with_sso": "使用 SSO 登录",
   "auth_dialog_or_use_api_key": "或使用 API 密钥",
+  "auth_dialog_or_use_password": "或使用用户名和密码",
   "auth_api_key_label": "API 密钥",
   "auth_api_key_placeholder": "主密钥或 bearer 令牌",
   "auth_api_key_invalid": "请输入有效的 API 密钥以继续。",

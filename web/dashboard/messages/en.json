@@ -1406,6 +1406,7 @@
   "auth_dialog_close": "Close authentication dialog",
   "auth_dialog_sign_in_with_sso": "Sign in with SSO",
   "auth_dialog_or_use_api_key": "or use an API key",
+  "auth_dialog_or_use_password": "or use your username and password",
   "auth_api_key_label": "API key",
   "auth_api_key_placeholder": "Master key or bearer token",
   "auth_api_key_invalid": "Enter a valid API key to continue.",

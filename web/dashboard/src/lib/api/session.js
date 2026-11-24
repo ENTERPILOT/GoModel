@@ -22,12 +22,18 @@ async function readJSON(res) {
 // signIn returns "" on success, or the failure kind from signInFailure.
 // Network errors propagate.
 export async function signIn(username, password) {
+  const generation = auth.generation;
   const res = await apiFetch(SESSION_PATH, {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
-  if (!res.ok) return signInFailure(res.status);
-  auth.startSession(sessionUsername(await readJSON(res)) || username);
+  if (!res.ok) {
+    return generation < auth.generation ? "" : signInFailure(res.status);
+  }
+  const data = await readJSON(res);
+  // Another credential was applied while this one was in flight; it stands.
+  if (generation < auth.generation) return "";
+  auth.startSession(sessionUsername(data) || username);
   return "";
 }
 
@@ -46,8 +52,11 @@ export async function loadSession() {
   const generation = auth.generation;
   try {
     const res = await apiFetch(SESSION_PATH);
-    if (!res.ok || generation < auth.generation) return;
-    auth.sessionUser = sessionUsername(await readJSON(res));
+    if (!res.ok) return;
+    const data = await readJSON(res);
+    // A credential applied or refused in the meantime outdates this answer.
+    if (generation < auth.generation || auth.needsAuth) return;
+    auth.sessionUser = sessionUsername(data);
   } catch {
     // Offline or restarting gateway.
   }

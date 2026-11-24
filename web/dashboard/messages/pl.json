@@ -1400,6 +1400,7 @@
   "auth_dialog_close": "Zamknij okno uwierzytelniania",
   "auth_dialog_sign_in_with_sso": "Zaloguj się przez SSO",
   "auth_dialog_or_use_api_key": "lub użyj klucza API",
+  "auth_dialog_or_use_password": "lub użyj nazwy użytkownika i hasła",
   "auth_api_key_label": "Klucz API",
   "auth_api_key_placeholder": "Klucz główny lub token Bearer",
   "auth_api_key_invalid": "Aby kontynuować, wprowadź prawidłowy klucz API.",

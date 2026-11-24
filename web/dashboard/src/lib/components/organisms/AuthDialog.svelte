@@ -100,7 +100,11 @@
           <Icon icon={KeyRound} />
           <span>{m.auth_dialog_sign_in_with_sso()}</span>
         </a>
-        <div class="auth-dialog-separator"><span>{m.auth_dialog_or_use_api_key()}</span></div>
+        <div class="auth-dialog-separator">
+          <span>{passwordMode
+              ? m.auth_dialog_or_use_password()
+              : m.auth_dialog_or_use_api_key()}</span>
+        </div>
       {/if}
       {#if passwordMode}
         <div class="auth-dialog-input-shell">

@@ -552,7 +552,7 @@ Zuordnungsregeln und die Durchsetzung in Workflows.
 | `ADMIN_ENDPOINTS_ENABLED`             | Aktiviert die Admin-REST-API                        | `true`  |
 | `ADMIN_UI_ENABLED`                    | Aktiviert die Oberfläche des Admin-Dashboards                    | `true`  |
 | `DASHBOARD_USERNAME`                  | Benutzername für die [Dashboard-Anmeldung](#dashboard-anmeldung) | `admin` |
-| `DASHBOARD_PASSWORD`                  | Passwort für die Dashboard-Anmeldung; ist es gesetzt, ist die Anmeldung aktiv | _(leer, Anmeldung aus)_ |
+| `DASHBOARD_PASSWORD`                  | Passwort für die Dashboard-Anmeldung; ist es gesetzt, ist die Anmeldung aktiv (erfordert `ADMIN_ENDPOINTS_ENABLED=true`) | _(leer, Anmeldung aus)_ |
 | `DASHBOARD_LIVE_LOGS_ENABLED`         | Streamt Echtzeit-Vorschauen von Request-Logs und Nutzung ins Dashboard | `true`  |
 | `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | Replay-Fenster im Arbeitsspeicher für Live-Ereignisse im Dashboard | `10000` |
 | `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Maximale Anzahl an Ereignissen, die einem sich neu verbindenden Client erneut gesendet werden   | `1000`  |
@@ -567,10 +567,11 @@ regulären REST-APIs neu.
 
 #### Dashboard-Anmeldung
 
-Standardmäßig fragt das Dashboard nach einem API-Key: dem Master-Key oder einem
-verwalteten Key mit Dashboard-Zugriff. Setzen Sie `DASHBOARD_PASSWORD`, um sich
-stattdessen mit Benutzername und Passwort anzumelden, sodass die Personen, die
-das Dashboard nutzen, den Master-Key nicht benötigen:
+Ohne Passwort fragt das Dashboard nach einem API-Key (dem Master-Key oder einem
+verwalteten Key mit Dashboard-Zugriff) und ist auf einem Gateway ohne
+Master-Key offen. Setzen Sie `DASHBOARD_PASSWORD`, um sich stattdessen mit
+Benutzernamen und Passwort anzumelden, sodass die Personen, die das Dashboard
+nutzen, den Master-Key nicht benötigen:
 
 ```bash
 DASHBOARD_PASSWORD=change-me
@@ -588,9 +589,10 @@ mit Dashboard-Zugriff und ohne User-Path: alles im Dashboard, außer
 [Secret-Referenzen](/de/advanced/secret-references#im-dashboard-verwaltete-zugangsdaten)
 hinzuzufügen, solange ein Master-Key konfiguriert ist.
 
-- Die Anmeldung schützt das Dashboard und `/admin/*`. Mit gesetztem Passwort
-  verlangt die Admin-API auch dann Zugangsdaten, wenn `GOMODEL_MASTER_KEY` leer
-  ist, statt offen zu bleiben.
+- Die Anmeldung schützt die Admin-API (`/admin/*`), die alles liefert, was das
+  Dashboard anzeigt; die Seite selbst lädt weiterhin ohne Zugangsdaten. Mit
+  gesetztem Passwort verlangt die Admin-API auch dann Zugangsdaten, wenn
+  `GOMODEL_MASTER_KEY` leer ist, statt offen zu bleiben.
 - Der Zugriff auf die Modell-API ändert sich nicht. Master-Key und verwaltete
   API-Keys funktionieren weiterhin, auch auf `/admin/*`, und ein Gateway ohne
   beides beantwortet Modell-Requests weiterhin ohne Zugangsdaten.

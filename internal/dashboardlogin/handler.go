@@ -176,7 +176,7 @@ func (h *Handler) record(c *echo.Context, eventType, outcome, reason string) {
 		Type:       eventType,
 		Outcome:    outcome,
 		Method:     AuthMethod,
-		RequestID:  request.Header.Get(core.RequestIDHeader),
+		RequestID:  core.GetRequestID(request.Context()),
 		ClientIP:   c.RealIP(),
 		HTTPMethod: request.Method,
 		Path:       request.URL.Path,
