@@ -910,9 +910,11 @@ oder Nachfahren ergeben; `managed: true` kennzeichnet in der Konfiguration dekla
 die hier schreibgeschützt sind (`409`, Code `user_managed`).
 
 `PUT /admin/users` akzeptiert `{"user_path": "/acme/eng", "allowed_models": ["anthropic/*"], "default_model": "anthropic/claude-sonnet-4-6", "max_reasoning_effort": "medium", "max_output_tokens": 8000, "description": "..."}`
-und gibt den aktualisierten Baum zurück. Der Aufruf ersetzt die gesamte Richtlinie des Knotens: Ein ausgelassenes Feld
-wird geleert, senden Sie also jedes Feld, das der Knoten behalten soll. `default_model`,
-`max_reasoning_effort` und `max_output_tokens` sind die Request-Policy des Knotens; ein Knoten in
+und gibt den aktualisierten Baum zurück. Der Aufruf ersetzt `allowed_models` und `description` des Knotens: Ein
+ausgelassenes davon wird geleert. `default_model`,
+`max_reasoning_effort` und `max_output_tokens` sind die Request-Policy des Knotens, und ein ausgelassenes dieser Felder
+(oder `null`) behält seinen Wert; ein Client, der sie nicht sendet, kann so beim Speichern des Knotens keine Obergrenze
+aufheben. Senden Sie `""` oder `0`, um eines zu leeren. Ein Knoten in
 `GET /admin/users` trägt in diesen Feldern seine eigenen Werte und in `request_policy` die Werte, die nach dem
 Zusammenführen mit seinen Vorfahren gelten, jeweils mit dem Pfad, von dem sie stammen (zum Beispiel
 `max_output_tokens_from`). Selektoren werden gegen die konfigurierten

@@ -365,9 +365,12 @@ Effort, eine negative Token-Obergrenze oder ein Wildcard-Standardmodell.
 | `PUT`    | `/admin/auth-keys/{id}/allowed-models`  | Ersetzt die Allowlist eines API-Keys           |
 
 `PUT /admin/users` nimmt `user_path`, `allowed_models`, `default_model`,
-`max_reasoning_effort`, `max_output_tokens` und `description` entgegen und
-ersetzt die ganze Zeile: Ein weggelassenes Feld wird geleert. `GET /admin/users`
-liefert die eigenen Felder jedes Knotens und ein Objekt `request_policy` mit den
+`max_reasoning_effort`, `max_output_tokens` und `description` entgegen. Der
+Aufruf ersetzt die Allowlist und die Beschreibung und behält ein Feld der
+Request-Policy (`default_model`, `max_reasoning_effort`, `max_output_tokens`),
+das der Body weglässt; ein Client, der diese Felder nicht sendet, kann so keine
+Obergrenze aufheben. Senden Sie `""` oder `0`, um eines zu leeren.
+`GET /admin/users` liefert die eigenen Felder jedes Knotens und ein Objekt `request_policy` mit den
 geltenden Werten und dem Pfad, aus dem jeder stammt (`default_model_from`,
 `max_reasoning_effort_from`, `max_output_tokens_from`). Ein auf einen Teilbaum
 beschränktes Credential kann die Policy seiner eigenen Scope-Wurzel nicht

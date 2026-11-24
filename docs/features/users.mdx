@@ -338,8 +338,11 @@ ceiling, or a wildcard default model in a declared policy fails startup.
 | `PUT`    | `/admin/auth-keys/{id}/allowed-models`  | Replace one API key's allowlist           |
 
 `PUT /admin/users` takes `user_path`, `allowed_models`, `default_model`,
-`max_reasoning_effort`, `max_output_tokens`, and `description`, and replaces
-the whole row: a field left out is cleared. `GET /admin/users` returns each
+`max_reasoning_effort`, `max_output_tokens`, and `description`. It replaces the
+allowlist and the description, and keeps a request policy field
+(`default_model`, `max_reasoning_effort`, `max_output_tokens`) that the body
+leaves out, so a client that does not send them cannot lift a ceiling; send
+`""` or `0` to clear one. `GET /admin/users` returns each
 node's own fields and a `request_policy` object with the values in force and
 the path each comes from (`default_model_from`, `max_reasoning_effort_from`,
 `max_output_tokens_from`). A credential scoped to a subtree cannot change the

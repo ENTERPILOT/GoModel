@@ -66,8 +66,8 @@ func TestUsersTreeReportsRequestPolicy(t *testing.T) {
 	assert.Nil(t, nodes["/other/ops"].RequestPolicy)
 	assert.Nil(t, nodes["/"].RequestPolicy)
 
-	// A PUT replaces the whole policy: fields left out are cleared.
-	c, rec = echotest.Request(t, http.MethodPut, "/admin/users", `{"user_path":"/acme/eng","allowed_models":["openai/*"]}`)
+	// An empty string and 0 clear a request policy field.
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/users", `{"user_path":"/acme/eng","allowed_models":["openai/*"],"default_model":"","max_reasoning_effort":"","max_output_tokens":0}`)
 	require.NoError(t, h.UpsertUser(c))
 	nodes = decodeUsers(t, rec)
 	assert.Empty(t, nodes["/acme/eng"].DefaultModel)
@@ -76,6 +76,53 @@ func TestUsersTreeReportsRequestPolicy(t *testing.T) {
 		MaxReasoningEffort: "high", MaxReasoningEffortFrom: "/acme",
 		MaxOutputTokens: 8000, MaxOutputTokensFrom: "/acme",
 	}, nodes["/acme/eng/alice"].RequestPolicy)
+}
+
+// A client that does not know the request policy fields, such as a script
+// written before they existed, saves a node without them. That must not lift
+// a ceiling: the fields a PUT leaves out, or sets to null, keep their value,
+// while the allowlist and the description are replaced as before.
+func TestUpsertUserKeepsTheRequestPolicyItLeavesOut(t *testing.T) {
+	h := newUsersHandler(t)
+	put := func(body string) userNodeResponse {
+		t.Helper()
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/users", body)
+		require.NoError(t, h.UpsertUser(c))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		return decodeUsers(t, rec)["/team"]
+	}
+	put(`{"user_path":"/team","allowed_models":["openai/*"],"description":"first","default_model":"team-model","max_reasoning_effort":"medium","max_output_tokens":4096}`)
+
+	node := put(`{"user_path":"/team","allowed_models":["anthropic/*"]}`)
+	assert.Equal(t, []string{"anthropic/"}, node.AllowedModels, "the allowlist is replaced")
+	assert.Empty(t, node.Description, "and so is the description")
+	assert.Equal(t, "team-model", node.DefaultModel)
+	assert.Equal(t, "medium", node.MaxReasoningEffort)
+	assert.Equal(t, 4096, node.MaxOutputTokens)
+
+	node = put(`{"user_path":"/team","allowed_models":["anthropic/*"],"default_model":null,"max_reasoning_effort":null,"max_output_tokens":null}`)
+	assert.Equal(t, "team-model", node.DefaultModel, "null is a field left out")
+	assert.Equal(t, "medium", node.MaxReasoningEffort)
+	assert.Equal(t, 4096, node.MaxOutputTokens)
+
+	node = put(`{"user_path":"/team","allowed_models":["anthropic/*"],"max_output_tokens":1024}`)
+	assert.Equal(t, 1024, node.MaxOutputTokens, "a field that is sent is set")
+	assert.Equal(t, "team-model", node.DefaultModel, "and the others are kept")
+	assert.Equal(t, "medium", node.MaxReasoningEffort)
+
+	node = put(`{"user_path":"/team","allowed_models":["anthropic/*"],"max_reasoning_effort":"","max_output_tokens":0}`)
+	assert.Empty(t, node.MaxReasoningEffort, "an empty string clears")
+	assert.Zero(t, node.MaxOutputTokens, "and so does 0")
+	assert.Equal(t, "team-model", node.DefaultModel)
+
+	fresh := func() userNodeResponse {
+		t.Helper()
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/users", `{"user_path":"/new","allowed_models":["openai/*"]}`)
+		require.NoError(t, h.UpsertUser(c))
+		return decodeUsers(t, rec)["/new"]
+	}()
+	assert.Empty(t, fresh.DefaultModel, "a path without a row has nothing to keep")
+	assert.Zero(t, fresh.MaxOutputTokens)
 }
 
 func TestUpsertUserValidatesRequestPolicy(t *testing.T) {

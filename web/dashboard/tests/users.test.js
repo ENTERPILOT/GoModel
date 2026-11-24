@@ -164,9 +164,9 @@ test("buildUpsertUserPayload prefixes the slash, parses selectors, and drops an 
   assert.deepEqual(payload, {
     user_path: "/acme/eng",
     allowed_models: ["anthropic/*", "openai/gpt-4o"],
-    default_model: undefined,
-    max_reasoning_effort: undefined,
-    max_output_tokens: undefined,
+    default_model: "",
+    max_reasoning_effort: "",
+    max_output_tokens: 0,
     description: undefined,
   });
   assert.ok(buildUpsertUserPayload({ ...defaultUserForm(), user_path: "" }).error);
@@ -185,7 +185,7 @@ test("buildUpsertUserPayload carries the request policy and rejects a bad token 
   assert.equal(payload.max_output_tokens, 4096);
   // A number input hands back a number, not a string.
   assert.equal(buildUpsertUserPayload({ ...defaultUserForm(), user_path: "/acme", max_output_tokens: 512 }).payload.max_output_tokens, 512);
-  assert.equal(buildUpsertUserPayload({ ...defaultUserForm(), user_path: "/acme", max_output_tokens: " " }).payload.max_output_tokens, undefined, "an empty field clears the ceiling");
+  assert.equal(buildUpsertUserPayload({ ...defaultUserForm(), user_path: "/acme", max_output_tokens: " " }).payload.max_output_tokens, 0, "an empty field clears the ceiling, which the endpoint needs spelled out");
   for (const bad of ["-1", "1.5", "many", "0", 0, "1e20", "9007199254740992"]) {
     assert.ok(buildUpsertUserPayload({ ...defaultUserForm(), user_path: "/acme", max_output_tokens: bad }).error, bad);
   }

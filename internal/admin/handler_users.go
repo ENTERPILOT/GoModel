@@ -62,13 +62,26 @@ type upsertUserRequest struct {
 	AllowedModels []string `json:"allowed_models"`
 	// DefaultModel serves chat, Responses and Messages requests under the
 	// path that name neither a model nor a provider.
-	DefaultModel string `json:"default_model,omitempty"`
+	DefaultModel *string `json:"default_model,omitempty"`
 	// MaxReasoningEffort and MaxOutputTokens cap what requests under the
-	// path may send upstream, batches and /p/ passthrough excepted. A PUT
-	// replaces the whole policy: a field left out is cleared.
-	MaxReasoningEffort string `json:"max_reasoning_effort,omitempty"`
-	MaxOutputTokens    int    `json:"max_output_tokens,omitempty"`
-	Description        string `json:"description,omitempty"`
+	// path may send upstream, batches and /p/ passthrough excepted.
+	//
+	// These three are the node's request policy. A PUT replaces the
+	// allowlist and the description, but keeps a request policy field the
+	// body leaves out or sets to null: a client that does not know the
+	// field, such as a script written before it existed, must not lift a
+	// ceiling by saving the node. An empty string or 0 clears the field.
+	MaxReasoningEffort *string `json:"max_reasoning_effort,omitempty"`
+	MaxOutputTokens    *int    `json:"max_output_tokens,omitempty"`
+	Description        string  `json:"description,omitempty"`
+}
+
+// sentOr returns the value a request carries, or kept when it carries none.
+func sentOr[T any](sent *T, kept T) T {
+	if sent == nil {
+		return kept
+	}
+	return *sent
 }
 
 // ListUsers handles GET /admin/users. It returns the user-path tree derived
@@ -95,12 +108,15 @@ func (h *Handler) UpsertUser(c *echo.Context) error {
 	}
 	h.mutationMu.Lock()
 	defer h.mutationMu.Unlock()
+	// Read under the lock, so the request policy kept is the one the write
+	// replaces. A path without a row keeps nothing.
+	stored, _ := h.users.Get(req.UserPath)
 	if _, err := h.users.Upsert(c.Request().Context(), users.User{
 		UserPath:           req.UserPath,
 		AllowedModels:      req.AllowedModels,
-		DefaultModel:       req.DefaultModel,
-		MaxReasoningEffort: req.MaxReasoningEffort,
-		MaxOutputTokens:    req.MaxOutputTokens,
+		DefaultModel:       sentOr(req.DefaultModel, stored.DefaultModel),
+		MaxReasoningEffort: sentOr(req.MaxReasoningEffort, stored.MaxReasoningEffort),
+		MaxOutputTokens:    sentOr(req.MaxOutputTokens, stored.MaxOutputTokens),
 		Description:        req.Description,
 	}); err != nil {
 		return handleError(c, userWriteError(err))

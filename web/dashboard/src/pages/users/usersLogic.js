@@ -17,8 +17,8 @@ export function defaultUserForm() {
 }
 
 // userFormFromNode fills the editor from a tree node. Every field the PUT
-// carries is copied: the API replaces the whole row, so a field left out
-// would be cleared on save.
+// carries is copied: the save sends them all (see buildUpsertUserPayload),
+// so a field the form did not hold would be cleared.
 export function userFormFromNode(node, displaySelector = (selector) => selector) {
   if (!node) {
     return defaultUserForm();
@@ -324,7 +324,9 @@ export function userPathValidationError(value) {
 }
 
 // buildUpsertUserPayload validates the editor form and builds the PUT
-// /admin/users payload. Returns { error } or { payload }.
+// /admin/users payload. Returns { error } or { payload }. The request policy
+// fields are always sent: the endpoint keeps one that is left out, so an
+// emptied field has to say so ("" or 0) to be cleared.
 export function buildUpsertUserPayload(form) {
   const source = form || {};
   const pathError = userPathValidationError(source.user_path);
@@ -343,9 +345,9 @@ export function buildUpsertUserPayload(form) {
     payload: {
       user_path: trimmed.startsWith("/") ? trimmed : "/" + trimmed,
       allowed_models: parseModelSelectors(source.allowed_models),
-      default_model: String(source.default_model || "").trim() || undefined,
-      max_reasoning_effort: String(source.max_reasoning_effort || "").trim() || undefined,
-      max_output_tokens: maxOutputTokens || undefined,
+      default_model: String(source.default_model || "").trim(),
+      max_reasoning_effort: String(source.max_reasoning_effort || "").trim(),
+      max_output_tokens: maxOutputTokens,
       description: String(source.description || "").trim() || undefined,
     },
   };

@@ -195,6 +195,6 @@ USERS='[{"path":"/acme/eng","allowed_models":["anthropic/*"],"default_model":"te
 | `DELETE` | `/admin/users?user_path=/acme/eng`      | 移除某个节点的策略                  |
 | `PUT`    | `/admin/auth-keys/{id}/allowed-models`  | 替换某个 API 密钥的允许列表           |
 
-`PUT /admin/users` 接受 `user_path`、`allowed_models`、`default_model`、`max_reasoning_effort`、`max_output_tokens` 和 `description`，并替换整行：省略的字段会被清空。`GET /admin/users` 返回每个节点自身的字段，以及一个 `request_policy` 对象，其中包含生效的值和每个值来自的路径（`default_model_from`、`max_reasoning_effort_from`、`max_output_tokens_from`）。限定在某个子树的凭据不能修改其自身作用域根节点的策略，只能修改其下的路径。
+`PUT /admin/users` 接受 `user_path`、`allowed_models`、`default_model`、`max_reasoning_effort`、`max_output_tokens` 和 `description`。该调用会替换允许列表和描述，而请求体省略的请求策略字段（`default_model`、`max_reasoning_effort`、`max_output_tokens`）保持原值，因此不发送这些字段的客户端无法解除上限；发送 `""` 或 `0` 可清空某个字段。`GET /admin/users` 返回每个节点自身的字段，以及一个 `request_policy` 对象，其中包含生效的值和每个值来自的路径（`default_model_from`、`max_reasoning_effort_from`、`max_output_tokens_from`）。限定在某个子树的凭据不能修改其自身作用域根节点的策略，只能修改其下的路径。
 
 `POST /admin/auth-keys` 在创建时接受 `allowed_models`。请求和响应格式请参阅 [Admin 端点](/zh/advanced/admin-endpoints)。
