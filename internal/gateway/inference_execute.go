@@ -371,7 +371,7 @@ func executeTranslatedProviderRequest[Req any, Resp any](
 	if err != nil {
 		return resp, meta, err
 	}
-	// The provider type drives routing and audit filters, so it is what the
+	// The provider type drives routing and request log filters, so it is what the
 	// attempt reported above; the client-facing field names the configured
 	// instance that served the request, as errors and breaker messages do.
 	return nameProviderInstance(resp, meta.ProviderName), meta, nil

@@ -15,6 +15,8 @@ import (
 const (
 	MinSlowdownFactor = 0.1
 	MaxSlowdownFactor = 10.0
+	// MaxTimeoutSeconds caps the per-attempt upstream timeouts (one day).
+	MaxTimeoutSeconds = 86400
 )
 
 // IsValidationError reports whether err is a validation error.
@@ -35,6 +37,9 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 	vm.Strategy = normalizeStrategy(vm.Strategy)
 	vm.StrategyPlugin = strings.TrimSpace(vm.StrategyPlugin)
 	if err := validateSlowdown(vm.Slowdown); err != nil {
+		return VirtualModel{}, nil, err
+	}
+	if err := validateTimeouts(vm); err != nil {
 		return VirtualModel{}, nil, err
 	}
 	if err := normalizeOverrides(&vm); err != nil {
@@ -113,6 +118,9 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	if err := validateSlowdown(vm.Slowdown); err != nil {
 		return VirtualModel{}, err
 	}
+	if err := validateTimeouts(vm); err != nil {
+		return VirtualModel{}, err
+	}
 	if err := normalizeOverrides(&vm); err != nil {
 		return VirtualModel{}, err
 	}
@@ -165,6 +173,9 @@ func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
 	if err := validateSlowdown(vm.Slowdown); err != nil {
 		return VirtualModel{}, err
 	}
+	if err := validateTimeouts(vm); err != nil {
+		return VirtualModel{}, err
+	}
 	if err := normalizeOverrides(&vm); err != nil {
 		return VirtualModel{}, err
 	}
@@ -214,6 +225,8 @@ func validatePolicyOverrideScope(vm VirtualModel, model string) error {
 		return nil
 	}
 	switch {
+	case vm.setsTimeouts():
+		return newValidationError("timeout and response_header_timeout can only be configured for a model or redirect", nil)
 	case vm.ReasoningEffort != "":
 		return newValidationError("reasoning_effort can only be configured for a model or redirect", nil)
 	case len(vm.Params) > 0:
@@ -231,6 +244,21 @@ func validateSlowdown(configured *float64) error {
 	factor := *configured
 	if math.IsNaN(factor) || math.IsInf(factor, 0) || factor < MinSlowdownFactor || factor > MaxSlowdownFactor {
 		return newValidationError(fmt.Sprintf("slowdown must be 0 (disabled) or between %.1f and %.0f", MinSlowdownFactor, MaxSlowdownFactor), nil)
+	}
+	return nil
+}
+
+func validateTimeouts(vm VirtualModel) error {
+	for _, field := range []struct {
+		name  string
+		value *int
+	}{
+		{"timeout", vm.Timeout},
+		{"response_header_timeout", vm.ResponseHeaderTimeout},
+	} {
+		if field.value != nil && (*field.value < 1 || *field.value > MaxTimeoutSeconds) {
+			return newValidationError(fmt.Sprintf("%s must be between 1 and %d seconds", field.name, MaxTimeoutSeconds), nil)
+		}
 	}
 	return nil
 }

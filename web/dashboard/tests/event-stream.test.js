@@ -1,4 +1,4 @@
-// Transport tests for the shared SSE client. The audit-log merge suite
+// Transport tests for the shared SSE client. The request-log merge suite
 // (live-logs.test.js) still exercises it end-to-end through
 // consumeLiveLogsBody; these cover the framing rules directly, including the
 // cases only the overview's usage stream used to hit.

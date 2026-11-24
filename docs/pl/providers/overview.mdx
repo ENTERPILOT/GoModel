@@ -162,9 +162,9 @@ przez providera upstream.
 - **Fireworks AI** – ID modeli to ścieżki w zakresie konta, takie jak
   `accounts/fireworks/models/gpt-oss-120b`; używaj ich dosłownie w requestach i w
   `FIREWORKS_MODELS`.
-- **ElevenLabs** – provider wyłącznie głosowy: `/v1/audio/speech` (text-to-speech)
-  i `/v1/audio/transcriptions` (speech-to-text) są obsługiwane, ale chat,
-  `/v1/responses` i embeddingi nie (oznaczenia ❌ powyżej wynikają z tego, a nie z
+- **ElevenLabs** – provider wyłącznie głosowy: `/v1/audio/speech` (text-to-speech),
+  `/v1/audio/transcriptions` (speech-to-text) i `/v1/realtime` (transkrypcja
+  Scribe Realtime) są obsługiwane, ale chat, `/v1/responses` i embeddingi nie (oznaczenia ❌ powyżej wynikają z tego, a nie z
   ograniczeń gatewaya). Pole `voice` z OpenAI musi być voice_id ElevenLabs.
   Obsługiwane formaty audio i modele speech-to-text opisuje
   [przewodnik ElevenLabs](/pl/providers/elevenlabs).
@@ -287,7 +287,7 @@ przez providera upstream.
 - **Jev / Kev** – System One API od TypeSafe to API decyzyjne (na wejściu stan i
   typowane pytania, na wyjściu skalibrowane prawdopodobieństwa). GoModel
   przekazuje je natywnie, bez tłumaczenia, pod `POST /v1/systemone` (z modelami
-  wirtualnymi, guardrails, audytem i użyciem) oraz przez passthrough pod
+  wirtualnymi, guardrails, logowaniem requestów i użyciem) oraz przez passthrough pod
   `/p/jev/...`, a także odpowiada nim na [Decisions API](/pl/advanced/decisions-api)
   OpenAI pod `POST /v1/decisions`, tłumacząc w obie strony. `/v1/decisions` jest
   dostępne po skonfigurowaniu providera `openai`, `jev` lub `openrouter`, a

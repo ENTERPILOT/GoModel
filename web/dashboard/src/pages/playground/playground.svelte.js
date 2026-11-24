@@ -1,11 +1,12 @@
 // Playground state: the editable conversation, the endpoint/model selection
 // and the in-flight request. Requests go straight to the gateway's public API
 // (/v1/chat/completions, /v1/responses, /v1/messages) with the dashboard key,
-// so they show up in Audit Logs and Usage like any other client's traffic.
+// so they show up in Requests and Usage like any other client's traffic.
 
 import { apiFetch, isAbortError } from "$lib/api/client.js";
 import { errorPayloadMessage, isGatewayAuthError } from "$lib/api/errors.js";
 import { consumeEventStream } from "$lib/api/eventStream.js";
+import { access } from "$lib/stores/access.svelte.js";
 import { auth } from "$lib/stores/auth.svelte.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
@@ -25,8 +26,10 @@ import {
   normalizeEndpoint,
   normalizeRole,
   playgroundUserPathHeader,
+  syncedUserPath,
 } from "./playgroundLogic.js";
 import { normalizeMode } from "./playgroundMedia.js";
+import { virtualModels as virtualModelsStore } from "../models/virtualModels.svelte.js";
 
 const STORAGE = {
   mode: "gomodel_playground_mode",
@@ -82,6 +85,9 @@ class PlaygroundStore {
 
   #abort = null;
   #nextID = 1;
+  // Whether userPath was entered by the user rather than prefilled from the
+  // selected model.
+  #userPathEntered = false;
 
   get endpointPath() {
     return endpointById(this.endpoint)?.path || "";
@@ -89,6 +95,12 @@ class PlaygroundStore {
 
   get canSend() {
     return !this.sending && (this.draft.trim() !== "" || this.messages.length > 0);
+  }
+
+  // Virtual models the picker lists next to the inventory. Their endpoint is
+  // global-only, so a scoped admin gets none and types the name instead.
+  get virtualModels() {
+    return access.loaded && !access.scoped ? virtualModelsStore.aliases : [];
   }
 
   // Header name the selected user path is sent under: the deployment's
@@ -105,7 +117,7 @@ class PlaygroundStore {
     this.mode = mode;
     writeStored(STORAGE.mode, mode);
     this.model = readStored(modelStorageKey(mode), "") || "";
-    this.userPath = defaultUserPathForModel(modelsStore.models, this.model.trim());
+    this.#resetUserPath();
   }
 
   setEndpoint(id) {
@@ -116,11 +128,27 @@ class PlaygroundStore {
   setModel(model) {
     this.model = String(model || "");
     writeStored(modelStorageKey(this.mode), this.model);
-    this.userPath = defaultUserPathForModel(modelsStore.models, this.model.trim());
+    this.#resetUserPath();
+  }
+
+  #modelUserPath() {
+    return defaultUserPathForModel(modelsStore.models, this.model.trim(), this.virtualModels);
+  }
+
+  #resetUserPath() {
+    this.#userPathEntered = false;
+    this.userPath = this.#modelUserPath();
+  }
+
+  // Follows the selected model's default user path when the inventory or the
+  // virtual models arrive or change, without replacing a path the user entered.
+  syncUserPath() {
+    this.userPath = syncedUserPath(this.userPath, this.#userPathEntered, this.#modelUserPath());
   }
 
   setUserPath(value) {
     this.userPath = String(value || "");
+    this.#userPathEntered = this.userPath !== "";
   }
 
   setStream(enabled) {

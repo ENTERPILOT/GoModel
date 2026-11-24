@@ -1,7 +1,9 @@
-// Package realtime implements a transparent, provider-agnostic websocket reverse
-// proxy for OpenAI-compatible realtime (speech-to-speech) sessions. The provider
-// event schema is the wire format, so frames are relayed verbatim; the gateway's
-// job is credential injection, routing, and observation.
+// Package realtime implements a provider-agnostic websocket reverse proxy for
+// OpenAI-compatible realtime (speech-to-speech) sessions. For most providers the
+// event schema is the wire format, so frames are relayed verbatim and the
+// gateway's job is credential injection, routing, and observation. A provider
+// with its own websocket protocol supplies a Translator, and the relay converts
+// each frame through it instead.
 package realtime
 
 import (
@@ -67,8 +69,25 @@ type Hooks struct {
 	// carries session policy such as pinning the transcription model.
 	MapClientFrame func([]byte) []byte
 	// OnServerFrame observes each upstream->client frame. It backs usage
-	// tracking, which reads the provider's usage events.
+	// tracking, which reads the provider's usage events. In a translated
+	// session it observes the translated frames, the ones the client receives.
 	OnServerFrame func([]byte)
+	// Translator converts the session between the client's event schema and
+	// the upstream's own protocol. Nil relays frames verbatim. The client-frame
+	// hooks run before it, so they always see what the client sent.
+	Translator Translator
+}
+
+// Translator converts the frames of one session between the client's event
+// schema and the upstream's protocol. The two methods run on different
+// goroutines.
+type Translator interface {
+	// ClientEvent translates one client frame into the frames to send upstream
+	// and the frames to answer the client with directly.
+	ClientEvent(frame []byte) (upstream, replies [][]byte)
+	// ProviderEvent translates one upstream frame into the frames the client
+	// receives.
+	ProviderEvent(frame []byte) [][]byte
 }
 
 // clientFrames folds the client-frame observer and mapper into the single
@@ -134,15 +153,26 @@ func relay(ctx context.Context, client, upstream *websocket.Conn, hooks Hooks) e
 	defer cancel()
 
 	done := make(chan error, 3)
-	go func() { done <- copyFrames(ctx, upstream, client, hooks.clientFrames()) }()         // client -> upstream
-	go func() { done <- copyFrames(ctx, client, upstream, observe(hooks.OnServerFrame)) }() // upstream -> client
+	if hooks.Translator == nil {
+		go func() { done <- copyFrames(ctx, upstream, client, hooks.clientFrames()) }()         // client -> upstream
+		go func() { done <- copyFrames(ctx, client, upstream, observe(hooks.OnServerFrame)) }() // upstream -> client
+	} else {
+		go func() { done <- translateClientFrames(ctx, upstream, client, hooks) }()
+		go func() { done <- translateUpstreamFrames(ctx, client, upstream, hooks) }()
+	}
 	go func() {
 		done <- heartbeat(ctx, func(ctx context.Context) error { return pingBoth(ctx, client, upstream) })
 	}()
 
 	first := <-done
-	cancel()
+	// A Read whose context ends drops its connection without a close frame, so
+	// a peer's close is mirrored before cancelling or its code could be lost.
+	// Any other failure cancels first: a dead peer would stall the handshake.
+	if _, closed := errors.AsType[websocket.CloseError](first); !closed {
+		cancel()
+	}
 	closeBoth(client, upstream, first)
+	cancel()
 	<-done
 	<-done
 
@@ -210,6 +240,62 @@ func copyFrames(ctx context.Context, dst, src *websocket.Conn, mapFrame func([]b
 			return err
 		}
 	}
+}
+
+// translateClientFrames is the client->upstream loop of a translated session.
+// Each client frame passes the client-frame hooks, then the translator; what it
+// returns for the upstream is forwarded and what it answers itself goes back to
+// the client. Translated frames are JSON events, so they travel as text.
+func translateClientFrames(ctx context.Context, upstream, client *websocket.Conn, hooks Hooks) error {
+	mapFrame := hooks.clientFrames()
+	for {
+		_, data, err := client.Read(ctx)
+		if err != nil {
+			return err
+		}
+		if mapFrame != nil {
+			data = mapFrame(data)
+		}
+		forward, replies := hooks.Translator.ClientEvent(data)
+		if err := writeFrames(ctx, upstream, forward); err != nil {
+			return err
+		}
+		if err := writeFrames(ctx, client, replies); err != nil {
+			return err
+		}
+	}
+}
+
+// translateUpstreamFrames is the upstream->client loop of a translated session.
+// The server-frame tap observes the translated frames, because those carry the
+// event schema it reads.
+func translateUpstreamFrames(ctx context.Context, client, upstream *websocket.Conn, hooks Hooks) error {
+	for {
+		_, data, err := upstream.Read(ctx)
+		if err != nil {
+			return err
+		}
+		frames := hooks.Translator.ProviderEvent(data)
+		if hooks.OnServerFrame != nil {
+			for _, frame := range frames {
+				hooks.OnServerFrame(frame)
+			}
+		}
+		if err := writeFrames(ctx, client, frames); err != nil {
+			return err
+		}
+	}
+}
+
+// writeFrames writes each frame as its own text message. Both loops of a
+// translated session write to the client; the connection serializes them.
+func writeFrames(ctx context.Context, dst *websocket.Conn, frames [][]byte) error {
+	for _, frame := range frames {
+		if err := dst.Write(ctx, websocket.MessageText, frame); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // observe adapts a read-only frame tap to copyFrames' mapping shape.

@@ -46,7 +46,7 @@ type DecisionRequest struct {
 	// Model is a "provider/model" reference, an alias, or a virtual model.
 	Model string
 	// UserPath optionally overrides the user path the internal call is scoped
-	// to (for budgets and audit). Empty means the current request's path.
+	// to (for budgets and request logs). Empty means the current request's path.
 	UserPath string
 	// Input is what the questions are about. Every message is sent as a user
 	// message; its text and image parts are sent, other parts are dropped.

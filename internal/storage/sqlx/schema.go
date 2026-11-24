@@ -123,43 +123,57 @@ func isPlainIdentifier(name string) bool {
 	return true
 }
 
-// Columns reports table's current column names, lowercased; a missing table
-// has none. On PostgreSQL the table is looked up in current_schema(), where
-// unqualified store SQL resolves it.
+// Columns reports table's current column names as a set (see ColumnNames).
+func Columns(ctx context.Context, db DB, table string) (map[string]bool, error) {
+	names, err := ColumnNames(ctx, db, db.Dialect(), table)
+	if err != nil {
+		return nil, err
+	}
+	columns := make(map[string]bool, len(names))
+	for _, name := range names {
+		columns[name] = true
+	}
+	return columns, nil
+}
+
+// ColumnNames lists table's current column names in declaration order,
+// lowercased; a missing table has none. It also reports a view's columns. On
+// PostgreSQL the table is looked up in current_schema(), where unqualified
+// store SQL resolves it.
 //
 // The SQLite query interpolates table, so it must be a fixed identifier.
-func Columns(ctx context.Context, db DB, table string) (map[string]bool, error) {
+func ColumnNames(ctx context.Context, q Querier, dialect Dialect, table string) ([]string, error) {
 	var query string
 	var args []any
-	switch db.Dialect() {
+	switch dialect {
 	case SQLite:
-		query = fmt.Sprintf(`SELECT name FROM pragma_table_info('%s')`, table)
+		query = fmt.Sprintf(`SELECT name FROM pragma_table_info('%s') ORDER BY cid`, table)
 	case PostgreSQL:
 		query = `SELECT column_name FROM information_schema.columns
-			WHERE table_schema = current_schema() AND table_name = ?`
+			WHERE table_schema = current_schema() AND table_name = ? ORDER BY ordinal_position`
 		args = []any{table}
 	default:
-		return nil, fmt.Errorf("unsupported dialect %q", db.Dialect())
+		return nil, fmt.Errorf("unsupported dialect %q", dialect)
 	}
 
-	rows, err := db.Query(ctx, query, args...)
+	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("inspect %s columns: %w", table, err)
 	}
 	defer rows.Close()
 
-	columns := make(map[string]bool)
+	var names []string
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
 			return nil, fmt.Errorf("inspect %s columns: %w", table, err)
 		}
-		columns[strings.ToLower(name)] = true
+		names = append(names, strings.ToLower(name))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("inspect %s columns: %w", table, err)
 	}
-	return columns, nil
+	return names, nil
 }
 
 // addColumnStatement expands type tokens and, on PostgreSQL, turns

@@ -137,7 +137,7 @@ td.col-price {
   display: block;
   width: auto;
   height: auto;
-  max-height: 160px;
+  max-height: 132px;
   margin: 0 auto;
   color: var(--text-muted);
 }
@@ -145,10 +145,11 @@ td.col-price {
 .empty-state-icon text {
   font-family: inherit;
   font-weight: 600;
+  letter-spacing: 0.02em;
   fill: var(--text-muted);
 }
 
-/* Empty-state illustration (with baked-in label) centered over the blank usage chart, filling its height. */
+/* Empty-state illustration (with baked-in label) centered over the blank usage chart. */
 .chart-empty-overlay {
   position: absolute;
   inset: 0;
@@ -161,7 +162,7 @@ td.col-price {
 .chart-empty-overlay .empty-state-icon {
   width: auto;
   height: auto;
-  max-height: 195px;
+  max-height: 148px;
   max-width: 90%;
 }
 

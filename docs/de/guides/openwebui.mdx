@@ -1,6 +1,6 @@
 ---
 title: "GoModel & Open WebUI"
-description: "Geben Sie Open WebUI über GoModel eine einzige Verbindung zu allen Providern und erhalten Sie Audit-Logs, Kostenerfassung pro Benutzer und Metriken für jeden Chat."
+description: "Geben Sie Open WebUI über GoModel eine einzige Verbindung zu allen Providern und erhalten Sie Request-Logs, Kostenerfassung pro Benutzer und Metriken für jeden Chat."
 icon: "messages-square"
 keywords: ["Open WebUI", "open-webui", "selbst gehosteter Chat", "self-hosted chat", "Base-URL", "OpenAI-Verbindung", "Kosten pro Benutzer", "LLM-Observability", "Einrichtungsanleitung"]
 ---
@@ -8,7 +8,7 @@ keywords: ["Open WebUI", "open-webui", "selbst gehosteter Chat", "self-hosted ch
 ## Übersicht
 
 Open WebUI ist eine selbst gehostete Chat-UI, kann Ihnen aber allein weder sagen, was
-die Chats der einzelnen Benutzer kosten, noch einen Audit-Trail des Modell-Traffics führen. Wenn Sie seine
+die Chats der einzelnen Benutzer kosten, noch ein Request-Log des Modell-Traffics führen. Wenn Sie seine
 OpenAI-Verbindung auf GoModel richten, ändert sich das: eine Verbindung, und jeder Chat wird
 protokolliert, bepreist und dem angemeldeten Open-WebUI-Benutzer zugeordnet. Dieselbe
 Verbindung bringt Anthropic, Gemini und jeden anderen in GoModel konfigurierten Provider
@@ -20,7 +20,7 @@ Ablauf:
 
 Was Sie erhalten:
 
-- Vollständige Request- und Response-Bodies für jeden Chat im Audit-Log von GoModel.
+- Vollständige Request- und Response-Bodies für jeden Chat im Request-Log von GoModel.
 - Kosten pro Open-WebUI-Benutzer über weitergeleitete Benutzer-Header und
   [Labels](/de/features/labelling).
 - Alle Provider hinter einer OpenAI-Verbindung; keine Einrichtung pro Provider in
@@ -94,7 +94,7 @@ Installationen können Sie dieselbe Verbindung statt über Umgebungsvariablen zu
 Wählen Sie ein beliebiges Modell – `openai/gpt-5-mini`, `anthropic/claude-haiku-4-5-20251001`,
 `gemini/gemini-2.5-flash` – und chatten Sie. Streaming-Responses sowie die anschließende
 Generierung von Titel und Tags, die Open WebUI nach jedem Chat ausführt, laufen alle über
-GoModel. Jeder Aufruf erscheint im Audit-Log mit vollständigem Prompt, Response,
+GoModel. Jeder Aufruf erscheint im Request-Log mit vollständigem Prompt, Response,
 Tokens, Kosten und den Headern, die den Benutzer identifizieren.
 
 <Note>
@@ -134,7 +134,7 @@ bleibt die Auswahl benutzbar:
 
 Nach jedem Chat generiert Open WebUI Titel und Tags standardmäßig mit demselben Modell
 wie der Chat – einige hundert zusätzliche Prompt-Tokens pro Unterhaltung,
-die Sie jetzt einzeln im Audit-Log sehen. Legen Sie unter
+die Sie jetzt einzeln im Request-Log sehen. Legen Sie unter
 `Admin Panel -> Settings -> Interface` ein kleines Modell (zum
 Beispiel `openai/gpt-5-mini`) als Task-Modell fest, um diesen Overhead günstig zu halten. Auch Task-Aufrufe
 laufen über GoModel und bleiben daher protokolliert und bepreist.

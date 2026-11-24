@@ -224,6 +224,7 @@ func buildDefaultConfig() *Config {
 		Budgets: BudgetsConfig{
 			Enabled:                 true,
 			ProviderBilledCacheHits: true,
+			Alerts:                  defaultBudgetAlertsConfig(),
 		},
 		RateLimits: RateLimitsConfig{
 			Enabled:       true,
@@ -240,6 +241,7 @@ func buildDefaultConfig() *Config {
 			Timeout:               600,
 			ResponseHeaderTimeout: 600,
 			StreamIdleTimeout:     300,
+			MaxIdleConnsPerHost:   512,
 		},
 		Failover: FailoverConfig{
 			Enabled:     true,
@@ -270,7 +272,8 @@ func buildDefaultConfig() *Config {
 			BuiltinRules: true,
 		},
 		MCP: MCPConfig{
-			Enabled: true,
+			Enabled:       true,
+			ToolDiscovery: MCPToolDiscoveryOff,
 		},
 		VersionCheck: VersionCheckConfig{
 			Enabled:        true,

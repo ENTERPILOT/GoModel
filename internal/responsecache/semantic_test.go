@@ -13,9 +13,9 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/anthropicapi"
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // mockEmbedder is an Embedder implementation for testing that returns a fixed vector.
@@ -638,7 +638,7 @@ func TestShouldSkipAllCacheHeaders_CacheControl(t *testing.T) {
 	}
 }
 
-func TestSemanticCacheMiddleware_HitMarksAuditEntryCacheType(t *testing.T) {
+func TestSemanticCacheMiddleware_HitMarksRequestLogEntryCacheType(t *testing.T) {
 	m, _, _ := newTestSemanticMiddleware(0.90, 10, false)
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"semantic-cache-type"}]}`)
 
@@ -647,12 +647,12 @@ func TestSemanticCacheMiddleware_HitMarksAuditEntryCacheType(t *testing.T) {
 
 	m.wg.Wait()
 
-	entry := &auditlog.LogEntry{ID: "semantic-audit-entry"}
-	c, rec := echotest.Post(t, "/v1/chat/completions", body, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	entry := &requestlog.LogEntry{ID: "semantic-request-log-entry"}
+	c, rec := echotest.Post(t, "/v1/chat/completions", body, echotest.WithValue(string(requestlog.LogEntryKey), entry))
 	err := m.Handle(&echoExchange{c: c}, body, func() error {
 		return c.JSON(http.StatusOK, map[string]string{"answer": "42"})
 	})
 	require.NoError(t, err)
 	require.Equal(t, "HIT (semantic)", rec.Header().Get("X-Cache"))
-	require.Equal(t, auditlog.CacheTypeSemantic, entry.CacheType)
+	require.Equal(t, requestlog.CacheTypeSemantic, entry.CacheType)
 }

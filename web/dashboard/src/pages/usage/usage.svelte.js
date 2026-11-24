@@ -1,6 +1,6 @@
 // Usage page state: filtered summaries backing the stat cards, the
 // per-model / per-user-path / per-label / per-request-type / per-session
-// breakdowns, and the request log. The filters live in usageFilters, their
+// breakdowns, and the usage log. The filters live in usageFilters, their
 // dropdown choices in usageFacets, the breakdown in usagePivot, and the API
 // and URL queries are built in usage-view.js. The shared cache overview lives
 // in usageData (this page passes its filter query through fetchCacheOverview).
@@ -11,7 +11,7 @@ import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { usageData } from "$lib/stores/usageData.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { toggleSearchValue } from "$lib/components/molecules/searchSelectLogic.js";
-import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
+import { liveLogs } from "../requests/liveLogs.svelte.js";
 import { emptySessionUsage, emptyUsageLog, emptyUsagePageSummary } from "./usage-helpers.js";
 import {
   endpointsSelected,
@@ -55,7 +55,7 @@ class UsagePageState {
   );
   sessionUsage = $state(emptySessionUsage());
 
-  // The request log is backed by liveLogs.usageLog — the live-merge source of
+  // The usage log is backed by liveLogs.usageLog — the live-merge source of
   // truth. Fetched pages are written into it and usage.* stream events merge
   // into it.
   get usageLog() {
@@ -271,7 +271,7 @@ class UsagePageState {
   }
 
   // Shared request lifecycle for the two paginated fetches (session
-  // breakdown, request log): track/abort the in-flight request, reset the
+  // breakdown, usage log): track/abort the in-flight request, reset the
   // offset, normalize the entries array, and fall back to an empty result
   // on error. Mirrors #fetchBreakdown but keeps pagination state and entry
   // normalization on top of it.
@@ -398,7 +398,7 @@ class UsagePageState {
 export const usagePage = new UsagePageState();
 
 // Live-stream reset hook: when the stream's replay window is lost, reload the
-// page's data so the request log resyncs. Guarded so usage-page data is only
+// page's data so the usage log resyncs. Guarded so usage-page data is only
 // refetched while on the usage page.
 // The live merge pauses usage previews while any usage filter is set.
 liveLogs.usageFilters = usageFilters;

@@ -56,11 +56,12 @@ const docTemplate = `{
                 "tags": [
                     "admin"
                 ],
-                "summary": "Get the interaction session containing an audit log entry",
+                "summary": "Get the interaction session containing a request log entry",
+                "deprecated": true,
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Anchor audit log entry ID",
+                        "description": "Anchor request log entry ID",
                         "name": "log_id",
                         "in": "query",
                         "required": true
@@ -76,7 +77,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/admin.auditConversationResponse"
+                            "$ref": "#/definitions/admin.requestLogConversationResponse"
                         }
                     },
                     "400": {
@@ -107,18 +108,19 @@ const docTemplate = `{
         },
         "/admin/audit/detail": {
             "get": {
-                "description": "Returns one audit log entry enriched with usage summary when available.",
+                "description": "Returns one request log entry enriched with usage summary when available.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "Get audit log entry detail",
+                "summary": "Get request log entry detail",
+                "deprecated": true,
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Audit log entry ID",
+                        "description": "Request log entry ID",
                         "name": "log_id",
                         "in": "query",
                         "required": true
@@ -128,7 +130,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/admin.auditLogEntryResponse"
+                            "$ref": "#/definitions/admin.requestLogEntryResponse"
                         }
                     },
                     "400": {
@@ -171,14 +173,15 @@ const docTemplate = `{
         },
         "/admin/audit/log": {
             "get": {
-                "description": "Entries are slimmed for the wire: request/response bodies,\nper-attempt error bodies, and rewritten revision bodies are\nomitted (bodies_omitted=true). Fetch /admin/audit/detail for\nthe full payload of one entry.",
+                "description": "Entries are slimmed for the wire: request/response bodies,\nper-attempt error bodies, and rewritten revision bodies are\nomitted (bodies_omitted=true). Fetch /admin/request-logs/detail for\nthe full payload of one entry.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "Get paginated audit log entries",
+                "summary": "Get paginated request log entries",
+                "deprecated": true,
                 "parameters": [
                     {
                         "type": "integer",
@@ -299,7 +302,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/admin.auditLogListResponse"
+                            "$ref": "#/definitions/admin.requestLogListResponse"
                         }
                     },
                     "400": {
@@ -330,14 +333,15 @@ const docTemplate = `{
         },
         "/admin/audit/sessions": {
             "get": {
-                "description": "Groups audit log entries by session id into threads and returns\none summary per thread — its latest matching entry and complete\nrequest count — ordered by latest activity. Entries without a session id\nappear as single-entry threads. Filters apply to entries before\ngrouping.",
+                "description": "Groups request log entries by session id into threads and returns\none summary per thread — its latest matching entry and complete\nrequest count — ordered by latest activity. Entries without a session id\nappear as single-entry threads. Filters apply to entries before\ngrouping.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "Get paginated audit sessions (threads)",
+                "summary": "Get paginated request log sessions (threads)",
+                "deprecated": true,
                 "parameters": [
                     {
                         "type": "integer",
@@ -458,7 +462,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/admin.auditSessionsListResponse"
+                            "$ref": "#/definitions/admin.requestLogSessionsListResponse"
                         }
                     },
                     "400": {
@@ -497,6 +501,7 @@ const docTemplate = `{
                     "admin"
                 ],
                 "summary": "Get time-bucketed request status and latency stats",
+                "deprecated": true,
                 "parameters": [
                     {
                         "type": "integer",
@@ -527,7 +532,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/auditlog.RequestStats"
+                            "$ref": "#/definitions/requestlog.RequestStats"
                         }
                     },
                     "400": {
@@ -1740,7 +1745,7 @@ const docTemplate = `{
         },
         "/admin/media/{id}": {
             "get": {
-                "description": "Streams the bytes of an audio or image object the audit log\nreferences by media_id, with its content type. Range requests\nare honored so browser players can seek. An object outside the\ncaller's user-path scope is reported as missing.",
+                "description": "Streams the bytes of an audio or image object the request log\nreferences by media_id, with its content type. Range requests\nare honored so browser players can seek. An object outside the\ncaller's user-path scope is reported as missing.",
                 "produces": [
                     "application/octet-stream"
                 ],
@@ -2579,6 +2584,515 @@ const docTemplate = `{
                     },
                     "503": {
                         "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/request-logs": {
+            "get": {
+                "description": "Entries are slimmed for the wire: request/response bodies,\nper-attempt error bodies, and rewritten revision bodies are\nomitted (bodies_omitted=true). Fetch /admin/request-logs/detail for\nthe full payload of one entry.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get paginated request log entries",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by requested model selector",
+                        "name": "requested_model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider name or provider type",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by HTTP method",
+                        "name": "method",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request path",
+                        "name": "path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by tracked user path subtree",
+                        "name": "user_path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by user paths starting with this text (case-sensitive, index-served)",
+                        "name": "user_path_prefix",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by requested or resolved model starting with this text (case-sensitive, index-served)",
+                        "name": "model_prefix",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact request id",
+                        "name": "request_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact session id",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by error type",
+                        "name": "error_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by status code",
+                        "name": "status_code",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Filter by stream mode (true/false)",
+                        "name": "stream",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+                        "name": "exclude_operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 25, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Offset for pagination",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.requestLogListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/request-logs/conversation": {
+            "get": {
+                "description": "Thread entries carry the request/response bodies the\ntranscript is built from; attempts, request revisions, and\nresponse headers are omitted; redacted request headers and\nper-request usage summaries are retained for continuation\nand prompt-cache visualization.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get the interaction session containing a request log entry",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Anchor request log entry ID",
+                        "name": "log_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max entries in thread (default 40, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.requestLogConversationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/request-logs/detail": {
+            "get": {
+                "description": "Returns one request log entry enriched with usage summary when available.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get request log entry detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Request log entry ID",
+                        "name": "log_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.requestLogEntryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/request-logs/sessions": {
+            "get": {
+                "description": "Groups request log entries by session id into threads and returns\none summary per thread — its latest matching entry and complete\nrequest count — ordered by latest activity. Entries without a session id\nappear as single-entry threads. Filters apply to entries before\ngrouping.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get paginated request log sessions (threads)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by requested model selector",
+                        "name": "requested_model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by provider name or provider type",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by HTTP method",
+                        "name": "method",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by request path",
+                        "name": "path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by tracked user path subtree",
+                        "name": "user_path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by user paths starting with this text (case-sensitive, index-served)",
+                        "name": "user_path_prefix",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by requested or resolved model starting with this text (case-sensitive, index-served)",
+                        "name": "model_prefix",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact request id",
+                        "name": "request_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact session id",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by error type",
+                        "name": "error_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by status code",
+                        "name": "status_code",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Filter by stream mode (true/false)",
+                        "name": "stream",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated endpoint operations to hide, e.g. mcp,provider_passthrough,audio_speech; other entries, including unclassified ones, stay",
+                        "name": "exclude_operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search across request_id/requested_model/provider/method/path/session_id/error_type/error_message",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size in threads (default 25, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Offset for pagination",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.requestLogSessionsListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/request-logs/stats": {
+            "get": {
+                "description": "Returns request counts grouped into 2xx/4xx/5xx status classes\nper time bucket, an overall success-rate summary, and average\nrequest duration per provider for the dashboard charts.\nRanges up to 3 days use hourly buckets, longer ranges daily.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get time-bucketed request status and latency stats",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by tracked user path subtree",
+                        "name": "user_path",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/requestlog.RequestStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -9486,176 +10000,19 @@ const docTemplate = `{
                 }
             }
         },
-        "admin.auditConversationResponse": {
+        "admin.budgetAlertsResponse": {
             "type": "object",
             "properties": {
-                "anchor_id": {
-                    "type": "string"
-                },
-                "entries": {
+                "default_thresholds": {
+                    "description": "DefaultThresholds are the alert thresholds, as percentages of the\namount, of every budget without alert_thresholds of its own.",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/admin.auditLogEntryResponse"
+                        "type": "integer"
                     }
                 },
-                "truncated": {
-                    "description": "Truncated reports that more session or linkage entries exist than were\nreturned.",
+                "enabled": {
+                    "description": "Enabled reports that an alert destination exists (a webhook under\nbudgets.alerts.webhooks, or a registered alert sink), so thresholds are\nevaluated. Without one no alert is ever raised.",
                     "type": "boolean"
-                }
-            }
-        },
-        "admin.auditLogEntryResponse": {
-            "type": "object",
-            "properties": {
-                "alias_used": {
-                    "type": "boolean"
-                },
-                "auth_key_id": {
-                    "type": "string"
-                },
-                "auth_method": {
-                    "type": "string"
-                },
-                "bodies_omitted": {
-                    "description": "BodiesOmitted marks a list entry whose request/response bodies (and\nother heavy payloads) were stripped server-side; the full entry is\navailable from GET /admin/audit/detail. It also tells the dashboard\nthe entry is persisted — a slim entry is never an in-flight request.",
-                    "type": "boolean"
-                },
-                "cache_type": {
-                    "type": "string"
-                },
-                "client_ip": {
-                    "type": "string"
-                },
-                "conversation_payload": {
-                    "description": "ConversationPayload reports that the entry's (stripped) bodies were\nshaped like a conversation, preserving the Interactions-drawer\neligibility signal the dashboard otherwise sniffs from the bodies.",
-                    "type": "boolean"
-                },
-                "data": {
-                    "description": "Data contains flexible request/response information as JSON",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/auditlog.LogData"
-                        }
-                    ]
-                },
-                "duration_ns": {
-                    "description": "DurationNs is the request duration in nanoseconds",
-                    "type": "integer"
-                },
-                "error_type": {
-                    "type": "string"
-                },
-                "id": {
-                    "description": "ID is a unique identifier for this log entry (UUID)",
-                    "type": "string"
-                },
-                "method": {
-                    "type": "string"
-                },
-                "path": {
-                    "type": "string"
-                },
-                "principal_id": {
-                    "type": "string"
-                },
-                "provider": {
-                    "description": "canonical provider type used for routing and filters",
-                    "type": "string"
-                },
-                "provider_name": {
-                    "type": "string"
-                },
-                "request_id": {
-                    "description": "Extracted fields for efficient filtering (indexed in relational DBs)",
-                    "type": "string"
-                },
-                "requested_model": {
-                    "description": "Core fields (indexed for queries)",
-                    "type": "string"
-                },
-                "resolved_model": {
-                    "type": "string"
-                },
-                "session_id": {
-                    "type": "string"
-                },
-                "status_code": {
-                    "type": "integer"
-                },
-                "stream": {
-                    "type": "boolean"
-                },
-                "timestamp": {
-                    "description": "Timestamp is when the request started",
-                    "type": "string"
-                },
-                "usage": {
-                    "$ref": "#/definitions/usage.RequestUsageSummary"
-                },
-                "user_path": {
-                    "type": "string"
-                },
-                "workflow_version_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "admin.auditLogListResponse": {
-            "type": "object",
-            "properties": {
-                "as_of": {
-                    "description": "AsOf is when the server read the page, in unix microseconds on its\nclock. A dashboard compares it with the write stamp of another\nreplica's live entry to tell whether this page already counted it.",
-                    "type": "integer"
-                },
-                "entries": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/admin.auditLogEntryResponse"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "offset": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "admin.auditSessionResponse": {
-            "type": "object",
-            "properties": {
-                "latest": {
-                    "$ref": "#/definitions/admin.auditLogEntryResponse"
-                },
-                "request_count": {
-                    "type": "integer"
-                }
-            }
-        },
-        "admin.auditSessionsListResponse": {
-            "type": "object",
-            "properties": {
-                "as_of": {
-                    "description": "AsOf: see auditLogListResponse.AsOf.",
-                    "type": "integer"
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "offset": {
-                    "type": "integer"
-                },
-                "sessions": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/admin.auditSessionResponse"
-                    }
-                },
-                "total": {
-                    "type": "integer"
                 }
             }
         },
@@ -9673,6 +10030,14 @@ const docTemplate = `{
         "admin.budgetListResponse": {
             "type": "object",
             "properties": {
+                "alerts": {
+                    "description": "Alerts describes soft budget alerts for the deployment.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/admin.budgetAlertsResponse"
+                        }
+                    ]
+                },
                 "budgets": {
                     "type": "array",
                     "items": {
@@ -9687,6 +10052,13 @@ const docTemplate = `{
         "admin.budgetStatusResponse": {
             "type": "object",
             "properties": {
+                "alert_thresholds": {
+                    "description": "AlertThresholds are this budget's own alert thresholds, as percentages\nof the amount. Omitted when it uses alerts.default_thresholds.",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
                 "amount": {
                     "type": "number"
                 },
@@ -9734,6 +10106,14 @@ const docTemplate = `{
                 },
                 "period_start": {
                     "type": "string"
+                },
+                "projected_exhaustion_at": {
+                    "description": "ProjectedExhaustionAt is when the budget runs out at that rate. Omitted\nwhen the budget lasts the period or is already spent.",
+                    "type": "string"
+                },
+                "projected_spend": {
+                    "description": "ProjectedSpend is the spend the period ends on at the rate seen so far\n(spent / period_ratio). Omitted while less than 5% of the period has\nelapsed, and for a per-child template.",
+                    "type": "number"
                 },
                 "remaining": {
                     "type": "number"
@@ -9976,6 +10356,14 @@ const docTemplate = `{
                 },
                 "effective_enabled": {
                     "type": "boolean"
+                },
+                "model_policy": {
+                    "description": "ModelPolicy is the model-wide policy row (source \"gpt-4o\"), if any. Its\nper-model values (slowdown, upstream timeouts) apply wherever Override\nleaves them unset.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/virtualmodels.VirtualModel"
+                        }
+                    ]
                 },
                 "override": {
                     "$ref": "#/definitions/virtualmodels.VirtualModel"
@@ -10244,6 +10632,179 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.requestLogConversationResponse": {
+            "type": "object",
+            "properties": {
+                "anchor_id": {
+                    "type": "string"
+                },
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/admin.requestLogEntryResponse"
+                    }
+                },
+                "truncated": {
+                    "description": "Truncated reports that more session or linkage entries exist than were\nreturned.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "admin.requestLogEntryResponse": {
+            "type": "object",
+            "properties": {
+                "alias_used": {
+                    "type": "boolean"
+                },
+                "auth_key_id": {
+                    "type": "string"
+                },
+                "auth_method": {
+                    "type": "string"
+                },
+                "bodies_omitted": {
+                    "description": "BodiesOmitted marks a list entry whose request/response bodies (and\nother heavy payloads) were stripped server-side; the full entry is\navailable from GET /admin/request-logs/detail. It also tells the dashboard\nthe entry is persisted — a slim entry is never an in-flight request.",
+                    "type": "boolean"
+                },
+                "cache_type": {
+                    "type": "string"
+                },
+                "client_ip": {
+                    "type": "string"
+                },
+                "conversation_payload": {
+                    "description": "ConversationPayload reports that the entry's (stripped) bodies were\nshaped like a conversation, preserving the Interactions-drawer\neligibility signal the dashboard otherwise sniffs from the bodies.",
+                    "type": "boolean"
+                },
+                "data": {
+                    "description": "Data contains flexible request/response information as JSON",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/requestlog.LogData"
+                        }
+                    ]
+                },
+                "duration_ns": {
+                    "description": "DurationNs is the request duration in nanoseconds",
+                    "type": "integer"
+                },
+                "error_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "description": "ID is a unique identifier for this log entry (UUID)",
+                    "type": "string"
+                },
+                "method": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "principal_id": {
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "canonical provider type used for routing and filters",
+                    "type": "string"
+                },
+                "provider_name": {
+                    "type": "string"
+                },
+                "request_id": {
+                    "description": "Extracted fields for efficient filtering (indexed in relational DBs)",
+                    "type": "string"
+                },
+                "requested_model": {
+                    "description": "Core fields (indexed for queries)",
+                    "type": "string"
+                },
+                "resolved_model": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "status_code": {
+                    "type": "integer"
+                },
+                "stream": {
+                    "type": "boolean"
+                },
+                "timestamp": {
+                    "description": "Timestamp is when the request started",
+                    "type": "string"
+                },
+                "usage": {
+                    "$ref": "#/definitions/usage.RequestUsageSummary"
+                },
+                "user_path": {
+                    "type": "string"
+                },
+                "workflow_version_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.requestLogListResponse": {
+            "type": "object",
+            "properties": {
+                "as_of": {
+                    "description": "AsOf is when the server read the page, in unix microseconds on its\nclock. A dashboard compares it with the write stamp of another\nreplica's live entry to tell whether this page already counted it.",
+                    "type": "integer"
+                },
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/admin.requestLogEntryResponse"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "admin.requestLogSessionResponse": {
+            "type": "object",
+            "properties": {
+                "latest": {
+                    "$ref": "#/definitions/admin.requestLogEntryResponse"
+                },
+                "request_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "admin.requestLogSessionsListResponse": {
+            "type": "object",
+            "properties": {
+                "as_of": {
+                    "description": "AsOf: see requestLogListResponse.AsOf.",
+                    "type": "integer"
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "sessions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/admin.requestLogSessionResponse"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "admin.resetBudgetRequest": {
             "type": "object",
             "properties": {
@@ -10403,6 +10964,13 @@ const docTemplate = `{
         "admin.upsertBudgetRequest": {
             "type": "object",
             "properties": {
+                "alert_thresholds": {
+                    "description": "AlertThresholds overrides the default alert thresholds for this budget:\npercentages of the amount, each 1-100. Empty or omitted uses the\ndefaults.",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
                 "amount": {
                     "type": "number"
                 },
@@ -10645,6 +11213,10 @@ const docTemplate = `{
                     "description": "ReasoningEffort forces the reasoning effort sent upstream (\"none\",\n\"minimal\", \"low\", \"medium\", \"high\", \"xhigh\", or \"max\"); empty keeps the\nclient's value.",
                     "type": "string"
                 },
+                "response_header_timeout": {
+                    "description": "ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in\nseconds (1 to 86400), for every upstream attempt. Omitted inherits.",
+                    "type": "integer"
+                },
                 "session_affinity": {
                     "description": "SessionAffinity keeps a detected session on the target that served it\nbefore. Omitted means enabled; false restores stateless balancing.",
                     "type": "boolean"
@@ -10679,6 +11251,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/admin.virtualModelTargetRequest"
                     }
+                },
+                "timeout": {
+                    "description": "Timeout overrides HTTP_TIMEOUT, in seconds (1 to 86400), for every\nupstream attempt of a request through this row. Omitted inherits.",
+                    "type": "integer"
                 },
                 "user_paths": {
                     "type": "array",
@@ -11105,366 +11681,6 @@ const docTemplate = `{
                 },
                 "output_tokens": {
                     "type": "integer"
-                }
-            }
-        },
-        "auditlog.AttemptSnapshot": {
-            "type": "object",
-            "properties": {
-                "duration_ns": {
-                    "type": "integer"
-                },
-                "error_code": {
-                    "type": "string"
-                },
-                "error_message": {
-                    "type": "string"
-                },
-                "error_type": {
-                    "type": "string"
-                },
-                "kind": {
-                    "type": "string"
-                },
-                "model": {
-                    "type": "string"
-                },
-                "provider_name": {
-                    "type": "string"
-                },
-                "provider_type": {
-                    "type": "string"
-                },
-                "response_body": {
-                    "description": "ResponseBody and ResponseHeaders capture the raw upstream error response\nof a failed attempt. ResponseBody is the parsed JSON (or a string when the\nbody is not JSON); ResponseHeaders is redacted. Both are populated only\nwhen audit body/header logging is enabled."
-                },
-                "response_headers": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "seq": {
-                    "type": "integer"
-                },
-                "started_at": {
-                    "type": "string"
-                },
-                "status_code": {
-                    "type": "integer"
-                },
-                "success": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "auditlog.FailoverSnapshot": {
-            "type": "object",
-            "properties": {
-                "target_model": {
-                    "type": "string"
-                }
-            }
-        },
-        "auditlog.GuardrailOutcomeSnapshot": {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "description": "Action is the decision (allow, warn, block, respond) or \"failure\" when\nthe instance errored; FailMode then says whether the chain carried on\n(\"open\") or the request failed (\"closed\").",
-                    "type": "string"
-                },
-                "code": {
-                    "type": "string"
-                },
-                "detail": {},
-                "dropped_events": {
-                    "type": "integer"
-                },
-                "duration_ns": {
-                    "type": "integer"
-                },
-                "edited": {
-                    "description": "Edited reports that the instance changed the request (prompt phase)\nor the response (response and stream phases); Target names which.",
-                    "type": "boolean"
-                },
-                "error": {
-                    "type": "string"
-                },
-                "fail_mode": {
-                    "type": "string"
-                },
-                "instance": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "phase": {
-                    "type": "string"
-                },
-                "replaced_events": {
-                    "description": "ReplacedEvents and DroppedEvents count the stream events an in-flight\nstream instance rewrote or withheld.",
-                    "type": "integer"
-                },
-                "seq": {
-                    "type": "integer"
-                },
-                "step": {
-                    "type": "integer"
-                },
-                "target": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                }
-            }
-        },
-        "auditlog.LogData": {
-            "type": "object",
-            "properties": {
-                "api_key_hash": {
-                    "type": "string"
-                },
-                "attempts": {
-                    "description": "Attempts captures provider calls made for this logical request. SQL\nstores split this into audit_log_attempts; Mongo stores it embedded.",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/auditlog.AttemptSnapshot"
-                    }
-                },
-                "error_code": {
-                    "type": "string"
-                },
-                "error_message": {
-                    "description": "Error details (message can be long, so kept in JSON)",
-                    "type": "string"
-                },
-                "error_provider": {
-                    "description": "ErrorProvider names the upstream provider an error came from; empty when\nthe gateway itself raised the error (authentication, validation, budget,\n...), which tells a provider's 401 apart from a rejected gateway key.",
-                    "type": "string"
-                },
-                "event_type": {
-                    "description": "EventType identifies non-request security lifecycle entries written\nthrough the extension authentication event recorder.",
-                    "type": "string"
-                },
-                "failover": {
-                    "description": "Failover captures runtime redirect details when translated execution\nmoved from the primary selector to a configured failover target.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/auditlog.FailoverSnapshot"
-                        }
-                    ]
-                },
-                "guardrails": {
-                    "description": "Guardrails records the outcome of every guardrail (plugin instance)\nthat ran for the request, in execution order across the prompt,\nresponse and stream phases: what each decided, whether it edited the\nrequest or response, and how it failed. It is the decision trail;\nRequestRevisions is the body trail. A configured step without an\noutcome did not run (an earlier block, a cache hit).",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/auditlog.GuardrailOutcomeSnapshot"
-                    }
-                },
-                "labels": {
-                    "description": "Labels are request labels extracted from configured tagging headers.",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "max_tokens": {
-                    "type": "integer"
-                },
-                "request_body": {
-                    "description": "Optional bodies (when LOGGING_LOG_BODIES=true). Captured JSON is kept\nas json.RawMessage; other captures (string fallbacks, audio/image logs,\nstream-built responses) keep their own types. The MongoDB writer decodes\nraw JSON into documents so they stay queryable — see body.go."
-                },
-                "request_body_too_big_to_handle": {
-                    "description": "Body capture status flags (set when body exceeds 1MB limit)",
-                    "type": "boolean"
-                },
-                "request_headers": {
-                    "description": "Optional headers (when LOGGING_LOG_HEADERS=true)\nSensitive headers are auto-redacted",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "request_revisions": {
-                    "description": "RequestRevisions captures the ingress request-rewrite chain: one entry\nper registered rewriter that ran, in application order, followed by the\nprompt-guardrail steps. Rewriters that changed the body carry the\nrewritten body; those that left it alone are recorded with NoChange so\nthe audit trail still shows the step ran. Each prompt guardrail that\nedited the prompt is a changed revision, in step order, carrying the\nrequest as it stood right after that step (the next step's input) with\nits sizes; one that objected (warn, block, respond) or failed without\nediting is a NoChange entry carrying the decision, and a silent allow\nleaves no entry. RequestBody always remains the original client\nrequest; the last changed revision is what was forwarded downstream —\nwhen every step was a no-op there is no such revision and the original\nbody is what went upstream.",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/auditlog.RequestRevisionSnapshot"
-                    }
-                },
-                "response_body": {},
-                "response_body_too_big_to_handle": {
-                    "type": "boolean"
-                },
-                "response_headers": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "temperature": {
-                    "description": "Request parameters",
-                    "type": "number"
-                },
-                "user_agent": {
-                    "description": "Identity",
-                    "type": "string"
-                },
-                "workflow_features": {
-                    "description": "WorkflowFeatures captures the request-time effective workflow features\nafter runtime caps were applied. This keeps audit views historically accurate\neven if the active process config changes later.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/auditlog.WorkflowFeaturesSnapshot"
-                        }
-                    ]
-                }
-            }
-        },
-        "auditlog.ProviderLatencySeries": {
-            "type": "object",
-            "properties": {
-                "avg_duration_ms": {
-                    "type": "array",
-                    "items": {
-                        "type": "number"
-                    }
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "requests": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                }
-            }
-        },
-        "auditlog.RequestRevisionSnapshot": {
-            "type": "object",
-            "properties": {
-                "body": {
-                    "description": "Body is the request body after this revision (the raw JSON, or a string\nwhen not valid JSON — see body.go). Populated only when body logging is\nenabled and the body is within the capture limit."
-                },
-                "bytes_after": {
-                    "type": "integer"
-                },
-                "bytes_before": {
-                    "type": "integer"
-                },
-                "detail": {
-                    "description": "Detail is an optional rewriter-provided structured summary of what\nchanged (for example a compression block report)."
-                },
-                "no_change": {
-                    "description": "NoChange marks a rewriter that ran and left the body untouched. Such\nrevisions record the step for operators — BytesAfter equals BytesBefore,\nBody is empty and TokensSaved is zero, though Detail may explain why\nnothing changed — but are not part of the chain that produced the\nforwarded request. Absent on entries written before no-change steps were\ntracked, which is why the flag is positive: an old revision always\nchanged the body.",
-                    "type": "boolean"
-                },
-                "rewriter": {
-                    "type": "string"
-                },
-                "seq": {
-                    "type": "integer"
-                },
-                "tokens_saved": {
-                    "description": "TokensSaved is the rewriter-reported estimate of prompt tokens this\nrevision saved (e.g. token compression); zero when the rewriter does\nnot report savings.",
-                    "type": "integer"
-                }
-            }
-        },
-        "auditlog.RequestStats": {
-            "type": "object",
-            "properties": {
-                "buckets": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/auditlog.RequestStatsBucket"
-                    }
-                },
-                "interval": {
-                    "type": "string"
-                },
-                "provider_latency": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/auditlog.ProviderLatencySeries"
-                    }
-                },
-                "summary": {
-                    "$ref": "#/definitions/auditlog.RequestStatsSummary"
-                }
-            }
-        },
-        "auditlog.RequestStatsBucket": {
-            "type": "object",
-            "properties": {
-                "requests": {
-                    "type": "integer"
-                },
-                "start": {
-                    "type": "string"
-                },
-                "status_2xx": {
-                    "type": "integer"
-                },
-                "status_4xx": {
-                    "type": "integer"
-                },
-                "status_5xx": {
-                    "type": "integer"
-                },
-                "status_other": {
-                    "type": "integer"
-                }
-            }
-        },
-        "auditlog.RequestStatsSummary": {
-            "type": "object",
-            "properties": {
-                "avg_duration_ms": {
-                    "type": "number"
-                },
-                "requests": {
-                    "type": "integer"
-                },
-                "status_2xx": {
-                    "type": "integer"
-                },
-                "status_4xx": {
-                    "type": "integer"
-                },
-                "status_5xx": {
-                    "type": "integer"
-                },
-                "status_other": {
-                    "type": "integer"
-                },
-                "success_rate": {
-                    "type": "number"
-                }
-            }
-        },
-        "auditlog.WorkflowFeaturesSnapshot": {
-            "type": "object",
-            "properties": {
-                "audit": {
-                    "type": "boolean"
-                },
-                "budget": {
-                    "type": "boolean"
-                },
-                "cache": {
-                    "type": "boolean"
-                },
-                "failover": {
-                    "type": "boolean"
-                },
-                "guardrails": {
-                    "type": "boolean"
-                },
-                "usage": {
-                    "type": "boolean"
                 }
             }
         },
@@ -12266,7 +12482,13 @@ const docTemplate = `{
                 "b64_json": {
                     "type": "string"
                 },
+                "error": {
+                    "$ref": "#/definitions/core.ImageItemError"
+                },
                 "revised_prompt": {
+                    "type": "string"
+                },
+                "size": {
                     "type": "string"
                 },
                 "url": {
@@ -12338,11 +12560,25 @@ const docTemplate = `{
                 "quality": {
                     "type": "string"
                 },
+                "request_id": {
+                    "type": "string"
+                },
                 "size": {
                     "type": "string"
                 },
                 "usage": {
                     "$ref": "#/definitions/core.ImageUsage"
+                }
+            }
+        },
+        "core.ImageItemError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
                 }
             }
         },
@@ -13808,6 +14044,371 @@ const docTemplate = `{
                 }
             }
         },
+        "requestlog.AttemptSnapshot": {
+            "type": "object",
+            "properties": {
+                "duration_ns": {
+                    "type": "integer"
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "error_type": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "provider_name": {
+                    "type": "string"
+                },
+                "provider_type": {
+                    "type": "string"
+                },
+                "response_body": {
+                    "description": "ResponseBody and ResponseHeaders capture the raw upstream error response\nof a failed attempt. ResponseBody is the parsed JSON (or a string when the\nbody is not JSON); ResponseHeaders is redacted. Both are populated only\nwhen request log body/header logging is enabled."
+                },
+                "response_headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "seq": {
+                    "type": "integer"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status_code": {
+                    "type": "integer"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "requestlog.FailoverSnapshot": {
+            "type": "object",
+            "properties": {
+                "target_model": {
+                    "type": "string"
+                }
+            }
+        },
+        "requestlog.GuardrailOutcomeSnapshot": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "description": "Action is the decision (allow, warn, block, respond) or \"failure\" when\nthe instance errored; FailMode then says whether the chain carried on\n(\"open\") or the request failed (\"closed\").",
+                    "type": "string"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "detail": {},
+                "dropped_events": {
+                    "type": "integer"
+                },
+                "duration_ns": {
+                    "type": "integer"
+                },
+                "edited": {
+                    "description": "Edited reports that the instance changed the request (prompt phase)\nor the response (response and stream phases); Target names which.",
+                    "type": "boolean"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "fail_mode": {
+                    "type": "string"
+                },
+                "instance": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "phase": {
+                    "type": "string"
+                },
+                "replaced_events": {
+                    "description": "ReplacedEvents and DroppedEvents count the stream events an in-flight\nstream instance rewrote or withheld.",
+                    "type": "integer"
+                },
+                "seq": {
+                    "type": "integer"
+                },
+                "step": {
+                    "type": "integer"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "requestlog.LogData": {
+            "type": "object",
+            "properties": {
+                "api_key_hash": {
+                    "type": "string"
+                },
+                "attempts": {
+                    "description": "Attempts captures provider calls made for this logical request. SQL\nstores split this into request_log_attempts; Mongo stores it embedded.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/requestlog.AttemptSnapshot"
+                    }
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "description": "Error details (message can be long, so kept in JSON)",
+                    "type": "string"
+                },
+                "error_provider": {
+                    "description": "ErrorProvider names the upstream provider an error came from; empty when\nthe gateway itself raised the error (authentication, validation, budget,\n...), which tells a provider's 401 apart from a rejected gateway key.",
+                    "type": "string"
+                },
+                "event_type": {
+                    "description": "EventType identifies non-request security lifecycle entries written\nthrough the extension authentication event recorder.",
+                    "type": "string"
+                },
+                "failover": {
+                    "description": "Failover captures runtime redirect details when translated execution\nmoved from the primary selector to a configured failover target.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/requestlog.FailoverSnapshot"
+                        }
+                    ]
+                },
+                "guardrails": {
+                    "description": "Guardrails records the outcome of every guardrail (plugin instance)\nthat ran for the request, in execution order across the prompt,\nresponse and stream phases: what each decided, whether it edited the\nrequest or response, and how it failed. It is the decision trail;\nRequestRevisions is the body trail. A configured step without an\noutcome did not run (an earlier block, a cache hit).",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/requestlog.GuardrailOutcomeSnapshot"
+                    }
+                },
+                "labels": {
+                    "description": "Labels are request labels extracted from configured tagging headers.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "max_tokens": {
+                    "type": "integer"
+                },
+                "request_body": {
+                    "description": "Optional bodies (when LOGGING_LOG_BODIES=true). Captured JSON is kept\nas json.RawMessage; other captures (string fallbacks, audio/image logs,\nstream-built responses) keep their own types. The MongoDB writer decodes\nraw JSON into documents so they stay queryable — see body.go."
+                },
+                "request_body_too_big_to_handle": {
+                    "description": "Body capture status flags (set when body exceeds 1MB limit)",
+                    "type": "boolean"
+                },
+                "request_headers": {
+                    "description": "Optional headers (when LOGGING_LOG_HEADERS=true)\nSensitive headers are auto-redacted",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "request_revisions": {
+                    "description": "RequestRevisions captures the ingress request-rewrite chain: one entry\nper registered rewriter that ran, in application order, followed by the\nprompt-guardrail steps. Rewriters that changed the body carry the\nrewritten body; those that left it alone are recorded with NoChange so\nthe request log still shows the step ran. Each prompt guardrail that\nedited the prompt is a changed revision, in step order, carrying the\nrequest as it stood right after that step (the next step's input) with\nits sizes; one that objected (warn, block, respond) or failed without\nediting is a NoChange entry carrying the decision, and a silent allow\nleaves no entry. RequestBody always remains the original client\nrequest; the last changed revision is what was forwarded downstream —\nwhen every step was a no-op there is no such revision and the original\nbody is what went upstream.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/requestlog.RequestRevisionSnapshot"
+                    }
+                },
+                "response_body": {},
+                "response_body_too_big_to_handle": {
+                    "type": "boolean"
+                },
+                "response_headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "temperature": {
+                    "description": "Request parameters",
+                    "type": "number"
+                },
+                "user_agent": {
+                    "description": "Identity",
+                    "type": "string"
+                },
+                "workflow_features": {
+                    "description": "WorkflowFeatures captures the request-time effective workflow features\nafter runtime caps were applied. This keeps request log views historically accurate\neven if the active process config changes later.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/requestlog.WorkflowFeaturesSnapshot"
+                        }
+                    ]
+                }
+            }
+        },
+        "requestlog.ProviderLatencySeries": {
+            "type": "object",
+            "properties": {
+                "avg_duration_ms": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "requests": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "requestlog.RequestRevisionSnapshot": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "description": "Body is the request body after this revision (the raw JSON, or a string\nwhen not valid JSON — see body.go). Populated only when body logging is\nenabled and the body is within the capture limit."
+                },
+                "bytes_after": {
+                    "type": "integer"
+                },
+                "bytes_before": {
+                    "type": "integer"
+                },
+                "detail": {
+                    "description": "Detail is an optional rewriter-provided structured summary of what\nchanged (for example a compression block report)."
+                },
+                "no_change": {
+                    "description": "NoChange marks a rewriter that ran and left the body untouched. Such\nrevisions record the step for operators — BytesAfter equals BytesBefore,\nBody is empty and TokensSaved is zero, though Detail may explain why\nnothing changed — but are not part of the chain that produced the\nforwarded request. Absent on entries written before no-change steps were\ntracked, which is why the flag is positive: an old revision always\nchanged the body.",
+                    "type": "boolean"
+                },
+                "rewriter": {
+                    "type": "string"
+                },
+                "seq": {
+                    "type": "integer"
+                },
+                "tokens_saved": {
+                    "description": "TokensSaved is the rewriter-reported estimate of prompt tokens this\nrevision saved (e.g. token compression); zero when the rewriter does\nnot report savings.",
+                    "type": "integer"
+                }
+            }
+        },
+        "requestlog.RequestStats": {
+            "type": "object",
+            "properties": {
+                "buckets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/requestlog.RequestStatsBucket"
+                    }
+                },
+                "interval": {
+                    "type": "string"
+                },
+                "provider_latency": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/requestlog.ProviderLatencySeries"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/requestlog.RequestStatsSummary"
+                }
+            }
+        },
+        "requestlog.RequestStatsBucket": {
+            "type": "object",
+            "properties": {
+                "requests": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "string"
+                },
+                "status_2xx": {
+                    "type": "integer"
+                },
+                "status_4xx": {
+                    "type": "integer"
+                },
+                "status_5xx": {
+                    "type": "integer"
+                },
+                "status_other": {
+                    "type": "integer"
+                }
+            }
+        },
+        "requestlog.RequestStatsSummary": {
+            "type": "object",
+            "properties": {
+                "avg_duration_ms": {
+                    "type": "number"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "status_2xx": {
+                    "type": "integer"
+                },
+                "status_4xx": {
+                    "type": "integer"
+                },
+                "status_5xx": {
+                    "type": "integer"
+                },
+                "status_other": {
+                    "type": "integer"
+                },
+                "success_rate": {
+                    "type": "number"
+                }
+            }
+        },
+        "requestlog.WorkflowFeaturesSnapshot": {
+            "type": "object",
+            "properties": {
+                "audit": {
+                    "description": "Deprecated alias of request_logs, which was named audit through v0.2.5. Always equal to request_logs.",
+                    "type": "boolean",
+                    "x-deprecated": true
+                },
+                "budget": {
+                    "type": "boolean"
+                },
+                "cache": {
+                    "type": "boolean"
+                },
+                "failover": {
+                    "type": "boolean"
+                },
+                "guardrails": {
+                    "type": "boolean"
+                },
+                "request_logs": {
+                    "type": "boolean"
+                },
+                "usage": {
+                    "type": "boolean"
+                }
+            }
+        },
         "server.authVerifyResponse": {
             "type": "object",
             "properties": {
@@ -15117,6 +15718,10 @@ const docTemplate = `{
                 "resolved_model": {
                     "type": "string"
                 },
+                "response_header_timeout": {
+                    "description": "ResponseHeaderTimeout is the per-attempt wait for upstream response\nheaders in seconds; omitted inherits.",
+                    "type": "integer"
+                },
                 "scope_kind": {
                     "type": "string"
                 },
@@ -15145,6 +15750,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/virtualmodels.Target"
                     }
+                },
+                "timeout": {
+                    "description": "Timeout is the per-attempt upstream timeout in seconds; omitted inherits.",
+                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"
@@ -15197,6 +15806,10 @@ const docTemplate = `{
                     "description": "ReasoningEffort, when set, replaces the reasoning effort of every\nrequest sent upstream through this redirect or to this model, whatever\nthe client asked for. Empty leaves the client's value untouched.",
                     "type": "string"
                 },
+                "response_header_timeout": {
+                    "description": "ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in\nseconds, for every upstream attempt. Nil inherits.",
+                    "type": "integer"
+                },
                 "session_affinity": {
                     "description": "SessionAffinity keeps requests of one detected session on the target that\nserved it before, while that target stays available. Tri-state: nil means\nenabled (the default); explicit false restores stateless balancing.",
                     "type": "boolean"
@@ -15224,6 +15837,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/virtualmodels.Target"
                     }
+                },
+                "timeout": {
+                    "description": "Timeout overrides HTTP_TIMEOUT, in seconds, for every upstream attempt\nof a request routed through this redirect or to this model. Nil\ninherits (from the target model's policy, then the gateway default).",
+                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"

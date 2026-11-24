@@ -36,7 +36,7 @@ func (s *nativeBatchService) CreateMessageBatch(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	storeWorkflow(c, result.Workflow)
-	auditBatchEntry(c, result.ProviderType)
+	requestLogBatchEntry(c, result.ProviderType)
 
 	return c.JSON(http.StatusOK, anthropicapi.FromBatchResponse(result.Batch))
 }
@@ -53,7 +53,7 @@ func (s *nativeBatchService) GetMessageBatch(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	auditBatchEntry(c, result.ProviderType)
+	requestLogBatchEntry(c, result.ProviderType)
 
 	return c.JSON(http.StatusOK, anthropicapi.FromBatchResponse(result.Batch))
 }
@@ -81,7 +81,7 @@ func (s *nativeBatchService) ListMessageBatches(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	auditBatchEntry(c, "")
+	requestLogBatchEntry(c, "")
 
 	return c.JSON(http.StatusOK, anthropicapi.FromBatchList(resp))
 }
@@ -98,7 +98,7 @@ func (s *nativeBatchService) CancelMessageBatch(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	auditBatchEntry(c, result.ProviderType)
+	requestLogBatchEntry(c, result.ProviderType)
 
 	return c.JSON(http.StatusOK, anthropicapi.FromBatchResponse(result.Batch))
 }
@@ -115,7 +115,7 @@ func (s *nativeBatchService) DeleteMessageBatch(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	auditBatchEntry(c, result.ProviderType)
+	requestLogBatchEntry(c, result.ProviderType)
 
 	return c.JSON(http.StatusOK, anthropicapi.DeletedMessageBatch{
 		ID:   anthropicapi.MessageBatchID(id),
@@ -135,7 +135,7 @@ func (s *nativeBatchService) MessageBatchResults(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	auditBatchEntry(c, result.ProviderType)
+	requestLogBatchEntry(c, result.ProviderType)
 
 	payload, err := anthropicapi.EncodeBatchResults(result.Response)
 	if err != nil {

@@ -6,8 +6,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -46,27 +46,24 @@ type modelCallRoute struct {
 // Authorization runs on the fully resolved selector so model-override and
 // user-path rules see the same concrete provider name as the inference orchestrator.
 func (s *modelCallService) prepare(c *echo.Context, model, providerHint string) (context.Context, modelCallRoute, error) {
-	selector, err := s.authorizedSelector(c, model, providerHint)
+	selector, vmRoute, err := s.authorizedSelector(c, model, providerHint)
 	if err != nil {
 		return nil, modelCallRoute{}, err
 	}
 	if err := enforceBudget(c, s.budgetChecker, rateLimitRoute{provider: selectorProviderName(s.provider, selector)}); err != nil {
 		return nil, modelCallRoute{}, err
 	}
-	auditlog.EnrichEntry(c, selector.Model, "")
+	requestlog.EnrichEntry(c, selector.Model, "")
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
 	c.SetRequest(c.Request().WithContext(ctx))
 	route := s.routeFor(selector, requestID)
-	// Stamp the executed route so audit rows carry the resolved model and
+	// Stamp the executed route so request log rows carry the resolved model and
 	// provider, as the inference orchestrator does for chat.
-	auditlog.EnrichEntryWithResolvedRoute(c, selector.QualifiedModel(), route.providerType, route.providerName)
-	route.slowdown = resolveModelSlowdown(
-		ctx,
-		s.modelResolver,
-		core.NewRequestedModelSelector(model, providerHint),
-		selector,
-	)
+	requestlog.EnrichEntryWithResolvedRoute(c, selector.QualifiedModel(), route.providerType, route.providerName)
+	requested := core.NewRequestedModelSelector(model, providerHint)
+	route.slowdown = resolveModelSlowdown(ctx, s.modelResolver, requested, selector)
+	ctx = withModelTimeouts(ctx, s.modelResolver, requested, selector, vmRoute)
 	return ctx, route, nil
 }
 
@@ -74,17 +71,17 @@ func (s *modelCallService) prepare(c *echo.Context, model, providerHint string) 
 // and checks the caller may use the resolved selector. Resolution failures
 // (unknown alias, registry not ready, malformed selector) surface instead of
 // authorizing an unresolved selector.
-func (s *modelCallService) authorizedSelector(c *echo.Context, model, providerHint string) (core.ModelSelector, error) {
-	selector, err := resolveServiceModel(c.Request().Context(), s.provider, s.modelResolver, model, providerHint)
+func (s *modelCallService) authorizedSelector(c *echo.Context, model, providerHint string) (core.ModelSelector, []string, error) {
+	selector, route, err := resolveServiceModelRoute(c.Request().Context(), s.provider, s.modelResolver, model, providerHint)
 	if err != nil {
-		return core.ModelSelector{}, err
+		return core.ModelSelector{}, nil, err
 	}
 	if s.modelAuthorizer != nil {
 		if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {
-			return core.ModelSelector{}, err
+			return core.ModelSelector{}, nil, err
 		}
 	}
-	return selector, nil
+	return selector, route, nil
 }
 
 // routeFor maps a resolved selector to its canonical provider type and concrete
@@ -140,5 +137,6 @@ func (s *modelCallService) logUsage(ctx context.Context, route modelCallRoute, e
 	entry.SessionID = core.SessionIDFromContext(ctx)
 	entry.AuthKeyID = core.GetAuthKeyID(ctx)
 	entry.Labels = core.RequestLabelsFromContext(ctx)
+	usage.ReportCost(ctx, s.usageLogger, entry)
 	s.usageLogger.Write(entry)
 }

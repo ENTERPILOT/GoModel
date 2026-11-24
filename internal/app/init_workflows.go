@@ -291,11 +291,11 @@ func defaultWorkflowInput(cfg *config.Config, availableGuardrails []string, conf
 	payload := workflows.Payload{
 		SchemaVersion: 2,
 		Features: workflows.FeatureFlags{
-			Cache:    responseCacheConfigured(cfg.Cache.Response),
-			Audit:    cfg.Logging.Enabled,
-			Usage:    cfg.Usage.Enabled,
-			Budget:   &budgetEnabled,
-			Failover: &failoverEnabled,
+			Cache:       responseCacheConfigured(cfg.Cache.Response),
+			RequestLogs: cfg.Logging.Enabled,
+			Usage:       cfg.Usage.Enabled,
+			Budget:      &budgetEnabled,
+			Failover:    &failoverEnabled,
 		},
 	}
 	available := make(map[string]struct{}, len(availableGuardrails))
@@ -348,12 +348,12 @@ func runtimeWorkflowFeatureCaps(cfg *config.Config) core.WorkflowFeatures {
 		return core.WorkflowFeatures{}
 	}
 	return core.WorkflowFeatures{
-		Cache:      responseCacheConfigured(cfg.Cache.Response),
-		Audit:      cfg.Logging.Enabled,
-		Usage:      cfg.Usage.Enabled,
-		Budget:     cfg.Budgets.Enabled,
-		Guardrails: cfg.Guardrails.Enabled,
-		Failover:   failoverFeatureEnabledGlobally(cfg),
+		Cache:       responseCacheConfigured(cfg.Cache.Response),
+		RequestLogs: cfg.Logging.Enabled,
+		Usage:       cfg.Usage.Enabled,
+		Budget:      cfg.Budgets.Enabled,
+		Guardrails:  cfg.Guardrails.Enabled,
+		Failover:    failoverFeatureEnabledGlobally(cfg),
 	}
 }
 

@@ -145,7 +145,7 @@ func scanObject(row sqlx.Row) (*Object, error) {
 		return nil, err
 	}
 	object.Kind = Kind(kind)
-	object.Source = Source(source)
+	object.Source = storedSource(source)
 	object.CreatedAt = time.Unix(createdAt, 0).UTC()
 	object.ExpiresAt = storage.UnixTime(expiresAt)
 	return &object, nil

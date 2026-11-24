@@ -10,20 +10,36 @@ import (
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
-func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.PricingResolver) func(exchange, []byte, string) {
+// hitRecorder prices a cache hit before it is replayed, so the response can
+// carry its cost, and returns the function that records its usage once the
+// replay is committed. The result is nil when the hit records no usage.
+type hitRecorder func(ex exchange, body []byte, cacheType string) (record func())
+
+// prepare prices the hit and returns the function that records its usage. It
+// is safe to call on a nil recorder, and the result is never nil.
+func (r hitRecorder) prepare(ex exchange, body []byte, cacheType string) func() {
+	if r != nil {
+		if record := r(ex, body, cacheType); record != nil {
+			return record
+		}
+	}
+	return func() {}
+}
+
+func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.PricingResolver) hitRecorder {
 	if logger == nil || !logger.Config().Enabled {
 		return nil
 	}
 
-	return func(ex exchange, body []byte, cacheType string) {
+	return func(ex exchange, body []byte, cacheType string) func() {
 		if ex == nil {
-			return
+			return nil
 		}
 
 		ctx := ex.Context()
 		plan := core.GetWorkflow(ctx)
 		if plan != nil && !plan.UsageEnabled() {
-			return
+			return nil
 		}
 
 		model := ""
@@ -38,7 +54,7 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 		}
 		if provider == "" {
 			slog.Debug("cache hit usage skipped: missing provider type")
-			return
+			return nil
 		}
 
 		endpoint := ex.Path()
@@ -52,7 +68,7 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 
 		entry := usage.ExtractFromCachedResponseBody(body, requestID, model, provider, endpoint, cacheType, pricing)
 		if entry == nil {
-			return
+			return nil
 		}
 		entry.ProviderName = providerName
 		entry.RoutedModel = model
@@ -60,7 +76,8 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 		entry.SessionID = core.SessionIDFromContext(ctx)
 		entry.AuthKeyID = core.GetAuthKeyID(ctx)
 		entry.Labels = core.RequestLabelsFromContext(ctx)
-		logger.Write(entry)
+		usage.ReportCost(ctx, logger, entry)
+		return func() { logger.Write(entry) }
 	}
 }
 

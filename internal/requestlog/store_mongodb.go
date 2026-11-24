@@ -1,0 +1,274 @@
+package requestlog
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"math"
+	"sync"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+)
+
+// ErrPartialWrite indicates that a batch write only partially succeeded.
+// Use errors.As to extract details about the failure.
+var ErrPartialWrite = errors.New("partial write failure")
+
+// PartialWriteError wraps a mongo.BulkWriteException with additional context
+// about how many entries failed vs succeeded.
+type PartialWriteError struct {
+	TotalEntries int
+	FailedCount  int
+	Cause        mongo.BulkWriteException
+}
+
+func (e *PartialWriteError) Error() string {
+	return fmt.Sprintf("partial request log insert: %d of %d entries failed: %v",
+		e.FailedCount, e.TotalEntries, e.Cause.Error())
+}
+
+func (e *PartialWriteError) Unwrap() error {
+	return ErrPartialWrite
+}
+
+// Prometheus metrics for request log partial write failures. The counter was
+// named for the audit log before the request log was renamed; that name still
+// counts alongside the new one, so existing dashboards and alerts keep working.
+var (
+	requestLogPartialWriteFailures = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "gomodel_request_log_partial_write_failures_total",
+			Help: "Total number of partial write failures when inserting request logs to MongoDB",
+		},
+	)
+	legacyRequestLogPartialWriteFailures = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "gomodel_audit_log_partial_write_failures_total",
+			Help: "Deprecated: use gomodel_request_log_partial_write_failures_total. Total number of partial write failures when inserting request logs to MongoDB",
+		},
+	)
+)
+
+// countPartialWriteFailure counts one partial write under both metric names.
+func countPartialWriteFailure() {
+	requestLogPartialWriteFailures.Inc()
+	legacyRequestLogPartialWriteFailures.Inc()
+}
+
+// MongoDBStore implements LogStore for MongoDB.
+const legacyExecutionPlanIndex = "execution_plan_version_id_1"
+
+// isIndexNotFound reports MongoDB's IndexNotFound (code 27) server error.
+func isIndexNotFound(err error) bool {
+	var cmdErr mongo.CommandError
+	return errors.As(err, &cmdErr) && cmdErr.HasErrorCode(27)
+}
+
+type MongoDBStore struct {
+	collection    *mongo.Collection
+	retentionDays int
+
+	// absorb moves what an older release wrote to audit_logs after the rename
+	// into the collection; see absorbLegacyCollections.
+	cancelAbsorb context.CancelFunc
+	absorb       sync.WaitGroup
+}
+
+// NewMongoDBStore creates a new MongoDB request log store.
+// It creates the collection and indexes if they don't exist.
+// MongoDB handles TTL-based cleanup automatically via TTL indexes.
+func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore, error) {
+	if database == nil {
+		return nil, fmt.Errorf("database is required")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	collection, err := adoptLegacyCollection(ctx, database)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create indexes for common queries
+	indexes := []mongo.IndexModel{
+		{
+			Keys: bson.D{{Key: "requested_model", Value: 1}},
+		},
+		{
+			// Lets the model prefix filter, which also matches the resolved
+			// model, stay an index union instead of a collection scan.
+			Keys: bson.D{{Key: "resolved_model", Value: 1}},
+		},
+		{
+			// The legacy pre-split requested model field. Sparse, so only the
+			// old documents that still carry it are indexed; the prefix filter
+			// cannot match a document without it.
+			Keys:    bson.D{{Key: "model", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+		{
+			Keys: bson.D{{Key: "status_code", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "provider", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "provider_name", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "workflow_version_id", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "request_id", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "principal_id", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "auth_key_id", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "client_ip", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "path", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "user_path", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "session_id", Value: 1}, {Key: "timestamp", Value: -1}},
+		},
+		{
+			Keys: bson.D{{Key: "error_type", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "data.response_body.id", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "data.request_body.previous_response_id", Value: 1}},
+		},
+		// Serves RecentWrites. Sparse, so history written before the write
+		// stamp existed stays out of it.
+		{
+			Keys:    bson.D{{Key: "written_at", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+	}
+
+	// Add timestamp index - use TTL index if retention is configured,
+	// otherwise use a regular descending index for query performance.
+	// MongoDB doesn't allow multiple indexes on the same field when one is TTL.
+	if retentionDays > 0 {
+		// expireAfterSeconds is an int32; clamp so a very long retention cannot
+		// overflow into a negative TTL.
+		const secondsPerDay = 24 * 60 * 60
+		ttlSeconds := int32(min(retentionDays, math.MaxInt32/secondsPerDay) * secondsPerDay)
+		indexes = append(indexes, mongo.IndexModel{
+			Keys:    bson.D{{Key: "timestamp", Value: -1}},
+			Options: options.Index().SetExpireAfterSeconds(ttlSeconds),
+		})
+	} else {
+		indexes = append(indexes, mongo.IndexModel{
+			Keys: bson.D{{Key: "timestamp", Value: -1}},
+		})
+	}
+
+	// Best-effort: retire the index on the pre-v0.1.17 execution_plan_version_id
+	// field, which the workflow rename left behind on older collections. Most
+	// collections never had it, so "not found" is the expected outcome.
+	if err := collection.Indexes().DropOne(ctx, legacyExecutionPlanIndex); err != nil && !isIndexNotFound(err) {
+		slog.Warn("failed to drop legacy MongoDB index", "index", legacyExecutionPlanIndex, "error", err)
+	}
+
+	_, err = collection.Indexes().CreateMany(ctx, indexes)
+	if err != nil {
+		// Log warning but don't fail - indexes may already exist
+		slog.Warn("failed to create some MongoDB indexes", "error", err)
+	}
+
+	store := &MongoDBStore{
+		collection:    collection,
+		retentionDays: retentionDays,
+	}
+	// Not when the rename was refused: audit_logs is then the live collection.
+	if collection.Name() == requestLogCollectionName {
+		absorbCtx, cancel := context.WithCancel(context.Background())
+		store.cancelAbsorb = cancel
+		store.absorb.Go(func() {
+			if err := absorbLegacyCollections(absorbCtx, database); err != nil && absorbCtx.Err() == nil {
+				slog.Warn("requestlog: could not move the audit_logs entries of an older release into request_logs; a later start tries again",
+					"error", err)
+			}
+		})
+	}
+	return store, nil
+}
+
+// WriteBatch writes multiple log entries to MongoDB using InsertMany.
+func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*LogEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	// Convert entries to BSON documents. Captured JSON bodies are decoded
+	// here so they land as BSON documents the store can index into
+	// (response id / previous_response_id lookups), not as opaque bytes.
+	docs := make([]any, len(entries))
+	for i, e := range entries {
+		if e != nil && e.Data != nil {
+			e.Data.Attempts = normalizeAttemptSnapshots(e.Data.Attempts)
+		}
+		docs[i] = e.withBodyDocuments()
+	}
+
+	// Use unordered insert for better performance (continues on errors)
+	opts := options.InsertMany().SetOrdered(false)
+	_, err := s.collection.InsertMany(ctx, docs, opts)
+	if err != nil {
+		// Check if it's a bulk write error with some successes
+		// The driver returns the exception by value, so match the value type.
+		if bulkErr, ok := errors.AsType[mongo.BulkWriteException](err); ok {
+			failedCount := len(bulkErr.WriteErrors)
+			// Log for visibility
+			slog.Warn("partial request log insert failure",
+				"total", len(entries),
+				"failed", failedCount,
+				"succeeded", len(entries)-failedCount,
+			)
+			// Increment metric for operators to detect data loss
+			countPartialWriteFailure()
+			// Return distinguishable error so callers know insert was partial
+			return &PartialWriteError{
+				TotalEntries: len(entries),
+				FailedCount:  failedCount,
+				Cause:        bulkErr,
+			}
+		}
+		return fmt.Errorf("failed to insert request logs: %w", err)
+	}
+
+	return nil
+}
+
+// Flush is a no-op for MongoDB as writes are synchronous.
+func (s *MongoDBStore) Flush(_ context.Context) error {
+	return nil
+}
+
+// Close stops the move of an older release's entries, if it is still running.
+// The client is managed by the storage layer.
+func (s *MongoDBStore) Close() error {
+	if s.cancelAbsorb != nil {
+		s.cancelAbsorb()
+	}
+	s.absorb.Wait()
+	return nil
+}

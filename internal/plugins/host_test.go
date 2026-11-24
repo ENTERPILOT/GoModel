@@ -115,7 +115,7 @@ func TestMetaFromContextAndRequestState(t *testing.T) {
 			ProviderName:     "anthropic-eu",
 			AliasApplied:     true,
 		},
-		Policy: &core.ResolvedWorkflowPolicy{VersionID: "wf-1", Features: core.WorkflowFeatures{Cache: true}},
+		Policy: &core.ResolvedWorkflowPolicy{VersionID: "wf-1", Features: core.WorkflowFeatures{Cache: true, RequestLogs: true}},
 	}
 	meta := MetaFromContext(ctx, workflow)
 	require.Equal(t, "req-9", meta.RequestID)
@@ -135,6 +135,10 @@ func TestMetaFromContextAndRequestState(t *testing.T) {
 	require.Equal(t, "wf-1", meta.WorkflowVersionID)
 	require.True(t, meta.Features["cache"])
 	require.False(t, meta.Features["usage"])
+	// request_logs was named audit through v0.2.5; plugins built against that
+	// name keep finding it.
+	require.True(t, meta.Features["request_logs"])
+	require.True(t, meta.Features["audit"])
 	meta = WithAttempts(meta, []Attempt{{Seq: 1, Kind: "primary", ProviderType: "anthropic", Success: true}})
 	require.Len(t, meta.Attempts, 1)
 	require.Equal(t, "anthropic", meta.Attempts[0].Provider)

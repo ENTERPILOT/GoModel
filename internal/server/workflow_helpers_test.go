@@ -7,16 +7,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 func TestEnsureTranslatedRequestWorkflow_CompletesPartialWorkflowFromDecodedSelector(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
 
-	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c, _ := echotest.Post(t, "/v1/chat/completions", nil, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	entry := &requestlog.LogEntry{Data: &requestlog.LogData{}}
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil, echotest.WithValue(string(requestlog.LogEntryKey), entry))
 
 	desc := core.DescribeEndpoint(http.MethodPost, "/v1/chat/completions")
 	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), &core.Workflow{

@@ -186,8 +186,8 @@ func requestHealthFor(healthByName map[string]health.ProviderHealth, name string
 	return nil
 }
 
-// applyRequestHealth folds real-traffic signals (circuit breaker state and
-// flagged models) into the discovery-based classification. Signals only
+// applyRequestHealth folds real-traffic signals (provider and per-model
+// circuit breaker state and flagged models) into the discovery-based classification. Signals only
 // worsen a status, never improve it, and an equally severe base status keeps
 // its more specific label and reason.
 func applyRequestHealth(status, label, reason, lastError string, rh *health.ProviderHealth) (string, string, string, string) {
@@ -207,6 +207,10 @@ func applyRequestHealth(status, label, reason, lastError string, rh *health.Prov
 			status, label = "degraded", "Recovering"
 			reason = "circuit breaker is half-open; probing recovery"
 		}
+	}
+	if open := rh.OpenCircuitModels(); len(open) > 0 && status == "healthy" {
+		status, label = "degraded", "Degraded"
+		reason = "circuit breaker is open for: " + strings.Join(open, ", ")
 	}
 	if len(flagged) > 0 && status == "healthy" {
 		status, label = "degraded", "Degraded"

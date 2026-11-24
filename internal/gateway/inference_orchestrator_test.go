@@ -112,7 +112,7 @@ func TestExecuteChatCompletionPricesRequestedModelWhenResponseModelIsVersioned(t
 
 // The response's provider field names the configured instance that served the
 // request, while the execution metadata keeps the provider type that drives
-// routing and audit filters.
+// routing and request log filters.
 func TestExecuteChatCompletionNamesTheProviderInstance(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -216,10 +216,10 @@ func TestInferenceOrchestratorLogUsageSkipsWhenWorkflowDisablesUsage(t *testing.
 		Policy: &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-usage-off",
 			Features: core.WorkflowFeatures{
-				Cache:      true,
-				Audit:      true,
-				Usage:      false,
-				Guardrails: true,
+				Cache:       true,
+				RequestLogs: true,
+				Usage:       false,
+				Guardrails:  true,
 			},
 		},
 	}, "gpt-5-nano", "openai", "primary-openai", func(*core.ModelPricing) *usage.UsageEntry {
@@ -237,11 +237,11 @@ func TestInferenceOrchestratorWithCacheRequestContextClearsInheritedGuardrailsHa
 			VersionID:      "workflow-1",
 			GuardrailsHash: "",
 			Features: core.WorkflowFeatures{
-				Cache:      true,
-				Audit:      true,
-				Usage:      true,
-				Guardrails: false,
-				Failover:   true,
+				Cache:       true,
+				RequestLogs: true,
+				Usage:       true,
+				Guardrails:  false,
+				Failover:    true,
 			},
 		},
 	}

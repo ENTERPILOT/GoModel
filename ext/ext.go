@@ -1,14 +1,14 @@
 // Package ext is the public extension API for building custom gateway
 // binaries on top of GoModel. External modules register request rewriters,
 // HTTP middleware, extra and admin routes, runtime settings, readiness health
-// checkers, upstream observers, a route selector, and log handler wrappers on
-// a Registry (usually ext.Default) before startup. Core consumes an immutable
+// checkers, upstream observers, a route selector, alert sinks, and log handler
+// wrappers on a Registry (usually ext.Default) before startup. Core consumes an immutable
 // snapshot at server construction; an empty registry adds zero request
 // overhead.
 //
 // Registered components can also receive core dependencies by implementing
-// an optional interface: AuthenticationEventRecorderAware for the audit
-// trail, and SharedStoreAware for a small key/value store kept in the
+// an optional interface: AuthenticationEventRecorderAware for the request
+// log, and SharedStoreAware for a small key/value store kept in the
 // configured storage backend and shared by every replica on it.
 package ext
 
@@ -61,7 +61,7 @@ type Result struct {
 	// can annotate what they did (for example X-GoModel-Pro-Tokens-Saved).
 	ResponseHeader http.Header
 	// Detail optionally carries a JSON-serializable summary of what the
-	// rewriter changed. It is recorded in the audit trail's request-revision
+	// rewriter changed. It is recorded in the request log's request-revision
 	// chain and never sent upstream; it must never contain secrets or
 	// request credentials.
 	Detail any

@@ -77,18 +77,20 @@ func exportVirtualModels(declared []config.VirtualModelConfig, stored []virtualm
 			return nil, fmt.Errorf("virtual model %q: default_params: %w", model.Source, err)
 		}
 		entry := config.VirtualModelConfig{
-			Source:          model.Source,
-			Strategy:        model.Strategy,
-			StrategyPlugin:  model.StrategyPlugin,
-			StrategyConfig:  model.StrategyConfig,
-			SessionAffinity: model.SessionAffinity,
-			Failover:        model.Failover,
-			UserPaths:       model.UserPaths,
-			Description:     model.Description,
-			Slowdown:        model.Slowdown,
-			ReasoningEffort: model.ReasoningEffort,
-			Params:          params,
-			DefaultParams:   defaultParams,
+			Source:                model.Source,
+			Strategy:              model.Strategy,
+			StrategyPlugin:        model.StrategyPlugin,
+			StrategyConfig:        model.StrategyConfig,
+			SessionAffinity:       model.SessionAffinity,
+			Failover:              model.Failover,
+			UserPaths:             model.UserPaths,
+			Description:           model.Description,
+			Slowdown:              model.Slowdown,
+			Timeout:               model.Timeout,
+			ResponseHeaderTimeout: model.ResponseHeaderTimeout,
+			ReasoningEffort:       model.ReasoningEffort,
+			Params:                params,
+			DefaultParams:         defaultParams,
 		}
 		// An access policy has no targets, and is written without any: its
 		// provider and model are the scope its source names, not a destination.
@@ -239,7 +241,10 @@ func exportBudgets(declared config.BudgetsConfig, stored []budget.Budget, billed
 	result := declared
 	result.UserPaths, result.Labels, result.Providers = nil, nil, nil
 	for _, row := range rows {
-		limit := config.BudgetLimitConfig{PeriodSeconds: row.PeriodSeconds, Amount: row.Amount, CostBasis: string(row.CostBasis)}
+		limit := config.BudgetLimitConfig{
+			PeriodSeconds: row.PeriodSeconds, Amount: row.Amount, CostBasis: string(row.CostBasis),
+			AlertThresholds: row.AlertThresholds,
+		}
 		if label := budget.PeriodLabel(row.PeriodSeconds); isBudgetPeriodName(label) {
 			limit.Period = label
 		}

@@ -31,8 +31,8 @@ type TestServerConfig struct {
 	// DBType is either "postgresql" or "mongodb"
 	DBType string
 
-	// AuditLogEnabled enables audit logging
-	AuditLogEnabled bool
+	// RequestLogEnabled enables request logging
+	RequestLogEnabled bool
 
 	// UsageEnabled enables usage tracking
 	UsageEnabled bool
@@ -46,10 +46,10 @@ type TestServerConfig struct {
 	// BudgetUserPaths seeds configured budget limits.
 	BudgetUserPaths []config.BudgetUserPathConfig
 
-	// LogBodies enables body logging in audit logs
+	// LogBodies enables body logging in request logs
 	LogBodies bool
 
-	// LogHeaders enables header logging in audit logs
+	// LogHeaders enables header logging in request logs
 	LogHeaders bool
 
 	// OnlyModelInteractions limits logging to model endpoints only
@@ -178,8 +178,14 @@ func resetPostgreSQLStorage(t *testing.T) {
 	defer cancel()
 
 	tables := []string{
-		// audit_log_attempts has a FK to audit_logs, so it is listed first; the
+		// request_log_attempts has a FK to request_logs, so it is listed first; the
 		// CASCADE below also covers any future dependents.
+		"request_log_attempts",
+		"request_logs",
+		// The names up to v0.2.5, on a database an older checkout used: the
+		// gateway would move their rows into the tables just reset. They come
+		// after the current ones, whose CASCADE removes the views PostgreSQL
+		// keeps under these names.
 		"audit_log_attempts",
 		"audit_logs",
 		"usage",
@@ -210,7 +216,8 @@ func resetMongoDBStorage(t *testing.T) {
 	defer cancel()
 
 	collections := []string{
-		"audit_logs",
+		"request_logs",
+		"audit_logs", // the name up to v0.2.5, on a database an older checkout used
 		"usage",
 		"budgets",
 		"budget_settings",
@@ -299,7 +306,7 @@ func buildAppConfig(t *testing.T, cfg TestServerConfig, mockLLMURL string, port 
 			Storage: config.MediaStorageConfig{Type: config.MediaStorageMemory},
 		},
 		Logging: config.LogConfig{
-			Enabled:               cfg.AuditLogEnabled,
+			Enabled:               cfg.RequestLogEnabled,
 			LogBodies:             cfg.LogBodies,
 			LogHeaders:            cfg.LogHeaders,
 			BufferSize:            100,

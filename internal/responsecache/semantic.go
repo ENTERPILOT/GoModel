@@ -40,7 +40,7 @@ type semanticCacheMiddleware struct {
 	store            VecStore
 	cfg              config.SemanticCacheConfig
 	embedderIdentity string
-	hitRecorder      func(exchange, []byte, string)
+	hitRecorder      hitRecorder
 
 	partitionByUserPath bool
 
@@ -54,7 +54,7 @@ type semanticCacheMiddleware struct {
 	closed  bool
 }
 
-func newSemanticCacheMiddleware(emb embedding.Embedder, store VecStore, cfg config.SemanticCacheConfig, hitRecorder func(exchange, []byte, string)) *semanticCacheMiddleware {
+func newSemanticCacheMiddleware(emb embedding.Embedder, store VecStore, cfg config.SemanticCacheConfig, hitRecorder hitRecorder) *semanticCacheMiddleware {
 	m := &semanticCacheMiddleware{
 		embedder:         emb,
 		store:            store,
@@ -175,12 +175,11 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 	}
 
 	if len(results) > 0 && float64(results[0].Score) >= threshold {
+		recordHit := m.hitRecorder.prepare(ex, results[0].Response, CacheTypeSemantic)
 		replayErr := ex.ReplayHit(body, results[0].Response, CacheTypeSemantic)
 		if replayErr == nil || replayCommitted(replayErr) {
 			ex.MarkHit(CacheTypeSemantic)
-			if m.hitRecorder != nil {
-				m.hitRecorder(ex, results[0].Response, CacheTypeSemantic)
-			}
+			recordHit()
 			slog.Info("semantic cache hit",
 				"path", path,
 				"score", results[0].Score,
@@ -454,7 +453,8 @@ var paramsHashPromptFields = map[string]struct{}{
 // paramsHashCallerFields identify the caller or steer provider-side prompt
 // caching. They never change what the model generates, so they are left out
 // of the hash, except on responsesPath: a Responses object echoes them back,
-// and a hit must not hand one caller's values to another.
+// and a hit must not hand one caller's values to another. The exact-cache key
+// leaves them out on the same terms (see cacheKeyRequestBody).
 var paramsHashCallerFields = map[string]struct{}{
 	"user":                   {},
 	"metadata":               {},

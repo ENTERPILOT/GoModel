@@ -26,11 +26,16 @@ var googleCompatRejectedFields = []string{
 }
 
 // adaptChatRequest rewrites a ChatRequest for Gemini's OpenAI-compatible
-// endpoint: members it rejects are dropped, unsigned Gemini 3+ tool calls get
+// endpoint: members it rejects are dropped, a "stop" list is capped at the
+// five entries the endpoint accepts, unsigned Gemini 3+ tool calls get
 // the validator placeholder, and the reasoning effort becomes the top-level
 // "reasoning_effort" string the endpoint reads (not the nested
 // "reasoning": {"effort": "..."} object), clamped to a level the model has.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
+	req, err := providers.CapStopSequences(req, maxStopSequences)
+	if err != nil {
+		return nil, err
+	}
 	adapted := *req
 	adapted.ExtraFields = req.ExtraFields.Without(googleCompatRejectedFields...)
 	adapted.Messages = withCompatThoughtSignatures(req.Model, req.Messages)

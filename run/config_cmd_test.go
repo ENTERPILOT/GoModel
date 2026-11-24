@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,10 +28,11 @@ func TestParseConfigArgs(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    []string
-		want    bool
+		want    *configExportOptions
 		wantErr string
 	}{
-		{name: "export", args: []string{"export"}, want: true},
+		{name: "export", args: []string{"export"}, want: &configExportOptions{}},
+		{name: "export with defaults", args: []string{"export", "--include-defaults"}, want: &configExportOptions{IncludeDefaults: true}},
 		{name: "help", args: []string{"help"}},
 		{name: "export help", args: []string{"export", "-h"}},
 		{name: "missing action", args: nil, wantErr: "missing action"},
@@ -78,6 +81,30 @@ func TestRunConfigExport(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal(stdout.Bytes(), &doc), "stdout holds the document alone")
 	assert.Equal(t, "${env:GOMODEL_MASTER_KEY}", doc.Server.MasterKey)
 	assert.NotContains(t, stdout.String()+stderr.String(), "cli-master-do-not-leak")
+}
+
+func TestRunConfigExportIncludeDefaults(t *testing.T) {
+	// So a developer's OPENAI_API_KEY does not declare a provider.
+	for _, entry := range os.Environ() {
+		if name, value, _ := strings.Cut(entry, "="); name != "" && !slices.Contains([]string{"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "SYSTEMROOT"}, strings.ToUpper(name)) {
+			t.Setenv(name, value)
+			require.NoError(t, os.Unsetenv(name))
+		}
+	}
+	t.Chdir(t.TempDir())
+	t.Setenv("STORAGE_TYPE", "sqlite")
+	sqlitePath := filepath.Join(t.TempDir(), "export.db")
+	t.Setenv("SQLITE_PATH", sqlitePath)
+	export := func(args ...string) string {
+		var stdout, stderr bytes.Buffer
+		require.NoError(t, Run(context.Background(), Options{Args: args, Stdout: &stdout, Stderr: &stderr}), stderr.String())
+		return stdout.String()
+	}
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(export("config", "export")), &doc))
+	assert.Equal(t, map[string]any{"storage": map[string]any{"sqlite": map[string]any{"path": sqlitePath}}}, doc, "settings at their default are left out")
+	assert.Contains(t, export("config", "export", "--include-defaults"), "retention_days: 30")
 }
 
 func TestRunConfigExportRefusesItsInput(t *testing.T) {

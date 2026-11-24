@@ -85,18 +85,20 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"LOGGING_ONLY_MODEL_INTERACTIONS", "LOGGING_BUFFER_SIZE",
 		"LOGGING_FLUSH_INTERVAL", "LOGGING_RETENTION_DAYS",
 		"USAGE_ENABLED", "ENFORCE_RETURNING_USAGE_DATA",
-		"USAGE_PRICING_RECALCULATION_ENABLED",
+		"USAGE_PRICING_RECALCULATION_ENABLED", "USAGE_RESPONSE_COST_ENABLED",
 		"PRICING_BILL_CACHE_HITS",
 		"PRICING_MARKUPS_ENABLED",
 		"USAGE_BUFFER_SIZE", "USAGE_FLUSH_INTERVAL", "USAGE_RETENTION_DAYS",
 		"BUDGETS_ENABLED", "BUDGETS_PROVIDER_BILLED_CACHE_HITS",
+		"BUDGETS_ALERTS_THRESHOLDS", "BUDGETS_ALERTS_INTERVAL", "BUDGETS_ALERTS_WEBHOOK_URL", "BUDGETS_ALERTS_WEBHOOK_SECRET",
+		"BUDGETS_ALERTS_WEBHOOK_TIMEOUT", "BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES",
 		"RATE_LIMITS_ENABLED", "RATE_LIMITS_FLUSH_INTERVAL",
 		"DASHBOARD_LIVE_LOGS_ENABLED", "DASHBOARD_LIVE_LOGS_BUFFER_SIZE",
 		"DASHBOARD_LIVE_LOGS_REPLAY_LIMIT", "DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS",
 		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING", "PLUGINS_ENABLED", "PLUGINS_LOAD",
 		"FAILOVER_MODE", "FAILOVER_MANUAL_RULES_PATH", "FAILOVER_ENABLED", "FAILOVER_RULES_JSON", "FAILOVER_DISABLED_MODELS", "FAILOVER_DISABLED_MODELS_JSON",
 		"MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "MODELS_VLLM_DISCOVERY_COMPAT", "UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
-		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT", "HTTP_TLS_CA_FILE", "HTTP_TLS_CLIENT_CERT_FILE", "HTTP_TLS_CLIENT_KEY_FILE", "HTTP_TLS_INSECURE_SKIP_VERIFY",
+		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT", "HTTP_MAX_IDLE_CONNS_PER_HOST", "HTTP_TLS_CA_FILE", "HTTP_TLS_CLIENT_CERT_FILE", "HTTP_TLS_CLIENT_KEY_FILE", "HTTP_TLS_INSECURE_SKIP_VERIFY",
 		"WORKFLOW_REFRESH_INTERVAL",
 		"LITELLM_TAGS_ENABLED",
 	} {
@@ -155,6 +157,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.True(t, cfg.Usage.Enabled)
 	assert.True(t, cfg.Usage.EnforceReturningUsageData)
 	assert.True(t, cfg.Usage.PricingRecalculationEnabled)
+	assert.False(t, cfg.Usage.ResponseCostEnabled)
 	assert.Equal(t, 1000, cfg.Usage.BufferSize)
 	assert.Equal(t, 5, cfg.Usage.FlushInterval)
 	assert.Equal(t, 90, cfg.Usage.RetentionDays)
@@ -165,6 +168,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.Equal(t, MetricsCallerDimensionsConfig{UserPathDepth: 2, MaxValues: 100}, cfg.Metrics.CallerDimensions)
 	assert.Equal(t, 600, cfg.HTTP.Timeout)
 	assert.Equal(t, 600, cfg.HTTP.ResponseHeaderTimeout)
+	assert.Equal(t, 512, cfg.HTTP.MaxIdleConnsPerHost)
 	assert.Equal(t, time.Minute, cfg.Workflows.RefreshInterval)
 	assert.True(t, cfg.Admin.EndpointsEnabled)
 	assert.True(t, cfg.Admin.UIEnabled)
@@ -566,6 +570,32 @@ func TestLoadBudgetsEnabledDisablesBudgetsWhenUsageTrackingDisabledWithoutSeedBu
 		require.NoError(t, err)
 		require.False(t, result.Config.Budgets.Enabled)
 	})
+}
+
+func TestLoadUsageResponseCost(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		env  string
+		want bool
+	}{
+		{name: "off by default"},
+		{name: "yaml", yaml: "usage:\n  response_cost_enabled: true\n", want: true},
+		{name: "env", env: "true", want: true},
+		{name: "env overrides yaml", yaml: "usage:\n  response_cost_enabled: true\n", env: "false"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(dir string) {
+				if tt.env != "" {
+					t.Setenv("USAGE_RESPONSE_COST_ENABLED", tt.env)
+				}
+				result := loadConfigYAML(t, dir, tt.yaml)
+				assert.Equal(t, tt.want, result.Config.Usage.ResponseCostEnabled)
+			})
+		})
+	}
 }
 
 func TestLoadUsagePricingRecalculationFromYAML(t *testing.T) {
@@ -1283,11 +1313,13 @@ func TestLoad_HTTPConfig(t *testing.T) {
 	withTempDir(t, func(_ string) {
 		t.Setenv("HTTP_TIMEOUT", "30")
 		t.Setenv("HTTP_RESPONSE_HEADER_TIMEOUT", "60")
+		t.Setenv("HTTP_MAX_IDLE_CONNS_PER_HOST", "2048")
 
 		result, err := Load()
 		require.NoError(t, err)
 		assert.Equal(t, 30, result.Config.HTTP.Timeout)
 		assert.Equal(t, 60, result.Config.HTTP.ResponseHeaderTimeout)
+		assert.Equal(t, 2048, result.Config.HTTP.MaxIdleConnsPerHost)
 	})
 
 	withTempDir(t, func(_ string) {

@@ -155,6 +155,10 @@ GoModel wybiera najgłębszą skonfigurowaną ścieżkę, która obejmuje user p
 
 Domyślnie nic nie jest ustawione: bez `user_path_markups` dla wszystkich obowiązuje `markups`. Przy `markups_enabled: false` `user_path_markups` jest ignorowane tak jak `markups`, a GoModel zapisuje ostrzeżenie w logu przy uruchomieniu. Reguła z `user_path_markups` jest zapisywana w `markup_selector` jako `<user path>:<selector>`, na przykład `/acme:openai/gpt-5`, dzięki czemu log żądań pokazuje, która reguła klienta została rozliczona. User path jest normalizowany tak jak w żądaniach, więc `acme/` i `/acme` to ten sam klucz; `/` jest odrzucany, bo obejmuje go już `markups`.
 
+## Koszt w odpowiedzi
+
+GoModel może zwrócić koszt wyliczony dla requestu klientowi, który go wysłał: `usage.cost` w odpowiedzi, w kształcie OpenRouter, oraz nagłówki `X-GoModel-Cost` w odpowiedziach buforowanych. Domyślnie jest to wyłączone (`USAGE_RESPONSE_COST_ENABLED`). Przy włączonych narzutach klient dostaje koszt rozliczeniowy, a pola kosztu providera są usuwane. Konfigurację, przykłady dla klienta, obsługiwane endpointy i limity opisuje strona [Koszt w odpowiedzi](/pl/features/response-cost).
+
 ## Sumy w dashboardzie
 
 - **Estimated Cost** – wydatki na rzeczywiste requesty do providerów; cache hity są wykluczone.

@@ -62,6 +62,15 @@ type VirtualModelConfig struct {
 	// nil leaves the setting unspecified.
 	Slowdown *float64 `yaml:"slowdown,omitempty" json:"slowdown,omitempty"`
 
+	// Timeout overrides HTTP_TIMEOUT, in seconds, for each upstream attempt
+	// of a request through this redirect or to this model. Retries and
+	// failovers each get a fresh budget. Omitted inherits.
+	Timeout *int `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+
+	// ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in
+	// seconds, for each upstream attempt. Omitted inherits.
+	ResponseHeaderTimeout *int `yaml:"response_header_timeout,omitempty" json:"response_header_timeout,omitempty"`
+
 	// ReasoningEffort forces the reasoning effort sent upstream for requests
 	// through this redirect or to this model ("none", "minimal", "low",
 	// "medium", "high", "xhigh", or "max"), replacing the client's value.

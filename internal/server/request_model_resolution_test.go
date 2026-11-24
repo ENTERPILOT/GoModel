@@ -10,9 +10,9 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 type canonicalizingProvider struct {
@@ -149,9 +149,9 @@ func TestResolveRequestModel_CanonicalizesAliasOutputThroughProviderResolver(t *
 	require.Equal(t, "openai_test", resolution.ProviderName)
 }
 
-func TestEnrichAuditEntryWithRequestedModelDoesNotPublishBodyBeforePolicy(t *testing.T) {
+func TestEnrichRequestLogEntryWithRequestedModelDoesNotPublishBodyBeforePolicy(t *testing.T) {
 	logger := &requestModelLiveLogger{
-		cfg: auditlog.Config{
+		cfg: requestlog.Config{
 			Enabled:   true,
 			LogBodies: true,
 		},
@@ -171,20 +171,20 @@ func TestEnrichAuditEntryWithRequestedModelDoesNotPublishBodyBeforePolicy(t *tes
 		nil,
 	))))
 
-	handler := auditlog.Middleware(logger)(func(c *echo.Context) error {
-		enrichAuditEntryWithRequestedModel(c, core.NewRequestedModelSelector("gpt-test", ""))
+	handler := requestlog.Middleware(logger)(func(c *echo.Context) error {
+		enrichRequestLogEntryWithRequestedModel(c, core.NewRequestedModelSelector("gpt-test", ""))
 		require.Len(t, logger.events, 2)
 
 		updated := logger.events[1]
-		require.Equal(t, auditlog.LiveEventAuditUpdated, updated.eventType)
+		require.Equal(t, requestlog.LiveEventRequestLogUpdated, updated.eventType)
 		require.Equal(t, "gpt-test", updated.requestedModel)
 		require.Nil(t, updated.requestBody)
 
 		workflow := &core.Workflow{
 			Policy: &core.ResolvedWorkflowPolicy{
-				VersionID: "audit-disabled",
+				VersionID: "request-log-disabled",
 				Features: core.WorkflowFeatures{
-					Audit: false,
+					RequestLogs: false,
 				},
 			},
 		}
@@ -196,7 +196,7 @@ func TestEnrichAuditEntryWithRequestedModelDoesNotPublishBodyBeforePolicy(t *tes
 	require.Len(t, logger.events, 3)
 
 	removed := logger.events[2]
-	require.Equal(t, auditlog.LiveEventAuditRemoved, removed.eventType)
+	require.Equal(t, requestlog.LiveEventRequestLogRemoved, removed.eventType)
 	require.Nil(t, removed.requestBody)
 	require.Equal(t, 0, logger.writes)
 }
@@ -208,16 +208,16 @@ type requestModelLiveEvent struct {
 }
 
 type requestModelLiveLogger struct {
-	cfg    auditlog.Config
+	cfg    requestlog.Config
 	events []requestModelLiveEvent
 	writes int
 }
 
-func (l *requestModelLiveLogger) Write(_ *auditlog.LogEntry) {
+func (l *requestModelLiveLogger) Write(_ *requestlog.LogEntry) {
 	l.writes++
 }
 
-func (l *requestModelLiveLogger) Config() auditlog.Config {
+func (l *requestModelLiveLogger) Config() requestlog.Config {
 	return l.cfg
 }
 
@@ -225,7 +225,7 @@ func (l *requestModelLiveLogger) Close() error {
 	return nil
 }
 
-func (l *requestModelLiveLogger) PublishLiveEvent(eventType string, entry *auditlog.LogEntry) {
+func (l *requestModelLiveLogger) PublishLiveEvent(eventType string, entry *requestlog.LogEntry) {
 	event := requestModelLiveEvent{eventType: eventType}
 	if entry != nil {
 		event.requestedModel = entry.RequestedModel

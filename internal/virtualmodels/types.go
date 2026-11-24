@@ -66,6 +66,13 @@ type VirtualModel struct {
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it. Nil
 	// leaves the setting unspecified so an alias can inherit its target model.
 	Slowdown *float64 `json:"slowdown,omitempty" bson:"slowdown,omitempty"`
+	// Timeout overrides HTTP_TIMEOUT, in seconds, for every upstream attempt
+	// of a request routed through this redirect or to this model. Nil
+	// inherits (from the target model's policy, then the gateway default).
+	Timeout *int `json:"timeout,omitempty" bson:"timeout,omitempty"`
+	// ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in
+	// seconds, for every upstream attempt. Nil inherits.
+	ResponseHeaderTimeout *int `json:"response_header_timeout,omitempty" bson:"response_header_timeout,omitempty"`
 	// ReasoningEffort, when set, replaces the reasoning effort of every
 	// request sent upstream through this redirect or to this model, whatever
 	// the client asked for. Empty leaves the client's value untouched.
@@ -161,6 +168,8 @@ func (v VirtualModel) clone() VirtualModel {
 		slowdown := *v.Slowdown
 		v.Slowdown = &slowdown
 	}
+	v.Timeout = cloneIntPtr(v.Timeout)
+	v.ResponseHeaderTimeout = cloneIntPtr(v.ResponseHeaderTimeout)
 	if len(v.Targets) > 0 {
 		v.Targets = append([]Target(nil), v.Targets...)
 	}
@@ -179,6 +188,14 @@ func (v VirtualModel) clone() VirtualModel {
 		v.Failover = &failover
 	}
 	return v
+}
+
+func cloneIntPtr(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
 }
 
 // cloneStrategyConfig deep-copies a strategy config so snapshot consumers and
@@ -212,18 +229,23 @@ type View struct {
 	UserPaths       []string       `json:"user_paths,omitempty"`
 	Description     string         `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
-	Slowdown        *float64          `json:"slowdown,omitempty"`
-	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
-	Params          requestparams.Set `json:"params,omitempty" swaggertype:"object"`
-	DefaultParams   requestparams.Set `json:"default_params,omitempty" swaggertype:"object"`
-	Enabled         bool              `json:"enabled"`
-	Managed         bool              `json:"managed,omitempty"`
-	ResolvedModel   string            `json:"resolved_model,omitempty"`
-	ProviderType    string            `json:"provider_type,omitempty"`
-	Valid           bool              `json:"valid,omitempty"`
-	ScopeKind       string            `json:"scope_kind,omitempty"`
-	CreatedAt       time.Time         `json:"created_at"`
-	UpdatedAt       time.Time         `json:"updated_at"`
+	Slowdown *float64 `json:"slowdown,omitempty"`
+	// Timeout is the per-attempt upstream timeout in seconds; omitted inherits.
+	Timeout *int `json:"timeout,omitempty"`
+	// ResponseHeaderTimeout is the per-attempt wait for upstream response
+	// headers in seconds; omitted inherits.
+	ResponseHeaderTimeout *int              `json:"response_header_timeout,omitempty"`
+	ReasoningEffort       string            `json:"reasoning_effort,omitempty"`
+	Params                requestparams.Set `json:"params,omitempty" swaggertype:"object"`
+	DefaultParams         requestparams.Set `json:"default_params,omitempty" swaggertype:"object"`
+	Enabled               bool              `json:"enabled"`
+	Managed               bool              `json:"managed,omitempty"`
+	ResolvedModel         string            `json:"resolved_model,omitempty"`
+	ProviderType          string            `json:"provider_type,omitempty"`
+	Valid                 bool              `json:"valid,omitempty"`
+	ScopeKind             string            `json:"scope_kind,omitempty"`
+	CreatedAt             time.Time         `json:"created_at"`
+	UpdatedAt             time.Time         `json:"updated_at"`
 }
 
 // Resolution captures the requested selector and the concrete selector chosen
