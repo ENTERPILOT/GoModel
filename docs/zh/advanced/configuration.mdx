@@ -263,6 +263,7 @@ server:
 | `USAGE_ENABLED`                | 启用 Token 用量追踪                    | `true`  |
 | `USAGE_PRICING_RECALCULATION_ENABLED` | 在支持时启用管理端的用量定价重新计算操作 | `true` |
 | `ENFORCE_RETURNING_USAGE_DATA` | 自动为流式请求添加 `include_usage` | `true`  |
+| `USAGE_RESPONSE_COST_ENABLED`  | 把 GoModel 为请求计算出的成本（已知时）返回给调用方：`usage.cost`（OpenRouter 的形式），缓冲响应另有 `X-GoModel-Cost` 和 `X-GoModel-Cost-Currency` 响应头。需要 `USAGE_ENABLED=true`。参见[随响应返回成本](/zh/features/response-cost) | `false` |
 | `USAGE_BUFFER_SIZE`            | 刷写前的内存缓冲区大小                  | `1000`  |
 | `USAGE_FLUSH_INTERVAL`         | 刷写间隔（秒）                      | `5`     |
 | `USAGE_RETENTION_DAYS`         | N 天后自动删除（0 = 永久保留）         | `90`    |
@@ -277,6 +278,12 @@ server:
 | `BUDGETS_PROVIDER_BILLED_CACHE_HITS` | 在基于计费成本的提供商预算中计入计费的响应缓存命中（GoModel Pro） | `true` |
 | `SET_BUDGET_<PATH>`          | 为用户路径预置预算限额，例如 `daily=10`                             | _（空）_ |
 | `SET_PROVIDER_BUDGET_<NAME>` | 为提供商实例预置预算限额，例如 `daily=100`                    | _（空）_ |
+| `BUDGETS_ALERTS_WEBHOOK_URL` | 以 JSON 接收[预算告警](/zh/features/budgets#告警)的 webhook。告警要求 `BUDGETS_ENABLED` 和用量追踪；设置 webhook 或由自定义构建注册 `ext.AlertSink` 后才会评估告警 | _（空）_ |
+| `BUDGETS_ALERTS_WEBHOOK_SECRET` | 为每次投递签名：`X-GoModel-Signature` 携带时间戳以及 `<时间戳>.<请求体>` 的 HMAC-SHA256 | _（空）_ |
+| `BUDGETS_ALERTS_THRESHOLDS`  | 默认告警阈值，预算金额的百分比，每个值为 `1`-`100`            | `80,100` |
+| `BUDGETS_ALERTS_INTERVAL`    | 两次告警评估之间的秒数                                        | `60`     |
+| `BUDGETS_ALERTS_WEBHOOK_TIMEOUT` | 每次 webhook 投递尝试的秒数                               | `10`     |
+| `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` | webhook 投递失败后的重试次数，采用指数退避；取值 `0`-`10` | `3`      |
 
 `SET_BUDGET_<PATH>` 支持标准周期 `hourly`、`daily`、`weekly` 和 `monthly`。`<PATH>` 后缀会被转换为小写；路径段之间使用双下划线（`__`），单下划线则保留在段内。例如，`SET_BUDGET_TEAM__ALPHA__SERVICE="daily=10"` 配置的是 `/team/alpha/service`，而 `SET_BUDGET_TEAM_ALPHA="daily=10"` 配置的是 `/team_alpha`。这与下文提供商的 `<SUFFIX>` 变量不同，后者会把提供商名称中的下划线转换为连字符；`SET_PROVIDER_BUDGET_<NAME>` 遵循提供商的规则，因此 `SET_PROVIDER_BUDGET_OPENAI_PROD` 限制的是 `openai-prod`。
 

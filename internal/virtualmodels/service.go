@@ -306,32 +306,46 @@ func (s *Service) Get(source string) (*VirtualModel, bool) {
 	return nil, false
 }
 
+// ModelWidePolicy returns the policy declared for a model name on every
+// provider (source "gpt-4o"). It supplies per-model values such as slowdown
+// and upstream timeouts where the model's exact policy leaves them unset.
+func (s *Service) ModelWidePolicy(model string) (*VirtualModel, bool) {
+	policy, ok := s.snapshot().modelWide[model]
+	if !ok {
+		return nil, false
+	}
+	clone := policy.clone()
+	return &clone, true
+}
+
 // ListViews returns all virtual models (redirects and policies) for the admin UI.
 func (s *Service) ListViews() []View {
 	rows := s.List()
 	views := make([]View, 0, len(rows))
 	for _, vm := range rows {
 		view := View{
-			Source:          vm.Source,
-			Kind:            vm.Kind(),
-			Targets:         vm.Targets,
-			Strategy:        vm.Strategy,
-			StrategyPlugin:  vm.StrategyPlugin,
-			StrategyConfig:  vm.StrategyConfig,
-			SessionAffinity: vm.SessionAffinity,
-			Failover:        vm.Failover,
-			ProviderName:    vm.ProviderName,
-			Model:           vm.Model,
-			UserPaths:       vm.UserPaths,
-			Description:     vm.Description,
-			Slowdown:        vm.Slowdown,
-			ReasoningEffort: vm.ReasoningEffort,
-			Params:          vm.Params,
-			DefaultParams:   vm.DefaultParams,
-			Enabled:         vm.Enabled,
-			Managed:         vm.Managed,
-			CreatedAt:       vm.CreatedAt,
-			UpdatedAt:       vm.UpdatedAt,
+			Source:                vm.Source,
+			Kind:                  vm.Kind(),
+			Targets:               vm.Targets,
+			Strategy:              vm.Strategy,
+			StrategyPlugin:        vm.StrategyPlugin,
+			StrategyConfig:        vm.StrategyConfig,
+			SessionAffinity:       vm.SessionAffinity,
+			Failover:              vm.Failover,
+			ProviderName:          vm.ProviderName,
+			Model:                 vm.Model,
+			UserPaths:             vm.UserPaths,
+			Description:           vm.Description,
+			Slowdown:              vm.Slowdown,
+			Timeout:               vm.Timeout,
+			ResponseHeaderTimeout: vm.ResponseHeaderTimeout,
+			ReasoningEffort:       vm.ReasoningEffort,
+			Params:                vm.Params,
+			DefaultParams:         vm.DefaultParams,
+			Enabled:               vm.Enabled,
+			Managed:               vm.Managed,
+			CreatedAt:             vm.CreatedAt,
+			UpdatedAt:             vm.UpdatedAt,
 		}
 		if vm.IsRedirect() {
 			view.ResolvedModel, view.ProviderType, view.Valid = s.redirectViewResolution(vm)
@@ -415,7 +429,7 @@ func (s *Service) Upsert(ctx context.Context, vm VirtualModel) error {
 		}
 		return s.commitRefresh(ctx, map[string]*VirtualModel{canonical: &previous})
 	}
-	if err := s.validateRedirectTarget(current, normalized); err != nil {
+	if err := s.validateRedirectTarget(current, normalized, priorRow(previous, existed)); err != nil {
 		return err
 	}
 	if _, err := buildSnapshot(upsertRow(baseRows, normalized), s.defaultEnabled); err != nil {
@@ -485,7 +499,7 @@ func (s *Service) Rename(ctx context.Context, oldSource string, vm VirtualModel)
 		}
 		return s.commitRefresh(ctx, map[string]*VirtualModel{oldSource: &previous})
 	}
-	if err := s.validateRedirectTarget(current, normalized); err != nil {
+	if err := s.validateRedirectTarget(current, normalized, &previous); err != nil {
 		return err
 	}
 	rows := upsertRow(baseRows, normalized)
@@ -564,7 +578,7 @@ func (s *Service) policyIsRedundant(policy VirtualModel, fallbackRows []VirtualM
 // policyIsNoop reports whether an otherwise empty policy changes effective
 // access compared with the snapshot that would remain without that policy.
 func policyIsNoop(policy VirtualModel, fallback snapshot) bool {
-	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" || policy.Slowdown != nil || policy.setsOverrides() {
+	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" || policy.Slowdown != nil || policy.setsTimeouts() || policy.setsOverrides() {
 		return false
 	}
 
@@ -615,20 +629,64 @@ func (s *Service) normalizeForUpsert(vm VirtualModel) (VirtualModel, error) {
 // is a caller mistake worth rejecting up front. Startup config validation skips
 // the availability check, because the catalog may not be warm yet (see
 // ValidateManagedConfig).
-func (s *Service) validateRedirectTarget(current *snapshot, vm VirtualModel) error {
+//
+// The availability check covers only targets this write introduces. A target
+// the stored row (previous, nil for a new row) already names can go missing
+// later — its model was deprecated or its provider removed — and that must not
+// block disabling the virtual model, renaming it, or editing its other fields.
+func (s *Service) validateRedirectTarget(current *snapshot, vm VirtualModel, previous *VirtualModel) error {
 	if err := validateRedirectStructure(vm); err != nil {
-		return err
-	}
-	if err := s.validateTargetProviders(vm, nil); err != nil {
 		return err
 	}
 	if err := s.validateRouteStrategy(vm); err != nil {
 		return err
 	}
-	if missing, ok := s.firstUnsupportedTarget(current, vm); ok {
+	introduced := vm
+	introduced.Targets = introducedTargets(vm, previous)
+	if err := s.validateTargetProviders(introduced, nil); err != nil {
+		return err
+	}
+	if missing, ok := s.firstUnsupportedTarget(current, introduced); ok {
 		return newValidationError("target model not found: "+missing, nil)
 	}
 	return nil
+}
+
+// introducedTargets returns the targets of vm that the stored row does not
+// already name.
+func introducedTargets(vm VirtualModel, previous *VirtualModel) []Target {
+	if previous == nil {
+		return vm.Targets
+	}
+	stored := make(map[string]struct{}, len(previous.Targets))
+	for _, target := range previous.Targets {
+		if key, ok := targetIdentity(target); ok {
+			stored[key] = struct{}{}
+		}
+	}
+	introduced := make([]Target, 0, len(vm.Targets))
+	for _, target := range vm.Targets {
+		key, ok := targetIdentity(target)
+		if !ok {
+			continue // selector parse errors are reported by validateRedirectStructure
+		}
+		if _, kept := stored[key]; !kept {
+			introduced = append(introduced, target)
+		}
+	}
+	return introduced
+}
+
+// targetIdentity keys a target by what it routes to. The provider field is
+// part of it: "team/cheap" as a bare model may name another virtual model,
+// while provider "team" with model "cheap" pins a concrete one, so moving
+// between the two is a new target even though they qualify to the same text.
+func targetIdentity(target Target) (string, bool) {
+	selector, err := target.selector()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(target.Provider) + "\x00" + selector.QualifiedModel(), true
 }
 
 // validateTargetProviders checks every explicitly-named target provider against

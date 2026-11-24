@@ -17,7 +17,10 @@
     vmFormTargetColumns,
     vmFormSupportsSlowdown,
     parseParamsJSON,
+    parseTimeoutSeconds,
     REASONING_EFFORT_LEVELS,
+    TIMEOUT_MAX_SECONDS,
+    TIMEOUT_MIN_SECONDS,
   } from "./vmForm.js";
   import VmTargetRow from "./VmTargetRow.svelte";
   import { Plus, Save } from "lucide";
@@ -37,6 +40,12 @@
   const paramsInvalid = $derived(parseParamsJSON(vm.vmForm.params) === null);
   const defaultParamsInvalid = $derived(
     parseParamsJSON(vm.vmForm.default_params) === null,
+  );
+  const timeoutInvalid = $derived(
+    Number.isNaN(parseTimeoutSeconds(vm.vmForm.timeout)),
+  );
+  const responseHeaderTimeoutInvalid = $derived(
+    Number.isNaN(parseTimeoutSeconds(vm.vmForm.response_header_timeout)),
   );
 
   // The strategy dropdown is server-driven (VIRTUAL_MODEL_STRATEGIES); make
@@ -265,6 +274,42 @@
         {m.models_slowdown_help()}
       </span>
     </FormField>
+
+    <div class="form-grid">
+      <FormField id="virtual-model-timeout" label={m.models_timeout_field()}>
+        <input
+          id="virtual-model-timeout"
+          type="number"
+          min={TIMEOUT_MIN_SECONDS}
+          max={TIMEOUT_MAX_SECONDS}
+          step="1"
+          placeholder={m.models_inherit()}
+          bind:value={vm.vmForm.timeout}
+          disabled={vm.vmFormManaged}
+          aria-invalid={timeoutInvalid}
+        />
+      </FormField>
+      <FormField
+        id="virtual-model-response-header-timeout"
+        label={m.models_response_header_timeout_field()}
+      >
+        <input
+          id="virtual-model-response-header-timeout"
+          type="number"
+          min={TIMEOUT_MIN_SECONDS}
+          max={TIMEOUT_MAX_SECONDS}
+          step="1"
+          placeholder={m.models_inherit()}
+          bind:value={vm.vmForm.response_header_timeout}
+          disabled={vm.vmFormManaged}
+          aria-invalid={responseHeaderTimeoutInvalid}
+        />
+      </FormField>
+    </div>
+    {#if timeoutInvalid || responseHeaderTimeoutInvalid}
+      <span class="form-error" role="alert">{m.models_timeout_invalid()}</span>
+    {/if}
+    <span class="form-hint">{m.models_timeouts_help()}</span>
 
     <FormField id="virtual-model-reasoning-effort" label={m.models_reasoning_effort_field()}>
       <select

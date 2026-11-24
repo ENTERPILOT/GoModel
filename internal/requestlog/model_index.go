@@ -8,7 +8,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
-// requestLogIndex is one audit_logs index: its name and the column list it covers.
+// requestLogIndex is one request_logs index: its name and the column list it covers.
 type requestLogIndex struct {
 	name    string
 	columns string
@@ -39,7 +39,7 @@ func modelIndexes(dialect sqlx.Dialect) []requestLogIndex {
 func modelIndexStatements(dialect sqlx.Dialect) []string {
 	statements := make([]string, 0, 3)
 	for _, index := range modelIndexes(dialect) {
-		statements = append(statements, "CREATE INDEX IF NOT EXISTS "+index.name+" ON audit_logs("+index.columns+")")
+		statements = append(statements, "CREATE INDEX IF NOT EXISTS "+index.name+" ON request_logs("+index.columns+")")
 	}
 	return append(statements, "DROP INDEX IF EXISTS "+legacyRequestedModelIndex)
 }
@@ -81,7 +81,7 @@ func buildIndexConcurrently(ctx context.Context, db sqlx.DB, index requestLogInd
 		}
 	}
 	started := time.Now()
-	if _, err := db.Exec(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS "+index.name+" ON audit_logs("+index.columns+")"); err != nil {
+	if _, err := db.Exec(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS "+index.name+" ON request_logs("+index.columns+")"); err != nil {
 		return err
 	}
 	slog.Info("requestlog: built index", "index", index.name, "duration", time.Since(started).Round(time.Millisecond))

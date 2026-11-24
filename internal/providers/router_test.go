@@ -1052,6 +1052,27 @@ func TestForwardResponsesRequest_DropsForeignExtraContent(t *testing.T) {
 	assert.Equal(t, "m", got.Model, "forwarded request = %+v", got)
 }
 
+// extra_content.mistral is written on Responses output only (citation
+// chunks). No provider reads it back, so a replayed message item loses it on
+// every route: OpenAI rejects unknown item members, and so does Mistral.
+func TestForwardResponsesRequest_DropsMistralContentChunks(t *testing.T) {
+	for _, providerType := range []string{"openai", "mistral", "gemini", "anthropic"} {
+		t.Run(providerType, func(t *testing.T) {
+			req := &core.ResponsesRequest{Model: "m", Input: []any{
+				map[string]any{
+					"type": "message", "role": "assistant",
+					"content":       []any{map[string]any{"type": "output_text", "text": "Paris."}},
+					"extra_content": map[string]any{core.ExtraContentVendorMistral: map[string]any{core.ContentChunksField: []any{map[string]any{"type": "reference", "reference_ids": []any{0}}}}},
+				},
+			}}
+			got := forwardResponsesRequest(req, resolvedRoute{selector: core.ModelSelector{Model: "m"}, providerType: providerType})
+			item := got.Input.([]any)[0].(map[string]any)
+			assert.NotContains(t, item, "extra_content")
+			assert.Contains(t, req.Input.([]any)[0], "extra_content", "the caller's request is left as it was")
+		})
+	}
+}
+
 func TestAdaptBatchRequest_StripsForeignExtraContentFromOrdinaryBatches(t *testing.T) {
 	chatBody := `{"model":"gpt-4o","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"},"extra_content":{"google":{"thought_signature":"sig"}}}]},{"role":"tool","tool_call_id":"c1","content":"ok"}]}`
 	responsesBody := `{"model":"gpt-4o","input":[{"type":"function_call","call_id":"c1","name":"f","arguments":"{}","extra_content":{"google":{"thought_signature":"sig"}}}]}`

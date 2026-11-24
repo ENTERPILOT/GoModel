@@ -182,6 +182,45 @@ for model-specific parameter limits.
 
 ## Image generation
 
+### H3 images
+
+Send `MiniMax-H3-Image` or `MiniMax-H3-Image-Highspeed` to
+`/v1/images/generations`. Use the global or China base URL matching your key.
+
+```json
+{"model":"MiniMax-H3-Image","provider":"minimax","prompt":"A lighthouse at sunrise","size":"2720x1536","n":2}
+```
+
+Set `size` to explicit pixels (`WIDTHxHEIGHT`), or leave it out and optionally
+set `aspect_ratio` (default `auto`) and `area` (`1K`, `2K`, or `4K`; default
+`4K`). MiniMax rejects `aspect_ratio` or `area` combined with a pixel size.
+H3 returns URLs by default and accepts `b64_json` for inline images.
+Options such as `output_format`, `output_compression`, and
+`disable_prompt_enhanced` pass through. The China endpoint also accepts
+`aigc_watermark`. GoModel serves non-streaming image requests.
+
+Each response carries MiniMax's `request_id`, and each image its actual `size`
+and `revised_prompt`. When some images of a batch fail, the response is still
+HTTP 200 and `data` keeps one item per requested image in order: failed items
+hold only an `error` with `code` and `message`, so check every item. When all
+images fail, MiniMax returns an error status instead.
+
+H3 is billed by token, and MiniMax reports `usage` for the successful images
+only, so failed images are not charged.
+
+Keep client, proxy, and gateway request and response-header timeouts at 600
+seconds or longer; GoModel's defaults already are. H3 generation is
+non-idempotent: a disconnected call may still complete and be charged. GoModel
+sends one attempt. Disable automatic retries in your calling client as well.
+
+H3 image edits are not supported yet; use `image-01` or `image-01-live` for
+`/v1/images/edits`.
+
+See the [global H3 reference](https://platform.minimax.io/docs/api-reference/image-generation-h3-generations)
+and [China H3 reference](https://platform.minimax.cn/docs/api-reference/image-generation-h3-generations).
+
+### Legacy images
+
 Use `image-01` or `image-01-live` with `/v1/images/generations`. GoModel translates
 requests to MiniMax's native `/v1/image_generation` endpoint using the configured
 base URL and returns generated images in `data`.

@@ -150,6 +150,9 @@ func TestCredentialsService_UpsertKeepsInheritedModelsWhenReplacementFetchFails(
 	other := &registryMockProvider{modelsResponse: modelsList("other-model")}
 	registry := NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(other, "other", "test")
+	// A save fetches only the saved provider, so the alternative gets its
+	// inventory the way a running gateway's does: from the startup sweep.
+	require.NoError(t, registry.Initialize(ctx))
 	svc, err := NewCredentialsService(ctx, keyedProviderFactory(map[string]core.Provider{"sk-one": first, "sk-two": second}),
 		registry, newFakeCredentialStore(), nil, config.ResilienceConfig{}, nil)
 	require.NoError(t, err)

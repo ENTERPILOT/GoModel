@@ -128,6 +128,18 @@ func TestApplyRequestHealth(t *testing.T) {
 			wantLastError: "discovery failed",
 		},
 		{
+			name:   "an open model breaker degrades a healthy provider",
+			status: "healthy",
+			label:  "Healthy",
+			rh: &health.ProviderHealth{CircuitState: "closed", Requests: 12, Models: []health.ModelHealth{
+				{Model: "embed-small", Requests: 6, Errors: 1, CircuitState: "open"},
+				{Model: "gpt-4o", Requests: 6},
+			}},
+			wantStatus: "degraded",
+			wantLabel:  "Degraded",
+			wantReason: "circuit breaker is open for: embed-small",
+		},
+		{
 			name:       "closed breaker with clean traffic keeps healthy",
 			status:     "healthy",
 			label:      "Healthy",

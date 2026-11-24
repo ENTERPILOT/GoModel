@@ -191,10 +191,10 @@ func TestSQLStoreAddsWriteStampColumns(t *testing.T) {
 		_, err = db.Exec(ctx, "DROP INDEX IF EXISTS "+writtenAtIndex)
 		require.NoError(t, err)
 		for _, column := range []string{"writer_id", "written_at"} {
-			_, err = db.Exec(ctx, "ALTER TABLE audit_logs DROP COLUMN "+column)
+			_, err = db.Exec(ctx, "ALTER TABLE request_logs DROP COLUMN "+column)
 			require.NoError(t, err)
 		}
-		_, err = db.Exec(ctx, "INSERT INTO audit_logs (id, timestamp) VALUES (?, ?)",
+		_, err = db.Exec(ctx, "INSERT INTO request_logs (id, timestamp) VALUES (?, ?)",
 			"legacy", db.Dialect().TimestampArg(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
 		require.NoError(t, err)
 

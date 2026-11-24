@@ -85,11 +85,13 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"LOGGING_ONLY_MODEL_INTERACTIONS", "LOGGING_BUFFER_SIZE",
 		"LOGGING_FLUSH_INTERVAL", "LOGGING_RETENTION_DAYS",
 		"USAGE_ENABLED", "ENFORCE_RETURNING_USAGE_DATA",
-		"USAGE_PRICING_RECALCULATION_ENABLED",
+		"USAGE_PRICING_RECALCULATION_ENABLED", "USAGE_RESPONSE_COST_ENABLED",
 		"PRICING_BILL_CACHE_HITS",
 		"PRICING_MARKUPS_ENABLED",
 		"USAGE_BUFFER_SIZE", "USAGE_FLUSH_INTERVAL", "USAGE_RETENTION_DAYS",
 		"BUDGETS_ENABLED", "BUDGETS_PROVIDER_BILLED_CACHE_HITS",
+		"BUDGETS_ALERTS_THRESHOLDS", "BUDGETS_ALERTS_INTERVAL", "BUDGETS_ALERTS_WEBHOOK_URL", "BUDGETS_ALERTS_WEBHOOK_SECRET",
+		"BUDGETS_ALERTS_WEBHOOK_TIMEOUT", "BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES",
 		"RATE_LIMITS_ENABLED", "RATE_LIMITS_FLUSH_INTERVAL",
 		"DASHBOARD_LIVE_LOGS_ENABLED", "DASHBOARD_LIVE_LOGS_BUFFER_SIZE",
 		"DASHBOARD_LIVE_LOGS_REPLAY_LIMIT", "DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS",
@@ -155,6 +157,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.True(t, cfg.Usage.Enabled)
 	assert.True(t, cfg.Usage.EnforceReturningUsageData)
 	assert.True(t, cfg.Usage.PricingRecalculationEnabled)
+	assert.False(t, cfg.Usage.ResponseCostEnabled)
 	assert.Equal(t, 1000, cfg.Usage.BufferSize)
 	assert.Equal(t, 5, cfg.Usage.FlushInterval)
 	assert.Equal(t, 90, cfg.Usage.RetentionDays)
@@ -567,6 +570,32 @@ func TestLoadBudgetsEnabledDisablesBudgetsWhenUsageTrackingDisabledWithoutSeedBu
 		require.NoError(t, err)
 		require.False(t, result.Config.Budgets.Enabled)
 	})
+}
+
+func TestLoadUsageResponseCost(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		env  string
+		want bool
+	}{
+		{name: "off by default"},
+		{name: "yaml", yaml: "usage:\n  response_cost_enabled: true\n", want: true},
+		{name: "env", env: "true", want: true},
+		{name: "env overrides yaml", yaml: "usage:\n  response_cost_enabled: true\n", env: "false"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(dir string) {
+				if tt.env != "" {
+					t.Setenv("USAGE_RESPONSE_COST_ENABLED", tt.env)
+				}
+				result := loadConfigYAML(t, dir, tt.yaml)
+				assert.Equal(t, tt.want, result.Config.Usage.ResponseCostEnabled)
+			})
+		})
+	}
 }
 
 func TestLoadUsagePricingRecalculationFromYAML(t *testing.T) {

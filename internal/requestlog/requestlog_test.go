@@ -650,10 +650,10 @@ func TestMiddleware_StoresWorkflowVersionID(t *testing.T) {
 		Policy: &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-version-123",
 			Features: core.WorkflowFeatures{
-				Cache:      true,
-				Audit:      true,
-				Usage:      true,
-				Guardrails: true,
+				Cache:       true,
+				RequestLogs: true,
+				Usage:       true,
+				Guardrails:  true,
 			},
 		},
 		Resolution: &core.RequestModelResolution{
@@ -731,10 +731,10 @@ func TestMiddleware_SkipsWriteWhenWorkflowDisablesRequestLog(t *testing.T) {
 		Policy: &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-version-123",
 			Features: core.WorkflowFeatures{
-				Cache:      true,
-				Audit:      false,
-				Usage:      true,
-				Guardrails: true,
+				Cache:       true,
+				RequestLogs: false,
+				Usage:       true,
+				Guardrails:  true,
 			},
 		},
 	})))
@@ -1133,11 +1133,11 @@ func TestCreateStreamEntry(t *testing.T) {
 		Data: &LogData{
 			UserAgent: "test",
 			WorkflowFeatures: &WorkflowFeaturesSnapshot{
-				Cache:      false,
-				Audit:      true,
-				Usage:      true,
-				Guardrails: false,
-				Failover:   true,
+				Cache:       false,
+				RequestLogs: true,
+				Usage:       true,
+				Guardrails:  false,
+				Failover:    true,
 			},
 			Failover: &FailoverSnapshot{
 				TargetModel: "azure/gpt-4o",
@@ -1178,7 +1178,7 @@ func TestCreateStreamEntry(t *testing.T) {
 	require.NotNil(t, streamEntry.Data.WorkflowFeatures)
 	require.NotSame(t, baseEntry.Data.WorkflowFeatures, streamEntry.Data.WorkflowFeatures)
 	assert.Equal(t, baseEntry.Data.WorkflowFeatures.Cache, streamEntry.Data.WorkflowFeatures.Cache)
-	assert.Equal(t, baseEntry.Data.WorkflowFeatures.Audit, streamEntry.Data.WorkflowFeatures.Audit)
+	assert.Equal(t, baseEntry.Data.WorkflowFeatures.RequestLogs, streamEntry.Data.WorkflowFeatures.RequestLogs)
 	assert.Equal(t, baseEntry.Data.WorkflowFeatures.Usage, streamEntry.Data.WorkflowFeatures.Usage)
 	assert.Equal(t, baseEntry.Data.WorkflowFeatures.Guardrails, streamEntry.Data.WorkflowFeatures.Guardrails)
 	assert.Equal(t, baseEntry.Data.WorkflowFeatures.Failover, streamEntry.Data.WorkflowFeatures.Failover)
@@ -1194,11 +1194,11 @@ func TestEnrichEntryWithWorkflowStoresWorkflowFeatures(t *testing.T) {
 		Policy: &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-v3",
 			Features: core.WorkflowFeatures{
-				Cache:      false,
-				Audit:      true,
-				Usage:      false,
-				Guardrails: true,
-				Failover:   false,
+				Cache:       false,
+				RequestLogs: true,
+				Usage:       false,
+				Guardrails:  true,
+				Failover:    false,
 			},
 		},
 	})
@@ -1207,7 +1207,7 @@ func TestEnrichEntryWithWorkflowStoresWorkflowFeatures(t *testing.T) {
 	require.NotNil(t, entry.Data)
 	require.NotNil(t, entry.Data.WorkflowFeatures)
 	require.False(t, entry.Data.WorkflowFeatures.Cache)
-	require.True(t, entry.Data.WorkflowFeatures.Audit)
+	require.True(t, entry.Data.WorkflowFeatures.RequestLogs)
 	require.False(t, entry.Data.WorkflowFeatures.Usage)
 	require.True(t, entry.Data.WorkflowFeatures.Guardrails)
 	require.False(t, entry.Data.WorkflowFeatures.Failover)

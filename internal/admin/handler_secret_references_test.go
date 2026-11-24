@@ -47,7 +47,7 @@ func TestProviderCredentialView_ShowsReferencesAndMasksLiterals(t *testing.T) {
 		byName[view.Name] = view
 	}
 	view := byName["openai"]
-	assert.Equal(t, []string{"${vault:llm#openai}", redactedCredentialValue}, view.APIKeys)
+	assert.Equal(t, []string{"${vault:llm#openai}", "***********#2"}, view.APIKeys)
 	assert.Equal(t, "${file:/run/secrets/sa.json}", view.ServiceAccountJSON)
 	assert.Equal(t, redactedCredentialValue, view.ServiceAccountJSONBase64)
 	assert.Equal(t, "http://gomodel:${file:/run/secrets/proxy}@proxy:3128", view.ProxyURL)
@@ -77,7 +77,7 @@ func TestUpsertProviderCredential_RoundTripsReferencesAndMasks(t *testing.T) {
 	assert.Equal(t, "http://u:${env:PROXY_PASS}@proxy:3128", stored.ProxyURL)
 
 	view := echotest.Decode[providerCredentialViewResponse](t, rec)
-	assert.Equal(t, []string{"${vault:new}", redactedCredentialValue, "${env:THIRD}"}, view.APIKeys)
+	assert.Equal(t, []string{"${vault:new}", "***********#2", "${env:THIRD}"}, view.APIKeys)
 }
 
 func TestUpsertProviderCredential_UnresolvableReferenceIs400(t *testing.T) {

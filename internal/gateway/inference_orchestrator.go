@@ -164,10 +164,16 @@ func (r *StreamResult) GenerationObserver() streaming.Observer {
 }
 
 // WrapDeliveryStream applies this result's client-facing slowdown after any
-// accounting or persistence wrappers have been attached to stream.
+// accounting or persistence wrappers have been attached to stream. Usage is
+// then recorded ahead of the events delivered, so the cost a response returns
+// travels with them: each event is written beside the cost of the usage read
+// up to it, not of what was read since.
 func (r *StreamResult) WrapDeliveryStream(ctx context.Context, stream io.ReadCloser) io.ReadCloser {
 	if r == nil {
 		return stream
+	}
+	if report := usage.CostReportFromContext(ctx); report != nil {
+		return streaming.NewSlowdownStreamWithState(ctx, stream, r.slowdownFactor, r.inferenceStarted, report)
 	}
 	return streaming.NewSlowdownStream(ctx, stream, r.slowdownFactor, r.inferenceStarted)
 }

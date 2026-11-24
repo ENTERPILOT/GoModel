@@ -42,21 +42,23 @@ func configModel(entry config.VirtualModelConfig) (VirtualModel, error) {
 		return VirtualModel{}, fmt.Errorf("default_params: %w", err)
 	}
 	return VirtualModel{
-		Source:          entry.Source,
-		Strategy:        entry.Strategy,
-		StrategyPlugin:  entry.StrategyPlugin,
-		StrategyConfig:  cloneStrategyConfig(entry.StrategyConfig),
-		SessionAffinity: entry.SessionAffinity,
-		Failover:        entry.Failover,
-		Targets:         configTargets(entry),
-		UserPaths:       entry.UserPaths,
-		Description:     entry.Description,
-		Slowdown:        entry.Slowdown,
-		ReasoningEffort: entry.ReasoningEffort,
-		Params:          params,
-		DefaultParams:   defaultParams,
-		Enabled:         enabled,
-		Managed:         true,
+		Source:                entry.Source,
+		Strategy:              entry.Strategy,
+		StrategyPlugin:        entry.StrategyPlugin,
+		StrategyConfig:        cloneStrategyConfig(entry.StrategyConfig),
+		SessionAffinity:       entry.SessionAffinity,
+		Failover:              entry.Failover,
+		Targets:               configTargets(entry),
+		UserPaths:             entry.UserPaths,
+		Description:           entry.Description,
+		Slowdown:              entry.Slowdown,
+		Timeout:               entry.Timeout,
+		ResponseHeaderTimeout: entry.ResponseHeaderTimeout,
+		ReasoningEffort:       entry.ReasoningEffort,
+		Params:                params,
+		DefaultParams:         defaultParams,
+		Enabled:               enabled,
+		Managed:               true,
 	}, nil
 }
 

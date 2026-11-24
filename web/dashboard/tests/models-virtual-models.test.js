@@ -16,6 +16,10 @@ import {
   rowIsManaged,
   rowRedirectCanRemove,
   rowAnchorID,
+  rowSlowdown,
+  rowUpstreamTimeouts,
+  slowdownLabel,
+  upstreamTimeoutsLabel,
 } from "../src/pages/models/displayRows.js";
 import {
   qualifiedModelName,
@@ -25,6 +29,7 @@ import {
   initialRenderStep,
 } from "../src/pages/models/renderBatching.js";
 import {
+  aliasRouting,
   aliasTargetLabel,
   mapRedirectView,
   maskingFailsOver,
@@ -41,6 +46,7 @@ import {
   defaultVirtualModelForm,
   formatParamsJSON,
   parseParamsJSON,
+  parseTimeoutSeconds,
   removePrimaryTarget,
   virtualModelTargetOptions,
   vmFormHasPrimaryTarget,
@@ -53,6 +59,7 @@ import {
   vmFormTargetColumns,
   vmFormStrategyPending,
   vmFormSupportsSlowdown,
+  vmFormTimeoutsValid,
   vmRoutingSummary,
 } from "../src/pages/models/vmForm.js";
 
@@ -221,6 +228,48 @@ test("mapRedirectView keeps load-balanced targets, strategy, and labels them", (
   assert.equal(aliasTargetLabel(alias), "openai/gpt-4o, groq/llama · Round-robin");
 });
 
+test("aliasRouting names two targets in the row and keeps the full list", () => {
+  const pool = mapRedirectView({
+    source: "cheap",
+    kind: "redirect",
+    targets: [
+      { provider: "groq", model: "llama" },
+      { provider: "gemini", model: "flash-lite" },
+      { provider: "bailian", model: "qwen-flash" },
+      { provider: "openai", model: "gpt-luna" },
+    ],
+    strategy: "cost",
+    enabled: true,
+    valid: true,
+  });
+  assert.deepEqual(aliasRouting(pool), {
+    kind: "cost",
+    label: "Lowest cost",
+    targets: "groq/llama, gemini/flash-lite +2",
+    all: "groq/llama, gemini/flash-lite, bailian/qwen-flash, openai/gpt-luna",
+  });
+
+  // The filter still finds the row by a target the row has no room to show.
+  const rows = buildDisplayModels({ models: [], aliases: [pool], virtualModelsAvailable: true });
+  assert.equal(filterDisplayModels(rows, "gpt-luna").length, 1);
+
+  // A plain alias has one target and no strategy to show.
+  const plain = mapRedirectView({
+    source: "default",
+    kind: "redirect",
+    targets: [{ provider: "openai", model: "gpt-luna" }],
+    strategy: "round_robin",
+    enabled: true,
+    valid: true,
+  });
+  assert.deepEqual(aliasRouting(plain), {
+    kind: "",
+    label: "",
+    targets: "openai/gpt-luna",
+    all: "openai/gpt-luna",
+  });
+});
+
 test("buildDisplayModels combines source-backed redirects with the concrete model row", () => {
   const models = [
     {
@@ -260,12 +309,110 @@ test("buildDisplayModels combines source-backed redirects with the concrete mode
 
   assert.equal(aliasOnly.source_model_exists, false);
   assert.equal(aliasRowCanRemove(aliasOnly), true);
-  assert.equal(modelBackedAliasRow, undefined);
-  assert.equal(modelBacked.masking_alias.name, "gpt-4o");
-  assert.equal(rowRedirectCanRemove(modelBacked), true);
-  assert.equal(nestedTargetAlias, undefined);
-  assert.equal(nestedTargetModel.masking_alias.name, "anthropic/claude-fable-5");
-  assert.equal(rowRedirectCanRemove(nestedTargetModel), true);
+  // Redirects named like a model's bare upstream ID are separate models: the
+  // gateway matches the requested name exactly, so requests for the model's
+  // qualified name never reach them.
+  assert.equal(modelBackedAliasRow.source_model_exists, true);
+  assert.equal(aliasRowCanRemove(modelBackedAliasRow), true);
+  assert.equal(modelBacked.masking_alias, null);
+  assert.equal(modelBacked.has_virtual_model, false);
+  assert.ok(nestedTargetAlias);
+  assert.equal(nestedTargetModel.masking_alias, null);
+});
+
+test("buildDisplayModels keeps a virtual model named like an upstream model ID visible (#1379)", () => {
+  const models = [
+    {
+      provider_name: "local",
+      provider_type: "openai",
+      selector: "local/qwen3-vl-8b",
+      model: { id: "qwen3-vl-8b", object: "model" },
+    },
+    {
+      provider_name: "openrouter",
+      provider_type: "openrouter",
+      selector: "openrouter/qwen/qwen3-vl-8b-instruct",
+      model: { id: "qwen/qwen3-vl-8b-instruct", object: "model" },
+    },
+  ];
+  const aliases = [
+    {
+      name: "qwen/qwen3-vl-8b-instruct",
+      strategy: "failover",
+      targets: [
+        { provider: "local", model: "qwen3-vl-8b" },
+        { provider: "openrouter", model: "qwen/qwen3-vl-8b-instruct" },
+      ],
+      enabled: true,
+      valid: true,
+    },
+  ];
+  const rows = display(models, aliases);
+
+  const virtualRow = rows.find((row) => row.key === "alias:qwen/qwen3-vl-8b-instruct");
+  const upstreamRow = rows.find((row) => row.key === "model:openrouter/qwen/qwen3-vl-8b-instruct");
+  assert.ok(virtualRow, "the virtual model keeps its own row");
+  assert.equal(virtualRow.is_alias, true);
+  assert.equal(upstreamRow.masking_alias, null, "the upstream row stays a plain model row");
+  assert.equal(upstreamRow.has_virtual_model, false);
+
+  const groups = groupDisplayModels(rows, models, []);
+  assert.equal(groups[0].key, "virtual-model-group");
+  assert.deepEqual(Array.from(groups[0].rows, (row) => row.display_name), ["qwen/qwen3-vl-8b-instruct"]);
+});
+
+test("buildDisplayModels folds a virtual model into the row that owns its name, whatever the model order", () => {
+  // The openrouter model also answers to "anthropic/claude-fable-5" and is
+  // listed first; the anthropic model owns that qualified name.
+  const models = [
+    {
+      provider_name: "openrouter",
+      provider_type: "openrouter",
+      selector: "openrouter/anthropic/claude-fable-5",
+      model: { id: "anthropic/claude-fable-5", object: "model" },
+    },
+    {
+      provider_name: "anthropic",
+      provider_type: "anthropic",
+      selector: "anthropic/claude-fable-5",
+      model: { id: "claude-fable-5", object: "model" },
+    },
+  ];
+  const aliases = [
+    {
+      name: "anthropic/claude-fable-5",
+      target_provider: "anthropic",
+      target_model: "claude-opus-5",
+      enabled: true,
+      valid: true,
+    },
+  ];
+  const rows = display(models, aliases);
+
+  assert.equal(rows.length, 2, "the virtual model is not rendered twice");
+  assert.equal(rows.some((row) => row.is_alias), false);
+  const owner = rows.find((row) => row.key === "model:anthropic/claude-fable-5");
+  const other = rows.find((row) => row.key === "model:openrouter/anthropic/claude-fable-5");
+  assert.equal(owner.masking_alias.name, "anthropic/claude-fable-5");
+  assert.equal(rowRedirectCanRemove(owner), true);
+  assert.equal(other.masking_alias, null);
+});
+
+test("buildDisplayModels gives a bare-name redirect served by several providers its own row", () => {
+  const models = [
+    { provider_name: "openai", provider_type: "openai", selector: "openai/gpt-5", model: { id: "gpt-5", object: "model" } },
+    { provider_name: "azure", provider_type: "azure", selector: "azure/gpt-5", model: { id: "gpt-5", object: "model" } },
+  ];
+  const aliases = [
+    { name: "gpt-5", target_provider: "azure", target_model: "gpt-5", enabled: true, valid: true },
+  ];
+  const rows = display(models, aliases);
+
+  const virtualRow = rows.find((row) => row.key === "alias:gpt-5");
+  assert.ok(virtualRow);
+  for (const key of ["model:openai/gpt-5", "model:azure/gpt-5"]) {
+    assert.equal(rows.find((row) => row.key === key).masking_alias, null, key);
+  }
 });
 
 test("buildDisplayModels flags model rows with a policy override as carrying a virtual model", () => {
@@ -365,7 +512,7 @@ test("groupDisplayModels keeps alias-only virtual models in a first group", () =
   ];
   const aliases = [
     { name: "smart", target_provider: "zulu", target_model: "model-z", enabled: true, valid: true },
-    { name: "model-a", target_provider: "zulu", target_model: "model-z", enabled: true, valid: true },
+    { name: "alpha/model-a", target_provider: "zulu", target_model: "model-z", enabled: true, valid: true },
   ];
   const rows = display(models, aliases, { activeCategory: "all" });
   const groups = groupDisplayModels(rows, models, []);
@@ -378,7 +525,7 @@ test("groupDisplayModels keeps alias-only virtual models in a first group", () =
   assert.deepEqual(Array.from(groups, (group) => group.display_name), ["Virtual models", "alpha", "zulu"]);
 
   const overriddenModel = groups[1].rows.find((row) => row.display_name === "alpha/model-a");
-  assert.equal(overriddenModel.masking_alias.name, "model-a");
+  assert.equal(overriddenModel.masking_alias.name, "alpha/model-a");
 });
 
 test("groupDisplayModels lets provider-wide overrides replace global paths", () => {
@@ -1525,4 +1672,312 @@ test("params and default_params round-trip through views and toggle payloads", (
   assert.equal(disable.method, "PUT");
   assert.equal(disable.payload.enabled, false);
   assert.deepEqual(disable.payload.params, { min_p: 0.1 });
+});
+
+test("buildDisplayModels matches a virtual model to a row by its exact, case-sensitive name", () => {
+  // The gateway resolves redirect sources by exact trimmed name, so
+  // "OPENAI/gpt-5" never answers requests for "openai/gpt-5".
+  const models = [
+    {
+      provider_name: "openai",
+      provider_type: "openai",
+      selector: "openai/gpt-5",
+      model: { id: "gpt-5", object: "model" },
+    },
+  ];
+  const aliases = [
+    {
+      name: "OPENAI/gpt-5",
+      target_provider: "openai",
+      target_model: "gpt-5",
+      enabled: true,
+      valid: true,
+    },
+  ];
+  const rows = display(models, aliases);
+
+  const modelRow = rows.find((row) => row.key === "model:openai/gpt-5");
+  const aliasRow = rows.find((row) => row.key === "alias:OPENAI/gpt-5");
+  assert.equal(modelRow.masking_alias, null);
+  assert.ok(aliasRow, "the differently cased virtual model keeps its own row");
+
+  const exact = display(models, [{ ...aliases[0], name: " openai/gpt-5 " }]);
+  const exactRow = exact.find((row) => row.key === "model:openai/gpt-5");
+  assert.equal(exactRow.masking_alias.name, " openai/gpt-5 ");
+  assert.equal(exact.filter((row) => row.is_alias).length, 0);
+});
+
+test("parseTimeoutSeconds accepts blank or whole seconds from 1 to 86400", () => {
+  const cases = [
+    { input: "", want: null },
+    { input: null, want: null },
+    { input: undefined, want: null },
+    { input: "  ", want: null },
+    { input: 1, want: 1 },
+    { input: "30", want: 30 },
+    { input: 86400, want: 86400 },
+    { input: 0, want: NaN },
+    { input: -5, want: NaN },
+    { input: 86401, want: NaN },
+    { input: 1.5, want: NaN },
+    { input: "abc", want: NaN },
+  ];
+  for (const { input, want } of cases) {
+    assert.equal(parseTimeoutSeconds(input), want, `input ${JSON.stringify(input)}`);
+  }
+});
+
+test("default form leaves timeouts empty so they inherit", () => {
+  const form = defaultVirtualModelForm();
+  assert.equal(form.timeout, "");
+  assert.equal(form.response_header_timeout, "");
+});
+
+test("save payload carries timeouts only when set", () => {
+  const configured = buildVirtualModelSavePayload(
+    {
+      source: "extract",
+      target_model: "openai/gpt-4o",
+      targets: [],
+      timeout: 600,
+      response_header_timeout: "120",
+      enabled: true,
+    },
+    "",
+    "create",
+  );
+  assert.equal(configured.payload.timeout, 600);
+  assert.equal(configured.payload.response_header_timeout, 120);
+
+  const inherited = buildVirtualModelSavePayload(
+    {
+      source: "extract",
+      target_model: "openai/gpt-4o",
+      targets: [],
+      timeout: "",
+      response_header_timeout: null,
+      enabled: true,
+    },
+    "",
+    "create",
+  );
+  assert.equal(Object.hasOwn(inherited.payload, "timeout"), false);
+  assert.equal(Object.hasOwn(inherited.payload, "response_header_timeout"), false);
+
+  const policy = buildVirtualModelSavePayload(
+    { source: "openai/text-embedding-3-small", target_model: "", timeout: 10, enabled: true },
+    "",
+    "create",
+  );
+  assert.equal(policy.payload.timeout, 10);
+});
+
+test("save payload drops timeouts on provider-wide and global policies", () => {
+  for (const source of ["openai/", "/"]) {
+    const { payload } = buildVirtualModelSavePayload(
+      { source, target_model: "", timeout: 30, response_header_timeout: 10, enabled: true },
+      "",
+      "create",
+    );
+    assert.equal(Object.hasOwn(payload, "timeout"), false, source);
+    assert.equal(Object.hasOwn(payload, "response_header_timeout"), false, source);
+  }
+});
+
+test("vmFormTimeoutsValid rejects out-of-range timeouts on models and redirects only", () => {
+  const cases = [
+    { form: { source: "fast", target_model: "openai/gpt-4o", timeout: 30 }, want: true },
+    { form: { source: "fast", target_model: "openai/gpt-4o", timeout: "" }, want: true },
+    { form: { source: "fast", target_model: "openai/gpt-4o", timeout: 0 }, want: false },
+    {
+      form: { source: "fast", target_model: "openai/gpt-4o", response_header_timeout: 86401 },
+      want: false,
+    },
+    { form: { source: "openai/gpt-4o", target_model: "", timeout: 2.5 }, want: false },
+    // Hidden on provider-wide policies, so a stale value never blocks a save.
+    { form: { source: "openai/", target_model: "", timeout: 0 }, want: true },
+  ];
+  for (const { form, want } of cases) {
+    assert.equal(vmFormTimeoutsValid(form), want, JSON.stringify(form));
+  }
+});
+
+test("splitVirtualModelViews parses timeouts on redirects and policies", () => {
+  const { aliases, policies } = splitVirtualModelViews([
+    { kind: "redirect", source: "fast", target: { model: "gpt-4o" }, timeout: 15 },
+    {
+      kind: "policy",
+      source: "openai/gpt-4o",
+      response_header_timeout: 20,
+    },
+  ]);
+  assert.equal(aliases[0].timeout, 15);
+  assert.equal(aliases[0].response_header_timeout, null);
+  assert.equal(policies[0].timeout, null);
+  assert.equal(policies[0].response_header_timeout, 20);
+});
+
+test("toggle payloads preserve configured timeouts", () => {
+  const alias = buildAliasTogglePayload({
+    name: "fast",
+    target_model: "openai/gpt-4o",
+    timeout: 15,
+    response_header_timeout: null,
+    enabled: true,
+  });
+  assert.equal(alias.timeout, 15);
+  assert.equal(Object.hasOwn(alias, "response_header_timeout"), false);
+
+  const { method, payload } = buildModelTogglePayload(
+    "openai/gpt-4o",
+    { selector: "openai/gpt-4o", user_paths: [], enabled: false, response_header_timeout: 20 },
+    { selector: "openai/gpt-4o", default_enabled: true, effective_enabled: false },
+  );
+  assert.equal(method, "PUT");
+  assert.equal(payload.enabled, true);
+  assert.equal(payload.response_header_timeout, 20);
+});
+
+test("rowUpstreamTimeouts shows a masking redirect's timeouts before the model's policies", () => {
+  const modelPolicy = { source: "gpt-4o", timeout: 120, response_header_timeout: 30 };
+  const elsewhere = { name: "openai/gpt-4o", targets: [{ provider: "azure", model: "gpt-4o" }] };
+  const failover = {
+    name: "openai/gpt-4o",
+    strategy: "failover",
+    targets: [{ provider: "openai", model: "gpt-4o" }, { provider: "azure", model: "gpt-4o" }],
+  };
+  const none = { timeout_source: "", response_header_timeout_source: "" };
+  const cases = [
+    {
+      name: "alias row",
+      row: { is_alias: true, alias: { timeout: 30, response_header_timeout: null } },
+      want: { ...none, timeout: 30, response_header_timeout: null },
+    },
+    {
+      name: "a redirect elsewhere replaces the model's own policies",
+      row: {
+        masking_alias: { ...elsewhere, timeout: 30 },
+        access: { override: { timeout: 60, response_header_timeout: 10 }, model_policy: modelPolicy },
+      },
+      want: { ...none, timeout: 30, response_header_timeout: null },
+    },
+    {
+      name: "a failover redirect that serves the model keeps its policies",
+      row: {
+        masking_alias: { ...failover, timeout: 30 },
+        access: { override: {}, model_policy: modelPolicy },
+      },
+      want: {
+        timeout: 30,
+        timeout_source: "",
+        response_header_timeout: 30,
+        response_header_timeout_source: "gpt-4o",
+      },
+    },
+    {
+      name: "exact policy without a masking redirect",
+      row: { access: { override: { timeout: 60, response_header_timeout: 10 } } },
+      want: { ...none, timeout: 60, response_header_timeout: 10 },
+    },
+    {
+      name: "the model-wide policy fills what the exact policy leaves unset",
+      row: { access: { override: { timeout: 60 }, model_policy: modelPolicy } },
+      want: {
+        timeout: 60,
+        timeout_source: "",
+        response_header_timeout: 30,
+        response_header_timeout_source: "gpt-4o",
+      },
+    },
+    {
+      name: "model-wide policy alone",
+      row: { access: { model_policy: modelPolicy } },
+      want: {
+        timeout: 120,
+        timeout_source: "gpt-4o",
+        response_header_timeout: 30,
+        response_header_timeout_source: "gpt-4o",
+      },
+    },
+    {
+      name: "nothing configured",
+      row: { access: {} },
+      want: { ...none, timeout: null, response_header_timeout: null },
+    },
+  ];
+  for (const { name, row, want } of cases) {
+    assert.deepEqual(rowUpstreamTimeouts(row), want, name);
+  }
+});
+
+test("rowSlowdown shows a masking redirect's slowdown before the model's policies", () => {
+  const modelPolicy = { source: "gpt-4o", slowdown: 0.5 };
+  const elsewhere = { name: "openai/gpt-4o", targets: [{ provider: "azure", model: "gpt-4o" }] };
+  const failover = {
+    name: "openai/gpt-4o",
+    strategy: "failover",
+    targets: [{ provider: "openai", model: "gpt-4o" }, { provider: "azure", model: "gpt-4o" }],
+  };
+  const cases = [
+    { name: "alias row", row: { is_alias: true, alias: { slowdown: 2 } }, want: { value: 2, source: "" } },
+    {
+      name: "masking redirect",
+      row: { masking_alias: { ...elsewhere, slowdown: 1 }, access: { override: { slowdown: 2 } } },
+      want: { value: 1, source: "" },
+    },
+    {
+      name: "a redirect elsewhere replaces the model's own policies",
+      row: { masking_alias: elsewhere, access: { override: { slowdown: 2 }, model_policy: modelPolicy } },
+      want: { value: null, source: "" },
+    },
+    {
+      name: "a failover redirect that serves the model keeps its policies",
+      row: { masking_alias: failover, access: { override: {}, model_policy: modelPolicy } },
+      want: { value: 0.5, source: "gpt-4o" },
+    },
+    {
+      name: "exact policy",
+      row: { access: { override: { slowdown: 2 }, model_policy: modelPolicy } },
+      want: { value: 2, source: "" },
+    },
+    {
+      name: "an exact zero disables the model-wide slowdown",
+      row: { access: { override: { slowdown: 0 }, model_policy: modelPolicy } },
+      want: { value: 0, source: "" },
+    },
+    {
+      name: "model-wide policy",
+      row: { access: { override: {}, model_policy: modelPolicy } },
+      want: { value: 0.5, source: "gpt-4o" },
+    },
+    { name: "nothing configured", row: { access: {} }, want: { value: null, source: "" } },
+  ];
+  for (const { name, row, want } of cases) {
+    assert.deepEqual(rowSlowdown(row), want, name);
+  }
+});
+
+test("slowdownLabel names the policy an inherited factor comes from", () => {
+  assert.equal(slowdownLabel({ value: null, source: "" }), "");
+  assert.equal(slowdownLabel({ value: 0, source: "" }), "");
+  assert.equal(slowdownLabel({ value: 2, source: "" }), "+2× inference time");
+  assert.equal(slowdownLabel({ value: 0.5, source: "gpt-4o" }), "+0.5× inference time (from gpt-4o)");
+});
+
+test("upstreamTimeoutsLabel lists only configured timeouts", () => {
+  assert.equal(upstreamTimeoutsLabel({ timeout: null, response_header_timeout: null }), "");
+  assert.equal(
+    upstreamTimeoutsLabel({ timeout: 30, response_header_timeout: 10 }),
+    "30s per attempt · 10s to headers",
+  );
+  assert.equal(upstreamTimeoutsLabel({ timeout: null, response_header_timeout: 10 }), "10s to headers");
+  assert.equal(
+    upstreamTimeoutsLabel({
+      timeout: 120,
+      timeout_source: "gpt-4o",
+      response_header_timeout: 10,
+      response_header_timeout_source: "",
+    }),
+    "120s per attempt (from gpt-4o) · 10s to headers",
+  );
 });

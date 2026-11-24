@@ -9,8 +9,7 @@ Die Seite **Playground** (`/admin/dashboard/playground`) sendet Requests mit
 Ihrem Dashboard-Key über die öffentliche API des Gateways. Jeder Aufruf wird
 daher genau wie der Request eines Clients geroutet, protokolliert und erfasst.
 Wählen Sie einen Endpunkt (`/v1/chat/completions`, `/v1/responses` oder
-`/v1/messages`), ein Modell aus dem Bestand oder einen beliebigen Alias bzw. ein
-virtuelles Modell über seinen Namen sowie, ob gestreamt werden soll. Bauen Sie
+`/v1/messages`), ein Modell sowie, ob gestreamt werden soll. Bauen Sie
 die Konversation aus bearbeitbaren, umsortierbaren System-, User- und
 Assistant-Nachrichten auf und senden Sie einen Prompt. Das JSON-Panel rechts
 zeigt den Request-Body so, wie er gesendet wird (live aktualisiert, während Sie
@@ -19,12 +18,23 @@ gestreamte Responses werden in dieselbe Form zusammengesetzt, die ein Aufruf
 ohne Streaming zurückgibt. Für Requests gelten dieselben Budgets, Rate-Limits,
 Guardrails und dasselbe Request-Logging wie für jeden anderen Client des Gateways.
 
+Die Modellauswahl listet zuerst Ihre
+[virtuellen Modelle](/de/features/virtual-models) auf, gekennzeichnet mit
+**Virtuelles Modell**, danach die Modelle Ihrer Provider. Ein virtuelles Modell
+wird aufgeführt, wenn es aktiviert ist und ein verfügbares Ziel hat. Ein
+virtuelles Modell ersetzt in der Auswahl ein Provider-Modell mit demselben
+Namen. Sie können auch einen beliebigen Modellnamen eingeben. Einem
+Dashboard-Key, der an einen User-Path gebunden ist, werden keine virtuellen
+Modelle angezeigt; geben Sie deren Namen stattdessen ein.
+
 ## Bild, Sprachausgabe, Transkription und Embeddings
 
 Mit dem Schalter **Modus** über der Modellauswahl lassen sich auch Medienmodelle
 testen. Jeder Modus ruft den OpenAI-kompatiblen Endpunkt des Gateways auf und
 listet Modelle, deren Metadaten diesen Modus ausweisen, zuerst auf; Sie können
-weiterhin jedes beliebige Modell oder jeden Alias eingeben.
+weiterhin jedes beliebige Modell oder jeden Alias eingeben. Ein virtuelles
+Modell wird in einem Modus nur dann ausgeblendet, wenn jedes seiner Ziele ein
+bekanntes Modell ist, das andere Modi ausweist.
 
 | Modus | Endpunkt | Eingabe | Ergebnis |
 | --- | --- | --- | --- |

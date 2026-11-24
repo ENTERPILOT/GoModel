@@ -40,7 +40,7 @@ entwickelt wurden, unverändert funktionieren.
 | API | Ort |
 | --- | --- |
 | Chat Completions | `tool_calls[].extra_content`; auf der Assistant-Nachricht für Turn-weiten Zustand wie Thinking-Blöcke; außerdem auf gestreamten `tool_calls` und Nachrichten-Deltas |
-| Responses | `function_call`-Output-Items; `reasoning`-Output-Items; das Assistant-`message`-Item, wenn beim Streaming eine Signatur für einen Text-Turn eintrifft |
+| Responses | `function_call`-Output-Items; `reasoning`-Output-Items; das Assistant-`message`-Item, wenn beim Streaming eine Signatur für einen Text-Turn eintrifft; das Assistant-`message`-Item für Mistral-Zitat-Chunks |
 | Anthropic Messages | `tool_use`-Content-Blöcke. Thinking-Blöcke verwenden stattdessen die eigenen Felder `signature` und `data` des Dialekts. |
 
 Der Zustand sitzt auf der Einheit, die genau einem Provider-Part entspricht. Ein Tool Call wird zu
@@ -56,7 +56,9 @@ zum gesamten Assistant-Turn, daher liegen sie auf der Nachricht.
   Gemini-Signatur erreicht nie Anthropic oder OpenAI, und ein Verlauf, der zwischen Providern
   gewechselt ist, scheitert nicht an fremden Feldern.
 - **Nur der zuständige Adapter liest oder schreibt darin.** Nichts anderes im Gateway interpretiert
-  den Inhalt.
+  den Inhalt. Eine Ausnahme: Die Responses-Übersetzung schreibt `extra_content.mistral` und kopiert
+  dabei die Chunks, die der Mistral-Adapter auf der Chat-Nachricht hinterlassen hat, ohne sie zu
+  interpretieren.
 - **Geben Sie es unverändert zurück.** Schreiben Sie das Feld nicht um, ordnen Sie es nicht neu und
   kürzen Sie es nicht.
 
@@ -321,6 +323,7 @@ entfernt, auf jeder Route und in jedem Dialekt.
 | `extra_content.google` | jeder andere Provider | nichts; das Feld wird verworfen |
 | `extra_content.anthropic` | `anthropic` | Thinking-Blöcke und `is_error`, an Ort und Stelle wiederhergestellt; ein Thinking-Block, den Anthropic nicht signiert hat, wird verworfen |
 | `extra_content.anthropic` | jeder andere Provider | nichts; das Feld wird verworfen |
+| `extra_content.mistral` | jeder Provider, auch `mistral` | nichts; das Feld wird verworfen |
 
 Der eigene Verlauf des Clients wird nie verändert. Die Filterung erfolgt auf der Kopie, die GoModel
 an den Upstream sendet.
@@ -331,3 +334,4 @@ an den Upstream sendet.
 | --- | --- | --- |
 | `google` | `gemini`, `vertex` | `thought_signature`: die Gemini-3-Signatur eines Function Calls oder Text-Turns. |
 | `anthropic` | `anthropic` | `thinking_blocks`: die `thinking`- und `redacted_thinking`-Blöcke eines Assistant-Turns einschließlich Signaturen, in Responses geschrieben und bei Requests zurückgelesen; `is_error`: kennzeichnet ein Tool-Ergebnis als fehlgeschlagen, gesetzt beim Eingang über die Anthropic Messages API. |
+| `mistral` | `mistral` | `content_chunks`: die Content-Chunks einer Antwort ohne OpenAI-Entsprechung, etwa [`reference`-Chunks aus Zitierungen](/de/providers/mistral#zitierungen), geschrieben auf dem `message`-Item von Responses. Nur Ausgabe: nichts liest das Feld zurück. |

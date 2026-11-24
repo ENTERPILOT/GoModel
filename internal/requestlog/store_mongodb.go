@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -36,13 +37,29 @@ func (e *PartialWriteError) Unwrap() error {
 	return ErrPartialWrite
 }
 
-// Prometheus metric for request log partial write failures
-var requestLogPartialWriteFailures = promauto.NewCounter(
-	prometheus.CounterOpts{
-		Name: "gomodel_audit_log_partial_write_failures_total",
-		Help: "Total number of partial write failures when inserting request logs to MongoDB",
-	},
+// Prometheus metrics for request log partial write failures. The counter was
+// named for the audit log before the request log was renamed; that name still
+// counts alongside the new one, so existing dashboards and alerts keep working.
+var (
+	requestLogPartialWriteFailures = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "gomodel_request_log_partial_write_failures_total",
+			Help: "Total number of partial write failures when inserting request logs to MongoDB",
+		},
+	)
+	legacyRequestLogPartialWriteFailures = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "gomodel_audit_log_partial_write_failures_total",
+			Help: "Deprecated: use gomodel_request_log_partial_write_failures_total. Total number of partial write failures when inserting request logs to MongoDB",
+		},
+	)
 )
+
+// countPartialWriteFailure counts one partial write under both metric names.
+func countPartialWriteFailure() {
+	requestLogPartialWriteFailures.Inc()
+	legacyRequestLogPartialWriteFailures.Inc()
+}
 
 // MongoDBStore implements LogStore for MongoDB.
 const legacyExecutionPlanIndex = "execution_plan_version_id_1"
@@ -56,6 +73,11 @@ func isIndexNotFound(err error) bool {
 type MongoDBStore struct {
 	collection    *mongo.Collection
 	retentionDays int
+
+	// absorb moves what an older release wrote to audit_logs after the rename
+	// into the collection; see absorbLegacyCollections.
+	cancelAbsorb context.CancelFunc
+	absorb       sync.WaitGroup
 }
 
 // NewMongoDBStore creates a new MongoDB request log store.
@@ -66,10 +88,13 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 		return nil, fmt.Errorf("database is required")
 	}
 
-	collection := database.Collection("audit_logs")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	collection, err := adoptLegacyCollection(ctx, database)
+	if err != nil {
+		return nil, err
+	}
 
 	// Create indexes for common queries
 	indexes := []mongo.IndexModel{
@@ -163,16 +188,28 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 		slog.Warn("failed to drop legacy MongoDB index", "index", legacyExecutionPlanIndex, "error", err)
 	}
 
-	_, err := collection.Indexes().CreateMany(ctx, indexes)
+	_, err = collection.Indexes().CreateMany(ctx, indexes)
 	if err != nil {
 		// Log warning but don't fail - indexes may already exist
 		slog.Warn("failed to create some MongoDB indexes", "error", err)
 	}
 
-	return &MongoDBStore{
+	store := &MongoDBStore{
 		collection:    collection,
 		retentionDays: retentionDays,
-	}, nil
+	}
+	// Not when the rename was refused: audit_logs is then the live collection.
+	if collection.Name() == requestLogCollectionName {
+		absorbCtx, cancel := context.WithCancel(context.Background())
+		store.cancelAbsorb = cancel
+		store.absorb.Go(func() {
+			if err := absorbLegacyCollections(absorbCtx, database); err != nil && absorbCtx.Err() == nil {
+				slog.Warn("requestlog: could not move the audit_logs entries of an older release into request_logs; a later start tries again",
+					"error", err)
+			}
+		})
+	}
+	return store, nil
 }
 
 // WriteBatch writes multiple log entries to MongoDB using InsertMany.
@@ -207,7 +244,7 @@ func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*LogEntry) erro
 				"succeeded", len(entries)-failedCount,
 			)
 			// Increment metric for operators to detect data loss
-			requestLogPartialWriteFailures.Inc()
+			countPartialWriteFailure()
 			// Return distinguishable error so callers know insert was partial
 			return &PartialWriteError{
 				TotalEntries: len(entries),
@@ -226,7 +263,12 @@ func (s *MongoDBStore) Flush(_ context.Context) error {
 	return nil
 }
 
-// Close is a no-op for MongoDB as the client is managed by the storage layer.
+// Close stops the move of an older release's entries, if it is still running.
+// The client is managed by the storage layer.
 func (s *MongoDBStore) Close() error {
+	if s.cancelAbsorb != nil {
+		s.cancelAbsorb()
+	}
+	s.absorb.Wait()
 	return nil
 }

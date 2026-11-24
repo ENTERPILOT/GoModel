@@ -439,6 +439,7 @@ strony. Gdy logowanie requestów jest włączone, zapisy są asynchroniczne i mo
 | `USAGE_ENABLED`                | Włącza śledzenie użycia tokenów                | `true`  |
 | `USAGE_PRICING_RECALCULATION_ENABLED` | Włącza w panelu administracyjnym akcję przeliczania cen użycia, jeśli jest obsługiwana | `true` |
 | `ENFORCE_RETURNING_USAGE_DATA` | Automatycznie dodaje `include_usage` do requestów streamingowych | `true`  |
+| `USAGE_RESPONSE_COST_ENABLED`  | Zwraca wywołującemu koszt wyliczony przez GoModel dla requestu, o ile jest znany: `usage.cost` (kształt OpenRouter), a w odpowiedziach buforowanych także nagłówki `X-GoModel-Cost` i `X-GoModel-Cost-Currency`. Wymaga `USAGE_ENABLED=true`. Zobacz [Koszt w odpowiedzi](/pl/features/response-cost) | `false` |
 | `USAGE_BUFFER_SIZE`            | Bufor w pamięci przed zapisem                  | `1000`  |
 | `USAGE_FLUSH_INTERVAL`         | Interwał zapisu w sekundach                    | `5`     |
 | `USAGE_RETENTION_DAYS`         | Automatyczne usuwanie po N dniach (0 = nigdy)  | `90`    |
@@ -454,6 +455,12 @@ startuje z wyłączonym zarządzaniem budżetami i loguje ostrzeżenie.
 | `BUDGETS_PROVIDER_BILLED_CACHE_HITS` | Wlicza rozliczone cache hity do budżetów providerów na koszcie rozliczeniowym (GoModel Pro) | `true` |
 | `SET_BUDGET_<PATH>`          | Wstępnie ustawia limity budżetu dla ścieżki użytkownika, np. `daily=10`            | _(pusty)_ |
 | `SET_PROVIDER_BUDGET_<NAME>` | Wstępnie ustawia limity budżetu dla instancji providera, np. `daily=100`           | _(pusty)_ |
+| `BUDGETS_ALERTS_WEBHOOK_URL` | Webhook, który otrzymuje [alerty budżetowe](/pl/features/budgets#alerty) jako JSON. Alerty wymagają `BUDGETS_ENABLED` i śledzenia użycia, a oceniane są dopiero po ustawieniu webhooka albo zarejestrowaniu `ext.AlertSink` we własnym buildzie | _(pusty)_ |
+| `BUDGETS_ALERTS_WEBHOOK_SECRET` | Podpisuje każde dostarczenie: `X-GoModel-Signature` niesie znacznik czasu i HMAC-SHA256 z `<znacznik>.<treść>` | _(pusty)_ |
+| `BUDGETS_ALERTS_THRESHOLDS`  | Domyślne progi alertów, procenty kwoty budżetu, każdy `1`-`100`                    | `80,100`  |
+| `BUDGETS_ALERTS_INTERVAL`    | Sekundy między ocenami alertów                                                     | `60`      |
+| `BUDGETS_ALERTS_WEBHOOK_TIMEOUT` | Sekundy na jedną próbę dostarczenia do webhooka                                | `10`      |
+| `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` | Ponowienia nieudanego dostarczenia do webhooka, z wykładniczym odstępem; `0`-`10` | `3`       |
 
 `SET_BUDGET_<PATH>` obsługuje standardowe okresy `hourly`, `daily`, `weekly`
 i `monthly`. Sufiks `<PATH>` jest zamieniany na małe litery; używaj podwójnych podkreślników

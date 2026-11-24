@@ -65,6 +65,27 @@ non-failing rows appear.
   neither output nor usage, and is never reported as empty.
 </Note>
 
+### Gemini turns with nothing usable
+
+Gemini's native API (the default for Gemini and Vertex AI) can end a turn with
+`MALFORMED_FUNCTION_CALL` or `MALFORMED_RESPONSE`, output Gemini could not
+encode (usually a broken tool call), or with `STOP` and no output at all.
+Passed through, these read as a finished turn, and an agent such as Claude
+Code stops mid-task. GoModel fails them instead, with
+`502 Gemini returned no usable output: <reason>` and at most 240 bytes of
+Gemini's finish message, so the client retries:
+
+- **Not streaming:** the `502` replaces the response and fails over under the
+  default `5xx` rule. Its usage is not recorded.
+- **Streaming:** the turn is judged when the stream ends, so it fails even
+  after text has streamed. The stream ends with a usage chunk, when usage
+  was requested and Gemini reported some, then an in-band provider error
+  event (`"type": "provider_error"`, with the same message) instead of a
+  finish reason, and no `[DONE]`. The response is already committed to
+  `200`, so the error carries no status, and it does not fail over.
+
+A turn with several candidates fails only when none of them is usable.
+
 ## Streaming failures
 
 A stream that has already sent bytes cannot be retried — the client has part

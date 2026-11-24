@@ -150,9 +150,9 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
 - **Fireworks AI** – Modell-IDs sind kontobezogene Pfade wie
   `accounts/fireworks/models/gpt-oss-120b`; verwenden Sie sie unverändert in Requests und in
   `FIREWORKS_MODELS`.
-- **ElevenLabs** – ein reiner Sprach-Provider: `/v1/audio/speech` (Text-to-Speech) und
-  `/v1/audio/transcriptions` (Speech-to-Text) werden unterstützt, Chat, `/v1/responses` und
-  Embeddings dagegen nicht (die ❌ oben spiegeln das wider, keine Einschränkung des Gateways). Das
+- **ElevenLabs** – ein reiner Sprach-Provider: `/v1/audio/speech` (Text-to-Speech),
+  `/v1/audio/transcriptions` (Speech-to-Text) und `/v1/realtime` (Transkription mit Scribe
+  Realtime) werden unterstützt, Chat, `/v1/responses` und Embeddings dagegen nicht (die ❌ oben spiegeln das wider, keine Einschränkung des Gateways). Das
   OpenAI-Feld `voice` muss eine ElevenLabs-voice_id sein. Unterstützte Audioformate und
   Speech-to-Text-Modelle finden Sie im [ElevenLabs-Leitfaden](/de/providers/elevenlabs).
 - **Chutes AI** – verwendet standardmäßig `https://llm.chutes.ai/v1` und ermittelt aktuelle

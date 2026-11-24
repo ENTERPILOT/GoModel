@@ -21,10 +21,10 @@ func (s *Service) resolveRequested(ctx context.Context, requested core.Requested
 	}
 	snap := s.snapshot()
 	if entry, ok := snap.findRedirect(requested.Model, userPath, enforceUserPaths); ok {
-		// The route is recorded only when a redirect forces a reasoning
-		// effort or request parameters, the one consumer of it.
+		// The route is recorded only when a redirect sets a value that
+		// follows it: a reasoning effort, request parameters or timeouts.
 		var path *[]string
-		if snap.redirectOverrides {
+		if snap.recordRoute {
 			path = new([]string)
 		}
 		if resolved, ok := s.balancedResolution(ctx, snap, entry, sessionID, path); ok {

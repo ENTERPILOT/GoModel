@@ -232,11 +232,11 @@ func TestChatCompletion_DoesNotFailoverWhenWorkflowPolicyDisablesFailover(t *tes
 		return &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-failover-off",
 			Features: core.WorkflowFeatures{
-				Cache:      true,
-				Audit:      true,
-				Usage:      true,
-				Guardrails: true,
-				Failover:   false,
+				Cache:       true,
+				RequestLogs: true,
+				Usage:       true,
+				Guardrails:  true,
+				Failover:    false,
 			},
 		}, nil
 	}), failoverResolverStub{
@@ -295,11 +295,11 @@ func TestChatCompletion_StreamDoesNotFailoverWhenWorkflowPolicyDisablesFailover(
 		return &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-failover-off",
 			Features: core.WorkflowFeatures{
-				Cache:      true,
-				Audit:      true,
-				Usage:      true,
-				Guardrails: true,
-				Failover:   false,
+				Cache:       true,
+				RequestLogs: true,
+				Usage:       true,
+				Guardrails:  true,
+				Failover:    false,
 			},
 		}, nil
 	}), failoverResolverStub{
@@ -440,11 +440,11 @@ func TestResponses_StreamDoesNotFailoverWhenWorkflowPolicyDisablesFailover(t *te
 		return &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-failover-off",
 			Features: core.WorkflowFeatures{
-				Cache:      true,
-				Audit:      true,
-				Usage:      true,
-				Guardrails: true,
-				Failover:   false,
+				Cache:       true,
+				RequestLogs: true,
+				Usage:       true,
+				Guardrails:  true,
+				Failover:    false,
 			},
 		}, nil
 	}), failoverResolverStub{

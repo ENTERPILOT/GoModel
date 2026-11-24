@@ -665,7 +665,7 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
 
 - `name` 是在 `name/model` 选择器中使用的提供商实例名称，因此不能包含 `/`。
 - 在 `config.yaml` 或环境变量中声明的提供商会以 `"managed": true` 列出，并且是只读的：对此类名称执行 `PUT` 或 `DELETE` 会返回 `400`。被同名已声明提供商遮盖的已存储记录不会被列出。
-- 响应会将 `api_keys`、`service_account_json` 和 `service_account_json_base64` 遮蔽为一串星号（`***********`），并遮蔽 `proxy_url` 中的任何密码。回传任何由三个或更多星号组成的值会保留已存储的值，因此编辑时无需重复提交 Secret；若遮蔽条目背后没有已存储的值，则返回 `400`。完全由 Secret 引用组成的值会按原样显示。
+- 响应会将 `api_keys`、`service_account_json` 和 `service_account_json_base64` 遮蔽为一串星号（`***********`），并遮蔽 `proxy_url` 中的任何密码。回传任何由三个或更多星号组成的值会保留已存储的值，因此编辑时无需重复提交 Secret；若遮蔽条目背后没有已存储的值，则返回 `400`。遮蔽的 API 密钥会显示前 5 个和后 3 个字符（仅限 20 个字符及以上的密钥），并标明它所代表的已存储密钥（`sk-pr***********7Qa#2` 表示第二个），因此可以删除或重新排序条目。编号对应保存时的已存储列表：若遮蔽值的字符与其已存储密钥不再匹配，则返回 `400`。该校验无法覆盖完全遮蔽的短密钥，以及可见字符相同的密钥，因此在并发编辑后请先重新加载再保存。不带编号的遮蔽值保留同一位置上的已存储密钥。完全由 Secret 引用组成的值会按原样显示。
 - `billable: false` 标记的是其成本不由调用方向您支付的提供商；参见[预算](/zh/features/budgets#非计费提供商)。
 - `DELETE` 返回 `204`，名称未知时返回 `404`。
 
@@ -687,6 +687,8 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
 `(user_path, period)` 来标识一个预算，对于自定义周期则使用 `(user_path, period_seconds)`。
 这些操作并非按周期全局生效。对于带路径作用域的 `PUT` 和
 `DELETE` 路由，请对 `user_path` 进行 URL 编码；请求格式参见[预算](/zh/features/budgets)。
+
+`GET /admin/budgets` 返回每个预算及其状态；周期经过 5% 之后，还会返回 `projected_spend`。只有当预测显示预算会在周期结束前用尽、且尚未用尽时，才会返回 `projected_exhaustion_at`；子路径预算的模板两个字段都不返回。顶层的 `alerts` 对象说明[预算告警](/zh/features/budgets#告警)是否启用（`enabled`）及其 `default_thresholds`；有自己阈值的预算带有 `alert_thresholds`，`PUT` 接受该字段。
 
 请求示例和执行行为参见[预算](/zh/features/budgets)。
 
@@ -894,6 +896,10 @@ http://localhost:8080/admin/dashboard
 `GET /admin/live/logs`，以流式方式接收精简的请求日志/用量生命周期预览。这样，“请求”和 Usage 页面可以在异步数据库写入完成之前，就展示请求在工作流中的处理进度。该流使用序列游标、有界重放和心跳事件，因此重新连接的浏览器可以在短暂断网后追上进度。
 
 持久化的请求日志表和用量表仍然是可信数据源。如果浏览器的游标超出了重放缓冲区，流会发送重置事件，控制台随后通过常规 REST 端点重新加载数据。
+
+请求日志事件的名称为 `request_log.started`、`request_log.updated`、`request_log.stream`、`request_log.completed`、`request_log.failed`、`request_log.flushed` 和 `request_log.removed`，用量事件的名称为 `usage.*`。查询参数 `types` 用于选择流接收的事件种类：`types=request_log,usage`。
+
+在请求日志重命名之前，这些事件名为 `audit.*`。这些旧名称已弃用，但仍会继续提供。在 `types` 中列出 `request_log` 的流会收到新名称。只列出旧别名 `audit` 或未传 `types` 的流仍会收到 `audit.*`（包括 SSE 事件名、`type` 字段以及负载中的 `_live_state`），直到这些已弃用的名称被移除；目前尚未确定移除日期。传入 `types=request_log,usage` 即可改用新名称。
 
 ## 禁用管理功能
 

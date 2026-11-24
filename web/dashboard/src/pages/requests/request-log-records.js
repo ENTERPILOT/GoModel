@@ -4,13 +4,13 @@
 // data that the browser already received.
 
 const lifecycleRank = {
-  "audit.started": 10,
-  "audit.updated": 20,
-  "audit.stream": 20,
-  "audit.completed": 30,
-  "audit.failed": 40,
-  "audit.flushed": 40,
-  "audit.detail": 40,
+  "request_log.started": 10,
+  "request_log.updated": 20,
+  "request_log.stream": 20,
+  "request_log.completed": 30,
+  "request_log.failed": 40,
+  "request_log.flushed": 40,
+  "request_log.detail": 40,
 };
 const liveRequestLogEvents = new Set(Object.keys(lifecycleRank));
 

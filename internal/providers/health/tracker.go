@@ -58,11 +58,16 @@ type ErrorInfo struct {
 
 // ModelHealth summarizes windowed traffic for one model.
 type ModelHealth struct {
-	Model     string     `json:"model"`
-	Requests  int        `json:"requests"`
-	Errors    int        `json:"errors"`
-	Flagged   bool       `json:"flagged"`
-	LastError *ErrorInfo `json:"last_error,omitempty"`
+	Model    string `json:"model"`
+	Requests int    `json:"requests"`
+	Errors   int    `json:"errors"`
+	Flagged  bool   `json:"flagged"`
+	// CircuitState is the state of the model's own circuit breaker as of its
+	// most recent request ("closed", "half-open", "open"). It is empty when
+	// the model shares the provider's breaker. Like the rest of the row, it
+	// leaves the snapshot once the model has no request in the window.
+	CircuitState string     `json:"circuit_state,omitempty"`
+	LastError    *ErrorInfo `json:"last_error,omitempty"`
 }
 
 // ProviderHealth summarizes windowed traffic for one provider.
@@ -88,8 +93,10 @@ type event struct {
 }
 
 type modelState struct {
-	events    []event
-	lastError *ErrorInfo
+	events []event
+	// circuitState is the model's own breaker state as of its last request.
+	circuitState string
+	lastError    *ErrorInfo
 	// lastRejection is the latest circuit-breaker rejection, kept apart so
 	// it can stand in once the upstream failure leaves the window.
 	lastRejection *ErrorInfo
@@ -152,13 +159,25 @@ func (t *Tracker) Record(info llmclient.ResponseInfo) {
 	}
 	// A caller-side cancellation proves nothing about provider health; the
 	// circuit breaker treats it as neutral and so does this tracker. Client
-	// deadlines (context.DeadlineExceeded) still count as failures.
-	if errors.Is(info.Error, context.Canceled) {
+	// deadlines (context.DeadlineExceeded) still count as failures. It only
+	// refreshes the breaker state of a model already tracked, so it never
+	// evicts another model to make room.
+	canceled := errors.Is(info.Error, context.Canceled)
+	if canceled && provider.models[info.Model] == nil {
+		return
+	}
+	model := provider.model(info.Model)
+	// A request that went through a breaker says which one: the model's own
+	// (its state) or the provider's (empty). One that bypassed breakers has
+	// no CircuitState and leaves the model's state as it was.
+	if info.CircuitState != "" {
+		model.circuitState = info.ModelCircuitState
+	}
+	if canceled {
 		return
 	}
 
 	now := t.now()
-	model := provider.model(info.Model)
 
 	failed := info.Error != nil || info.StatusCode >= 400
 	model.events = append(model.events, event{at: now, failed: failed})
@@ -235,10 +254,11 @@ func (t *Tracker) Snapshot() map[string]ProviderHealth {
 				continue
 			}
 			row := ModelHealth{
-				Model:    modelName,
-				Requests: requests,
-				Errors:   errors,
-				Flagged:  errors >= flagMinErrors && errors*2 >= requests,
+				Model:        modelName,
+				Requests:     requests,
+				Errors:       errors,
+				Flagged:      errors >= flagMinErrors && errors*2 >= requests,
+				CircuitState: model.circuitState,
 			}
 			if reported := model.reportedError(now); reported != nil {
 				lastError := *reported
@@ -262,6 +282,18 @@ func (t *Tracker) Snapshot() map[string]ProviderHealth {
 		result[name] = snapshot
 	}
 	return result
+}
+
+// OpenCircuitModels returns the models whose own circuit breaker is open,
+// sorted as the snapshot lists them.
+func (p ProviderHealth) OpenCircuitModels() []string {
+	var open []string
+	for _, model := range p.Models {
+		if model.CircuitState == "open" {
+			open = append(open, model.Model)
+		}
+	}
+	return open
 }
 
 // FlaggedModels returns the flagged model names from a snapshot, sorted as
@@ -390,11 +422,14 @@ func errorMessage(info llmclient.ResponseInfo) string {
 	return message
 }
 
-// sortModelHealth orders rows flagged-first, then by errors, requests, and
-// name so the most troubled models surface before the snapshot cap applies.
+// sortModelHealth orders rows open-circuit first, then flagged, then by
+// errors, requests, and name so the most troubled models surface before the snapshot cap applies.
 func sortModelHealth(models []ModelHealth) {
 	sort.Slice(models, func(i, j int) bool {
 		a, b := models[i], models[j]
+		if aOpen, bOpen := a.CircuitState == "open", b.CircuitState == "open"; aOpen != bOpen {
+			return aOpen
+		}
 		if a.Flagged != b.Flagged {
 			return a.Flagged
 		}

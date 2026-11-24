@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -123,12 +124,75 @@ func normalizePhase(phase string) (string, error) {
 
 // FeatureFlags configures gateway-owned behaviors for a request.
 type FeatureFlags struct {
-	Cache      bool  `json:"cache" bson:"cache"`
-	Audit      bool  `json:"audit" bson:"audit"`
-	Usage      bool  `json:"usage" bson:"usage"`
-	Budget     *bool `json:"budget,omitempty" bson:"budget,omitempty"`
-	Guardrails bool  `json:"guardrails" bson:"guardrails"`
-	Failover   *bool `json:"failover,omitempty" bson:"failover,omitempty"`
+	Cache       bool  `json:"cache" bson:"cache"`
+	RequestLogs bool  `json:"request_logs" bson:"request_logs"`
+	Usage       bool  `json:"usage" bson:"usage"`
+	Budget      *bool `json:"budget,omitempty" bson:"budget,omitempty"`
+	Guardrails  bool  `json:"guardrails" bson:"guardrails"`
+	Failover    *bool `json:"failover,omitempty" bson:"failover,omitempty"`
+}
+
+// featureFlagsWire is FeatureFlags as JSON and BSON. The request_logs flag was
+// named audit through v0.2.5. A replica of that version reads only audit, and
+// takes a payload without it as request logging switched off, so both keys are
+// written to the API and to storage. request_logs wins when both are read.
+type featureFlagsWire struct {
+	Cache       bool  `json:"cache" bson:"cache"`
+	RequestLogs *bool `json:"request_logs,omitempty" bson:"request_logs,omitempty"`
+	Audit       *bool `json:"audit,omitempty" bson:"audit,omitempty"`
+	Usage       bool  `json:"usage" bson:"usage"`
+	Budget      *bool `json:"budget,omitempty" bson:"budget,omitempty"`
+	Guardrails  bool  `json:"guardrails" bson:"guardrails"`
+	Failover    *bool `json:"failover,omitempty" bson:"failover,omitempty"`
+}
+
+func (f FeatureFlags) wire() featureFlagsWire {
+	return featureFlagsWire{
+		Cache:       f.Cache,
+		RequestLogs: &f.RequestLogs,
+		Audit:       &f.RequestLogs, // deprecated alias: drop this line to stop writing it
+		Usage:       f.Usage,
+		Budget:      f.Budget,
+		Guardrails:  f.Guardrails,
+		Failover:    f.Failover,
+	}
+}
+
+func (w featureFlagsWire) flags() FeatureFlags {
+	return FeatureFlags{
+		Cache:       w.Cache,
+		RequestLogs: core.RequestLogsFlag(w.RequestLogs, w.Audit),
+		Usage:       w.Usage,
+		Budget:      w.Budget,
+		Guardrails:  w.Guardrails,
+		Failover:    w.Failover,
+	}
+}
+
+// MarshalJSON writes request_logs and its deprecated alias audit.
+func (f FeatureFlags) MarshalJSON() ([]byte, error) { return json.Marshal(f.wire()) }
+
+// UnmarshalJSON reads request_logs, falling back to its deprecated alias audit.
+func (f *FeatureFlags) UnmarshalJSON(data []byte) error {
+	var wire featureFlagsWire
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*f = wire.flags()
+	return nil
+}
+
+// MarshalBSON writes request_logs and its deprecated alias audit.
+func (f FeatureFlags) MarshalBSON() ([]byte, error) { return bson.Marshal(f.wire()) }
+
+// UnmarshalBSON reads request_logs, falling back to its deprecated alias audit.
+func (f *FeatureFlags) UnmarshalBSON(data []byte) error {
+	var wire featureFlagsWire
+	if err := bson.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*f = wire.flags()
+	return nil
 }
 
 func (f FeatureFlags) canonicalize() FeatureFlags {
@@ -146,12 +210,12 @@ func (f FeatureFlags) canonicalize() FeatureFlags {
 func (f FeatureFlags) runtimeFeatures() core.WorkflowFeatures {
 	f = f.canonicalize()
 	return core.WorkflowFeatures{
-		Cache:      f.Cache,
-		Audit:      f.Audit,
-		Usage:      f.Usage,
-		Budget:     f.Usage && *f.Budget,
-		Guardrails: f.Guardrails,
-		Failover:   *f.Failover,
+		Cache:       f.Cache,
+		RequestLogs: f.RequestLogs,
+		Usage:       f.Usage,
+		Budget:      f.Usage && *f.Budget,
+		Guardrails:  f.Guardrails,
+		Failover:    *f.Failover,
 	}
 }
 
@@ -297,8 +361,44 @@ func normalizeStepsPayload(payload Payload) (Payload, string, error) {
 	return hashPayload(payload)
 }
 
+// hashedPayload is a payload as v0.2.5 serialized it, which is the form the
+// workflow hash is taken over. Hashing this form rather than the wire form
+// keeps a hash independent of key renames such as audit to request_logs:
+// stored hashes stay valid, and replicas of different versions agree on the
+// hash of the managed default workflow instead of replacing each other's.
+//
+// A field added to Payload or FeatureFlags must be added here as well, with a
+// tag that leaves it out when unset.
+type hashedPayload struct {
+	SchemaVersion int                `json:"schema_version"`
+	Features      hashedFeatureFlags `json:"features"`
+	Guardrails    []GuardrailStep    `json:"guardrails,omitempty"`
+	Steps         []Step             `json:"steps,omitempty"`
+}
+
+type hashedFeatureFlags struct {
+	Cache      bool  `json:"cache"`
+	Audit      bool  `json:"audit"`
+	Usage      bool  `json:"usage"`
+	Budget     *bool `json:"budget,omitempty"`
+	Guardrails bool  `json:"guardrails"`
+	Failover   *bool `json:"failover,omitempty"`
+}
+
 func hashPayload(payload Payload) (Payload, string, error) {
-	raw, err := json.Marshal(payload)
+	raw, err := json.Marshal(hashedPayload{
+		SchemaVersion: payload.SchemaVersion,
+		Features: hashedFeatureFlags{
+			Cache:      payload.Features.Cache,
+			Audit:      payload.Features.RequestLogs,
+			Usage:      payload.Features.Usage,
+			Budget:     payload.Features.Budget,
+			Guardrails: payload.Features.Guardrails,
+			Failover:   payload.Features.Failover,
+		},
+		Guardrails: payload.Guardrails,
+		Steps:      payload.Steps,
+	})
 	if err != nil {
 		return Payload{}, "", newValidationError("marshal workflow payload", err)
 	}

@@ -14,6 +14,9 @@
     providerBreakerState,
     providerBreakerStateLabel,
     providerBreakerStateClass,
+    providerHealthModelBreakerClass,
+    providerHealthModelBreakerLabel,
+    providerHealthModelBreakerState,
     providerLastErrorText,
     providerRecentTrafficSummary,
     providerHealthModels,
@@ -88,8 +91,16 @@
                 >
                   <span class="provider-status-health-model-name mono"
                   >{model.model}</span>
-                  <span class="provider-status-health-model-stats"
-                  >{providerHealthModelStats(model)}</span>
+                  <span class="provider-status-health-model-meta">
+                    {#if providerHealthModelBreakerState(model)}
+                      <span
+                        class={["provider-status-health-state", "is-compact", providerHealthModelBreakerClass(model)]}
+                        title={m.overview_model_breaker_title()}
+                      >{providerHealthModelBreakerLabel(model)}</span>
+                    {/if}
+                    <span class="provider-status-health-model-stats"
+                    >{providerHealthModelStats(model)}</span>
+                  </span>
                 </div>
               {/each}
             </div>
@@ -229,6 +240,17 @@
 
   .provider-status-health-model.is-flagged {
     color: var(--danger);
+  }
+
+  .provider-status-health-model-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .provider-status-health-state.is-compact {
+    padding: 0 6px;
+    font-size: 11px;
   }
 
   .provider-status-health-model-name {

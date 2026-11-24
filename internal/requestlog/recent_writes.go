@@ -48,7 +48,7 @@ func NewRecentWriteReader(store storage.Storage) (RecentWriteReader, error) {
 	return storage.ResolveSQLBackend[RecentWriteReader](
 		context.Background(),
 		store,
-		func(db sqlx.DB) (RecentWriteReader, error) { return NewSQLReader(db) },
+		func(db sqlx.DB) (RecentWriteReader, error) { return newAdoptingSQLReader(db) },
 		func(db *mongo.Database) (RecentWriteReader, error) { return NewMongoDBReader(db) },
 	)
 }
@@ -57,7 +57,7 @@ func NewRecentWriteReader(store storage.Storage) (RecentWriteReader, error) {
 // the stamped rows: history written before the column existed stays out.
 const writtenAtIndex = "idx_audit_written_at"
 
-const writtenAtIndexDefinition = "audit_logs(written_at) WHERE written_at IS NOT NULL"
+const writtenAtIndexDefinition = "request_logs(written_at) WHERE written_at IS NOT NULL"
 
 // writtenAtIndexes creates the SQLite index inline. PostgreSQL builds it in
 // the background (writtenAtBackgroundIndex) because the table it lands on can
@@ -78,7 +78,8 @@ var writtenAtBackgroundIndex = storage.BackgroundIndex{
 }
 
 // backgroundIndexLockKey serializes the request log index builds across replicas
-// (see storage.BackgroundIndexBuilder).
+// (see storage.BackgroundIndexBuilder). The value predates the request log's
+// rename and must stay: replicas on an older release take the same lock.
 const backgroundIndexLockKey int64 = 0x676d2d6175646974
 
 // backgroundIndexRetry is the pause between build attempts; tests shorten it.
@@ -117,7 +118,7 @@ func (r *SQLReader) RecentWrites(ctx context.Context, since int64, excludeWriter
 		return nil, nil
 	}
 	rows, err := r.db.Query(ctx,
-		"SELECT "+r.dialect.idColumn+", written_at FROM audit_logs"+
+		"SELECT "+r.dialect.idColumn+", written_at FROM request_logs"+
 			" WHERE written_at IS NOT NULL AND written_at >= ? AND writer_id <> ?"+
 			" ORDER BY written_at DESC LIMIT ?",
 		since, excludeWriter, limit)
@@ -164,7 +165,7 @@ func (r *SQLReader) PreviewsByID(ctx context.Context, ids []string) ([]EntryPrev
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
 	rows, err := r.db.Query(ctx,
-		"SELECT "+previewColumns(r.db.Dialect())+" FROM audit_logs WHERE "+r.dialect.idColumn+" IN ("+placeholders+")", args...)
+		"SELECT "+previewColumns(r.db.Dialect())+" FROM request_logs WHERE "+r.dialect.idColumn+" IN ("+placeholders+")", args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query request log previews by id: %w", err)
 	}
@@ -227,7 +228,7 @@ func (r *MongoDBReader) RecentWrites(ctx context.Context, since int64, excludeWr
 		SetSort(bson.D{{Key: "written_at", Value: -1}}).
 		SetLimit(int64(limit)).
 		SetProjection(bson.D{{Key: "_id", Value: 1}, {Key: "written_at", Value: 1}})
-	cursor, err := r.collection.Find(ctx, filter, opts)
+	cursor, err := r.logs(ctx).Find(ctx, filter, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query recent request log writes: %w", err)
 	}
@@ -255,7 +256,7 @@ func (r *MongoDBReader) PreviewsByID(ctx context.Context, ids []string) ([]Entry
 	captured := func(field string) bson.D {
 		return bson.D{{Key: "$ne", Value: bson.A{bson.D{{Key: "$type", Value: field}}, "missing"}}}
 	}
-	cursor, err := r.collection.Aggregate(ctx, mongo.Pipeline{
+	cursor, err := r.logs(ctx).Aggregate(ctx, mongo.Pipeline{
 		{{Key: "$match", Value: bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}}}},
 		{{Key: "$addFields", Value: bson.D{
 			{Key: "_request_body_captured", Value: captured("$data.request_body")},

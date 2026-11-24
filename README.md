@@ -137,7 +137,7 @@ The official SDKs therefore work unchanged. Configure their base URLs as follows
 - Amazon Bedrock Runtime and Bedrock Mantle
 - ChatGPT (the Codex backend) and Claude
 - GitHub Copilot
-- ElevenLabs (text-to-speech and speech-to-text)
+- ElevenLabs (text-to-speech, speech-to-text, and realtime transcription)
 - Jev (TypeSafe System One decision API) and self-hosted Kev, also behind OpenAI's Decisions API
 - All OpenAI-compatible providers
 
@@ -189,6 +189,7 @@ for the full list of settings.
 
 - [Caching](https://gomodel.enterpilot.io/docs/features/cache?utm_source=readme) - exact and semantic response caching, so repeated prompts cost nothing
 - [Cost tracking](https://gomodel.enterpilot.io/docs/features/cost-tracking?utm_source=readme) - per-request cost estimates, usage analytics, and spending breakdowns in the dashboard
+- [Response cost](https://gomodel.enterpilot.io/docs/features/response-cost?utm_source=readme) - return each request's cost to the client that made it, as `usage.cost` in the response (OpenRouter's shape)
 - [Budgets](https://gomodel.enterpilot.io/docs/features/budgets?utm_source=readme) - soft spend limits per user, team, or key: new requests are blocked once a limit is spent, but concurrent and in-flight requests can overshoot it
 - [Rate limits](https://gomodel.enterpilot.io/docs/features/rate-limits?utm_source=readme) - requests, tokens, and concurrency caps per user path, provider, or model
 - [Usage API](https://gomodel.enterpilot.io/docs/advanced/usage-api?utm_source=readme) - clients check their own usage, remaining budget, and rate-limit headroom with the key they already use for inference

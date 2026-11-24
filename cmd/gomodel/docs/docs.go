@@ -10000,6 +10000,22 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.budgetAlertsResponse": {
+            "type": "object",
+            "properties": {
+                "default_thresholds": {
+                    "description": "DefaultThresholds are the alert thresholds, as percentages of the\namount, of every budget without alert_thresholds of its own.",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "enabled": {
+                    "description": "Enabled reports that an alert destination exists (a webhook under\nbudgets.alerts.webhooks, or a registered alert sink), so thresholds are\nevaluated. Without one no alert is ever raised.",
+                    "type": "boolean"
+                }
+            }
+        },
         "admin.budgetKeyRequest": {
             "type": "object",
             "properties": {
@@ -10014,6 +10030,14 @@ const docTemplate = `{
         "admin.budgetListResponse": {
             "type": "object",
             "properties": {
+                "alerts": {
+                    "description": "Alerts describes soft budget alerts for the deployment.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/admin.budgetAlertsResponse"
+                        }
+                    ]
+                },
                 "budgets": {
                     "type": "array",
                     "items": {
@@ -10028,6 +10052,13 @@ const docTemplate = `{
         "admin.budgetStatusResponse": {
             "type": "object",
             "properties": {
+                "alert_thresholds": {
+                    "description": "AlertThresholds are this budget's own alert thresholds, as percentages\nof the amount. Omitted when it uses alerts.default_thresholds.",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
                 "amount": {
                     "type": "number"
                 },
@@ -10075,6 +10106,14 @@ const docTemplate = `{
                 },
                 "period_start": {
                     "type": "string"
+                },
+                "projected_exhaustion_at": {
+                    "description": "ProjectedExhaustionAt is when the budget runs out at that rate. Omitted\nwhen the budget lasts the period or is already spent.",
+                    "type": "string"
+                },
+                "projected_spend": {
+                    "description": "ProjectedSpend is the spend the period ends on at the rate seen so far\n(spent / period_ratio). Omitted while less than 5% of the period has\nelapsed, and for a per-child template.",
+                    "type": "number"
                 },
                 "remaining": {
                     "type": "number"
@@ -10317,6 +10356,14 @@ const docTemplate = `{
                 },
                 "effective_enabled": {
                     "type": "boolean"
+                },
+                "model_policy": {
+                    "description": "ModelPolicy is the model-wide policy row (source \"gpt-4o\"), if any. Its\nper-model values (slowdown, upstream timeouts) apply wherever Override\nleaves them unset.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/virtualmodels.VirtualModel"
+                        }
+                    ]
                 },
                 "override": {
                     "$ref": "#/definitions/virtualmodels.VirtualModel"
@@ -10917,6 +10964,13 @@ const docTemplate = `{
         "admin.upsertBudgetRequest": {
             "type": "object",
             "properties": {
+                "alert_thresholds": {
+                    "description": "AlertThresholds overrides the default alert thresholds for this budget:\npercentages of the amount, each 1-100. Empty or omitted uses the\ndefaults.",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
                 "amount": {
                     "type": "number"
                 },
@@ -11159,6 +11213,10 @@ const docTemplate = `{
                     "description": "ReasoningEffort forces the reasoning effort sent upstream (\"none\",\n\"minimal\", \"low\", \"medium\", \"high\", \"xhigh\", or \"max\"); empty keeps the\nclient's value.",
                     "type": "string"
                 },
+                "response_header_timeout": {
+                    "description": "ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in\nseconds (1 to 86400), for every upstream attempt. Omitted inherits.",
+                    "type": "integer"
+                },
                 "session_affinity": {
                     "description": "SessionAffinity keeps a detected session on the target that served it\nbefore. Omitted means enabled; false restores stateless balancing.",
                     "type": "boolean"
@@ -11193,6 +11251,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/admin.virtualModelTargetRequest"
                     }
+                },
+                "timeout": {
+                    "description": "Timeout overrides HTTP_TIMEOUT, in seconds (1 to 86400), for every\nupstream attempt of a request through this row. Omitted inherits.",
+                    "type": "integer"
                 },
                 "user_paths": {
                     "type": "array",
@@ -12420,7 +12482,13 @@ const docTemplate = `{
                 "b64_json": {
                     "type": "string"
                 },
+                "error": {
+                    "$ref": "#/definitions/core.ImageItemError"
+                },
                 "revised_prompt": {
+                    "type": "string"
+                },
+                "size": {
                     "type": "string"
                 },
                 "url": {
@@ -12492,11 +12560,25 @@ const docTemplate = `{
                 "quality": {
                     "type": "string"
                 },
+                "request_id": {
+                    "type": "string"
+                },
                 "size": {
                     "type": "string"
                 },
                 "usage": {
                     "$ref": "#/definitions/core.ImageUsage"
+                }
+            }
+        },
+        "core.ImageItemError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
                 }
             }
         },
@@ -14081,7 +14163,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "attempts": {
-                    "description": "Attempts captures provider calls made for this logical request. SQL\nstores split this into audit_log_attempts; Mongo stores it embedded.",
+                    "description": "Attempts captures provider calls made for this logical request. SQL\nstores split this into request_log_attempts; Mongo stores it embedded.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/requestlog.AttemptSnapshot"
@@ -14303,7 +14385,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "audit": {
-                    "type": "boolean"
+                    "description": "Deprecated alias of request_logs, which was named audit through v0.2.5. Always equal to request_logs.",
+                    "type": "boolean",
+                    "x-deprecated": true
                 },
                 "budget": {
                     "type": "boolean"
@@ -14315,6 +14399,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "guardrails": {
+                    "type": "boolean"
+                },
+                "request_logs": {
                     "type": "boolean"
                 },
                 "usage": {
@@ -15631,6 +15718,10 @@ const docTemplate = `{
                 "resolved_model": {
                     "type": "string"
                 },
+                "response_header_timeout": {
+                    "description": "ResponseHeaderTimeout is the per-attempt wait for upstream response\nheaders in seconds; omitted inherits.",
+                    "type": "integer"
+                },
                 "scope_kind": {
                     "type": "string"
                 },
@@ -15659,6 +15750,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/virtualmodels.Target"
                     }
+                },
+                "timeout": {
+                    "description": "Timeout is the per-attempt upstream timeout in seconds; omitted inherits.",
+                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"
@@ -15711,6 +15806,10 @@ const docTemplate = `{
                     "description": "ReasoningEffort, when set, replaces the reasoning effort of every\nrequest sent upstream through this redirect or to this model, whatever\nthe client asked for. Empty leaves the client's value untouched.",
                     "type": "string"
                 },
+                "response_header_timeout": {
+                    "description": "ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in\nseconds, for every upstream attempt. Nil inherits.",
+                    "type": "integer"
+                },
                 "session_affinity": {
                     "description": "SessionAffinity keeps requests of one detected session on the target that\nserved it before, while that target stays available. Tri-state: nil means\nenabled (the default); explicit false restores stateless balancing.",
                     "type": "boolean"
@@ -15738,6 +15837,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/virtualmodels.Target"
                     }
+                },
+                "timeout": {
+                    "description": "Timeout overrides HTTP_TIMEOUT, in seconds, for every upstream attempt\nof a request routed through this redirect or to this model. Nil\ninherits (from the target model's policy, then the gateway default).",
+                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"

@@ -15,7 +15,7 @@ func TestMongoReader_GetLastUsedByAuthKeys_Errors(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		reader, err := NewMongoDBReader(db)
 		require.NoError(t, err)
-		collection := db.Collection("audit_logs")
+		collection := db.Collection("request_logs")
 
 		t.Run("aggregate error", func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())

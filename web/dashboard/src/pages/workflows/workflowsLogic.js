@@ -1,7 +1,7 @@
 // Pure workflow form/scope/payload logic.
 // No Svelte runes here so node:test can import it directly.
 //
-// Feature caps ({cache, audit, usage, budget, guardrails, failover}) are the
+// Feature caps ({cache, request_logs, usage, budget, guardrails, failover}) are the
 // runtime-config visibility gates; callers derive them from the shared
 // runtimeConfig store (see workflows.svelte.js featureCaps()).
 
@@ -30,7 +30,7 @@ export function defaultWorkflowForm() {
     description: "",
     features: {
       cache: true,
-      audit: true,
+      request_logs: true,
       usage: true,
       budget: true,
       guardrails: false,
@@ -172,10 +172,17 @@ function workflowHasDefinedFeatureFlag(raw, key) {
   });
 }
 
+// The request_logs flag was named audit through v0.2.5. Workflows and request
+// log entries that release stored, and a replica still running it, carry audit
+// alone, so it is read when request_logs is missing.
 export function workflowNormalizedFeatures(raw) {
   return {
     cache: !!workflowReadFeatureFlag(raw, "cache", false),
-    audit: !!workflowReadFeatureFlag(raw, "audit", false),
+    request_logs: !!workflowReadFeatureFlag(
+      raw,
+      "request_logs",
+      workflowReadFeatureFlag(raw, "audit", false),
+    ),
     usage: !!workflowReadFeatureFlag(raw, "usage", false),
     budget: workflowReadFeatureFlag(raw, "budget", true) !== false,
     guardrails: !!workflowReadFeatureFlag(raw, "guardrails", false),
@@ -189,7 +196,7 @@ export function workflowApplyGlobalFeatureCaps(raw, caps) {
   const usage = features.usage && !!limits.usage;
   return {
     cache: features.cache && !!limits.cache,
-    audit: features.audit && !!limits.audit,
+    request_logs: features.request_logs && !!limits.request_logs,
     usage,
     budget: usage && features.budget && !!limits.budget,
     guardrails: features.guardrails && !!limits.guardrails,
@@ -497,7 +504,7 @@ export function workflowPreview(form, caps) {
       schema_version: WORKFLOW_SCHEMA_VERSION,
       features: {
         cache: !!features.cache,
-        audit: !!features.audit,
+        request_logs: !!features.request_logs,
         usage: !!features.usage,
         budget: !!features.budget,
         guardrails: guardrailsEnabled,
@@ -572,7 +579,11 @@ export function buildWorkflowRequest({
       schema_version: WORKFLOW_SCHEMA_VERSION,
       features: {
         cache: !!features.cache,
-        audit: !!features.audit,
+        request_logs: !!features.request_logs,
+        // Deprecated alias of request_logs. This page can be served by one
+        // replica and save through another that still runs v0.2.5, which
+        // reads only audit and takes its absence as request logging off.
+        audit: !!features.request_logs,
         usage: !!features.usage,
         budget: !!features.budget,
         guardrails: !!features.guardrails,
