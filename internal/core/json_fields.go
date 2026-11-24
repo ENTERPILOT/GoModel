@@ -433,14 +433,10 @@ func extractUnknownJSONFieldsWith(data []byte, isKnown func(string) bool) (Unkno
 }
 
 func marshalWithUnknownJSONFields(base any, extraFields UnknownJSONFields) ([]byte, error) {
-	baseBody, err := json.Marshal(base)
-	if err != nil {
-		return nil, err
-	}
 	if extraFields.IsEmpty() {
-		return baseBody, nil
+		return json.Marshal(base)
 	}
-	return mergeUnknownJSONObject(baseBody, extraFields.raw)
+	return marshalMergingUnknownJSONObject(base, extraFields.raw)
 }
 
 func mergeUnknownJSONObject(baseBody, extraBody []byte) ([]byte, error) {
