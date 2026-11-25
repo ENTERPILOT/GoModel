@@ -11,7 +11,7 @@ import (
 // A rule with MaxRetries zero explicitly disables retries for its status.
 type RetryRuleConfig struct {
 	Status     int           `yaml:"status" json:"status"`
-	MaxRetries int           `yaml:"max_retries" json:"max_retries"`
+	MaxRetries *int          `yaml:"max_retries" json:"max_retries"`
 	Delay      time.Duration `yaml:"delay" json:"delay"`
 }
 

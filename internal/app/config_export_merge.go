@@ -409,6 +409,14 @@ func isRateLimitPeriodName(label string) bool {
 }
 
 // exportedRetryRules maps internal retry rules back to config form.
+func cloneIntPtr(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
+}
+
 func exportedRetryRules(rules []virtualmodels.RetryRule) []config.RetryRuleConfig {
 	if len(rules) == 0 {
 		return nil
@@ -417,7 +425,7 @@ func exportedRetryRules(rules []virtualmodels.RetryRule) []config.RetryRuleConfi
 	for i, rule := range rules {
 		out[i] = config.RetryRuleConfig{
 			Status:     rule.Status,
-			MaxRetries: rule.MaxRetries,
+			MaxRetries: cloneIntPtr(rule.MaxRetries),
 			Delay:      rule.Delay,
 		}
 	}

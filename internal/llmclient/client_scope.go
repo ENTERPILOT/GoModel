@@ -258,8 +258,8 @@ func (c *Client) waitForRetryAttemptWithDelay(ctx context.Context, scope request
 // retryRulesForContext returns the per-status retry rules in effect: explicit
 // context overrides first, then the ones resolved for the request's model.
 func (c *Client) retryRulesForContext(ctx context.Context) []httpclient.AttemptRetryRule {
-	if rules := httpclient.AttemptRetryRulesFromContext(ctx); len(rules) > 0 {
-		return rules
+	if httpclient.HasAttemptRetryRules(ctx) {
+		return httpclient.AttemptRetryRulesFromContext(ctx)
 	}
 	workflow := core.GetWorkflow(ctx)
 	if workflow == nil || workflow.Resolution == nil || len(workflow.Resolution.RetryRules) == 0 {

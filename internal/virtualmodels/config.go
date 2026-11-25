@@ -93,7 +93,7 @@ func configRetryRules(entries []config.RetryRuleConfig) []RetryRule {
 	for i, entry := range entries {
 		rules[i] = RetryRule{
 			Status:     entry.Status,
-			MaxRetries: entry.MaxRetries,
+			MaxRetries: cloneIntPtr(entry.MaxRetries),
 			Delay:      entry.Delay,
 		}
 	}

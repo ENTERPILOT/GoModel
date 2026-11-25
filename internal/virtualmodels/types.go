@@ -54,8 +54,8 @@ func (t Target) selector() (core.ModelSelector, error) {
 // zero waits the configured gateway backoff.
 type RetryRule struct {
 	Status     int           `json:"status" bson:"status"`
-	MaxRetries int           `json:"max_retries,omitempty" bson:"max_retries,omitempty"`
-	Delay      time.Duration `json:"delay,omitempty" bson:"delay,omitempty"`
+	MaxRetries *int          `json:"max_retries,omitempty" bson:"max_retries,omitempty"`
+	Delay      time.Duration `json:"delay,omitempty" bson:"delay,omitempty" swaggertype:"integer"`
 }
 
 // VirtualModel is one operator-defined model entry.
@@ -186,6 +186,9 @@ func (v VirtualModel) clone() VirtualModel {
 	v.ResponseHeaderTimeout = cloneIntPtr(v.ResponseHeaderTimeout)
 	if len(v.RetryRules) > 0 {
 		v.RetryRules = append([]RetryRule(nil), v.RetryRules...)
+		for i := range v.RetryRules {
+			v.RetryRules[i].MaxRetries = cloneIntPtr(v.RetryRules[i].MaxRetries)
+		}
 	}
 	if len(v.Targets) > 0 {
 		v.Targets = append([]Target(nil), v.Targets...)

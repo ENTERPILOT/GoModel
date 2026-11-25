@@ -17,6 +17,11 @@ import (
 
 func retryRulesTestClient(t *testing.T, statusQueue []int) (*Client, *atomic.Int32) {
 	t.Helper()
+	return retryRulesTestClientWithMaxRetries(t, statusQueue, 5)
+}
+
+func retryRulesTestClientWithMaxRetries(t *testing.T, statusQueue []int, maxRetries int) (*Client, *atomic.Int32) {
+	t.Helper()
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		i := int(calls.Add(1)) - 1
@@ -29,7 +34,7 @@ func retryRulesTestClient(t *testing.T, statusQueue []int) (*Client, *atomic.Int
 	t.Cleanup(server.Close)
 
 	cfg := DefaultConfig("test", server.URL)
-	cfg.Retry.MaxRetries = 5
+	cfg.Retry.MaxRetries = maxRetries
 	cfg.Retry.InitialBackoff = time.Millisecond
 	cfg.Retry.MaxBackoff = time.Millisecond
 	cfg.CircuitBreaker.Enabled = false
@@ -94,4 +99,29 @@ func TestClient_RetryRulesFromModelResolution(t *testing.T) {
 	_, err := client.DoRaw(ctx, Request{Method: http.MethodPost, Endpoint: "/chat/completions", Body: map[string]any{}})
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), calls.Load(), "rules on the request resolution drive retries")
+}
+
+func TestClient_StatusWithoutRuleKeepsGatewayBudgetWhenAnotherRuleExpandsLoop(t *testing.T) {
+	client, calls := retryRulesTestClientWithMaxRetries(t, []int{502, 502, 502, 502}, 1)
+
+	ctx := httpclient.WithAttemptRetryRules(context.Background(), []httpclient.AttemptRetryRule{
+		{Status: 429, MaxRetries: 5, Delay: time.Millisecond},
+	})
+	_, err := client.DoRaw(ctx, Request{Method: http.MethodPost, Endpoint: "/chat/completions", Body: map[string]any{}})
+	require.Error(t, err)
+	assert.Equal(t, int32(2), calls.Load(), "an unrelated high-budget rule must not extend retries for 502")
+}
+
+func TestClient_EmptyAttemptRetryRulesOverrideResolutionRules(t *testing.T) {
+	client, calls := retryRulesTestClient(t, []int{500, 200})
+
+	ctx := core.WithWorkflow(context.Background(), &core.Workflow{
+		Resolution: &core.RequestModelResolution{
+			RetryRules: core.UpstreamRetryRules{{Status: 500, MaxRetries: 1, Delay: time.Millisecond}},
+		},
+	})
+	ctx = httpclient.WithAttemptRetryRules(ctx, nil)
+	_, err := client.DoRaw(ctx, Request{Method: http.MethodPost, Endpoint: "/chat/completions", Body: map[string]any{}})
+	require.Error(t, err)
+	assert.Equal(t, int32(1), calls.Load(), "an explicit empty override selects the gateway policy, not inherited model rules")
 }

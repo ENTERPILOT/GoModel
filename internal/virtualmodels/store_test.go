@@ -24,8 +24,8 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 			Slowdown:    new(0.4),
 			Timeout:     new(30),
 			RetryRules: []RetryRule{
-				{Status: 429, MaxRetries: 2, Delay: time.Second},
-				{Status: 500, MaxRetries: 0},
+				{Status: 429, MaxRetries: new(2), Delay: time.Second},
+				{Status: 500, MaxRetries: new(0)},
 			},
 			ReasoningEffort: "medium",
 			Params:          requestparams.Set{"chat_template_kwargs": json.RawMessage(`{"enable_thinking":true}`), "stale": nil},
@@ -74,8 +74,8 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		assert.Equal(t, 30, *gotRedirect.Timeout)
 		assert.Nil(t, gotRedirect.ResponseHeaderTimeout)
 		assert.Equal(t, []RetryRule{
-			{Status: 429, MaxRetries: 2, Delay: time.Second},
-			{Status: 500, MaxRetries: 0},
+			{Status: 429, MaxRetries: new(2), Delay: time.Second},
+			{Status: 500, MaxRetries: new(0)},
 		}, gotRedirect.RetryRules)
 		assert.Equal(t, "medium", gotRedirect.ReasoningEffort)
 		require.Len(t, gotRedirect.Params, 2)

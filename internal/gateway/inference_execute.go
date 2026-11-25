@@ -461,6 +461,7 @@ func (o *InferenceOrchestrator) validateProviderAndRequest(requestPresent bool, 
 // instances of one type can tell which instance answered (see
 // ResolvedProviderName).
 func (o *InferenceOrchestrator) chatCompletionProviderCall(ctx context.Context, req *core.ChatRequest, providerName string) (*core.ChatResponse, error) {
+	ctx = o.withAttemptRetryRules(ctx, core.ModelSelector{Provider: req.Provider, Model: req.Model})
 	resp, err := o.provider.ChatCompletion(ctx, req)
 	if err != nil {
 		return nil, err
@@ -475,6 +476,7 @@ func (o *InferenceOrchestrator) chatCompletionProviderCall(ctx context.Context, 
 }
 
 func (o *InferenceOrchestrator) responsesProviderCall(ctx context.Context, req *core.ResponsesRequest, providerName string) (*core.ResponsesResponse, error) {
+	ctx = o.withAttemptRetryRules(ctx, core.ModelSelector{Provider: req.Provider, Model: req.Model})
 	resp, err := o.provider.Responses(ctx, req)
 	if err != nil {
 		return nil, err
@@ -486,11 +488,11 @@ func (o *InferenceOrchestrator) responsesProviderCall(ctx context.Context, req *
 }
 
 func (o *InferenceOrchestrator) streamChatCompletionProviderCall(ctx context.Context, req *core.ChatRequest, _ string) (io.ReadCloser, error) {
-	return o.provider.StreamChatCompletion(ctx, req)
+	return o.provider.StreamChatCompletion(o.withAttemptRetryRules(ctx, core.ModelSelector{Provider: req.Provider, Model: req.Model}), req)
 }
 
 func (o *InferenceOrchestrator) streamResponsesProviderCall(ctx context.Context, req *core.ResponsesRequest, _ string) (io.ReadCloser, error) {
-	return o.provider.StreamResponses(ctx, req)
+	return o.provider.StreamResponses(o.withAttemptRetryRules(ctx, core.ModelSelector{Provider: req.Provider, Model: req.Model}), req)
 }
 
 func emptyProviderResponseError(provider string) *core.GatewayError {
@@ -563,6 +565,7 @@ func (o *InferenceOrchestrator) executeEmbeddings(
 }
 
 func (o *InferenceOrchestrator) embeddingsProviderCall(ctx context.Context, req *core.EmbeddingRequest, providerName string) (*core.EmbeddingResponse, error) {
+	ctx = o.withAttemptRetryRules(ctx, core.ModelSelector{Provider: req.Provider, Model: req.Model})
 	resp, err := o.provider.Embeddings(ctx, req)
 	if err != nil {
 		return nil, err

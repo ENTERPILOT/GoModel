@@ -19,9 +19,9 @@ func TestResolveRetryRules(t *testing.T) {
 	exact := VirtualModel{
 		Source: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", Enabled: true,
 		RetryRules: retryRules(
-			RetryRule{Status: 429, MaxRetries: 2, Delay: time.Second},
-			RetryRule{Status: 503, MaxRetries: 1, Delay: 250 * time.Millisecond},
-			RetryRule{Status: 500, MaxRetries: 0},
+			RetryRule{Status: 429, MaxRetries: new(2), Delay: time.Second},
+			RetryRule{Status: 503, MaxRetries: new(1), Delay: 250 * time.Millisecond},
+			RetryRule{Status: 500, MaxRetries: new(0)},
 		),
 	}
 	alias := func(source string, rules []RetryRule) VirtualModel {
@@ -44,10 +44,14 @@ func TestResolveRetryRules(t *testing.T) {
 		},
 		{
 			name:      "alias rules beat model policy",
-			rows:      []VirtualModel{alias("extract", retryRules(RetryRule{Status: 429, MaxRetries: 3, Delay: 2 * time.Second})), exact},
+			rows:      []VirtualModel{alias("extract", retryRules(RetryRule{Status: 429, MaxRetries: new(3), Delay: 2 * time.Second})), exact},
 			requested: core.NewRequestedModelSelector("extract", ""),
 			route:     []string{"extract"},
-			want:      core.UpstreamRetryRules{{Status: 429, MaxRetries: 3, Delay: 2 * time.Second}},
+			want: core.UpstreamRetryRules{
+				{Status: 429, MaxRetries: 3, Delay: 2 * time.Second},
+				{Status: 503, MaxRetries: 1, Delay: 250 * time.Millisecond},
+				{Status: 500, MaxRetries: 0},
+			},
 		},
 		{
 			name:      "alias inherits model policy when omitted",
@@ -63,7 +67,7 @@ func TestResolveRetryRules(t *testing.T) {
 		{
 			name: "a redirect routing did not apply sets nothing",
 			rows: []VirtualModel{
-				alias("extract", retryRules(RetryRule{Status: 429, MaxRetries: 3})),
+				alias("extract", retryRules(RetryRule{Status: 429, MaxRetries: new(3)})),
 				exact,
 			},
 			requested: core.NewRequestedModelSelector("extract", ""),
@@ -76,8 +80,8 @@ func TestResolveRetryRules(t *testing.T) {
 		{
 			name: "outer redirect on the route wins over inner",
 			rows: []VirtualModel{
-				{Source: "outer", Targets: []Target{{Model: "inner"}}, RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: 5}), Enabled: true},
-				alias("inner", retryRules(RetryRule{Status: 429, MaxRetries: 3})),
+				{Source: "outer", Targets: []Target{{Model: "inner"}}, RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: new(5)}), Enabled: true},
+				alias("inner", retryRules(RetryRule{Status: 429, MaxRetries: new(3)})),
 			},
 			requested: core.NewRequestedModelSelector("outer", ""),
 			route:     []string{"outer", "inner"},
@@ -86,7 +90,7 @@ func TestResolveRetryRules(t *testing.T) {
 		{
 			name: "policy for another user path is skipped",
 			rows: []VirtualModel{
-				{Source: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", UserPaths: []string{"/team/alpha"}, RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: 2}), Enabled: true},
+				{Source: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", UserPaths: []string{"/team/alpha"}, RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: new(2)}), Enabled: true},
 			},
 			requested: core.NewRequestedModelSelector("openai/gpt-4o", ""),
 			ctx:       core.WithEffectiveUserPath(context.Background(), "/team/beta"),
@@ -94,7 +98,7 @@ func TestResolveRetryRules(t *testing.T) {
 		},
 		{
 			name:      "explicit provider skips redirects",
-			rows:      []VirtualModel{alias("gpt-4o-fast", retryRules(RetryRule{Status: 429, MaxRetries: 3})), exact},
+			rows:      []VirtualModel{alias("gpt-4o-fast", retryRules(RetryRule{Status: 429, MaxRetries: new(3)})), exact},
 			requested: core.NewRequestedModelSelector("gpt-4o", "openai"),
 			want: core.UpstreamRetryRules{
 				{Status: 429, MaxRetries: 2, Delay: time.Second},
@@ -125,15 +129,18 @@ func TestValidateRetryRules(t *testing.T) {
 	}{
 		{name: "unset", vm: VirtualModel{}},
 		{name: "valid", vm: VirtualModel{RetryRules: retryRules(
-			RetryRule{Status: 429, MaxRetries: 2, Delay: time.Second},
-			RetryRule{Status: 503, MaxRetries: 1, Delay: 250 * time.Millisecond},
-			RetryRule{Status: 500, MaxRetries: 0},
+			RetryRule{Status: 429, MaxRetries: new(2), Delay: time.Second},
+			RetryRule{Status: 503, MaxRetries: new(1), Delay: 250 * time.Millisecond},
+			RetryRule{Status: 500, MaxRetries: new(0)},
 		)}},
+		{name: "missing retries", vm: VirtualModel{RetryRules: retryRules(RetryRule{Status: 429})}, wantErr: "retry_rules[0].max_retries"},
+		{name: "too many retries", vm: VirtualModel{RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: new(MaxRetryRuleRetries + 1)})}, wantErr: "retry_rules[0].max_retries"},
+		{name: "too long a delay", vm: VirtualModel{RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: new(1), Delay: MaxRetryRuleDelay + time.Second})}, wantErr: "retry_rules[0].delay"},
 		{name: "invalid status", vm: VirtualModel{RetryRules: retryRules(RetryRule{Status: 99})}, wantErr: "retry_rules[0].status"},
-		{name: "negative retries", vm: VirtualModel{RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: -1})}, wantErr: "retry_rules[0].max_retries"},
-		{name: "negative delay", vm: VirtualModel{RetryRules: retryRules(RetryRule{Status: 429, Delay: -time.Second})}, wantErr: "retry_rules[0].delay"},
+		{name: "negative retries", vm: VirtualModel{RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: new(-1)})}, wantErr: "retry_rules[0].max_retries"},
+		{name: "negative delay", vm: VirtualModel{RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: new(1), Delay: -time.Second})}, wantErr: "retry_rules[0].delay"},
 		{name: "duplicate status", vm: VirtualModel{RetryRules: retryRules(
-			RetryRule{Status: 429}, RetryRule{Status: 429},
+			RetryRule{Status: 429, MaxRetries: new(1)}, RetryRule{Status: 429, MaxRetries: new(1)},
 		)}, wantErr: "retry_rules[1].status"},
 	}
 	for _, tt := range tests {
@@ -153,24 +160,24 @@ func TestValidateRetryRules(t *testing.T) {
 func TestRetryRulesRejectedOnProviderWidePolicy(t *testing.T) {
 	_, err := normalizePolicyInput(testCatalog(), VirtualModel{
 		Source: "openai/", Enabled: true,
-		RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: 2}),
+		RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: new(2)}),
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "can only be configured for a model or redirect")
 }
 
 func TestVirtualModelCloneDoesNotShareRetryRules(t *testing.T) {
-	original := VirtualModel{RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: 2})}
+	original := VirtualModel{RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: new(2)})}
 	cloned := original.clone()
-	cloned.RetryRules[0].MaxRetries = 5
-	assert.Equal(t, 2, original.RetryRules[0].MaxRetries)
+	*cloned.RetryRules[0].MaxRetries = 5
+	assert.Equal(t, 2, *original.RetryRules[0].MaxRetries)
 }
 
 func TestResolveRetryRulesFollowsRecordedRoute(t *testing.T) {
 	service := newSlowdownService(t,
 		VirtualModel{Source: "outer", Targets: []Target{{Model: "inner"}}, Enabled: true},
 		VirtualModel{Source: "inner", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}},
-			RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: 4}), Enabled: true},
+			RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: new(4)}), Enabled: true},
 	)
 	requested := core.NewRequestedModelSelector("outer", "")
 	resolved, route, changed, err := service.ResolveModelRouteForUserPath(context.Background(), requested)
@@ -179,4 +186,31 @@ func TestResolveRetryRulesFollowsRecordedRoute(t *testing.T) {
 	assert.Equal(t, []string{"outer", "inner"}, route)
 	got := service.ResolveRetryRules(context.Background(), requested, resolved, route)
 	assert.Equal(t, core.UpstreamRetryRules{{Status: 429, MaxRetries: 4}}, got)
+}
+
+func TestResolveAttemptRetryRulesUsesFailoverTargetPolicies(t *testing.T) {
+	service := newSlowdownService(t,
+		VirtualModel{
+			Source:     "extract",
+			Targets:    []Target{{Provider: "openai", Model: "gpt-4o"}, {Provider: "anthropic", Model: "claude"}},
+			RetryRules: retryRules(RetryRule{Status: 429, MaxRetries: new(3)}),
+			Enabled:    true,
+		},
+		VirtualModel{Source: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", RetryRules: retryRules(RetryRule{Status: 500, MaxRetries: new(4)}), Enabled: true},
+		VirtualModel{Source: "anthropic/claude", ProviderName: "anthropic", Model: "claude", RetryRules: retryRules(RetryRule{Status: 503, MaxRetries: new(1)}), Enabled: true},
+	)
+	primary := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
+	backup := core.ModelSelector{Provider: "anthropic", Model: "claude"}
+	resolution := &core.RequestModelResolution{
+		Requested:        core.NewRequestedModelSelector("extract", ""),
+		ResolvedSelector: primary,
+		VirtualModelPath: []string{"extract"},
+	}
+
+	got := service.ResolveAttemptRetryRules(context.Background(), resolution, backup)
+	assert.Equal(t, core.UpstreamRetryRules{
+		{Status: 429, MaxRetries: 3},
+		{Status: 503, MaxRetries: 1},
+	}, got)
+	assert.NotContains(t, got, core.UpstreamRetryRule{Status: 500, MaxRetries: 4})
 }

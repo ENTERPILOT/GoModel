@@ -415,8 +415,8 @@ func TestUpsertVirtualModelRetryRules(t *testing.T) {
 			wantStatus: http.StatusOK,
 			wantView: func(t *testing.T, view virtualmodels.View) {
 				assert.Equal(t, []virtualmodels.RetryRule{
-					{Status: 429, MaxRetries: 2, Delay: time.Second},
-					{Status: 503, MaxRetries: 0},
+					{Status: 429, MaxRetries: new(2), Delay: time.Second},
+					{Status: 503, MaxRetries: new(0)},
 				}, view.RetryRules)
 			},
 		},

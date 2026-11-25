@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modelselectors"
@@ -17,6 +18,11 @@ const (
 	MaxSlowdownFactor = 10.0
 	// MaxTimeoutSeconds caps the per-attempt upstream timeouts (one day).
 	MaxTimeoutSeconds = 86400
+	// MaxRetryRuleRetries caps one status override so a request cannot be held
+	// in an effectively unbounded retry loop.
+	MaxRetryRuleRetries = 10
+	// MaxRetryRuleDelay caps the fixed wait before one retry.
+	MaxRetryRuleDelay = time.Hour
 )
 
 // IsValidationError reports whether err is a validation error.
@@ -266,11 +272,20 @@ func validateRetryRules(vm VirtualModel) error {
 		if rule.Status < 400 || rule.Status > 599 {
 			return newValidationError(prefix+".status must be an HTTP error status between 400 and 599", nil)
 		}
-		if rule.MaxRetries < 0 {
+		if rule.MaxRetries == nil {
+			return newValidationError(prefix+".max_retries is required", nil)
+		}
+		if *rule.MaxRetries < 0 {
 			return newValidationError(prefix+".max_retries cannot be negative", nil)
+		}
+		if *rule.MaxRetries > MaxRetryRuleRetries {
+			return newValidationError(fmt.Sprintf(prefix+".max_retries cannot exceed %d", MaxRetryRuleRetries), nil)
 		}
 		if rule.Delay < 0 {
 			return newValidationError(prefix+".delay cannot be negative", nil)
+		}
+		if rule.Delay > MaxRetryRuleDelay {
+			return newValidationError(prefix+".delay cannot exceed "+MaxRetryRuleDelay.String(), nil)
 		}
 		if _, dup := seen[rule.Status]; dup {
 			return newValidationError(prefix+".status duplicates an earlier rule", nil)

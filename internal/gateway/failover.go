@@ -340,7 +340,7 @@ func (o *InferenceOrchestrator) ExecutePassthroughWithFailover(ctx context.Conte
 				recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, qualified, started, saturated))
 				return answer{}, "", "", saturated
 			}
-			resp, err := call(ctx, primary, providerType, providerName)
+			resp, err := call(o.withAttemptRetryRules(ctx, primary), primary, providerType, providerName)
 			recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, qualified, started, err))
 			if err != nil {
 				return answer{}, "", "", err
@@ -351,7 +351,8 @@ func (o *InferenceOrchestrator) ExecutePassthroughWithFailover(ctx context.Conte
 		func(selector core.ModelSelector, providerType, providerName string) (answer, string, error) {
 			// A failover target gets a different body, so it must not reuse
 			// the client's idempotency key.
-			resp, err := call(core.WithIdempotencyKey(ctx, ""), selector, providerType, providerName)
+			attemptCtx := core.WithIdempotencyKey(ctx, "")
+			resp, err := call(o.withAttemptRetryRules(attemptCtx, selector), selector, providerType, providerName)
 			if err != nil {
 				return answer{}, "", err
 			}

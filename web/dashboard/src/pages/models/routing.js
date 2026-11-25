@@ -200,6 +200,7 @@ export function mapRedirectView(view) {
       view.response_header_timeout == null
         ? null
         : Number(view.response_header_timeout),
+    retry_rules: Array.isArray(view.retry_rules) ? view.retry_rules : [],
     reasoning_effort: view.reasoning_effort || "",
     params: paramsObject(view.params),
     default_params: paramsObject(view.default_params),
@@ -237,6 +238,7 @@ export function splitVirtualModelViews(views) {
           view.response_header_timeout == null
             ? null
             : Number(view.response_header_timeout),
+        retry_rules: Array.isArray(view.retry_rules) ? view.retry_rules : [],
         reasoning_effort: view.reasoning_effort || "",
         params: paramsObject(view.params),
         default_params: paramsObject(view.default_params),

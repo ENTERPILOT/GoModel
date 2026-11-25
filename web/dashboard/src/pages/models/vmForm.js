@@ -342,6 +342,14 @@ export function timeoutPayloadFields(source) {
   return fields;
 }
 
+// retryRulesPayloadFields preserves rules the API already stored. The
+// dashboard has no retry-rule editor yet, so they ride along unchanged.
+export function retryRulesPayloadFields(source) {
+  return Array.isArray(source && source.retry_rules) && source.retry_rules.length > 0
+    ? { retry_rules: source.retry_rules }
+    : {};
+}
+
 // vmFormHasExtraTargetRows: a second target row (filled or not) means the
 // editor is configuring a load balancer.
 function vmFormHasExtraTargetRows(form) {
@@ -576,7 +584,7 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
   // Timeouts are only valid on a model or redirect; the backend rejects them
   // on provider-wide and global policies, where the fields are hidden.
   if (vmFormSupportsSlowdown(form)) {
-    Object.assign(payload, timeoutPayloadFields(form));
+    Object.assign(payload, timeoutPayloadFields(form), retryRulesPayloadFields(form));
   }
   // A model left as its own only target saves as a policy, which has no
   // targets: the effort still shown on that row becomes the policy's, as it
@@ -654,7 +662,7 @@ export function buildAliasTogglePayload(alias) {
       payload.slowdown = slowdown;
     }
   }
-  Object.assign(payload, timeoutPayloadFields(alias));
+  Object.assign(payload, timeoutPayloadFields(alias), retryRulesPayloadFields(alias));
   if (alias.reasoning_effort) {
     payload.reasoning_effort = alias.reasoning_effort;
   }
@@ -732,12 +740,13 @@ export function buildModelTogglePayload(selector, existingPolicy, access) {
   }
   const existingTimeouts = timeoutPayloadFields(existingPolicy);
   const hasExistingTimeouts = Object.keys(existingTimeouts).length > 0;
-  Object.assign(preserved, existingTimeouts);
+  Object.assign(preserved, existingTimeouts, retryRulesPayloadFields(existingPolicy));
   if (existingReasoningEffort) {
     preserved.reasoning_effort = existingReasoningEffort;
   }
   assignParamsFromView(preserved, existingPolicy);
   const hasExistingParams = PARAMS_FIELDS.some((field) => field in preserved);
+  const hasExistingRetryRules = Object.keys(retryRulesPayloadFields(existingPolicy)).length > 0;
 
   let method = "PUT";
   let payload;
@@ -756,6 +765,7 @@ export function buildModelTogglePayload(selector, existingPolicy, access) {
     !hasExistingTimeouts &&
     !existingReasoningEffort &&
     !hasExistingParams &&
+    !hasExistingRetryRules &&
     safeAccess.default_enabled !== false
   ) {
     // Removing a path-less policy only enables the model when the default is

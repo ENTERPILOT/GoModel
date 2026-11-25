@@ -124,14 +124,26 @@ type AttemptRetryRule struct {
 
 type attemptRetryRulesKey struct{}
 
+type attemptRetryRulesOverride struct {
+	rules []AttemptRetryRule
+}
+
 // WithAttemptRetryRules attaches per-status retry overrides to ctx. An empty
 // list removes any inherited overrides so the gateway-wide policy applies.
 func WithAttemptRetryRules(ctx context.Context, rules []AttemptRetryRule) context.Context {
-	return context.WithValue(ctx, attemptRetryRulesKey{}, rules)
+	return context.WithValue(ctx, attemptRetryRulesKey{}, attemptRetryRulesOverride{rules: rules})
 }
 
 // AttemptRetryRulesFromContext returns the overrides attached to ctx.
 func AttemptRetryRulesFromContext(ctx context.Context) []AttemptRetryRule {
-	rules, _ := ctx.Value(attemptRetryRulesKey{}).([]AttemptRetryRule)
-	return rules
+	override, _ := ctx.Value(attemptRetryRulesKey{}).(attemptRetryRulesOverride)
+	return override.rules
+}
+
+// HasAttemptRetryRules reports whether ctx carries an explicit override, even
+// an empty one. The presence matters: empty means the gateway-wide policy,
+// not the model's inherited rules.
+func HasAttemptRetryRules(ctx context.Context) bool {
+	_, ok := ctx.Value(attemptRetryRulesKey{}).(attemptRetryRulesOverride)
+	return ok
 }

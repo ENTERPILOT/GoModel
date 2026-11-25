@@ -296,10 +296,12 @@ By default every upstream attempt follows the gateway-wide
 `RETRY_MAX_RETRIES` times with exponential backoff. Set `retry_rules` on a
 redirect or a concrete model to change that behavior for specific upstream
 HTTP statuses. Each rule names a `status` (400-599), a `max_retries` count,
-and a fixed `delay` before each retry. A rule with `max_retries: 0` disables
-retries for that status, so the failure moves on to the next
-[failover](/features/failover) target right away. A status with no rule keeps
-the gateway policy. Each retry gets the per-attempt timeout described above.
+and an optional fixed `delay` before each retry. `max_retries` is required and
+is capped at 10. A rule with `max_retries: 0` disables retries for that status.
+Whether the failure then moves on to the next [failover](/features/failover)
+target still depends on the configured failover policy matching that error. A
+status with no rule keeps the gateway policy. Each retry gets the per-attempt
+timeout described above.
 
 ```yaml
 virtual_models:
@@ -316,14 +318,18 @@ virtual_models:
         max_retries: 0
 ```
 
-- Rules resolve like timeouts: the redirects the request routed through win
-  (outermost first), then the resolved model's exact policy, then its
-  model-wide one. A policy whose `user_paths` exclude the caller is skipped.
+- Rules merge per status: the redirects the request routed through win
+  (outermost first), then the resolved model's exact policy fills statuses the
+  redirects did not set, then its model-wide one fills the rest. A policy whose
+  `user_paths` exclude the caller is skipped. Failover targets use their own
+  concrete-model rules, never the primary target's.
 - A rule for a status outside the gateway's `retry_on_statuses` makes that
   status retryable; a rule with `max_retries: 0` makes a normally retryable
   status fail immediately.
-- A fixed `delay` replaces exponential backoff for that status. Omit it (or
-  set `0`) to keep the gateway backoff.
+- A fixed `delay` replaces exponential backoff for that status and is capped at
+  one hour. Omit it (or set `0`) to keep the gateway backoff. YAML accepts Go
+  duration strings such as `1s`; JSON and the admin API encode it as integer
+  nanoseconds.
 - Only a redirect or a concrete model accepts retry rules; provider-wide
   (`openai/`) and global (`/`) policies reject them. Callers cannot set them
   with request headers.

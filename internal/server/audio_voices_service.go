@@ -59,7 +59,9 @@ func (s *audioService) ListVoices(c *echo.Context) error {
 	}
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
-	ctx = withModelTimeouts(ctx, s.modelResolver, core.NewRequestedModelSelector(model, providerHint), selector, vmRoute)
+	requested := core.NewRequestedModelSelector(model, providerHint)
+	ctx = withModelTimeouts(ctx, s.modelResolver, requested, selector, vmRoute)
+	ctx = withModelRetryRules(ctx, s.modelResolver, requested, selector, vmRoute)
 	c.SetRequest(c.Request().WithContext(ctx))
 	requestlog.EnrichEntry(c, selector.Model, "")
 	route := s.routeFor(selector, requestID)
