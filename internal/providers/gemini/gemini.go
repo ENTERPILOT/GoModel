@@ -180,6 +180,11 @@ func (p *Provider) SetModelsURL(url string) {
 }
 
 func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
+	if len(p.vertexLabels) > 0 && !p.useNativeAPI {
+		// Refused rather than dropped: unlabeled calls would bill unnoticed.
+		p.configErr = fmt.Errorf("vertex_labels requires api_mode native: Vertex AI's OpenAI-compatible endpoint takes no request labels")
+		return
+	}
 	if p.backend == geminiBackendVertex && p.authType == geminiAuthTypeAPIKey {
 		p.configErr = fmt.Errorf("vertex Gemini requires gcp_adc or gcp_service_account auth")
 		return
@@ -195,11 +200,6 @@ func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
 	}
 	if p.backend == geminiBackendAIStudio && p.authType == geminiAuthTypeAPIKey && strings.TrimSpace(providerCfg.APIKey) == "" {
 		p.configErr = fmt.Errorf("gemini API key is required")
-		return
-	}
-	if len(p.vertexLabels) > 0 && !p.useNativeAPI {
-		// Refused rather than dropped: unlabeled calls would bill unnoticed.
-		p.configErr = fmt.Errorf("vertex_labels requires api_mode native: Vertex AI's OpenAI-compatible endpoint takes no request labels")
 	}
 }
 
