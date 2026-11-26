@@ -113,16 +113,24 @@ providers:
       environment: "${ENVIRONMENT}"
 ```
 
+Or set them from the environment, as `key=value` pairs separated by commas.
+`VERTEX_LABELS` replaces the provider's `vertex_labels`, and a suffixed
+instance takes its own, such as `VERTEX_US_LABELS`:
+
+```bash
+VERTEX_LABELS=team=search,environment=prod
+```
+
 - No labels are sent by default.
-- `vertex_labels` is set in `config.yaml` only; it has no environment
-  variable. A value can still come from the environment through `${VAR}`.
-- It requires `api_mode: native`. A provider in `openai_compatible` or
-  `anthropic` mode with labels fails its requests with a configuration error
-  rather than sending calls without them.
-- Embeddings and Imagen calls carry no labels.
-- Vertex AI checks the labels' format: lowercase keys and values of up to 63
-  characters, and at most 64 labels. It forwards them to Cloud Billing for
-  pay-as-you-go requests only, not Provisioned Throughput.
+- Labels require `api_mode: native`, rather than calls going out without them.
+  With labels set, a provider in `anthropic` mode fails every request with a
+  configuration error. One in `openai_compatible` mode fails chat, Responses,
+  image, and model-listing requests; its embeddings still work.
+- Embeddings and Imagen calls never carry labels, in any mode.
+- Vertex AI checks each label against its
+  [label requirements](https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/add-labels-to-api-calls)
+  and rejects requests with invalid ones. It forwards labels to Cloud Billing
+  for pay-as-you-go requests only, not Provisioned Throughput.
 
 ## Claude models
 

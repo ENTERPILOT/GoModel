@@ -708,7 +708,7 @@ providers:
     # service_account_json: "${VERTEX_SERVICE_ACCOUNT_JSON}"
     # service_account_json_base64: "${VERTEX_SERVICE_ACCOUNT_JSON_BASE64}"
     # api_mode: native # or openai_compatible, or anthropic for Claude models
-    # vertex_labels: # Cloud Billing request labels on Gemini calls; native mode only
+    # vertex_labels: # Cloud Billing request labels on Gemini calls; native mode only; or VERTEX_LABELS=team=search
     #   team: "search"
     # models:
     #   - id: "google/gemini-2.5-flash"
