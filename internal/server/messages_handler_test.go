@@ -319,6 +319,37 @@ func TestRewriteMessagesModel(t *testing.T) {
 	})
 }
 
+// setMessagesModel adds the model to a body that has none, where
+// rewriteMessagesModel leaves such a body alone, and otherwise rewrites it
+// the same way.
+func TestSetMessagesModel(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"absent member is added first", `{ "max_tokens": 1, "messages": [] }`, `{"model":"claude-test", "max_tokens": 1, "messages": [] }`},
+		{"empty object", `{}`, `{"model":"claude-test"}`},
+		{"null model is replaced", `{"model":null,"max_tokens":1}`, `{"model":"claude-test","max_tokens":1}`},
+		{"alias is replaced in place", `{"max_tokens":1,"model":"my-alias"}`, `{"max_tokens":1,"model":"claude-test"}`},
+		{"same model leaves body untouched", `{"model":"claude-test"}`, `{"model":"claude-test"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := setMessagesModel([]byte(tt.body), "claude-test")
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, string(got))
+		})
+	}
+
+	untouched, err := rewriteMessagesModel([]byte(`{"max_tokens":1}`), "claude-test")
+	require.NoError(t, err)
+	assert.Equal(t, `{"max_tokens":1}`, string(untouched))
+
+	_, err = setMessagesModel([]byte(`[1,2]`), "claude-test")
+	require.Error(t, err)
+}
+
 func TestMessages_InvalidRequestReturnsAnthropicError(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"claude-test"}}
 	handler := NewHandler(provider, nil, nil, nil)

@@ -75,14 +75,14 @@ func applyReasoning(req *anthropicRequest, model, effort string) {
 			req.Thinking = &anthropicThinking{Type: "disabled"}
 			return
 		}
-		if !alwaysThinks(model) {
+		if !AlwaysThinks(model) {
 			return
 		}
 		effort = "low"
 	}
 	if isAdaptiveThinkingModel(model) {
 		req.Thinking = &anthropicThinking{Type: "adaptive"}
-		req.OutputConfig = &anthropicOutputConfig{Effort: normalizeEffort(effort)}
+		req.OutputConfig = &anthropicOutputConfig{Effort: SupportedEffort(model, normalizeEffort(effort))}
 	} else {
 		budget := reasoningEffortToBudgetTokens(effort)
 		req.Thinking = &anthropicThinking{
@@ -90,7 +90,7 @@ func applyReasoning(req *anthropicRequest, model, effort string) {
 			BudgetTokens: budget,
 		}
 		if req.MaxTokens <= budget {
-			adjusted := budget + 1024
+			adjusted := budget + thinkingAnswerRoom
 			slog.Info("MaxTokens adjusted for extended thinking",
 				"original", req.MaxTokens, "adjusted", adjusted)
 			req.MaxTokens = adjusted
@@ -133,7 +133,7 @@ const thinkingDisplaySummarized = "summarized"
 func applyReasoningSummary(req *anthropicRequest, model string) {
 	switch {
 	case req.Thinking == nil:
-		if thinksByDefault(model) || alwaysThinks(model) {
+		if thinksByDefault(model) || AlwaysThinks(model) {
 			req.Thinking = &anthropicThinking{Type: "adaptive", Display: thinkingDisplaySummarized}
 		}
 	case req.Thinking.Type != "disabled":

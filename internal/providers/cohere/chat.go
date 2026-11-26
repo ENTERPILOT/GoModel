@@ -1,6 +1,7 @@
 package cohere
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -86,6 +87,10 @@ func toCohereChatRequest(req *core.ChatRequest, stream bool) (*chatRequest, erro
 	}
 	if err := copyChatExtraFields(out, req.ExtraFields); err != nil {
 		return nil, err
+	}
+	// Cohere's own control wins over the common effort. A null one is none.
+	if core.IsJSONNull(bytes.TrimSpace(out.Thinking)) {
+		out.Thinking = thinkingForEffort(req.Model, requestedEffort(req), out.MaxTokens)
 	}
 	return out, nil
 }

@@ -69,6 +69,8 @@ type Provider struct {
 	// Typed requests receive them through the ChatCompatible and Anthropic
 	// hooks; Passthrough merges them under the caller's opaque headers.
 	headers func(context.Context) http.Header
+	// defaultEffort is the effort injected into requests that set none.
+	defaultEffort string
 }
 
 var _ core.Provider = (*Provider)(nil)
@@ -77,7 +79,8 @@ var _ core.Provider = (*Provider)(nil)
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
 	headers := requestHeaders(loadSessionHeaderEnabled())
-	chat := openai.NewChatCompatible(cfg.APIKey, opts, compatibleConfig(baseURL, headers))
+	defaultEffort := loadDefaultReasoningEffort()
+	chat := openai.NewChatCompatible(cfg.APIKey, opts, compatibleConfig(baseURL, headers, defaultEffort))
 	// opts carries the shared keyring, so the /messages client rotates in step
 	// with the chat client above rather than pinning the primary key.
 	messages := anthropic.New(providers.ProviderConfig{APIKey: cfg.APIKey, APIKeys: cfg.APIKeys, BaseURL: baseURL}, opts)
@@ -89,6 +92,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		messages:       messages,
 		messagesModels: loadMessagesModels(),
 		headers:        headers,
+		defaultEffort:  defaultEffort,
 	}
 }
 
@@ -98,11 +102,11 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 // deepseek.go), and ChatRequestHeaders its session/client identification
 // headers (see session.go), so /v1/responses picks them up through
 // ResponsesViaChat as well.
-func compatibleConfig(baseURL string, headers func(context.Context) http.Header) openai.CompatibleProviderConfig {
+func compatibleConfig(baseURL string, headers func(context.Context) http.Header, defaultEffort string) openai.CompatibleProviderConfig {
 	return openai.CompatibleProviderConfig{
 		ProviderName:       "opencode_go",
 		BaseURL:            baseURL,
-		AdaptChatRequest:   chatRequestAdapter(loadDefaultReasoningEffort(), deepseek.LoadJSONSchemaMode()),
+		AdaptChatRequest:   chatRequestAdapter(defaultEffort, deepseek.LoadJSONSchemaMode()),
 		ChatRequestHeaders: chatRequestHeaders(headers),
 	}
 }
@@ -140,7 +144,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if req != nil && p.usesMessages(req.Model) {
 		return p.messages.ChatCompletion(ctx, req)
 	}
-	return p.ChatCompatible.ChatCompletion(ctx, req)
+	return p.ChatCompatible.ChatCompletion(ctx, withinEffortCeiling(ctx, req, p.defaultEffort))
 }
 
 // StreamChatCompletion mirrors ChatCompletion's per-model endpoint routing.
@@ -148,7 +152,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	if req != nil && p.usesMessages(req.Model) {
 		return p.messages.StreamChatCompletion(ctx, req)
 	}
-	return p.ChatCompatible.StreamChatCompletion(ctx, req)
+	return p.ChatCompatible.StreamChatCompletion(ctx, withinEffortCeiling(ctx, req, p.defaultEffort))
 }
 
 // Responses dispatches through this provider's ChatCompletion so /v1/responses

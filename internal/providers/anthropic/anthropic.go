@@ -381,9 +381,9 @@ func thinksByDefault(model string) bool {
 	return matchesModelPrefix(model, defaultThinkingPrefixes) && !matchesModelPrefix(model, disabledThinkingRejectedPrefixes)
 }
 
-// alwaysThinks reports whether model thinks on every request and rejects
+// AlwaysThinks reports whether model thinks on every request and rejects
 // thinking {"type": "disabled"}.
-func alwaysThinks(model string) bool {
+func AlwaysThinks(model string) bool {
 	return matchesModelPrefix(model, alwaysThinkingPrefixes)
 }
 
@@ -398,6 +398,24 @@ func matchesModelPrefix(model string, prefixes []string) bool {
 		}
 	}
 	return false
+}
+
+// xhighRejectedPrefixes lists the adaptive-thinking models that take effort
+// "max" but not "xhigh", the level Opus 4.7 added: Anthropic answers them
+// with a 400 ("This model does not support effort level 'xhigh'").
+var xhighRejectedPrefixes = []string{
+	"claude-opus-4-6",
+	"claude-sonnet-4-6",
+}
+
+// SupportedEffort returns the effort model is sent for effort: "xhigh"
+// becomes "high", the next level down, on a model that rejects it. Every
+// other effort, in any spelling, is returned as it is.
+func SupportedEffort(model, effort string) string {
+	if strings.EqualFold(strings.TrimSpace(effort), "xhigh") && matchesModelPrefix(model, xhighRejectedPrefixes) {
+		return "high"
+	}
+	return effort
 }
 
 // normalizeEffort maps effort to the values Anthropic's adaptive thinking

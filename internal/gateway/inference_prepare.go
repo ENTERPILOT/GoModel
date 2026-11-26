@@ -102,7 +102,7 @@ func prepareTranslated[Req any, Prepared any](
 	}
 	if spec.overrides != nil {
 		if overrides := o.RequestOverrides(ctx, workflow); !overrides.IsZero() {
-			ctx = withClientRequest(ctx, req)
+			ctx = withCeilingsContext(withClientRequest(ctx, req), overrides.Ceilings)
 			if req, err = spec.overrides(req, overrides); err != nil {
 				return zero, overridesError(err)
 			}

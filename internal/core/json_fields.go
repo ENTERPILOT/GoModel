@@ -242,6 +242,82 @@ func (fields UnknownJSONFields) Lookup(key string) json.RawMessage {
 	return found
 }
 
+// LookupAll returns every raw value stored under key, in document order. A
+// body may repeat a member, and most upstream decoders keep the last
+// occurrence where Lookup reports the first, so a check that bounds a value
+// must see them all.
+func (fields UnknownJSONFields) LookupAll(key string) []json.RawMessage {
+	var found []json.RawMessage
+	fields.forEachMember(func(name string, value gjson.Result) bool {
+		if name == key && decoderAcceptsJSONValue(value.Raw) {
+			found = append(found, CloneRawJSON(json.RawMessage(value.Raw)))
+		}
+		return true
+	})
+	return found
+}
+
+// Respelled returns the names of the members that spell one of keys in
+// another letter case. A decoder that matches member names
+// case-insensitively, as Go's do, reads such a member as the key itself, so
+// a check that bounds a key must not let its respellings through.
+func (fields UnknownJSONFields) Respelled(keys ...string) []string {
+	var names []string
+	fields.forEachMember(func(name string, _ gjson.Result) bool {
+		if !slices.Contains(keys, name) && slices.ContainsFunc(keys, func(key string) bool { return strings.EqualFold(key, name) }) {
+			names = append(names, name)
+		}
+		return true
+	})
+	return names
+}
+
+// Rewritten returns the fields with every member replaced by what rewrite
+// returns for it; see RewriteJSONObject. The fields are returned as they are
+// when rewrite changes nothing.
+func (fields UnknownJSONFields) Rewritten(rewrite func(name string, value json.RawMessage) json.RawMessage) UnknownJSONFields {
+	raw, changed := RewriteJSONObject(fields.raw, rewrite)
+	if !changed {
+		return fields
+	}
+	return UnknownJSONFields{raw: raw}
+}
+
+// RewriteJSONObject returns object with every member replaced by what rewrite
+// returns for it: the value to keep, or nil to drop the member. Members are
+// visited in document order, a repeated one once per occurrence, so the
+// rewrite reaches every occurrence whichever one a decoder keeps. changed is
+// false, and object is returned as it is, when rewrite changes nothing or
+// object is not a JSON object.
+func RewriteJSONObject(object json.RawMessage, rewrite func(name string, value json.RawMessage) json.RawMessage) (rewritten json.RawMessage, changed bool) {
+	root := gjson.ParseBytes(object)
+	if !root.IsObject() {
+		return object, false
+	}
+	buf := bytes.NewBuffer(make([]byte, 0, len(object)))
+	buf.WriteByte('{')
+	root.ForEach(func(key, value gjson.Result) bool {
+		kept := rewrite(key.String(), json.RawMessage(value.Raw))
+		if kept == nil {
+			changed = true
+			return true
+		}
+		changed = changed || string(kept) != value.Raw
+		if buf.Len() > 1 {
+			buf.WriteByte(',')
+		}
+		buf.WriteString(key.Raw)
+		buf.WriteByte(':')
+		buf.Write(kept)
+		return true
+	})
+	if !changed {
+		return object, false
+	}
+	buf.WriteByte('}')
+	return buf.Bytes(), true
+}
+
 // HasAny reports whether any of the named members is present, in one pass over
 // the stored object rather than one pass per key. Callers that only test for
 // presence — the prompt-cache planner checks six directive keys on every

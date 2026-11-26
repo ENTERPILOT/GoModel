@@ -23,7 +23,10 @@ type ImportPlan struct {
 	DisabledKeys int
 }
 
-// PolicyImport is a user-path model allowlist (PUT /admin/users).
+// PolicyImport is a user-path model allowlist (PUT /admin/users). It names
+// no request policy field (default model, request ceilings), which LiteLLM
+// has no counterpart for: the endpoint keeps the ones a path has, so a re-run
+// does not clear them.
 type PolicyImport struct {
 	UserPath      string   `json:"user_path"`
 	AllowedModels []string `json:"allowed_models"`

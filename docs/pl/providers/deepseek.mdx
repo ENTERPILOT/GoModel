@@ -43,6 +43,11 @@ poziomie z dwoma poziomami reasoningu, `high` i `max`, oraz `none`, które wył�
 | `xhigh` / `max` | `max` |
 | cokolwiek innego | przekazywane dalej przez GoModel, a następnie odrzucane przez DeepSeek |
 
+Przy [`max_reasoning_effort`](/pl/features/users#polityka-requestów) ustawionym
+na ścieżce użytkownika poziom powyżej limitu nigdy nie jest wysyłany: limit
+`high` albo `xhigh` wysyła najwyżej `high`, a limit poniżej `high` wysyła
+`none`, bo DeepSeek nie ma niższego poziomu reasoningu.
+
 GoModel przepisuje `"reasoning": {"effort": "..."}` w formacie OpenAI na
 `reasoning_effort` na najwyższym poziomie w formacie DeepSeek – bez zmian po stronie klienta.
 Własne wartości klienta zwaliduj lub znormalizuj do `high` albo `max` przed wywołaniem GoModel.

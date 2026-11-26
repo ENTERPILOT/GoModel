@@ -97,7 +97,8 @@ func TestApply_WritesPlanInOrder(t *testing.T) {
 		"PUT /admin/users", "PUT /admin/budgets", "PUT /admin/budgets", "PUT /admin/rate-limits",
 		"POST /admin/auth-keys/import", "POST /admin/auth-keys/import",
 	}, order, "policies go first, keys last")
-	assert.Equal(t, map[string]any{"user_path": "/team", "allowed_models": []any{"openai/gpt-4o"}, "description": "Migrated from LiteLLM team team"}, admin.calls[0].Body)
+	assert.Equal(t, map[string]any{"user_path": "/team", "allowed_models": []any{"openai/gpt-4o"}, "description": "Migrated from LiteLLM team team"}, admin.calls[0].Body,
+		"a policy write names no request policy field, so GoModel keeps the ones the path has")
 	assert.Equal(t, map[string]any{"scope": "user_path", "subject": "/team", "amount": 100.0, "budget_key": map[string]any{"period": "monthly"}}, admin.calls[1].Body)
 	assert.Equal(t, map[string]any{"period_seconds": 43200.0}, admin.calls[2].Body["budget_key"])
 	assert.Equal(t, map[string]any{"scope": "user_path", "subject": "/team/k", "limit_key": map[string]any{"period": "concurrent"}, "max_requests": 4.0, "max_tokens": nil}, admin.calls[3].Body)

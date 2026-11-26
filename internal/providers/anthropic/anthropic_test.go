@@ -4077,6 +4077,26 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			expectNilTemp:     true,
 		},
 		{
+			name:              "opus 4.6 - xhigh, which it rejects, is sent as high",
+			model:             "claude-opus-4-6",
+			reasoning:         &core.Reasoning{Effort: "xhigh"},
+			maxTokens:         new(4096),
+			expectedThinkType: "adaptive",
+			expectedEffort:    "high",
+			expectedMaxTokens: 4096,
+			expectNilTemp:     true,
+		},
+		{
+			name:              "sonnet 4.6 snapshot - max, which it takes, is kept",
+			model:             "claude-sonnet-4-6-20260115",
+			reasoning:         &core.Reasoning{Effort: "max"},
+			maxTokens:         new(4096),
+			expectedThinkType: "adaptive",
+			expectedEffort:    "max",
+			expectedMaxTokens: 4096,
+			expectNilTemp:     true,
+		},
+		{
 			name:              "opus 4.8 - adaptive thinking with xhigh effort",
 			model:             "claude-opus-4-8",
 			reasoning:         &core.Reasoning{Effort: "xhigh"},
@@ -4367,6 +4387,26 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			expectNilTemp:     true,
 		},
 		{
+			name:              "opus 4.6 - xhigh, which it rejects, is sent as high",
+			model:             "claude-opus-4-6",
+			reasoning:         &core.Reasoning{Effort: "xhigh"},
+			maxOutputTokens:   new(4096),
+			expectedThinkType: "adaptive",
+			expectedEffort:    "high",
+			expectedMaxTokens: 4096,
+			expectNilTemp:     true,
+		},
+		{
+			name:              "sonnet 4.6 snapshot - max, which it takes, is kept",
+			model:             "claude-sonnet-4-6-20260115",
+			reasoning:         &core.Reasoning{Effort: "max"},
+			maxOutputTokens:   new(4096),
+			expectedThinkType: "adaptive",
+			expectedEffort:    "max",
+			expectedMaxTokens: 4096,
+			expectNilTemp:     true,
+		},
+		{
 			name:              "opus 4.8 - adaptive thinking with xhigh effort",
 			model:             "claude-opus-4-8",
 			reasoning:         &core.Reasoning{Effort: "xhigh"},
@@ -4527,7 +4567,7 @@ func TestAlwaysThinks(t *testing.T) {
 		"claude-haiku-5-5":           false,
 		"claude-opus-4-8":            false,
 	} {
-		assert.Equal(t, want, alwaysThinks(model), model)
+		assert.Equal(t, want, AlwaysThinks(model), model)
 	}
 }
 
