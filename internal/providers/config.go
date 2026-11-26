@@ -54,6 +54,9 @@ type ProviderConfig struct {
 	ServiceAccountJSON       string
 	ServiceAccountJSONBase64 string
 	GCPScope                 string
+	// VertexLabels are Vertex AI request labels the Gemini adapter adds to
+	// every generateContent call on the Vertex AI backend; nil sends none.
+	VertexLabels map[string]string
 	// ProxyURL routes this provider's upstream traffic through one HTTP(S)
 	// or SOCKS5 proxy. Empty defers to the extension proxy selector, if any,
 	// and then to the process environment.
@@ -331,6 +334,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		ServiceAccountJSON:       raw.ServiceAccountJSON,
 		ServiceAccountJSONBase64: raw.ServiceAccountJSONBase64,
 		GCPScope:                 raw.GCPScope,
+		VertexLabels:             raw.VertexLabels,
 		ProxyURL:                 strings.TrimSpace(raw.ProxyURL),
 		Models:                   config.ProviderModelIDs(raw.Models),
 		ModelsMode:               config.NormalizeConfiguredProviderModelsMode(raw.ModelsMode),

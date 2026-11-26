@@ -4,6 +4,7 @@ package gemini
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"strings"
@@ -79,6 +80,10 @@ type Provider struct {
 	// one; empty for constructors invoked outside the factory.
 	providerName string
 	useNativeAPI bool
+	// vertexLabels is the operator's vertex_labels, sent as the labels member
+	// of every generateContent body. Only the Vertex AI backend has it; nil
+	// elsewhere and when none are configured. Requests only read it.
+	vertexLabels map[string]string
 	modelsURL    string
 	configErr    error
 	cacheMu      sync.Mutex
@@ -110,6 +115,10 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 		authType:     authType,
 		useNativeAPI: useNativeAPI(providerCfg.APIMode),
 		modelsURL:    modelsURL,
+	}
+	if backend == geminiBackendVertex {
+		// A copy, so the configuration's map is never shared with requests.
+		p.vertexLabels = maps.Clone(providerCfg.VertexLabels)
 	}
 	p.validateConfig(providerCfg)
 	if !preauthenticated {
@@ -186,6 +195,11 @@ func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
 	}
 	if p.backend == geminiBackendAIStudio && p.authType == geminiAuthTypeAPIKey && strings.TrimSpace(providerCfg.APIKey) == "" {
 		p.configErr = fmt.Errorf("gemini API key is required")
+		return
+	}
+	if len(p.vertexLabels) > 0 && !p.useNativeAPI {
+		// Refused rather than dropped: unlabeled calls would bill unnoticed.
+		p.configErr = fmt.Errorf("vertex_labels requires api_mode native: Vertex AI's OpenAI-compatible endpoint takes no request labels")
 	}
 }
 

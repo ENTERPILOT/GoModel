@@ -77,6 +77,22 @@ func TestAnthropicModeChatUsesRawPredict(t *testing.T) {
 	assert.Equal(t, 3, resp.Usage.PromptTokens)
 }
 
+// Claude calls can't carry the labels, so a labeled anthropic-mode provider
+// is refused rather than left to bill unlabeled.
+func TestAnthropicModeRefusesVertexLabels(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, anthropicMessageJSON)
+	cfg := testConfig()
+	cfg.APIMode = "anthropic"
+	cfg.BaseURL = server.URL + "/v1/projects/prod-ai/locations/eu/endpoints/openapi"
+	cfg.VertexLabels = map[string]string{"code-review": "private"}
+	provider := newProvider(cfg, providers.ProviderOptions{}, authedTestClient(server.Client()), true)
+
+	_, err := provider.ChatCompletion(context.Background(), chatRequest(false))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "vertex_labels requires api_mode native")
+	assert.Equal(t, 0, capture.Count())
+}
+
 func TestAnthropicModeResponsesUsesRawPredict(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, anthropicMessageJSON)
 	provider := anthropicModeProvider(t, server.URL, server.Client())

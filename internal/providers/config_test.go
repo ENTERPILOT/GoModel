@@ -116,6 +116,30 @@ func TestBuildProviderConfig_InheritsGlobal(t *testing.T) {
 	assert.True(t, got.SessionStickyKeys)
 }
 
+func TestBuildProviderConfig_VertexLabels(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  config.RawProviderConfig
+		want map[string]string
+	}{
+		{
+			name: "carries labels",
+			raw:  config.RawProviderConfig{Type: "vertex", VertexLabels: map[string]string{"code-review": "private"}},
+			want: map[string]string{"code-review": "private"},
+		},
+		{
+			name: "none configured",
+			raw:  config.RawProviderConfig{Type: "vertex"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildProviderConfig(tt.raw, globalResilience)
+			assert.Equal(t, tt.want, got.VertexLabels)
+		})
+	}
+}
+
 func TestBuildProviderConfig_LLMDControlDefaults(t *testing.T) {
 	disabled := false
 	tests := []struct {

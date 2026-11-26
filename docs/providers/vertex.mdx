@@ -94,6 +94,36 @@ thought-signature handling apply to Vertex Gemini models
 sampling parameters on Gemini 3 and 4. Gemini 4 is served from the `global`,
 `us` and `eu` locations.
 
+## Billing labels
+
+Set `vertex_labels` to attribute a provider's spend in Cloud Billing. GoModel
+sends them as [request labels](https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/add-labels-to-api-calls)
+on every Gemini `generateContent` and `streamGenerateContent` call: chat,
+Responses, and Gemini image models. They then appear in billing reports and
+the billing export, alongside the project's other Vertex AI costs.
+
+```yaml
+providers:
+  vertex:
+    type: vertex
+    vertex_project: my-gcp-project
+    vertex_location: global
+    vertex_labels:
+      team: search
+      environment: "${ENVIRONMENT}"
+```
+
+- No labels are sent by default.
+- `vertex_labels` is set in `config.yaml` only; it has no environment
+  variable. A value can still come from the environment through `${VAR}`.
+- It requires `api_mode: native`. A provider in `openai_compatible` or
+  `anthropic` mode with labels fails its requests with a configuration error
+  rather than sending calls without them.
+- Embeddings and Imagen calls carry no labels.
+- Vertex AI checks the labels' format: lowercase keys and values of up to 63
+  characters, and at most 64 labels. It forwards them to Cloud Billing for
+  pay-as-you-go requests only, not Provisioned Throughput.
+
 ## Claude models
 
 Set `api_mode: anthropic` to serve Claude (Anthropic partner models) from

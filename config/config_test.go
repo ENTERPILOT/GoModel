@@ -1290,6 +1290,31 @@ providers:
 	})
 }
 
+// vertex_labels has no env var of its own; a value comes from the environment
+// through config.yaml's ordinary expansion.
+func TestLoad_VertexLabelsFromYAML(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	t.Setenv("REVIEW_TIER", "private")
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+providers:
+  vertex:
+    type: vertex
+    vertex_project: my-project
+    vertex_location: global
+    vertex_labels:
+      code-review: "${REVIEW_TIER}"
+      team: reviewbot
+`
+		result := loadConfigYAML(t, dir, yaml)
+
+		provider, exists := result.RawProviders["vertex"]
+		require.True(t, exists)
+		assert.Equal(t, map[string]string{"code-review": "private", "team": "reviewbot"}, provider.VertexLabels)
+	})
+}
+
 func TestLoad_ProviderResilienceInRawProviders(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
