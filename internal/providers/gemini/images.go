@@ -230,6 +230,8 @@ func (p *Provider) generateContentImages(ctx context.Context, model string, body
 	if count > maxGeminiImageFanOut {
 		return nil, core.NewInvalidRequestError(fmt.Sprintf("n must be at most %d for Gemini image models", maxGeminiImageFanOut), nil)
 	}
+	// Set before the fan-out, which only reads body.
+	body.Labels = p.vertexLabels
 	if count <= 1 {
 		return p.doGenerateContentImage(ctx, model, body)
 	}

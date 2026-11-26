@@ -196,8 +196,9 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 
 // prepareNativeRequest applies the backend-specific members a translated
 // generateContent request gets before it is sent: the AI Studio-only store
-// flag and the cached-content prefix.
+// flag, the Vertex AI-only request labels, and the cached-content prefix.
 func (p *Provider) prepareNativeRequest(ctx context.Context, req *core.ChatRequest, body *geminiGenerateContentRequest) error {
+	body.Labels = p.vertexLabels
 	if p.backend == geminiBackendAIStudio {
 		store, err := chatStore(req)
 		if err != nil {
