@@ -146,6 +146,30 @@ BEDROCK_EU_MODELS=amazon.nova-lite-v1:0
 
 这会注册 `bedrock-us` 和 `bedrock-eu` 两个提供商。Bedrock 凭据仍然来自标准 AWS 凭据链。
 
+## 账单归属
+
+Bedrock 没有按请求设置的账单标签。要在 AWS Cost Explorer 中拆分 Bedrock 支出，请通过带标签的[应用推理配置文件](https://docs.aws.amazon.com/bedrock/latest/userguide/cost-mgmt-application-inference-profiles.html)调用模型：AWS 会把经由该配置文件发出的每个请求的费用归属到该配置文件的标签。
+
+为模型创建配置文件，然后提供它的 ARN：
+
+```bash
+aws bedrock create-inference-profile \
+  --inference-profile-name search-nova-micro \
+  --model-source copyFrom=arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0 \
+  --tags key=team,value=search
+```
+
+```bash
+BEDROCK_MODELS=arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc123example
+```
+
+客户端将该 ARN 作为 `model` 发送。聊天、流式传输和 Responses API 的用法与其他 Bedrock 模型相同。
+
+- 一个配置文件对应一个模型。请为每个模型和每组标签分别创建。
+- 在 AWS Billing 中将这些标签激活为成本分配标签；激活之前它们不会出现在 Cost Explorer 中。
+- ARN 不包含模型名称，因此 GoModel 没有它的目录价格，记录用量时不含成本。请为该 ARN 设置[定价覆盖](/zh/features/cost-tracking#覆盖定价)，以保留 GoModel 自身的成本跟踪。
+- 如需给客户端一个易读的名称，可将[虚拟模型](/zh/features/virtual-models#使用稳定的名称)指向 `bedrock/<配置文件 ARN>`。
+
 ## 允许的工具
 
 Bedrock Converse 无法将某一轮对话限制为已声明工具的一个子集。对于类型为 `allowed_tools` 的 `tool_choice`，GoModel 只声明列出的函数：当模式为 `required` 时 `toolChoice` 为 `any`，否则为 `auto`。如果子集中没有任何已声明的函数，请求会以 400 被拒绝。
