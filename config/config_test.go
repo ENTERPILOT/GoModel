@@ -1290,8 +1290,8 @@ providers:
 	})
 }
 
-// vertex_labels has no env var of its own; a value comes from the environment
-// through config.yaml's ordinary expansion.
+// A vertex_labels value can come from the environment through config.yaml's
+// ordinary expansion, apart from VERTEX_LABELS.
 func TestLoad_VertexLabelsFromYAML(t *testing.T) {
 	clearAllConfigEnvVars(t)
 	t.Setenv("REVIEW_TIER", "private")

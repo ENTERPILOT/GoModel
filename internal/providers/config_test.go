@@ -672,6 +672,74 @@ func TestApplyProviderEnvVars_BillableRejectsMalformedValue(t *testing.T) {
 	require.ErrorContains(t, err, "OPENAI_BILLABLE: value is not a boolean")
 }
 
+func TestApplyProviderEnvVars_VertexLabels(t *testing.T) {
+	yamlLabels := map[string]string{"team": "yaml"}
+	tests := []struct {
+		name     string
+		env      map[string]string
+		raw      map[string]config.RawProviderConfig
+		provider string
+		want     map[string]string
+	}{
+		{
+			name:     "unsuffixed",
+			env:      map[string]string{"VERTEX_PROJECT": "prod-ai", "VERTEX_LOCATION": "global", "VERTEX_LABELS": "code-review=private,team=search"},
+			provider: "vertex",
+			want:     map[string]string{"code-review": "private", "team": "search"},
+		},
+		{
+			name:     "suffixed",
+			env:      map[string]string{"VERTEX_US_PROJECT": "prod-ai", "VERTEX_US_LOCATION": "us-central1", "VERTEX_US_LABELS": "code-review=public"},
+			provider: "vertex-us",
+			want:     map[string]string{"code-review": "public"},
+		},
+		{
+			name:     "environment replaces yaml labels",
+			env:      map[string]string{"VERTEX_LABELS": "code-review=private"},
+			raw:      map[string]config.RawProviderConfig{"vertex": {Type: "vertex", VertexProject: "prod-ai", VertexLocation: "global", VertexLabels: yamlLabels}},
+			provider: "vertex",
+			want:     map[string]string{"code-review": "private"},
+		},
+		{
+			name:     "bare variable yields to a differently named provider's labels",
+			env:      map[string]string{"VERTEX_LABELS": "code-review=private"},
+			raw:      map[string]config.RawProviderConfig{"gemini-prod": {Type: "vertex", VertexProject: "prod-ai", VertexLocation: "global", VertexLabels: yamlLabels}},
+			provider: "gemini-prod",
+			want:     yamlLabels,
+		},
+		{
+			name:     "unset keeps yaml labels",
+			env:      map[string]string{"VERTEX_API_MODE": "native"},
+			raw:      map[string]config.RawProviderConfig{"vertex": {Type: "vertex", VertexProject: "prod-ai", VertexLocation: "global", VertexLabels: yamlLabels}},
+			provider: "vertex",
+			want:     yamlLabels,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			got, _ := applyEnv(t, tt.raw)
+			require.Contains(t, got, tt.provider)
+			assert.Equal(t, tt.want, got[tt.provider].VertexLabels)
+		})
+	}
+}
+
+// A malformed VERTEX_LABELS must fail loading rather than leave calls
+// unlabeled, without quoting the value.
+func TestApplyProviderEnvVars_VertexLabelsRejectsMalformedValue(t *testing.T) {
+	t.Setenv("VERTEX_PROJECT", "prod-ai")
+	t.Setenv("VERTEX_LOCATION", "global")
+	t.Setenv("VERTEX_LABELS", "code-review=private,secretish")
+
+	_, _, err := applyProviderEnvVars(t.Context(), nil, map[string]config.RawProviderConfig{}, testDiscoveryConfigs, os.Environ())
+	require.ErrorContains(t, err, "VERTEX_LABELS: entry 2 is not key=value")
+	require.NotContains(t, err.Error(), "secretish")
+}
+
 func TestApplyProviderEnvVars_DiscoversFromBaseURL(t *testing.T) {
 	t.Setenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 

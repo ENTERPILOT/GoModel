@@ -32,7 +32,8 @@ type RawProviderConfig struct {
 	GCPScope                 string `yaml:"gcp_scope"`
 	// VertexLabels are Vertex AI request labels sent with every Gemini
 	// generateContent call so Cloud Billing can attribute the spend. Only the
-	// Vertex AI backend uses them; nil sends none. YAML only, not an env var.
+	// Vertex AI backend uses them; nil sends none. VERTEX_LABELS
+	// ("key=value,key=value") replaces them.
 	VertexLabels map[string]string `yaml:"vertex_labels"`
 	// ProxyURL sends this provider's upstream traffic through an HTTP, HTTPS,
 	// or SOCKS5 proxy ("http://proxy:3128", "socks5://user:pass@host:1080").
