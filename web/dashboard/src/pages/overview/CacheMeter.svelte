@@ -30,6 +30,7 @@
   );
 </script>
 
+
 <div class="cache-meter">
   <div class="cache-meter-header">
     <h3>{m.overview_tokens()}</h3>
@@ -72,6 +73,7 @@
       </div>
     {/each}
   </div>
+
 </div>
 
 <style>
@@ -88,6 +90,7 @@
     font-weight: 600;
   }
 
+
   .cache-meter-subtitle {
     font-size: 13px;
     color: var(--text-muted);
@@ -96,8 +99,9 @@
   .cache-meter-bar {
     display: flex;
     width: 100%;
+
     height: 28px;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     overflow: hidden;
     background: var(--bg-surface-hover);
   }
@@ -113,12 +117,16 @@
   }
 
   .cache-meter-segment-label {
-    color: #fff;
+    /* The slice lightness flips with the theme, so the label color has to
+       as well: dark on the pale light-theme slices, white on the saturated
+       dark-theme ones. */
+
+    color: var(--meter-label);
     font-size: 12px;
     font-weight: 600;
+
     line-height: 1;
     white-space: nowrap;
-    /* Keeps white legible on the lighter brown slice in dark mode. */
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
   }
 
@@ -126,19 +134,22 @@
     box-shadow: -1px 0 0 var(--bg-surface);
   }
 
+
   .cache-meter-bar.is-empty {
     height: auto;
     min-height: 28px;
     align-items: center;
     justify-content: center;
-    padding: 6px 12px;
+
+    padding: 8px 12px;
     background: var(--bg-surface-hover);
   }
 
   .cache-meter-legend {
     display: flex;
+
     flex-wrap: wrap;
-    gap: 10px 24px;
+    gap: 12px 24px;
     margin-top: 16px;
   }
 
@@ -150,9 +161,11 @@
   }
 
   .cache-meter-swatch {
+
     width: 12px;
     height: 12px;
-    border-radius: 3px;
+    border-radius: var(--radius-control);
+
     flex-shrink: 0;
   }
 

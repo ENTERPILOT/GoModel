@@ -16,6 +16,7 @@
   });
 </script>
 
+
 <div>
   <div class="page-header">
     <div>
@@ -34,12 +35,14 @@
         </button>
       {/if}
     </div>
+
   </div>
 
   {#if !wf.available && !auth.authError}
     <div class="alert alert-warning">{m.workflows_unavailable()}</div>
   {/if}
   {#if wf.error && !auth.authError}
+
     <div class="alert alert-warning">{wf.error}</div>
   {/if}
 
@@ -54,14 +57,18 @@
       </div>
       <div class="table-toolbar-actions">
         <span class="model-count">{m.workflows_active_scopes({ count: wf.filteredWorkflows.length })}</span>
+
       </div>
+
     </div>
   {/if}
+
 
   <WorkflowEditor />
 
   <WorkflowList />
 </div>
+
 
 <style>
 /* Workflows */
@@ -70,7 +77,7 @@
   }
 
 .workflow-page-note {
-    margin-top: 6px;
+    margin-top: 8px;
     color: var(--text-muted);
     font-size: 14px;
   }

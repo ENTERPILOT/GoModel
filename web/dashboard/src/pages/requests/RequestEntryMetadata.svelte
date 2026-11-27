@@ -53,6 +53,7 @@
   );
 </script>
 
+
 <div class="request-log-entry-metadata">
   <span class="request-log-entry-metadata-label">{m.requests_metadata_label()}</span>
   <div class="request-log-entry-context">
@@ -71,25 +72,26 @@
       {/if}
     {/each}
   </div>
+
 </div>
 
 <style>
   .request-log-entry-metadata {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     margin-top: 12px;
     padding-top: 12px;
+
     border-top: 1px solid var(--border);
   }
 
   .request-log-entry-metadata-label {
     flex: 0 0 auto;
     color: var(--text-muted);
+
     font-size: 12px;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
   }
 
   .request-log-entry-context {
@@ -99,6 +101,7 @@
     gap: 8px;
   }
 
+
   .request-log-alias-badge {
     background: color-mix(in srgb, var(--accent) 14%, var(--bg));
     border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
@@ -106,6 +109,7 @@
   }
 
   /* Guardrail verdict badges; the class is picked in script, so the compound
+
      :global keeps the rule visible to the compiler at the base's specificity. */
   .provider-badge:global(.request-log-guardrail-badge-danger) {
     background: color-mix(in srgb, var(--danger) 12%, var(--bg));

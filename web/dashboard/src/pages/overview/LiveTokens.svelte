@@ -93,6 +93,7 @@
         <NoDataIllustration />
       </div>
     {/if}
+
   </div>
 </div>
 
@@ -101,6 +102,7 @@
   /* The generic .chart-container has no margin (siblings space it), but this card
      is followed by the cache meter, which only spaces below itself — so give the
      live card the same 28px rhythm as .cards/.cache-meter. */
+
   .live-tokens {
     margin-bottom: 28px;
   }
@@ -113,33 +115,39 @@
 
   .live-tokens-subtitle {
     display: inline-flex;
+
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: 12px;
     color: var(--text-muted);
   }
+
 
   .live-tokens-legend {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px 18px;
+    gap: 8px 20px;
     margin-bottom: 16px;
   }
+
 
   .live-tokens-legend-item {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     font-size: 12px;
     color: var(--text-muted);
+
   }
 
   .live-tokens-swatch {
     width: 10px;
+
     height: 10px;
-    border-radius: 2px;
+    border-radius: var(--radius-control);
     flex-shrink: 0;
   }
+
 
   .live-tokens-legend-value {
     color: var(--text);

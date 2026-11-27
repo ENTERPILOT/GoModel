@@ -49,6 +49,7 @@
   }
 </script>
 
+
 <article class="provider-status-card">
   <div class="provider-status-card-head">
     <div>
@@ -79,6 +80,7 @@
       class="provider-status-pill {providerStatusBadgeClass(provider.status)}"
       title={providerStatusPillTitle(provider)}
     >{provider.status_label}</span>
+
   </div>
 
   <div class="provider-status-meta">
@@ -100,7 +102,9 @@
         class="provider-status-meta-value mono"
         title={providerLastCheckedTitle(provider, formatTimestamp)}
       >{providerLastCheckedTime(provider, formatTimestamp)}</span>
+
     </div>
+
   </div>
 
   <ProviderStatusCardDetails {provider} {expanded} />
@@ -117,6 +121,7 @@
       ? m.overview_collapse_details()
       : m.overview_expand_details()}
     onclick={() => providerStatusState.toggleCard(provider)}
+
   >
     <Icon icon={ChevronDown} class="provider-status-card-toggle-icon" />
   </button>
@@ -126,26 +131,29 @@
   .provider-status-card {
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    padding: 18px;
+    gap: 16px;
+
+    padding: 16px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
   }
 
   .provider-status-card-toggle {
     /* Bleed to the card edges so the strip spans the full card width. */
-    margin: auto -18px -18px;
-    padding: 7px 0;
+    margin: auto -16px -16px;
+    padding: 8px 0;
     display: flex;
     align-items: center;
     justify-content: center;
     background: transparent;
     border: 0;
+
     border-top: 1px solid var(--border);
-    border-radius: 0 0 var(--radius) var(--radius);
+    border-radius: 0 0 var(--radius-panel) var(--radius-panel);
     color: var(--text-muted);
     cursor: pointer;
+
     transition: background 0.15s ease, color 0.15s ease;
   }
 
@@ -155,17 +163,20 @@
   }
 
   .provider-status-card-toggle:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    outline: 2px solid var(--primary-ring);
     outline-offset: -2px;
+
   }
 
   /* The class rides on the Icon child's own <svg>, so it needs :global. */
+
   .provider-status-card-toggle :global(.provider-status-card-toggle-icon) {
     display: block;
     width: 16px;
     height: 16px;
     transition: transform 0.28s ease;
   }
+
 
   .provider-status-card-toggle.is-expanded :global(.provider-status-card-toggle-icon) {
     transform: rotate(180deg);
@@ -180,11 +191,13 @@
 
   .provider-status-name {
     display: flex;
+
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 6px;
+    gap: 8px;
     font-size: 16px;
     font-weight: 700;
+
     letter-spacing: -0.02em;
   }
 
@@ -197,8 +210,7 @@
   .provider-status-name-type {
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+
     color: var(--text-muted);
   }
 
@@ -207,16 +219,19 @@
     align-items: center;
     justify-content: center;
     min-height: 28px;
-    padding: 0 10px;
-    border-radius: 999px;
+
+    padding: 0 12px;
+    border-radius: var(--radius-pill);
     border: 1px solid var(--border);
     font-size: 12px;
     font-weight: 700;
+
     white-space: nowrap;
   }
 
   /* Status pill palette: reads identically to the breaker-state pill inside
      the details (ProviderStatusCardDetails.svelte keeps its half of these
+
      rules). Kept here because the pill's state class is a computed string. */
   .provider-status-pill.is-healthy {
     color: var(--success);
@@ -242,14 +257,17 @@
     gap: 12px;
   }
 
+
   .provider-status-meta-item {
     display: flex;
+
     flex-direction: column;
     gap: 4px;
-    padding: 10px 12px;
+    padding: 12px 12px;
     background: var(--bg);
+
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
   }
 
   .provider-status-meta-link {
@@ -269,15 +287,13 @@
   }
 
   .provider-status-meta-link:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    outline: 2px solid var(--primary-ring);
     outline-offset: 2px;
   }
 
   .provider-status-meta-label {
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
     color: var(--text-muted);
   }
 

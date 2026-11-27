@@ -35,6 +35,7 @@
   }
 </script>
 
+
 <div class="table-wrapper">
   <table class="data-table">
     <thead>
@@ -128,6 +129,7 @@
       </tbody>
     {/each}
   </table>
+
 </div>
 
 <style>
@@ -137,9 +139,11 @@
     padding-bottom: 12px;
   }
 
+
   .provider-group-row {
     cursor: pointer;
   }
+
 
   .provider-group-row:hover :global(td) {
     background: color-mix(in srgb, var(--accent) 8%, var(--bg));
@@ -152,12 +156,14 @@
     gap: 16px;
   }
 
+
   .provider-group-meta {
     min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 4px;
   }
+
 
   .provider-group-title {
     display: flex;
@@ -170,18 +176,21 @@
     appearance: none;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     /* Padding grows the hit area; the negative margin keeps the layout. */
-    margin: -6px -8px;
-    padding: 6px 8px;
+    margin: -8px -8px;
+    padding: 8px 8px;
     min-height: 32px;
+
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: none;
+
     color: inherit;
     font: inherit;
     text-align: left;
     cursor: pointer;
+
   }
 
   .provider-group-toggle:hover {
@@ -189,11 +198,13 @@
   }
 
   .provider-group-toggle:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 32%, transparent);
+
+    outline: 2px solid var(--primary-ring);
     outline-offset: 0;
   }
 
   /* Touch screens get the recommended 44px minimum target. */
+
   @media (pointer: coarse) {
     .provider-group-toggle {
       min-height: 44px;
@@ -205,9 +216,11 @@
       width: 18px;
       height: 18px;
     }
+
   }
 
   /* The class rides on the Icon child's own <svg>, so it needs :global. */
+
   .provider-group-toggle :global(.provider-group-toggle-icon) {
     flex: 0 0 auto;
     width: 14px;

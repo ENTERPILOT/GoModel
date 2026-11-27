@@ -82,6 +82,7 @@
     {:else}
       <small class="form-hint">{m.mcp_slug_edit_help()}</small>
     {/if}
+
   </FormField>
 {/snippet}
 
@@ -91,6 +92,7 @@
       <option value="http">Streamable HTTP</option>
       <option value="sse">SSE (legacy)</option>
     </select>
+
     <small class="form-hint">{m.mcp_transport_help()}</small>
   </FormField>
 {/snippet}
@@ -114,6 +116,7 @@
           onclick={() => mcpServers.chooseServerKind(urlPreset.id)}
           >{m.mcp_preset_url_match_action({ name: urlPreset.name })}</button
         >
+
       </small>
     {/if}
   </FormField>
@@ -157,6 +160,7 @@
       >
         <Icon icon={Plus} class="form-action-icon" />
         <span>{m.mcp_add_header()}</span>
+
       </button>
     </div>
     <small class="form-hint">{m.mcp_headers_help()}</small>
@@ -168,6 +172,7 @@
     <div class="vm-status-toggle">
       <EnabledToggle
         enabled={mcpServers.form.enabled}
+
         label="MCP server"
         onclick={() => (mcpServers.form.enabled = !mcpServers.form.enabled)}
       />
@@ -218,6 +223,7 @@
           <a href={preset.tokenURL} target="_blank" rel="noopener noreferrer"
             >{m.mcp_preset_token_link({ name: preset.name })}</a
           >
+
         {/if}
       </small>
     {:else if mcpServers.formAuth === MCP_AUTH_NONE}
@@ -228,6 +234,7 @@
 
 {#snippet accessFields()}
   <div class="form-field">
+
     <label class="form-field-label" for="mcp-server-description">{m.mcp_description()}</label>
     <input
       id="mcp-server-description"
@@ -238,6 +245,7 @@
   </div>
 
   <div class="form-field">
+
     <label class="form-field-label" for="mcp-server-user-paths">{m.mcp_user_paths()}</label>
     <textarea
       id="mcp-server-user-paths"
@@ -251,6 +259,7 @@
   <div class="form-field">
     <label class="form-field-label" for="mcp-server-disallowed-user-paths"
       >{m.mcp_disallowed_user_paths()}</label
+
     >
     <textarea
       id="mcp-server-disallowed-user-paths"
@@ -264,6 +273,7 @@
 
   <div class="form-field">
     <label class="form-field-label" for="mcp-server-tool-timeout">{m.mcp_timeout()}</label>
+
     <input
       id="mcp-server-tool-timeout"
       type="number"
@@ -280,6 +290,7 @@
   open={mcpServers.formOpen}
   title={creating ? m.mcp_add() : m.mcp_edit()}
   ariaLabel={m.mcp_editor_label()}
+
   error={mcpServers.error}
   submitting={mcpServers.formSubmitting}
   submitDisabled={creating && !kind}
@@ -293,6 +304,7 @@
     <p class="form-hint">{creating ? m.mcp_preset_help() : m.mcp_identity_help()}</p>
   {/snippet}
 
+
   {#if creating}
     <FormField id="mcp-server-kind" label={m.mcp_preset_server()}>
       <SearchSelect
@@ -305,6 +317,7 @@
         ariaLabel={m.mcp_preset_server()}
       />
     </FormField>
+
   {/if}
 
   {#if !creating || kind}
@@ -318,6 +331,7 @@
         data-modal-autofocus={creating ? undefined : true}
       />
       <small class="form-hint">{m.mcp_name_help()}</small>
+
     </FormField>
 
     {#if preset}
@@ -335,6 +349,7 @@
     {/if}
 
     <details
+
       class="mcp-server-advanced"
       open={mcpServers.advancedOpen}
       ontoggle={(event) => (mcpServers.advancedOpen = event.currentTarget.open)}
@@ -351,6 +366,7 @@
           >
         </span>
       </summary>
+
 
       <div class="mcp-server-advanced-fields">
         {#if preset}
@@ -387,6 +403,6 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
   }
 </style>

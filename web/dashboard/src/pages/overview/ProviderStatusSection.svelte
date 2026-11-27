@@ -8,6 +8,7 @@
   const providers = $derived(providerStatusState.status.providers);
 </script>
 
+
 {#if providers.length > 0}
   <div
     id="provider-status-section"
@@ -46,6 +47,7 @@
   <div class="provider-status-section provider-status-section-loading">
     <Spinner size={18} label={m.overview_loading_provider_status()} />
   </div>
+
 {/if}
 
 <style>
@@ -66,12 +68,12 @@
 .provider-status-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   padding: 8px 12px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   /* Matches .btn and .table-action-btn; only the switch itself stays round. */
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   color: var(--text);
   font-size: 12px;
   font-family: inherit;
@@ -79,16 +81,20 @@
   cursor: pointer;
   transition:
     background-color 0.18s ease,
+
     border-color 0.18s ease,
     color 0.18s ease;
 }
+
 
 .provider-status-toggle:hover {
   background: var(--bg-surface-hover);
 }
 
+
 .provider-status-toggle:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  outline: 2px solid var(--primary-ring);
+
   outline-offset: 2px;
 }
 
@@ -98,9 +104,11 @@
 
 .provider-status-toggle-track {
   position: relative;
+
   width: 34px;
   height: 20px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
+
   background: color-mix(in srgb, var(--text-muted) 35%, var(--border));
   transition: background-color 0.2s ease;
   flex-shrink: 0;
@@ -112,12 +120,14 @@
 
 .provider-status-toggle-thumb {
   position: absolute;
+
   top: 2px;
   left: 2px;
   width: 16px;
+
   height: 16px;
-  border-radius: 50%;
-  background: #fff;
+  border-radius: var(--radius-circle);
+  background: var(--switch-thumb);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.24);
   transition: transform 0.2s ease;
 }

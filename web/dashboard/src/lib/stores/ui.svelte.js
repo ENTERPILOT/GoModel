@@ -1,6 +1,7 @@
 // Cross-cutting UI state: theme, sidebar sizing, and the count of open
 // overlay dialogs (drives the body-level dashboard-modal-open class).
 
+
 import { readStored, writeStored } from "$lib/utils/storage.js";
 import {
   MAX_SIDEBAR_WIDTH,
@@ -8,9 +9,20 @@ import {
   clampSidebarWidth,
 } from "./sidebar-sizing.js";
 
+// The effective mode behind the "system" preference. `data-theme` is always
+// written with a concrete value ("light" or "dark") so the stylesheet needs
+// exactly one light palette instead of a duplicated prefers-color-scheme
+// block — the duplication is what let the two copies drift apart.
+function systemMode() {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
 class ThemeStore {
   theme = $state("system");
   // tick increments whenever effective colors may have changed (explicit
+
   // theme switch, or the OS scheme flipping while in system mode). Charts
   // watch it to rebuild with fresh CSS-variable colors.
   tick = $state(0);
@@ -22,16 +34,22 @@ class ThemeStore {
       .matchMedia("(prefers-color-scheme: dark)")
       .addEventListener("change", () => {
         if (this.theme === "system") {
+          // Re-resolve "system" into a concrete data-theme, then let the
+          // charts rebuild with the new palette.
+          this.apply();
+
           this.tick++;
         }
       });
   }
 
   set(t) {
+
     this.theme = t;
     writeStored("gomodel_theme", t);
     this.apply();
     this.tick++;
+
   }
 
   toggle() {
@@ -40,13 +58,16 @@ class ThemeStore {
   }
 
   apply() {
-    const root = document.documentElement;
-    if (this.theme === "system") {
-      root.removeAttribute("data-theme");
-    } else {
-      root.setAttribute("data-theme", this.theme);
-    }
+
+    const mode =
+
+      this.theme === "light" || this.theme === "dark"
+        ? this.theme
+
+        : systemMode();
+    document.documentElement.setAttribute("data-theme", mode);
   }
+
 }
 
 export const themeStore = new ThemeStore();
@@ -56,12 +77,14 @@ class SidebarStore {
 
   get collapsed() {
     return this.width === MIN_SIDEBAR_WIDTH;
+
   }
 
   init() {
     const storedWidth = readStored("gomodel_sidebar_width");
     const legacyCollapsed = readStored("gomodel_sidebar_collapsed") === "true";
     this.setWidth(
+
       storedWidth == null
         ? (legacyCollapsed ? MIN_SIDEBAR_WIDTH : MAX_SIDEBAR_WIDTH)
         : storedWidth,
@@ -72,31 +95,39 @@ class SidebarStore {
     this.setWidth(
       this.collapsed ? MAX_SIDEBAR_WIDTH : MIN_SIDEBAR_WIDTH,
       true,
+
     );
+
   }
 
   setWidth(value, persist = false) {
     this.width = clampSidebarWidth(value);
     if (typeof document !== "undefined") {
       document.documentElement.style.setProperty("--sidebar-width", `${this.width}px`);
+
     }
     if (!persist) return;
     writeStored("gomodel_sidebar_width", this.width);
     writeStored("gomodel_sidebar_collapsed", this.collapsed);
   }
+
 }
 
 export const sidebar = new SidebarStore();
 
+
 // Modal accounting: every overlay dialog registers while open so the app
 // shell can add the dashboard-modal-open body class (scroll lock). The
+
 // stack order lets Escape close only the topmost dialog.
 class ModalStore {
   stack = $state([]);
+
   #nextToken = 1;
 
   opened() {
     const token = this.#nextToken++;
+
     this.stack = [...this.stack, token];
     return token;
   }

@@ -12,6 +12,7 @@
   const live = $derived(liveLogs.liveLogsStreaming && !pauseReason);
 </script>
 
+
 {#if liveLogs.liveLogsEnabled()}
   <span class="request-log-live-status" role="status">
     <span class="live-dot" class:is-streaming={live} aria-hidden="true"></span>
@@ -23,23 +24,26 @@
       <span class="request-log-live-status-text is-live">{m.requests_live()}</span>
     {/if}
   </span>
+
 {/if}
 
 <style>
   .request-log-live-status {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     font-size: 12px;
     color: var(--text-muted);
     /* Clearance for the expanding ring: it grows to ~2.5x the dot, so keep
        it away from whatever sits to the left of the chip. */
     margin-left: 16px;
-    padding-left: 6px;
+
+    padding-left: 8px;
   }
 
   /* The shared .live-dot ring alone is easy to miss at 8px; throb the dot
      itself in the same rhythm so the live state is unmistakable. */
+
   .request-log-live-status .live-dot.is-streaming {
     animation: request-log-live-dot-throb 1.8s ease-out infinite;
   }
@@ -58,6 +62,7 @@
       transform: scale(1);
     }
   }
+
 
   @media (prefers-reduced-motion: reduce) {
     .request-log-live-status .live-dot.is-streaming {

@@ -106,6 +106,7 @@
             : virtualModels.displayModels.length,
         })}
       </div>
+
     {/if}
   </div>
 
@@ -116,6 +117,7 @@
   {#if virtualModels.aliasError && !authError}
     <div class="alert alert-warning">{virtualModels.aliasError}</div>
   {/if}
+
   {#if pricingOverrides.modelPricingOverrideError && !authError && !pricingOverrides.modelPricingOverrideFormOpen}
     <div class="alert alert-warning">{pricingOverrides.modelPricingOverrideError}</div>
   {/if}
@@ -131,6 +133,7 @@
         >
           <span>{categoryLabel(cat)}</span>
           <span class="tab-count">{cat.count}</span>
+
         </button>
       {/each}
     </div>
@@ -178,14 +181,18 @@
           >
             <Icon icon={Plus} class="alias-create-icon" />
             <span>{m.models_new_virtual()}</span>
+
           </button>
         {/if}
       </div>
+
     </div>
   {/if}
 
+
   {#if virtualModels.modelsBusy() && !authError}
     <LoadingState label={virtualModels.modelLoadingText()} class="models-loading-state" />
+
   {/if}
 
   <VirtualModelEditor />
@@ -195,13 +202,16 @@
     <ModelTable />
   {/if}
 
+
   {#if virtualModels.displayModels.length === 0 && !modelsStore.loading && !authError && !modelsStore.filter && (modelsStore.activeCategory === "all" || !modelsStore.activeCategory)}
     <p class="empty-state">{m.models_empty()}</p>
   {/if}
+
   {#if virtualModels.displayModels.length === 0 && !modelsStore.loading && !authError && !modelsStore.filter && modelsStore.activeCategory && modelsStore.activeCategory !== "all"}
     <p class="empty-state">{m.models_empty_category()}</p>
   {/if}
   {#if virtualModels.displayModels.length > 0 && virtualModels.filteredDisplayModels.length === 0 && virtualModels.filtersActive()}
+
     <p class="empty-state">{m.models_no_match()}</p>
   {/if}
 
@@ -227,16 +237,19 @@
 .category-tab {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
+    gap: 8px;
+
+    padding: 8px 16px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
+
     color: var(--text-muted);
     font-size: 13px;
     font-family: inherit;
     font-weight: 500;
     cursor: pointer;
+
     transition: all 0.15s;
     white-space: nowrap;
     flex-shrink: 0;
@@ -248,20 +261,23 @@
   }
 
 .category-tab.active {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
+    background: var(--primary);
+    color: var(--on-fill);
+
+    border-color: var(--primary);
   }
+
 
 .category-tab .tab-count {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     min-width: 20px;
+
     height: 18px;
-    padding: 0 5px;
+    padding: 0 4px;
     background: rgba(255, 255, 255, 0.15);
-    border-radius: 9px;
+    border-radius: var(--radius-pill);
     font-size: 11px;
     font-weight: 600;
     line-height: 1;
@@ -278,7 +294,7 @@
         }
 
   .category-tab {
-          padding: 5px 10px;
+          padding: 4px 12px;
           font-size: 12px;
         }
 }

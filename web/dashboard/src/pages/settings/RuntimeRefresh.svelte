@@ -55,6 +55,7 @@
   }
 </script>
 
+
 <div class="settings-refresh-section">
   <InlineHelpSection
     copyId="runtime-refresh-help-copy"
@@ -88,6 +89,7 @@
       {/each}
     </ul>
   {/if}
+
 </div>
 
 <style>
@@ -100,11 +102,13 @@
 .runtime-refresh-steps {
     display: grid;
     gap: 8px;
-    margin-top: 14px;
-    padding-left: 18px;
+    margin-top: 16px;
+    padding-left: 20px;
+
     color: var(--text-muted);
     font-size: 13px;
   }
+
 
 .runtime-refresh-step.is-ok {
     color: var(--success);

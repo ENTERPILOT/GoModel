@@ -30,6 +30,7 @@
   }
 </script>
 
+
 <form
   class="playground-media-form"
   onsubmit={(event) => {
@@ -180,6 +181,7 @@
         {/if}
       </FormField>
     </div>
+
   {/if}
 
   <div class="playground-media-actions">
@@ -204,6 +206,7 @@
         <span>{m.common_action_send()}</span>
       </button>
     {/if}
+
   </div>
 </form>
 
@@ -214,8 +217,9 @@
     gap: 12px;
     padding: 12px;
     background: var(--bg-surface);
+
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
   }
 
   .playground-media-form textarea {
@@ -225,11 +229,13 @@
     field-sizing: content;
   }
 
+
   .playground-media-options {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 12px;
   }
+
 
   .playground-media-actions {
     display: flex;

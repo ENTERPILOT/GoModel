@@ -76,13 +76,16 @@
   });
 </script>
 
+
 <div class="page-with-sticky-date">
   {#if !scoped}
     <LiveTokens />
   {/if}
 
   <div class="page-header date-range-page-header">
+
     <h2>{m.overview_usage_title()}</h2>
+
   </div>
   <div class="sticky-date-range">
     <DatePicker onchange={onDateRangeChange} />

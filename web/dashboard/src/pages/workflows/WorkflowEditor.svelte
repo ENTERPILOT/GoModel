@@ -20,6 +20,7 @@
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
+
 <EditorDialog
   open={wf.formOpen}
   ariaLabel={m.workflows_editor()}
@@ -43,6 +44,7 @@
         <h3>{wf.submitMode() === "save" ? m.workflows_edit() : m.workflows_create()}</h3>
       {/snippet}
     </InlineHelpSection>
+
   {/snippet}
 
   <div class="form-grid">
@@ -68,6 +70,7 @@
         {#each wf.providerOptions() as providerName (providerName)}
           <option value={providerName}>{providerName}</option>
         {/each}
+
       </select>
     </div>
 
@@ -85,6 +88,7 @@
           searchPlaceholder={m.workflows_model_search_placeholder()}
           ariaLabel={m.workflows_model()}
           mono
+
         />
       </FormField>
     {/if}
@@ -104,6 +108,7 @@
         type="text"
         class="workflow-input"
         placeholder={m.workflows_name_placeholder()}
+
         aria-describedby="workflow-name-help-copy"
         bind:value={wf.form.name}
       />
@@ -124,6 +129,7 @@
         type="text"
         class="workflow-input"
         placeholder="team/alpha or /team/alpha"
+
         aria-describedby="workflow-user-path-help-copy"
         bind:value={wf.form.scope_user_path}
       />
@@ -131,6 +137,7 @@
   </div>
 
   <FormField id="workflow-description" label={m.workflows_description()}>
+
     <textarea
       id="workflow-description"
       placeholder={m.workflows_description_placeholder()}
@@ -181,12 +188,14 @@
     {/if}
     {#if wf.failoverVisible()}
       <EnabledToggle
+
         enabled={wf.form.features.failover}
         label={m.workflows_failover()}
         text={m.workflows_failover()}
         onclick={() => (wf.form.features.failover = !wf.form.features.failover)}
       />
     {/if}
+
   </div>
 
   <div class="workflow-preview">
@@ -200,6 +209,7 @@
     <div class="workflow-guardrail-editor">
       <InlineHelpSection
         copyId="workflow-steps-help-copy"
+
         label={m.workflows_steps_help_label()}
       >
         {#snippet title()}
@@ -209,6 +219,7 @@
           {m.workflows_phase_help()} {m.workflows_steps_help()}
         {/snippet}
       </InlineHelpSection>
+
 
       {#if wf.guardrailRefs.length === 0}
         <div class="alert alert-warning alert-inline-actions">
@@ -225,6 +236,7 @@
         {@const phaseRows = wf.form.guardrails.filter((step) => step.phase === phase)}
         <section class="workflow-guardrail-phase" aria-label={m.workflows_guardrail_flow_title({ phase: phaseName })}>
           <div class="workflow-section-head workflow-guardrail-phase-head">
+
             <h5>{m.workflows_guardrail_flow_title({ phase: phaseName })}</h5>
             <button
               type="button"
@@ -297,9 +309,11 @@
                       />
                     </div>
                     <button type="button" class="table-action-btn table-action-btn-danger" onclick={() => wf.removeGuardrailStep(index)}>{m.workflows_remove()}</button>
+
                   </div>
                 {/if}
               {/each}
+
             </div>
           {:else}
             <p class="form-hint">{m.workflows_no_phase_steps({ phase: phaseName })}</p>
@@ -310,6 +324,7 @@
   {/if}
 </EditorDialog>
 
+
 <!-- Stacked over the workflow form for creating or editing an instance
      without leaving the draft. -->
 <GuardrailEditor />
@@ -317,6 +332,7 @@
 <style>
   /* EditorDialog renders the plain editor shell (no wide variant), so widen
      the dialog itself via the dialogClass hook. That div lives in
+
      EditorDialog's markup where this component's scope hash cannot match, so
      the rule is :global — compounded with .model-editor to keep outranking
      the shared base rule in forms.css. */
@@ -339,15 +355,18 @@
     gap: 16px;
   }
 
+
   .workflow-guardrail-editor :global(h4) {
     font-size: 14px;
     font-weight: 700;
   }
 
+
   .workflow-guardrail-phase {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
+
   }
 
   .workflow-guardrail-phase-head {
@@ -357,9 +376,8 @@
   .workflow-guardrail-phase-head h5 {
     font-size: 13px;
     font-weight: 600;
+
     color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
   }
 
   .workflow-add-btn {
@@ -369,18 +387,22 @@
 
   .workflow-guardrail-list-editor {
     display: flex;
+
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
   }
+
 
   .workflow-guardrail-row {
     display: flex;
     align-items: center;
+
     gap: 12px;
-    padding: 10px 12px;
+    padding: 12px 12px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-panel);
     background: var(--bg);
+
   }
 
   .workflow-guardrail-field {

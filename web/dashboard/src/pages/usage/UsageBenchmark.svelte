@@ -74,6 +74,7 @@
         value={usageBenchmark.view}
         onchange={(view) => (usageBenchmark.view = view)}
       />
+
     </div>
   </div>
 
@@ -100,6 +101,7 @@
         {#each BENCHMARK_MONTH_OPTIONS as count (count)}
           <option value={String(count)}>{m.usage_benchmark_months_option({ count })}</option>
         {/each}
+
       </select>
     </label>
   </div>
@@ -158,10 +160,12 @@
           </tbody>
         </table>
       </div>
+
     {/if}
   {/if}
   <p class="usage-benchmark-note">{m.usage_benchmark_note()}</p>
 </section>
+
 
 <style>
   .usage-benchmark {
@@ -176,12 +180,14 @@
     margin-left: auto;
   }
 
+
   .usage-benchmark-controls {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
     margin-bottom: 16px;
   }
+
 
   .usage-benchmark-controls label,
   .usage-benchmark-field {

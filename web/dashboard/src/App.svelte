@@ -84,6 +84,7 @@
   const PageComponent = $derived(pageComponents[router.page] || OverviewPage);
 </script>
 
+
 <Sidebar />
 <main
   id="dashboard-content"

@@ -15,6 +15,7 @@
   const isEdit = $derived(store.formMode === "edit");
 </script>
 
+
 <EditorDialog
   open={store.formOpen}
   title={isEdit ? m.guardrails_edit() : m.guardrails_create()}
@@ -30,6 +31,7 @@
     <p class="form-hint">
       {m.guardrails_editor_help()}
     </p>
+
   {/snippet}
 
   <div class="form-grid">
@@ -41,6 +43,7 @@
         bind:value={store.form.name}
         disabled={isEdit}
         data-modal-autofocus={isEdit ? undefined : true}
+
       />
     </FormField>
 
@@ -57,6 +60,7 @@
         {/each}
         {#if isEdit && !store.types.some((typeDef) => typeDef.type === store.form.type)}
           <option value={store.form.type}>{store.form.type}</option>
+
         {/if}
       </select>
     </FormField>
@@ -66,6 +70,7 @@
         id="guardrail-description"
         type="text"
         placeholder={m.guardrails_description_placeholder()}
+
         bind:value={store.form.description}
         data-modal-autofocus={isEdit ? true : undefined}
       />
@@ -87,11 +92,13 @@
         id="guardrail-user-path"
         type="text"
         placeholder="/team/alpha"
+
         bind:value={store.form.user_path}
         aria-label={m.guardrails_user_path()}
         aria-describedby="guardrail-user-path-help-copy"
       />
     </div>
+
 
     <SchemaFields
       fields={store.typeFields(store.form.type)}
@@ -123,6 +130,7 @@
             step="1"
             placeholder={m.guardrails_timeout_placeholder()}
             bind:value={store.form.timeout_ms}
+
           />
           <small class="form-hint">{m.guardrails_timeout_help()}</small>
         </FormField>
@@ -132,9 +140,11 @@
 </EditorDialog>
 
 <style>
+
   /* EditorDialog renders the plain editor shell, so the wide width
      (min(1080px, 100%)) is applied on the dialog itself via the dialogClass
      hook. That div lives in EditorDialog's markup where this component's
+
      scope hash cannot match, so the rules are :global — compounded with
      .model-editor to keep outranking the shared base rule in forms.css. */
   :global(.model-editor.guardrails-editor-wide) {
@@ -147,19 +157,19 @@
 
   .guardrail-advanced {
     grid-column: 1 / -1;
-    padding: 10px 12px;
+    padding: 12px 12px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+
+    border-radius: var(--radius-panel);
     background: var(--bg);
   }
+
 
   .guardrail-advanced-summary {
     cursor: pointer;
     color: var(--text-muted);
     font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
     user-select: none;
   }
 
@@ -168,6 +178,6 @@
   }
 
   .guardrail-advanced-grid {
-    margin-top: 10px;
+    margin-top: 12px;
   }
 </style>

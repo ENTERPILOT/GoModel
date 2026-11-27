@@ -31,12 +31,15 @@
   });
 </script>
 
+
 <div>
   <div class="page-header">
     <div>
       <h2>{m.settings_title()}</h2>
     </div>
+
   </div>
+
 
   <UpdateBanner />
 
@@ -52,8 +55,10 @@
       <TaggingSettings />
       <RuntimeSettings />
       <PricingRecalculation />
+
       <RuntimeRefresh />
     {/if}
+
   </div>
 
   <p class="settings-version-footer mono">{appVersion()}</p>

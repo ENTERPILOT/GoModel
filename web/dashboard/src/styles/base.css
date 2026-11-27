@@ -9,17 +9,55 @@ body {
   overflow: hidden;
 }
 
+
 body {
-  font-family:
-    "Inter",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
+}
+
+/* Form controls do NOT inherit the font stack: the UA stylesheet gives
+   buttons, selects and inputs their own default (Arial), so every control
+   that does not set a font of its own renders in Arial instead of the app
+   stack. Arco's reset makes them inherit — measured from the compiled
+   @arco-design/web-react@2.66.0 stylesheet:
+     button, input, optgroup, select, textarea { font-family: inherit }
+   Only the family is inherited here; the app sets font-size on every
+   control it owns, and inheriting that too would change their metrics. */
+button,
+input,
+optgroup,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* Keyboard focus fallback (DESIGN.md §5.1): every focusable control that
+   does not style its own ring — links, menu items, table sort headers, and
+   any future component — gets the shared --primary-ring outline. Text
+   fields keep their :focus border+ring (forms.css), and buttons replace
+   outline with their box-shadow ring (buttons.css); both use the same
+   token, so the keyboard cursor looks identical everywhere. :focus-visible
+   keeps mouse clicks on links and cards from painting a ring. */
+:focus-visible {
+  outline: 2px solid var(--primary-ring);
+  outline-offset: 0;
+}
+
+/* Reduced motion (DESIGN.md §5.1): the dashboard animates on state change
+   only — a live pulse, a toast slide, a panel expand. A user who asks the
+   OS for less motion gets none of it. Component rules that hide the
+   decoration outright stay in place; this is the app-wide floor. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 .app {
@@ -30,33 +68,36 @@ body {
 }
 
 .badge {
-  background: var(--accent);
-  color: #fff;
+  background: var(--primary);
+  color: var(--on-fill);
+
   font-size: 10px;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  border-radius: var(--radius-pill);
 }
 
 /* Spacing scale. Containers read their padding and pages their rhythm from
    these tokens, so the tiers below are the only place mobile spacing is
-   decided; components carry no spacing media queries of their own. */
+   decided; components carry no spacing media queries of their own.
+   Every tier is a multiple of 4 (DESIGN.md §5, P3) — the app's spacing
+   grid is 4 / 8 / 12 / 16 / 20 / 24 / 32. */
 :root {
   --space-page: 32px; /* .content padding */
+
   --space-block: 24px; /* sections, panels, editors */
-  --space-card: 20px; /* stat cards, workflow cards */
+  --space-card: 16px; /* stat cards, workflow cards */
   --space-cell: 16px; /* table cell horizontal padding */
   --space-stack: 24px; /* vertical rhythm: page header, gaps between blocks */
   --space-grid: 16px; /* card grid gap */
 }
 
 /* Tablet */
+
 @media (max-width: 768px) {
   :root {
     --space-page: 20px;
-    --space-block: 18px;
+    --space-block: 16px;
     --space-stack: 20px;
   }
 }
@@ -66,10 +107,10 @@ body {
 @media (max-width: 520px) {
   :root {
     --space-page: 12px;
-    --space-block: 14px;
-    --space-card: 14px;
-    --space-cell: 10px;
+    --space-block: 12px;
+    --space-card: 12px;
+    --space-cell: 8px;
     --space-stack: 16px;
-    --space-grid: 10px;
+    --space-grid: 8px;
   }
 }

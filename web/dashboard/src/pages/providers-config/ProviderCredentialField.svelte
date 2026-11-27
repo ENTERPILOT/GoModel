@@ -44,6 +44,7 @@
   }
 </script>
 
+
 <div class="form-field">
   <div class="form-field-label-row">
     <label class="form-field-label" for={id}>
@@ -69,6 +70,7 @@
         <span class="inline-help-toggle-icon" aria-hidden="true">?</span>
       </a>
     {/if}
+
   </div>
 
   {#if field.control === "keys"}
@@ -158,6 +160,7 @@
       aria-describedby={describedBy}
       bind:value={providersConfig.form[field.name]}
       oninput={onInput}
+
     />
   {/if}
 
@@ -172,6 +175,7 @@
       {#if collapsed && field.docsUrl}
         <a href={field.docsUrl} target="_blank" rel="noopener noreferrer">{field.docsLabel}</a>
       {/if}
+
     </small>
   {/if}
 </div>
@@ -179,10 +183,12 @@
 <style>
   /* Keeps the docs "?" beside the label: .form-field stacks its children. */
   .form-field-label-row {
+
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
   }
+
 
   /* .form-field stretches its children; keep the switch at its own width. */
   .form-field-switch {

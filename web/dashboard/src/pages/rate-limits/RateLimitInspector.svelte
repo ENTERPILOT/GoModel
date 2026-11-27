@@ -22,6 +22,7 @@
   }
 </script>
 
+
 <Modal open={rateLimits.rateLimitInspectorOpen} variant="editor" {onclose}>
   <div
     class="model-editor budget-editor"
@@ -40,6 +41,7 @@
         label="Close rate limits inspector"
         onclick={() => rateLimits.closeRateLimitInspector()}
       />
+
     </div>
 
     {#if rateLimits.rateLimitsLoading}
@@ -140,6 +142,7 @@
             </div>
           {/if}
         </section>
+
       {/each}
     {/if}
 

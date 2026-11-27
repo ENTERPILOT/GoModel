@@ -24,6 +24,7 @@
   );
 </script>
 
+
 <Modal open={mcpServers.catalogOpen} variant="editor" onclose={() => mcpServers.closeCatalog()}>
   <div class="model-editor" role="dialog" aria-modal="true" aria-label={m.mcp_catalog_label()}>
     <div class="editor-header">
@@ -40,6 +41,7 @@
         label={m.mcp_catalog_close()}
         onclick={() => mcpServers.closeCatalog()}
       />
+
     </div>
 
     {#if mcpServers.catalogLoading}
@@ -48,6 +50,7 @@
       <p class="form-error" role="alert" aria-live="assertive">{mcpServers.catalogError}</p>
     {:else}
       {#if mcpServers.catalog.instructions}
+
         <p class="form-hint">{mcpServers.catalog.instructions}</p>
       {/if}
 
@@ -87,9 +90,11 @@
                 {/if}
               </li>
             {/each}
+
           </ul>
         </section>
       {/each}
+
 
       {#if mcpCatalogIsEmpty(mcpServers.catalog)}
         <p class="empty-state">{m.mcp_catalog_empty()}</p>
@@ -101,16 +106,19 @@
         <button type="button" class="btn" onclick={() => mcpServers.chooseToolsFromCatalog()}
           >{m.mcp_catalog_choose_tools()}</button
         >
+
       {/if}
       <button type="button" class="btn" onclick={() => mcpServers.closeCatalog()}>{m.mcp_close()}</button>
     </div>
   </div>
 </Modal>
 
+
 <style>
   /* MCP catalog inspector: read-only lists of tools, prompts, and resources. */
+
   .mcp-catalog-section {
-    margin-top: 18px;
+    margin-top: 20px;
   }
 
   .mcp-catalog-section :global(.form-field-label) {
@@ -123,6 +131,7 @@
     flex-wrap: wrap;
     gap: 8px;
   }
+
 
   .mcp-catalog-list {
     list-style: none;
@@ -150,12 +159,14 @@
 
   .mcp-catalog-badge {
     display: inline-block;
-    margin-left: 6px;
-    padding: 0 6px;
+
+    margin-left: 8px;
+    padding: 0 8px;
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     color: var(--text-muted);
     font-size: 11px;
+
     line-height: 18px;
     vertical-align: middle;
   }

@@ -15,6 +15,7 @@
   });
 </script>
 
+
 <span class="session-id-chip" class:active class:compact>
   <button
     type="button"
@@ -36,6 +37,7 @@
   >
     <Icon icon={copyState.copied ? CircleCheck : Copy} />
   </button>
+
 </span>
 
 <style>
@@ -45,9 +47,10 @@
     max-width: 290px;
     overflow: hidden;
     border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: color-mix(in srgb, var(--accent) 10%, var(--bg));
     color: var(--accent-strong, var(--accent));
+
     vertical-align: middle;
   }
 
@@ -76,17 +79,21 @@
 
   .session-id-copy {
     display: inline-flex;
+
     align-items: center;
     justify-content: center;
     width: 28px;
-    padding: 0 7px;
+    padding: 0 8px;
+
     border-left: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
   }
 
   .session-id-copy:hover,
+
   .session-id-copy.copied {
     background: color-mix(in srgb, var(--accent) 18%, transparent);
   }
+
 
   .session-id-copy :global(svg) {
     width: 13px;
@@ -98,12 +105,12 @@
   }
 
   .session-id-chip.compact .session-id-filter {
-    padding: 3px 7px;
+    padding: 4px 8px;
     font-size: 11px;
   }
 
   .session-id-chip.compact .session-id-copy {
     width: 25px;
-    padding: 0 6px;
+    padding: 0 8px;
   }
 </style>

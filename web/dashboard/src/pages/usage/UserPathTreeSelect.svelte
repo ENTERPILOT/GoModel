@@ -156,16 +156,19 @@
         <Icon icon={Check} class="search-select-check" />
       {/if}
     </li>
+
   {/each}
   {#if rowCount === 0}
     <li class="search-select-empty" role="presentation">{m.search_select_no_matches()}</li>
   {/if}
 </SearchPopover>
 
+
 <style>
   /* Tree rows add an expand toggle and indentation to the shared rows. */
+
   :global(.user-path-tree-select) .tree-row.search-select-option {
-    gap: 6px;
+    gap: 8px;
   }
 
   :global(.user-path-tree-select) .tree-row-covered.search-select-option {
@@ -177,13 +180,16 @@
     align-items: center;
     justify-content: center;
     width: 18px;
+
     height: 18px;
     padding: 0;
     background: none;
+
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-control);
     color: var(--text-muted);
     cursor: pointer;
+
   }
 
   .tree-toggle:hover {

@@ -26,6 +26,7 @@
   });
 </script>
 
+
 <div>
   <div class="page-header">
     <div>
@@ -39,7 +40,9 @@
         {/snippet}
       </InlineHelpSection>
     </div>
+
   </div>
+
 
   <AuthBanner />
 
@@ -54,6 +57,7 @@
   {#if !auth.authError && store.error && !store.formOpen}
     <div class="alert alert-warning">{store.error}</div>
   {/if}
+
   {#if !auth.authError && store.typesError && store.typesError !== store.error && !store.formOpen}
     <div class="alert alert-warning">{store.typesError}</div>
   {/if}

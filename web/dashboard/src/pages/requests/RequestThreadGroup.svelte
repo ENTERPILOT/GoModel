@@ -27,6 +27,7 @@
   );
 </script>
 
+
 {#if !requestIsThreadHead(entry)}
   <RequestEntryRow {entry} />
 {:else}
@@ -65,21 +66,25 @@
       </div>
     {/if}
   </div>
+
 {/if}
 
 <style>
   .request-log-thread {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+
+    gap: 12px;
   }
 
   .request-log-thread-children {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin-left: 26px;
+
+    gap: 12px;
+    margin-left: 28px;
   }
+
 
   .request-log-thread-child,
   .request-log-thread-loading {
@@ -115,7 +120,7 @@
 
   .request-log-thread-loading {
     display: flex;
-    padding: 6px 0 6px 4px;
+    padding: 8px 0 8px 4px;
   }
 
   .request-log-thread-more {

@@ -117,6 +117,33 @@ For DOM behaviour tied to one element, prefer an attachment over `bind:this` +
 the element, and a falsy expression (`{@attach open ? x(…) : undefined}`)
 switches it off.
 
+## 设计 token
+
+视觉规范的事实源是 [`DESIGN.md`](./DESIGN.md)。本节只写**编码约定**。
+
+`src/styles/themes.css` 是唯一调色板，分两层：
+
+```
+第 1 层  PALETTE   Arco 官方色阶，每族 10 级，深浅各一套（深色方向反转）
+第 2 层  SEMANTIC  扁平语义名，指向第 1 层
+```
+
+规矩：
+
+1. **组件里不写死颜色。** 任何前景 / 背景 / 描边都要落到 `themes.css` 的语义 token 上。需要新颜色时，先在 `themes.css` 加 token（调色板或语义层），再用它。唯一例外是 `color-mix()` 里参与混合的比例色（`#fff` / `#000`）。
+2. **先挑对的层。** 填充 / 描边 / 图标用 `--primary`（`--success` / `--warning` / `--danger` 同理）；**文字**用 `--primary-text` / `--success-text` / `--warning-text` / `--danger-text`。浅色主题下三个状态色本身已是文字安全级，深色主题下 level-6 在深底上也已达标 —— 但"压在色块上的文字"另有专用的 `--on-fill`。
+3. **文字压在色块上**用 `--on-fill`（饱和底，如主按钮 / danger 按钮）、`--on-dark-fill`（深色实底，如预算周期条）、`--meter-label`（仪表条切片）；**开关旋钮**用 `--switch-thumb`。这四个 token 都不是主题色，别用 `--text` 顶替。
+4. **分类编码**（工作流"当前执行"节点、provider scope 色相）用 `--category-1`，不要用 `--primary` —— 两套编码必须异色。
+5. **6 个 `--chart-*` token 必须是字面量颜色**（`--chart-grid`、`--chart-text`、`--chart-day-marker`、`--chart-tooltip-bg`、`--chart-tooltip-border`、`--chart-tooltip-text`）。`chartTheme.js` 的 `cssVar()` 返回原始文本并直接交给 Chart.js，写成 `var(--text)` 会让 Canvas 静默丢弃该颜色。
+6. **`data-theme` 永远存在。** `themeStore.apply()` 把 `system` 解析成具体的 `light` / `dark` 后写入 `<html data-theme>`，`index.html` 的首屏脚本做同样的事。因此样式表里**不要**再写 `@media (prefers-color-scheme: ...)` —— 浅色调色板只定义一次。
+7. **焦点环用共享 token，不要自己写 alpha。** 全局 `:focus-visible` 兜底在 `base.css`，输入类用 `:focus`（`forms.css`），按钮用 `box-shadow`（`buttons.css`）。环的颜色只有两个来源：`--primary-ring`（普通控件）与 `--ring-on-fill`（填充按钮 —— 环像素落在按钮自己的填充上，同色相无法对自己过 3:1）。自定义环一律改用 `--primary-ring`，不要写 `color-mix(... 28%, transparent)` 这类比例：透明环实测只有 1–2:1，等于没有环。
+8. **交互三态用 token。** 填充按钮的悬停 / 按下用 `--primary-hover` / `--primary-active`（不是自己 mix 出来的颜色）；禁用态用 `--disabled-opacity` + `--text-disabled` + `not-allowed` 光标，不要各写各的 opacity。
+9. **改动 token 要跑守卫测试**：`tests/themeTokens.test.js` 会按 DESIGN.md §6 的组合表算对比度（含焦点环的 3:1 非文本门槛），也会检查第 5、6 条。新增颜色时同步更新该表的期望值。
+10. **圆角只用四个 token**（`themes.css`）：`--radius-control`（2px，控件）、`--radius-panel`（4px，面板）、`--radius-pill`（999px，胶囊）、`--radius-circle`（50%，正圆）。不要写 `border-radius: 6px` 这类一次性值——`tests/designGrid.test.js` 会直接报错。判断档位看形状：按钮、输入、标签、图标按钮、菜单项是控件；卡片、弹窗、浮层、下拉、表格容器是面板；状态徽章、计数胶囊是胶囊；状态点、加载圈、开关旋钮是正圆。
+11. **间距走 4px 栅格**：`padding` / `margin` / `gap` 的长度取 4 / 8 / 12 / 16 / 20 / 24 / 32。两种例外是**有意**的：1px / 2px 的光学微调（图标居中、描边重叠），以及 Arco 自身的两个组件度量（按钮横向内边距 15px、表格单元格纵向内边距 9px，见 DESIGN.md §7 #12）。改这两个值前先读 DESIGN.md §5.2。
+12. **字体只用两个 token**（`themes.css`）：正文 `var(--font-sans)`（Arco 正文字栈，含 PingFang SC / Hiragino Sans GB / Microsoft YaHei，中文不再回退到随机系统字体）、等宽 `var(--font-mono)`。组件里不要写新的 `font-family` 字栈——继承（默认）或引用 token 即可，`tests/fonts.test.js` 会拒绝硬编码。唯一例外是 Canvas 字体字符串（`chartTheme.js`、`liveTokensLogic.js`）：Canvas 读不到 `var()`，改 `--font-mono` 时必须同步改这两处（测试会比对）。
+13. **不做 uppercase**：任何规则都不要写 `text-transform: uppercase`（Arco 全库只有 `none`，标签层级靠字重与颜色表达）。`tests/fonts.test.js` 会直接报错。
+
 ## Page skeleton
 
 ```svelte

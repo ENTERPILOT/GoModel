@@ -59,6 +59,7 @@
   }
 </script>
 
+
 {#snippet tokenCard(label, inputTokens, outputTokens, totalTokens, busy)}
   <div class="card card-wide">
     <div class="card-label">{label}</div>
@@ -89,6 +90,7 @@
       {/if}
     </div>
   </div>
+
 {/snippet}
 
 {#snippet statusCard(flagClass, statusClass, label, ratio, text, link)}
@@ -108,6 +110,7 @@
     {:else}
       <span class="provider-status-card-note">{text}</span>
     {/if}
+
   </div>
 {/snippet}
 
@@ -224,9 +227,11 @@
       mcpOverviewRatioText(mcpServersState.servers),
       mcpOverviewSummaryText(mcpServersState.servers),
       { title: m.overview_view_mcp_servers(), onclick: () => router.navigate("mcp-servers") },
+
     )}
   {/if}
 </div>
+
 
 <style>
   .provider-status-flag {
@@ -246,6 +251,7 @@
     border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
     background: color-mix(in srgb, var(--warning) 26%, var(--bg-surface));
   }
+
 
   .provider-status-flag.is-unhealthy {
     border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
@@ -275,9 +281,10 @@
   }
 
   .provider-status-card-link:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    outline: 2px solid var(--primary-ring);
     outline-offset: 3px;
-    border-radius: 4px;
+
+    border-radius: var(--radius-control);
   }
 
   .provider-status-card-note {
@@ -288,15 +295,16 @@
 
   @media (min-width: 720px) {
     .card-wide {
-        grid-column: span 2;
-      }
+      grid-column: span 2;
+    }
   }
 
   .cache-token-value {
     align-items: center;
     display: flex;
+
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
     line-height: 1;
   }
 
@@ -314,13 +322,13 @@
   }
 
   .cache-token-marker {
+
     color: var(--text-muted);
     font-size: 14px;
     font-weight: 700;
-    letter-spacing: 0;
     margin-left: 2px;
-    text-transform: uppercase;
   }
+
 
   /* Prompt cache rate gauge (compact half-circle in a stat card). A 180° doughnut's
      natural box is 2:1, so the container is 2:1 and Chart.js sizes the canvas to it
@@ -333,9 +341,11 @@
     overflow: hidden;
   }
 
+
   .prompt-cache-gauge :global(canvas) {
     display: block;
   }
+
 
   .prompt-cache-gauge-loading {
     display: flex;

@@ -55,6 +55,7 @@ import {
   $effect(() => onSearchInput.cancel);
 </script>
 
+
 {#snippet authKeyChip(entry)}
   {#if entry.auth_key_id}
     {@const name = authKeyDisplayName(entry.auth_key_id, usageFacets.authKeyNames)}
@@ -70,6 +71,7 @@ import {
   {:else}
     <span>-</span>
   {/if}
+
 {/snippet}
 
 {#snippet labelChips(entry)}
@@ -88,6 +90,7 @@ import {
     </div>
   {:else}
     <span>-</span>
+
   {/if}
 {/snippet}
 
@@ -261,23 +264,27 @@ import {
     offset={usagePage.usageLog.offset}
     limit={usagePage.usageLog.limit}
     onprev={() => usagePage.usageLogPrevPage()}
+
     onnext={() => usagePage.usageLogNextPage()}
   />
 </div>
 
 <style>
 /* Match the empty-state block's height so the section doesn't jump when the
+
    fetch settles. The class lands in LoadingState's markup, so :global. */
 .usage-log-section :global(.usage-log-loading) {
   --loading-state-min-height: 120px;
 }
 
 .usage-log-section {
+
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
   padding: var(--space-block);
 }
+
 
 .usage-log-section :global(h3) {
   font-size: 16px;
@@ -327,14 +334,17 @@ import {
   font-size: 12px;
 }
 
+
 .usage-log-row-cached :global(td) {
   opacity: 0.75;
   font-style: italic;
 }
 
+
 .usage-log-row-cached .usage-log-cache-cell {
   font-weight: 700;
 }
+
 
 /* Caveat warning icon */
 .caveat-icon {
@@ -347,7 +357,7 @@ import {
 @media (max-width: 768px) {
   /* Usage page mobile */
   .usage-log-toolbar {
-        gap: 10px;
+        gap: 12px;
       }
 
   .usage-filter-row {

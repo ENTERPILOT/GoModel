@@ -127,10 +127,12 @@
         <svg viewBox="0 0 12 12" fill="none"><path d="M10 2v8M3 6h7M5.5 3.5L3 6l2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       {/if}
       <span>{selectingDate === "end"
+
           ? m.date_picker_select_end()
           : m.date_picker_select_start()}</span>
     </div>
   {/if}
+
 </div>
 
 <style>
@@ -142,17 +144,21 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 12px;
+    height: 32px;
+    padding: 0 12px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
+
     color: var(--text);
-    font-size: 13px;
+    font-size: 14px;
     font-family: inherit;
+
     cursor: pointer;
     transition: all 0.15s;
     white-space: nowrap;
   }
+
 
   .date-picker-trigger:hover {
     background: var(--bg-surface-hover);
@@ -171,6 +177,7 @@
     transform: rotate(180deg);
   }
 
+
   .date-picker-dropdown {
     position: absolute;
     top: calc(100% + 6px);
@@ -179,7 +186,8 @@
     display: flex;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+
+    border-radius: var(--radius-panel);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
     overflow: hidden;
   }
@@ -193,18 +201,22 @@
     min-width: 140px;
   }
 
+
   .preset-btn {
     padding: 8px 12px;
+
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     color: var(--text);
+
     font-size: 13px;
     font-family: inherit;
     text-align: left;
     cursor: pointer;
     transition: all 0.15s;
     white-space: nowrap;
+
   }
 
   .preset-btn:hover {
@@ -212,8 +224,8 @@
   }
 
   .preset-btn.active {
-    background: var(--accent);
-    color: #fff;
+    background: var(--primary);
+    color: var(--on-fill);
   }
 
   .date-picker-calendars {
@@ -223,22 +235,24 @@
     gap: 16px;
   }
 
+
   .dp-cursor-hint {
     position: fixed;
     pointer-events: none;
     z-index: 101;
     background: var(--bg-surface);
+
     color: var(--text);
     border: 1px solid var(--accent);
     font-size: 11px;
     font-weight: 500;
-    padding: 3px 8px;
-    border-radius: 4px;
+    padding: 4px 8px;
+    border-radius: var(--radius-control);
     white-space: nowrap;
     transform: translate(12px, -50%);
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
   }
 
   .dp-cursor-hint svg {
@@ -251,13 +265,16 @@
   @media (max-width: 768px) {
     /* Dock the dropdown to the bottom of the viewport and show one month. */
     .date-picker-dropdown {
+
         flex-direction: column;
         right: 0;
         left: 0;
         position: fixed;
+
         top: auto;
         bottom: 0;
-        border-radius: var(--radius) var(--radius) 0 0;
+        border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+
         max-height: 80vh;
         padding-bottom: env(safe-area-inset-bottom, 0px);
         overflow-y: auto;

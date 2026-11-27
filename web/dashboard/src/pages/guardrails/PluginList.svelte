@@ -15,6 +15,7 @@
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
+
 {#if pluginsStore.available}
 <section class="settings-panel plugins-panel">
   <div class="editor-header">
@@ -25,6 +26,7 @@
       {/if}
     </h3>
   </div>
+
   <p class="form-hint">{m.plugins_help()}</p>
 
   {#if pluginsStore.error}
@@ -89,6 +91,7 @@
   </table>
   </div>
   {/if}
+
 </section>
 {/if}
 
@@ -105,10 +108,12 @@
     margin: 0;
   }
 
+
   .plugin-name {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
+
   }
 
   .plugin-guardrail {
@@ -136,18 +141,20 @@
   .plugin-kind {
     display: inline-flex;
     align-items: center;
-    padding: 2px 7px;
+
+    padding: 2px 8px;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
+
     background: var(--bg);
     color: var(--text-muted);
     font-size: 9px;
     font-weight: 800;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+
     white-space: nowrap;
     line-height: 1.5;
   }
+
 
   .plugin-source {
     white-space: nowrap;

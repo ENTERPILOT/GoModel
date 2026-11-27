@@ -24,6 +24,7 @@
   const filtered = $derived(store.filteredBudgets());
 </script>
 
+
 <div>
   <div class="page-header">
     <div>
@@ -47,7 +48,9 @@
         </button>
       {/if}
     </div>
+
   </div>
+
 
   <AuthBanner />
 
@@ -57,6 +60,7 @@
   {#if store.error && !auth.authError}
     <p class="form-error" role="alert" aria-live="assertive">{store.error}</p>
   {/if}
+
   {#if store.loading && !auth.authError}
     <LoadingState label={m.budgets_loading()} />
   {/if}
@@ -81,10 +85,13 @@
         >
           <option value="subject">{m.budgets_sort_subject()}</option>
           <option value="period">{m.budgets_period()}</option>
+
         </select>
+
       </div>
     </div>
   {/if}
+
 
   <BudgetEditor />
 
@@ -92,11 +99,13 @@
     <BudgetList budgets={filtered} />
   {/if}
 
+
   {#if store.budgets.length === 0 && !store.filter && !store.loading && !auth.authError && !store.error && store.budgetsAvailable && store.managementEnabled()}
     <p class="empty-state">{m.budgets_empty()}</p>
   {/if}
   {#if store.budgets.length > 0 && filtered.length === 0 && store.filter && !store.loading && !auth.authError && !store.error && store.budgetsAvailable && store.managementEnabled()}
     <p class="empty-state">{m.budgets_no_match()}</p>
+
   {/if}
 </div>
 

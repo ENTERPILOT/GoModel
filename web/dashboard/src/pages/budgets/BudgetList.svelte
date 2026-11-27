@@ -52,6 +52,7 @@
   }
 </script>
 
+
 <div class="budget-list">
   {#each budgets as item (budgetKey(item))}
     <section class="budget-row">
@@ -309,14 +310,16 @@
       </div>
     </section>
   {/each}
+
 </div>
 
 <style>
   .per-child-summary {
     padding: 0.75rem 0.9rem;
     border: 1px solid var(--border);
-    border-radius: 0.5rem;
+    border-radius: var(--radius-panel);
     color: var(--text-muted);
+
     line-height: 1.45;
   }
 
@@ -324,18 +327,21 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 4px 14px;
+    gap: 4px 16px;
     min-width: 0;
     color: var(--text-muted);
+
     font-size: 11px;
     line-height: 1.4;
   }
 
   .budget-outlook-item {
+
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
   }
+
 
   .budget-outlook-over {
     color: var(--danger);
@@ -347,8 +353,17 @@
   }
 
   .budget-bar-text-row-on-fill {
-    color: #fff;
+    /* The period fills are dark in both themes, so their on-fill caption is
+       always light. The themed usage/danger fills are overridden below. */
+
+    color: var(--on-dark-fill);
     clip-path: inset(0 calc(100% - var(--budget-progress, 0%)) 0 0);
+  }
+
+
+  .budget-bar-track:has(.budget-bar-fill-usage) .budget-bar-text-row-on-fill,
+  .budget-bar-track:has(.budget-bar-fill-danger) .budget-bar-text-row-on-fill {
+    color: var(--on-fill);
   }
 
   .budget-bar-text-start {

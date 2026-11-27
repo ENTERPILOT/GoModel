@@ -109,6 +109,7 @@
         {/each}
       </tbody>
     </table>
+
   </div>
 </section>
 
@@ -126,20 +127,22 @@
 
   .request-log-guardrails-table th,
   .request-log-guardrails-table td {
-    padding: 6px 8px;
+    padding: 8px 8px;
+
     text-align: left;
     vertical-align: middle;
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
   }
 
+
   .request-log-guardrails-table th {
     color: var(--text-muted);
+
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
   }
+
 
   .request-log-guardrails-table tbody tr:last-child td {
     border-bottom: 0;
@@ -160,14 +163,17 @@
 
   .request-log-guardrails-toggle {
     display: inline-flex;
+
     align-items: center;
     justify-content: center;
     width: 22px;
     height: 22px;
+
     padding: 0;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: var(--bg-surface);
+
     color: var(--text-muted);
     cursor: pointer;
   }
@@ -177,15 +183,18 @@
     border-color: color-mix(in srgb, var(--border) 60%, var(--text) 40%);
   }
 
+
   .request-log-guardrails-toggle :global(svg) {
     width: 14px;
     height: 14px;
   }
 
+
   .request-log-guardrails-type {
-    margin-left: 6px;
+    margin-left: 8px;
     color: var(--text-muted);
     font-size: 11px;
+
   }
 
   .request-log-guardrails-muted {
@@ -193,6 +202,7 @@
   }
 
   /* The code · message cell is the only one allowed to wrap. */
+
   .request-log-guardrails-table td.request-log-guardrails-result {
     white-space: normal;
     min-width: 200px;
@@ -205,7 +215,7 @@
   }
 
   .request-log-guardrails-detail-row td {
-    padding: 8px 10px 10px 36px;
+    padding: 8px 12px 12px 36px;
     background: var(--bg-surface);
   }
 
@@ -214,19 +224,20 @@
   }
 
   .request-log-guardrails-block > h5 {
-    margin-bottom: 6px;
+    margin-bottom: 8px;
+
   }
 
   .request-log-guardrails-json {
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-panel);
     box-sizing: border-box;
-    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     line-height: 1.45;
     max-width: 100%;
-    padding: 10px;
+    padding: 12px;
     max-height: 220px;
     overflow: auto;
     white-space: pre;

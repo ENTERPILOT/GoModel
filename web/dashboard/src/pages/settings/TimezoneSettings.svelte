@@ -25,6 +25,7 @@
     text={m.settings_timezone_help()}
   >
     {#snippet title()}<h3>{m.settings_timezone_title()}</h3>{/snippet}
+
   </InlineHelpSection>
 </div>
 
@@ -54,6 +55,7 @@
   {#if timezone.override}
     <button type="button" class="btn" onclick={clear}
       >{m.settings_timezone_use_browser()}</button
+
     >
   {/if}
 </div>
@@ -66,11 +68,13 @@
     margin-bottom: 20px;
   }
 
+
   /* margin-bottom dropped: the heading sits in an inline-help-title-row,
      whose global margin-bottom: 0 always outranked the 6px declared here. */
   .settings-panel-header :global(h3) {
     font-size: 18px;
   }
+
 
   .settings-form-grid {
     display: grid;

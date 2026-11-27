@@ -47,6 +47,7 @@
   };
 </script>
 
+
 <div class="playground-toolbar">
   <div class="playground-toolbar-row">
     <label class="playground-field">
@@ -99,6 +100,7 @@
         mono
       />
     </div>
+
   </div>
 
   {#if store.mode === "chat"}
@@ -137,6 +139,7 @@
         <span>{m.playground_clear()}</span>
       </button>
     </div>
+
   {/if}
 </div>
 
@@ -144,12 +147,13 @@
   .playground-toolbar {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 12px 14px;
+    gap: 12px;
+    padding: 12px 16px;
     margin-bottom: 12px;
     background: var(--bg-surface);
+
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
   }
 
   .playground-toolbar-row {
@@ -158,6 +162,7 @@
     align-items: center;
     gap: 12px 16px;
   }
+
 
   .playground-field {
     display: flex;
@@ -171,10 +176,12 @@
   }
 
   /* The class lands on the molecule's wrapper, outside this scope hash. */
+
   .playground-field-model :global(.playground-model-select) {
     flex: 1 1 auto;
     min-width: 0;
   }
+
 
   .playground-field-user-path {
     flex: 0 1 260px;
@@ -189,32 +196,37 @@
     color: var(--text-muted);
     font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.3px;
-    text-transform: uppercase;
     white-space: nowrap;
+
   }
 
   .playground-stream-toggle {
+
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     color: var(--text);
+
     font-size: 13px;
     cursor: pointer;
     user-select: none;
   }
 
+
   .playground-stream-toggle input {
     accent-color: var(--accent);
   }
 
+
   .playground-add-buttons {
     display: inline-flex;
-    gap: 6px;
+
+    gap: 8px;
   }
 
+
   .playground-add-btn {
-    padding: 5px 12px;
+    padding: 4px 12px;
     font-size: 12px;
     font-weight: 600;
   }
@@ -223,9 +235,11 @@
     color: var(--warning);
   }
 
+
   .playground-add-btn.playground-role-user {
-    color: var(--info);
+    color: var(--primary-text);
   }
+
 
   .playground-add-btn.playground-role-assistant {
     color: var(--success);
@@ -241,6 +255,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
 
   @media (max-width: 768px) {
     .playground-endpoint-path {

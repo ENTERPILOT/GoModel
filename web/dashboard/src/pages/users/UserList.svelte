@@ -11,6 +11,7 @@
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
+
 <div class="table-wrapper">
   <table class="data-table">
     <thead>
@@ -130,14 +131,16 @@
       {/each}
     </tbody>
   </table>
+
 </div>
 
 <style>
   .user-path-cell {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding-left: calc(var(--user-depth, 0) * 18px);
+    gap: 8px;
+    padding-left: calc(var(--user-depth, 0) * 20px);
+
     white-space: nowrap;
   }
 
@@ -146,9 +149,11 @@
     flex-shrink: 0;
   }
 
+
   .user-path-leaf {
     font-weight: 600;
   }
+
 
   /* The copy affordance stays quiet until the row is hovered or focused. */
   .user-path-cell :global(.user-copy-btn) {
@@ -174,8 +179,9 @@
 
   .user-selector {
     font-size: 12px;
-    padding: 2px 6px;
-    border-radius: var(--radius);
+    padding: 2px 8px;
+
+    border-radius: var(--radius-control);
     background: color-mix(in srgb, var(--accent) 10%, var(--bg));
     white-space: nowrap;
   }
@@ -188,10 +194,12 @@
 
   .user-effective-none {
     display: inline-flex;
+
     align-items: center;
     gap: 4px;
-    color: var(--danger, #c0392b);
+    color: var(--danger-text);
     font-weight: 600;
+
   }
 
   .user-effective-via {
@@ -205,6 +213,7 @@
     color: var(--text-muted);
     font-size: 13px;
   }
+
 
   .user-actions-cell {
     white-space: nowrap;
@@ -224,6 +233,6 @@
   .user-row-actions {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
   }
 </style>

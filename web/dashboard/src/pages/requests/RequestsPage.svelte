@@ -62,6 +62,7 @@
   }
 </script>
 
+
 <div class="page-with-sticky-date">
   <div class="page-header date-range-page-header">
     <div class="inline-help-section">
@@ -86,7 +87,9 @@
   </div>
   <div class="sticky-date-range">
     <DatePicker onchange={() => requestList.fetchRequestLog(true)} />
+
   </div>
+
 
   <AuthBanner />
 
@@ -94,8 +97,10 @@
     <div class="alert alert-warning" role="status">
       {m.requests_logging_disabled_before_config()}<code
         >LOGGING_ENABLED=true</code
+
       >{m.requests_logging_disabled_after_config()}
     </div>
+
   {/if}
 
   <div class="request-log-section">
@@ -132,6 +137,7 @@
             onchange={() => requestList.toggleRequestLogGroupSessions()}
           />
           <span>{m.requests_group_by_session()}</span>
+
         </label>
         <RequestColumnsMenu />
       </div>
@@ -155,11 +161,13 @@
             {#if requestList.requestLogGroupSessions}
               <RequestThreadGroup {entry} />
             {:else}
+
               <RequestEntryRow {entry} />
             {/if}
           </div>
         {/each}
       </div>
+
     {/if}
 
     {#if requestList.requestLog.entries.length === 0 && !requestList.loading && !auth.needsAuth}
@@ -168,7 +176,9 @@
       </div>
     {/if}
 
+
     <Pagination
+
       total={requestList.requestLog.total}
       offset={requestList.requestLog.offset}
       limit={requestList.requestLog.limit}
@@ -180,15 +190,17 @@
 </div>
 
 <style>
+
   /* Row above the list: page summary and view preference on the left, the
      live-stream status on the right. */
   .request-log-list-toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
+
     gap: 12px;
     flex-wrap: wrap;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
   }
 
   .request-log-list-toolbar-left {
@@ -201,12 +213,14 @@
   .request-log-group-checkbox {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     color: var(--text-muted);
     font-size: 13px;
+
     cursor: pointer;
     user-select: none;
   }
+
 
   .request-log-group-checkbox input {
     accent-color: var(--accent);
@@ -218,6 +232,7 @@
   font-size: 13px;
 }
 
+
 .request-log-retention-highlight {
   color: var(--text);
   font-weight: 600;
@@ -226,7 +241,7 @@
 .request-log-section {
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
   padding: var(--space-block);
 }
 
@@ -238,6 +253,6 @@
 .request-log-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 </style>

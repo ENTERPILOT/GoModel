@@ -23,6 +23,7 @@
   const cycleLabel = $derived(m.theme_change({ theme: activeTheme.label }));
 </script>
 
+
 <div class="theme-toggle" class:is-compact={compact} role="group" aria-label={m.theme_label()}>
   {#each themes as theme (theme.value)}
     <button
@@ -45,6 +46,7 @@
   aria-label={cycleLabel}
 >
   <Icon icon={activeTheme.icon} class="theme-icon" />
+
 </button>
 
 <style>
@@ -54,9 +56,10 @@
     align-items: center;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     padding: 2px;
-    margin-bottom: 10px;
+
+    margin-bottom: 12px;
   }
 
   .theme-btn {
@@ -67,24 +70,28 @@
     height: 24px;
     background: transparent;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-control);
     color: var(--text-muted);
+
     cursor: pointer;
     transition: all 0.15s;
   }
+
 
   .theme-btn:hover {
     color: var(--text);
   }
 
+
   .theme-btn.active {
-    background: var(--accent);
-    color: #fff;
+    background: var(--primary);
+    color: var(--on-fill);
   }
+
 
   .theme-btn:focus-visible,
   .theme-toggle-mobile:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
+    outline: 2px solid var(--primary-ring);
     outline-offset: 2px;
   }
 
@@ -95,17 +102,21 @@
     justify-content: center;
     width: 36px;
     height: 36px;
+
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
+
     color: var(--text-muted);
     cursor: pointer;
     transition: all 0.15s;
   }
 
+
   .theme-toggle-mobile:hover {
     color: var(--text);
   }
+
 
   /* Swap the two forms. The caller's `compact` and the viewport breakpoint
      express the same intent, so they carry the same pair of rules. */

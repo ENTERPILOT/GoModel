@@ -1,177 +1,384 @@
-/* GoModel Dashboard Styles */
-/* The light palette below is deliberately written twice: once for an explicit
-   [data-theme="light"] and once for the system preference, because
-   themeStore.apply() *removes* data-theme in "system" mode, so neither block
-   can cover the other. Do not collapse them with light-dark(): chartTheme.js
-   reads these variables back through getComputedStyle, and an unregistered
-   custom property computes to its token stream — Chart.js would receive the
-   literal "light-dark(...)" text instead of a color. */
-/* Dark mode (default) — matches gomodel.enterpilot.io */
+/* DavAi Gateway dashboard design tokens — Arco Design based.
+   ============================================================================
+   Two layers, in this order:
+
+     1. PALETTE   Arco's own ramps, one set per theme. Light and dark ramps are
+                  NOT the same hues: Arco inverts the direction in dark mode
+                  (level 1 = darkest, level 10 = lightest), so the same level
+                  keeps the same perceptual role in both themes.
+     2. SEMANTIC  The flat names the components already consume. They alias
+                  layer 1, so the 200+ `var(--accent)` call sites keep working
+                  while the underlying palette changes.
+
+   Theme selection: `data-theme` on <html> is ALWAYS written — "light" or
+   "dark", with "system" resolved to the effective mode by themeStore (see
+   $lib/stores/ui.svelte.js) and mirrored by the pre-paint script in
+   index.html. There is deliberately no `prefers-color-scheme` block: the light
+   palette is defined exactly once, so a token can never drift between the two
+   copies (that duplication was the root cause of audit finding #20).
+
+   chartTheme.js reads six custom properties back through getComputedStyle and
+   feeds them straight to Chart.js. Those six must therefore stay LITERAL
+   colors — `cssVar()` returns the raw token text, so a `var()` reference
+   would hand Chart.js the string "var(--text)" and Canvas would silently
+   drop it (audit finding #16).
+   ========================================================================= */
+
+/* ── Dark theme (default) ───────────────────────────────────────────────────
+   Kept as :root so the first paint is dark even before the store boots. */
 :root {
-  --bg: #111110;
-  --bg-surface: #1e1d1c;
-  --bg-surface-hover: #2a2420;
-  --border: #2a2826;
-  --text: #e8e0d6;
-  --text-muted: #9a918a;
-  --accent: #b8956e;
-  --accent-hover: #d4b896;
-  --success: #34d399;
-  --info: #3b82f6;
-  --warning: #f59e0b;
-  --danger: #ef4444;
-  --prompt-cache-color: color-mix(in srgb, var(--info) 72%, #ffffff);
-  --prompt-cache-color-bg: color-mix(in srgb, var(--token-prompt) 24%, var(--bg-surface));
-  /* Cache meter segments share the live token-throughput palette (defined
-     below) so the meter and the chart read consistently: Regular is the paid
-     brown (input); local and prompt caches are the translucent blues, cheaper
-     = more transparent. */
-  --cache-meter-uncached: var(--token-input);
+  /* 1. PALETTE — Arco dark ramps (level 1 = darkest, level 10 = lightest) */
+  --primary-1: #000d4d;
+  --primary-2: #041b79;
+  --primary-3: #0e32a6;
+  --primary-4: #1d4dd2;
+  --primary-5: #306fff;
+  --primary-6: #3c7eff;
+  --primary-7: #689fff;
+  --primary-8: #93beff;
+  --primary-9: #bedaff;
+  --primary-10: #eaf4ff;
+  --success-1: #004d1c;
+  --success-2: #046625;
+  --success-3: #0a802d;
+  --success-4: #129a37;
+  --success-5: #1db440;
+  --success-6: #27c346;
+  --success-7: #50d266;
+  --success-8: #7ee18b;
+  --success-9: #b2f0b7;
+  --success-10: #ebffec;
+  --warning-1: #4d1b00;
+  --warning-2: #793004;
+  --warning-3: #a64b0a;
+  --warning-4: #d26913;
+  --warning-5: #ff8d1f;
+  --warning-6: #ff9626;
+  --warning-7: #ffb357;
+  --warning-8: #ffcd87;
+  --warning-9: #ffe3b8;
+  --warning-10: #fff7e8;
+  --danger-1: #4d000a;
+  --danger-2: #770611;
+  --danger-3: #a1161f;
+  --danger-4: #cb2e34;
+  --danger-5: #f54e4e;
+  --danger-6: #f76965;
+  --danger-7: #f98d86;
+  --danger-8: #fbb0a7;
+  --danger-9: #fdd1ca;
+  --danger-10: #fff0ec;
+  --neutral-1: #17171a;
+  --neutral-2: #2e2e30;
+  --neutral-3: #484849;
+  --neutral-4: #5f5f60;
+  --neutral-5: #78787a;
+  --neutral-6: #929293;
+  --neutral-7: #ababac;
+  --neutral-8: #c5c5c5;
+  --neutral-9: #dfdfdf;
+  --neutral-10: #f6f6f6;
+  /* Arco's cyan ramp — the categorical channel (--category-1), kept apart
+     from the primary blue so two classifications never share a hue. */
+  --cyan-1: #00424d;
+  --cyan-2: #06616c;
+  --cyan-3: #11838b;
+  --cyan-4: #1fa6aa;
+  --cyan-5: #30c9c9;
+  --cyan-6: #3fd4cf;
+  --cyan-7: #66dfd7;
+  --cyan-8: #90e9e1;
+  --cyan-9: #bef4ed;
+  --cyan-10: #f0fffc;
+  /* Arco's dedicated background scale — not the same as the neutral ramp. */
+  --bg-1: #17171a;
+  --bg-2: #232324;
+  --bg-3: #2a2a2b;
+  --bg-4: #313132;
+  --bg-5: #373739;
+  /* 2. SEMANTIC */
+  --bg: var(--bg-1);
+  --bg-surface: var(--bg-2);
+  --bg-surface-hover: var(--bg-3);
+  --bg-popup: var(--bg-3);
+  --border: #333335;
+  --border-strong: var(--neutral-3);
+  --text: rgba(255, 255, 255, 0.9);
+  --text-muted: rgba(255, 255, 255, 0.7);
+  --text-disabled: rgba(255, 255, 255, 0.3);
+  /* --primary paints fills, borders and icons; --primary-text is the same
+     hue as a *text* color. Dark primary-6 is only 4.20:1 on the card
+     surface, so text uses primary-7 instead.
+
+     Hover/active sit on the TEXT-SAFE side of the ramp (7/8), not Arco's
+     own 5/7: Arco keeps white text and its dark hover fill #306FFF drops
+     to 4.36:1 — under AA. Our fills carry dark text (--on-fill), and the
+     inverted dark ramp makes level 7 the adjacent lighter step, so moving
+     6 → 7 → 8 brightens the button on hover and keeps ≥7:1. */
+  --primary: var(--primary-6);
+  --primary-hover: var(--primary-7);
+  --primary-active: var(--primary-8);
+  --primary-text: var(--primary-7);
+  /* Text/icon painted on a saturated fill (buttons, meter, budget bars).
+     Dark text on the light-blue fill keeps 4.79:1; white on the same fill
+     is only 3.74:1. */
+  --on-fill: #17171a;
+  --primary-contrast: var(--on-fill);
+  /* Text on a dark solid fill (the budget period palette) — light in both
+     themes, because those fills are dark in both themes. */
+  --on-dark-fill: #ffffff;
+  /* Back-compat alias: 200+ call sites use --accent, and it is overwhelmingly
+     a text/icon color, so it points at the text-safe tier, not --primary. */
+  --accent: var(--primary-text);
+  --accent-strong: var(--primary-8);
+  /* Focus ring (DESIGN.md §5.1). Solid primary-8 clears 3:1 — WCAG 1.4.11's
+     focus-indicator floor — against every neutral surface in this theme
+     (worst: 6.84:1 over bg-4), with no alpha compositing to reason about.
+     Translucent formulas (Arco's rgba(primary-6,.35), or 65% mixes) were
+     measured at 1–2:1 and dropped. The one surface a hue can never clear
+     3:1 against is its own ramp, so a filled button uses --ring-on-fill
+     (the page color, ≥4.79:1 against all three primary fills). */
+  --primary-ring: var(--primary-8);
+  --ring-on-fill: var(--bg);
+  --success: var(--success-6);
+  --success-text: var(--success-7);
+  --success-bg: rgba(39, 195, 70, 0.18);
+  --warning: var(--warning-6);
+  --warning-text: var(--warning-7);
+  --warning-bg: rgba(255, 150, 38, 0.18);
+  --danger: var(--danger-6);
+  --danger-text: var(--danger-7);
+  --danger-bg: rgba(247, 105, 101, 0.18);
+  --link: var(--primary-text);
+  /* Categorical channel — the "currently executing" workflow node and the
+     provider-scope hue. Cyan-6 in dark mode reads at 9.8:1 on the page. */
+  --category-1: var(--cyan-6);
+  /* Toggle knobs stay light in both themes: they are physical affordances,
+     not text, so they must not follow the fill/text contrast token. */
+  --switch-thumb: #ffffff;
+  /* Disabled controls: one opacity for the whole app, so "disabled" looks the
+     same on a button, a table row action, and a select. WCAG exempts
+     disabled controls from the contrast requirement. */
+  --disabled-opacity: 0.45;
+  /* Label painted on a filled meter segment. The slice lightness flips with
+     the theme, so the label color has to as well. */
+  --meter-label: #ffffff;
+  /* Chart data colors — deliberately NOT aliased to the semantic layer.
+     The token-throughput series encode cost by warm/cool and by lightness. */
+  --chart-prompt: var(--primary-7);
+  --chart-local: color-mix(in srgb, var(--chart-prompt) 20%, transparent);
+  --token-input: #d18f52;
+  --token-output: #e8bd8b;
+  --token-prompt: color-mix(in srgb, var(--chart-prompt) 60%, transparent);
+  --token-local: color-mix(in srgb, var(--chart-prompt) 20%, transparent);
+  /* The meter is a filled bar carrying a white label, so its uncached slice
+     is a deeper brown than the chart line: #d18f52 would put white text at
+     3.2:1. */
+  --cache-meter-uncached: #96662f;
   --cache-meter-local: var(--token-local);
   --cache-meter-prompt: var(--token-prompt);
-  /* Live token throughput series, coloured by cost. Input and output are the
-     paid tokens: solid, light browns (output a shade lighter so the pair reads
-     together). Cached tokens are cheap, so they read as translucent blue —
-     prompt-cache reads (almost free) are semi-transparent; local cache hits
-     (no provider cost) are the most transparent. */
-  --token-input: #c0824a;
-  --token-output: #ddb27a;
-  --token-prompt: color-mix(in srgb, var(--info) 60%, transparent);
-  --token-local: color-mix(in srgb, var(--info) 20%, transparent);
-  --sidebar-width: 240px;
-  --radius: 8px;
-  --chart-grid: #2a2826;
-  --chart-text: #9a918a;
-  /* High-contrast color for chart day-boundary markers (divider line + date
-     label) so they stand out from the muted axis text: bright on dark,
-     dark on light. */
-  --chart-day-marker: var(--text);
-  --chart-tooltip-bg: #1e1d1c;
-  --chart-tooltip-border: #2a2826;
-  --chart-tooltip-text: #e8e0d6;
-  /* Activity-calendar ramp — graduated blue derived from the prompt-cache blue
-     (--info) so the chart reads like the cache visuals. Dark theme climbs from a
-     dark navy through --info and into a brighter tint, giving 10 distinguishable
-     steps (keep in sync with calendarLevel() in contribution-calendar.js). */
+  --prompt-cache-color: color-mix(in srgb, var(--chart-prompt) 72%, #ffffff);
+  --prompt-cache-color-bg: color-mix(in srgb, var(--token-prompt) 24%, var(--bg-surface));
+  /* Activity-calendar ramp — a data ramp, sourced from the chart blue. */
   --cal-level-0: #161b22;
-  --cal-level-1: color-mix(in srgb, var(--info) 15%, var(--bg-surface));
-  --cal-level-2: color-mix(in srgb, var(--info) 25%, var(--bg-surface));
-  --cal-level-3: color-mix(in srgb, var(--info) 36%, var(--bg-surface));
-  --cal-level-4: color-mix(in srgb, var(--info) 48%, var(--bg-surface));
-  --cal-level-5: color-mix(in srgb, var(--info) 60%, var(--bg-surface));
-  --cal-level-6: color-mix(in srgb, var(--info) 73%, var(--bg-surface));
-  --cal-level-7: color-mix(in srgb, var(--info) 87%, var(--bg-surface));
-  --cal-level-8: var(--info);
-  --cal-level-9: color-mix(in srgb, var(--info) 80%, #ffffff);
-  --cal-level-10: color-mix(in srgb, var(--info) 62%, #ffffff);
-  --alias-row-valid-bg: color-mix(
-    in srgb,
-    var(--bg-surface-hover) 86%,
-    #fff 14%
-  );
-  --alias-row-valid-bg-hover: color-mix(
-    in srgb,
-    var(--bg-surface-hover) 72%,
-    #fff 28%
-  );
+  --cal-level-1: color-mix(in srgb, var(--chart-prompt) 15%, var(--bg-surface));
+  --cal-level-2: color-mix(in srgb, var(--chart-prompt) 25%, var(--bg-surface));
+  --cal-level-3: color-mix(in srgb, var(--chart-prompt) 36%, var(--bg-surface));
+  --cal-level-4: color-mix(in srgb, var(--chart-prompt) 48%, var(--bg-surface));
+  --cal-level-5: color-mix(in srgb, var(--chart-prompt) 60%, var(--bg-surface));
+  --cal-level-6: color-mix(in srgb, var(--chart-prompt) 73%, var(--bg-surface));
+  --cal-level-7: color-mix(in srgb, var(--chart-prompt) 87%, var(--bg-surface));
+  --cal-level-8: var(--chart-prompt);
+  --cal-level-9: color-mix(in srgb, var(--chart-prompt) 80%, #ffffff);
+  --cal-level-10: color-mix(in srgb, var(--chart-prompt) 62%, #ffffff);
+  --alias-row-valid-bg: color-mix(in srgb, var(--bg-surface-hover) 86%, #fff 14%);
+  --alias-row-valid-bg-hover: color-mix(in srgb, var(--bg-surface-hover) 72%, #fff 28%);
+  /* LITERAL colors: chartTheme.js hands these straight to Chart.js. */
+  --chart-grid: #2a2a2b;
+  --chart-text: #b9b9b9;
+  --chart-day-marker: #e8e8e8;
+  --chart-tooltip-bg: #232324;
+  --chart-tooltip-border: #333335;
+  --chart-tooltip-text: #e8e8e8;
+  --sidebar-width: 240px;
+  /* Radius scale (DESIGN.md §5, P3). Arco's compiled tokens are
+     --border-radius-small: 2px, --border-radius-medium: 4px and
+     --border-radius-circle: 50%; its --border-radius-large: 8px is defined
+     but never used by any component, so the app keeps three box tiers and
+     reserves the fourth for shapes that are not boxes at all:
+       control 2px  — buttons, inputs, tags, icon buttons, menu items
+       panel   4px  — cards, dialogs, popups, menus, table wrappers
+       pill    999px — status badges and count chips
+       circle  50%  — dots, spinners, switch thumbs, square icon bases */
+  --radius-control: 2px;
+  --radius-panel: 4px;
+  --radius-pill: 999px;
+  --radius-circle: 50%;
+  /* Font stacks (DESIGN.md §5, P4) — Arco's body stack verbatim (quoted,
+     and "noto sans" capitalized, which only affects font matching):
+       sans  — every UI text; the CJK names are what fixes CJK falling to a
+               random system font on Linux/Windows where Inter ships alone
+       mono  — model ids, request ids, JSON payloads, code; the mono face
+               UI-first (SF Mono / Menlo / Consolas) instead of the browser
+               default */
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Hiragino Sans GB", "Noto Sans", "Microsoft YaHei", "Helvetica Neue",
+    Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", Menlo, Consolas, monospace;
   color-scheme: dark;
 }
 
-/* Light mode — matches gomodel.enterpilot.io */
+/* ── Light theme ─────────────────────────────────────────────────────────── */
 [data-theme="light"] {
-  --bg: #f5f0ea;
-  --bg-surface: #ffffff;
-  --bg-surface-hover: #ece5dc;
-  --border: #e8e0d6;
-  --text: #2d2519;
-  --text-muted: #7a7068;
-  --accent: #755c3d;
-  --accent-hover: #9a7d5a;
-  --success: #34d399;
-  --info: #2563eb;
-  --warning: #d97706;
-  --danger: #dc2626;
-  --prompt-cache-color: color-mix(in srgb, var(--info) 84%, #0f172a);
+  /* 1. PALETTE — Arco light ramps (level 1 = lightest, level 10 = darkest) */
+  --primary-1: #e8f3ff;
+  --primary-2: #bedaff;
+  --primary-3: #94bfff;
+  --primary-4: #6aa1ff;
+  --primary-5: #4080ff;
+  --primary-6: #165dff;
+  --primary-7: #0e42d2;
+  --primary-8: #072ca6;
+  --primary-9: #031a79;
+  --primary-10: #000d4d;
+  --success-1: #e8ffea;
+  --success-2: #aff0b5;
+  --success-3: #7be188;
+  --success-4: #4cd263;
+  --success-5: #23c343;
+  --success-6: #00b42a;
+  --success-7: #009a29;
+  --success-8: #008026;
+  --success-9: #006622;
+  --success-10: #004d1c;
+  --warning-1: #fff7e8;
+  --warning-2: #ffe4ba;
+  --warning-3: #ffcf8b;
+  --warning-4: #ffb65d;
+  --warning-5: #ff9a2e;
+  --warning-6: #ff7d00;
+  --warning-7: #d25f00;
+  --warning-8: #a64500;
+  --warning-9: #792e00;
+  --warning-10: #4d1b00;
+  --danger-1: #ffecec;
+  --danger-2: #fdcdc5;
+  --danger-3: #fbaca3;
+  --danger-4: #f98981;
+  --danger-5: #f76560;
+  --danger-6: #f53f3f;
+  --danger-7: #cb272d;
+  --danger-8: #a1151e;
+  --danger-9: #770813;
+  --danger-10: #4d000a;
+  --neutral-1: #f7f8fa;
+  --neutral-2: #f2f3f5;
+  --neutral-3: #e5e6eb;
+  --neutral-4: #c9cdd4;
+  --neutral-5: #a9aeb8;
+  --neutral-6: #86909c;
+  --neutral-7: #6b7785;
+  --neutral-8: #4e5969;
+  --neutral-9: #272e3b;
+  --neutral-10: #1d2129;
+  --cyan-1: #e8fffb;
+  --cyan-2: #b7f4ec;
+  --cyan-3: #89e9e0;
+  --cyan-4: #5edfd6;
+  --cyan-5: #37d4cf;
+  --cyan-6: #14c9c9;
+  --cyan-7: #0da5aa;
+  --cyan-8: #07828b;
+  --cyan-9: #03616c;
+  --cyan-10: #00424d;
+  --bg-1: #ffffff;
+  --bg-2: #ffffff;
+  --bg-3: #ffffff;
+  --bg-4: #ffffff;
+  --bg-5: #ffffff;
+  /* 2. SEMANTIC */
+  --bg: var(--neutral-1);
+  --bg-surface: var(--bg-1);
+  --bg-surface-hover: var(--neutral-2);
+  --bg-popup: var(--bg-1);
+  --border: var(--neutral-3);
+  --border-strong: var(--neutral-4);
+  --text: var(--neutral-10);
+  --text-muted: #646e7d;
+  --text-disabled: var(--neutral-5);
+  /* Same text-safe hover/active tiers as the dark theme (see there): the
+     inverted light ramp makes 7/8 the adjacent *darker* steps, so the
+     button darkens on hover with white text held ≥6:1. */
+  --primary: var(--primary-6);
+  --primary-hover: var(--primary-7);
+  --primary-active: var(--primary-8);
+  --primary-text: var(--primary-6);
+  --on-fill: #ffffff;
+  --primary-contrast: var(--on-fill);
+  --on-dark-fill: #ffffff;
+  --accent: var(--primary-text);
+  --accent-strong: var(--primary-7);
+  /* Same two ring tokens as the dark theme (see there): primary-8 is
+     ≥10.29:1 on every neutral surface, and --bg is ≥4.89:1 against all
+     three primary fills. The inverted ramp makes the same level the
+     near-black navy here that it makes the pale periwinkle in dark —
+     both sit two steps from their fill and clear the indicator floor
+     easily. */
+  --primary-ring: var(--primary-8);
+  --ring-on-fill: var(--bg);
+  /* Light mode takes the *text-safe* tier of each status ramp (level-8 /
+     level-7). Arco's level-6 green is only 2.78:1 on white, and the
+     dashboard paints status colours as text all over the place. */
+  --success: var(--success-8);
+  --success-text: var(--success-8);
+  --success-bg: #e8ffea;
+  --warning: var(--warning-8);
+  --warning-text: var(--warning-8);
+  --warning-bg: #fff7e8;
+  --danger: var(--danger-7);
+  --danger-text: var(--danger-7);
+  --danger-bg: #ffecec;
+  --link: var(--primary-text);
+  /* Cyan-9 in light mode: cyan-6 (#14c9c9) is only 2.05:1 on white, so the
+     categorical channel has to sit two levels darker to carry text. */
+  --category-1: var(--cyan-9);
+  --switch-thumb: #ffffff;
+  --disabled-opacity: 0.45;
+  /* Light slices are pale, so their labels are dark. */
+  --meter-label: #17171a;
+  --chart-prompt: var(--primary-5);
+  --chart-local: color-mix(in srgb, var(--chart-prompt) 20%, transparent);
+  --token-input: #c0824a;
+  --token-output: #ddb27a;
+  --token-prompt: color-mix(in srgb, var(--chart-prompt) 60%, transparent);
+  --token-local: color-mix(in srgb, var(--chart-prompt) 20%, transparent);
+  --cache-meter-uncached: #c0824a;
+  --cache-meter-local: var(--token-local);
+  --cache-meter-prompt: var(--token-prompt);
+  --prompt-cache-color: color-mix(in srgb, var(--chart-prompt) 84%, #0f172a);
   --prompt-cache-color-bg: color-mix(in srgb, var(--token-prompt) 18%, var(--bg-surface));
-  --chart-grid: #e8e0d6;
-  --chart-text: #7a7068;
-  --chart-day-marker: var(--text);
-  --chart-tooltip-bg: #ffffff;
-  --chart-tooltip-border: #e8e0d6;
-  --chart-tooltip-text: #2d2519;
-  /* Light theme: graduated blue climbing from a pale tint through --info into a
-     deep navy, keeping 10 distinguishable steps (see :root for the dark ramp). */
   --cal-level-0: #ebedf0;
-  --cal-level-1: color-mix(in srgb, var(--info) 12%, #ffffff);
-  --cal-level-2: color-mix(in srgb, var(--info) 24%, #ffffff);
-  --cal-level-3: color-mix(in srgb, var(--info) 37%, #ffffff);
-  --cal-level-4: color-mix(in srgb, var(--info) 50%, #ffffff);
-  --cal-level-5: color-mix(in srgb, var(--info) 64%, #ffffff);
-  --cal-level-6: color-mix(in srgb, var(--info) 80%, #ffffff);
-  --cal-level-7: var(--info);
-  --cal-level-8: color-mix(in srgb, var(--info) 85%, #000000);
-  --cal-level-9: color-mix(in srgb, var(--info) 72%, #000000);
-  --cal-level-10: color-mix(in srgb, var(--info) 60%, #000000);
-  --alias-row-valid-bg: color-mix(
-    in srgb,
-    var(--bg-surface) 96%,
-    var(--accent) 4%
-  );
-  --alias-row-valid-bg-hover: color-mix(
-    in srgb,
-    var(--bg-surface) 90%,
-    var(--accent) 10%
-  );
-  color-scheme: light;
-}
+  --cal-level-1: color-mix(in srgb, var(--chart-prompt) 12%, #ffffff);
+  --cal-level-2: color-mix(in srgb, var(--chart-prompt) 24%, #ffffff);
+  --cal-level-3: color-mix(in srgb, var(--chart-prompt) 37%, #ffffff);
+  --cal-level-4: color-mix(in srgb, var(--chart-prompt) 50%, #ffffff);
+  --cal-level-5: color-mix(in srgb, var(--chart-prompt) 64%, #ffffff);
+  --cal-level-6: color-mix(in srgb, var(--chart-prompt) 80%, #ffffff);
+  --cal-level-7: var(--chart-prompt);
+  --cal-level-8: color-mix(in srgb, var(--chart-prompt) 85%, #000000);
+  --cal-level-9: color-mix(in srgb, var(--chart-prompt) 72%, #000000);
+  --cal-level-10: color-mix(in srgb, var(--chart-prompt) 60%, #000000);
+  --alias-row-valid-bg: color-mix(in srgb, var(--bg-surface) 96%, var(--accent) 4%);
+  --alias-row-valid-bg-hover: color-mix(in srgb, var(--bg-surface) 90%, var(--accent) 10%);
+  /* LITERAL colors: chartTheme.js hands these straight to Chart.js. */
+  --chart-grid: #e5e6eb;
+  --chart-text: #646e7d;
 
-/* System preference: light */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-      --bg: #f5f0ea;
-      --bg-surface: #ffffff;
-      --bg-surface-hover: #ece5dc;
-      --border: #e8e0d6;
-      --text: #2d2519;
-      --text-muted: #7a7068;
-      --accent: #755c3d;
-      --accent-hover: #9a7d5a;
-      --success: #34d399;
-      --info: #2563eb;
-      --warning: #d97706;
-      --danger: #dc2626;
-      --prompt-cache-color: color-mix(in srgb, var(--info) 84%, #0f172a);
-      --prompt-cache-color-bg: color-mix(in srgb, var(--token-prompt) 18%, var(--bg-surface));
-      --chart-grid: #e8e0d6;
-      --chart-text: #7a7068;
-      --chart-day-marker: var(--text);
-      --chart-tooltip-bg: #ffffff;
-      --chart-tooltip-border: #e8e0d6;
-      --chart-tooltip-text: #2d2519;
-      /* Light theme (system preference): mirror the [data-theme="light"] blue ramp. */
-      --cal-level-0: #ebedf0;
-      --cal-level-1: color-mix(in srgb, var(--info) 12%, #ffffff);
-      --cal-level-2: color-mix(in srgb, var(--info) 24%, #ffffff);
-      --cal-level-3: color-mix(in srgb, var(--info) 37%, #ffffff);
-      --cal-level-4: color-mix(in srgb, var(--info) 50%, #ffffff);
-      --cal-level-5: color-mix(in srgb, var(--info) 64%, #ffffff);
-      --cal-level-6: color-mix(in srgb, var(--info) 80%, #ffffff);
-      --cal-level-7: var(--info);
-      --cal-level-8: color-mix(in srgb, var(--info) 85%, #000000);
-      --cal-level-9: color-mix(in srgb, var(--info) 72%, #000000);
-      --cal-level-10: color-mix(in srgb, var(--info) 60%, #000000);
-      --alias-row-valid-bg: color-mix(
-        in srgb,
-        var(--bg-surface) 96%,
-        var(--accent) 4%
-      );
-      --alias-row-valid-bg-hover: color-mix(
-        in srgb,
-        var(--bg-surface) 90%,
-        var(--accent) 10%
-      );
-      color-scheme: light;
-    }
+  --chart-day-marker: #1d2129;
+  --chart-tooltip-bg: #ffffff;
+  --chart-tooltip-border: #e5e6eb;
+  --chart-tooltip-text: #1d2129;
+  color-scheme: light;
 }
 
 * {

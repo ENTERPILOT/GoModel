@@ -10,6 +10,7 @@
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
+
 <div class="flash-region">
   {#each flash.toasts as toast (toast.id)}
     <div
@@ -36,6 +37,7 @@
       </button>
     </div>
   {/each}
+
 </div>
 
 <style>
@@ -51,11 +53,13 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
+
     pointer-events: none;
   }
 
   /* Track the sidebar's collapsed (60px) width; same on mobile. */
+
   :global(.sidebar.sidebar-collapsed) ~ .flash-region {
     left: 60px;
   }
@@ -69,13 +73,14 @@
   .flash-toast {
     display: flex;
     align-items: flex-start;
-    gap: 10px;
+    gap: 12px;
     padding: 12px 12px 12px 16px;
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     font-size: 14px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
     pointer-events: auto;
     width: max-content;
+
     max-width: min(480px, calc(100% - 32px));
     /* Entry attention pulse: a colored glow (currentColor = the kind's
        accent) that fades out, layered on the fly-in slide. */
@@ -102,16 +107,19 @@
   }
 
   .flash-toast-success {
-    background: color-mix(in srgb, var(--success) 14%, var(--bg-surface));
-    border: 1px solid rgba(52, 211, 153, 0.35);
-    color: var(--success);
+    background: var(--success-bg);
+
+    border: 1px solid color-mix(in srgb, var(--success) 35%, var(--border));
+    color: var(--success-text);
   }
 
   .flash-toast-error {
-    background: color-mix(in srgb, var(--warning) 14%, var(--bg-surface));
-    border: 1px solid rgba(245, 158, 11, 0.4);
-    color: var(--warning);
+
+    background: var(--warning-bg);
+    border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+    color: var(--warning-text);
   }
+
 
   .flash-toast-text {
     flex: 1;
@@ -124,6 +132,7 @@
     width: 18px;
     height: 18px;
   }
+
 
   .flash-toast-dismiss {
     flex-shrink: 0;

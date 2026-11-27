@@ -33,6 +33,7 @@
   }
 </script>
 
+
 <button
   type="button"
   class="workflow-pipeline-meta mono"
@@ -48,6 +49,7 @@
   <span class="workflow-pipeline-meta-icon" aria-hidden="true">
     <Icon icon={Copy} />
   </span>
+
 </button>
 
 <style>
@@ -60,8 +62,8 @@
     gap: 0;
     min-width: 0;
     max-width: calc(100% - 28px);
-    padding: 2px 10px;
-    border-radius: 12px;
+    padding: 2px 12px;
+    border-radius: var(--radius-panel);
     border: 1px solid var(--border);
     background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
     color: var(--text-muted);
@@ -77,6 +79,7 @@
       background-color 0.15s,
       border-color 0.15s,
       color 0.15s,
+
       box-shadow 0.15s;
   }
 
@@ -87,10 +90,12 @@
     color: color-mix(in srgb, var(--accent) 74%, var(--text));
   }
 
+
   .workflow-pipeline-meta:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+    box-shadow: 0 0 0 2px var(--primary-ring);
   }
+
 
   .workflow-pipeline-meta-label {
     flex: 0 0 auto;
@@ -124,6 +129,7 @@
       opacity 0.15s ease;
   }
 
+
   .workflow-pipeline-meta:hover .workflow-pipeline-meta-placeholder,
   .workflow-pipeline-meta:focus-visible .workflow-pipeline-meta-placeholder,
   .workflow-pipeline-meta-copied .workflow-pipeline-meta-placeholder,
@@ -132,6 +138,7 @@
     margin-left: 0;
     opacity: 0;
   }
+
 
   .workflow-pipeline-meta:hover .workflow-pipeline-meta-value,
   .workflow-pipeline-meta:focus-visible .workflow-pipeline-meta-value,
@@ -161,12 +168,14 @@
       transform 0.18s ease;
   }
 
+
   .workflow-pipeline-meta-icon :global(svg) {
     width: 14px;
     height: 14px;
   }
 
   .workflow-pipeline-meta-copied,
+
   .workflow-pipeline-meta-copied:hover,
   .workflow-pipeline-meta-copied:focus-visible {
     background: color-mix(in srgb, var(--success) 12%, var(--bg));
@@ -176,7 +185,7 @@
 
   .workflow-pipeline-meta-copied .workflow-pipeline-meta-icon {
     width: 14px;
-    margin-left: 6px;
+    margin-left: 8px;
     opacity: 1;
     transform: translateY(1px);
   }

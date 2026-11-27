@@ -25,6 +25,7 @@
   }
 </script>
 
+
 <section class="mcp-virtual-servers" aria-labelledby="mcp-virtual-servers-title">
   <div class="mcp-virtual-header">
     <div>
@@ -124,6 +125,7 @@
     </table>
   </div>
   {/if}
+
 </section>
 
 <style>
@@ -136,9 +138,11 @@
     flex-wrap: wrap;
     align-items: flex-start;
     justify-content: space-between;
+
     gap: 12px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
   }
+
 
   .mcp-virtual-title {
     margin: 0 0 4px;
@@ -148,6 +152,7 @@
   .mcp-virtual-servers .form-hint {
     margin: 0;
   }
+
 
   .mcp-virtual-sub {
     margin-top: 4px;

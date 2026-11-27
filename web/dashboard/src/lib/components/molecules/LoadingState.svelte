@@ -5,9 +5,11 @@
   let { label = "Loading...", class: className = "" } = $props();
 </script>
 
+
 <div class={["loading-state", className]} role="status" aria-live="polite">
   <span class="loading-spinner" aria-hidden="true"></span>
   <span>{label}</span>
+
 </div>
 
 <style>
@@ -15,7 +17,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 12px;
     min-height: var(--loading-state-min-height, 64px);
     color: var(--text-muted);
     font-size: 14px;

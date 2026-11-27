@@ -153,10 +153,12 @@
         <span>{m.settings_pricing_action()}</span>
       </button>
     </div>
+
   </div>
 {/if}
 
 <style>
+
 .pricing-recalculate-section {
     width: 100%;
   }
@@ -170,6 +172,7 @@
     width: 100%;
   }
 
+
 .pricing-recalculate-date-field {
     grid-column: 1 / -1;
     max-width: 320px;
@@ -181,9 +184,11 @@
     width: 100%;
   }
 
+
 /* The picker and its trigger render inside the DatePicker child, so :global
    reaches them; the field class keeps these rules winning over DatePicker's
    scoped bases. */
+
 .pricing-recalculate-date-field :global(.date-picker) {
     width: 100%;
   }
@@ -193,10 +198,12 @@
     justify-content: space-between;
   }
 
+
 .pricing-recalculate-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+
+    gap: 12px;
   }
 
 @media (max-width: 768px) {

@@ -41,6 +41,7 @@
   );
 </script>
 
+
 {#snippet configRow(label, value, code = false)}
   <div class="provider-status-config-row">
     <span class="provider-status-config-label">{label}</span>
@@ -50,6 +51,7 @@
       <span class="provider-status-config-value">{value}</span>
     {/if}
   </div>
+
 {/snippet}
 
 <div
@@ -61,6 +63,7 @@
   <div class="provider-status-details-inner">
     <p class="provider-status-reason">{provider.status_reason}</p>
     {#if providerLastErrorText(provider)}
+
       <p class="provider-status-error">{providerLastErrorText(provider)}</p>
     {/if}
 
@@ -105,6 +108,7 @@
               {/each}
             </div>
           </div>
+
         {/if}
       </div>
     {/if}
@@ -115,6 +119,7 @@
       {/each}
       {@render configRow(m.overview_configured_models(), providerModelsSummary(provider))}
       {@render configRow(m.overview_retry(), providerRetrySummary(provider))}
+
       {@render configRow(m.overview_circuit_breaker(), providerCircuitBreakerSummary(provider))}
     </div>
   </div>
@@ -137,18 +142,22 @@
     pointer-events: none;
   }
 
+
   .provider-status-details-inner {
     min-height: 0;
     overflow: hidden;
+
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
   }
+
 
   .provider-status-reason {
     font-size: 13px;
     color: var(--text-muted);
   }
+
 
   .provider-status-error {
     font-size: 12px;
@@ -157,19 +166,20 @@
   }
 
   .provider-status-config-label {
+
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
     color: var(--text-muted);
   }
+
 
   .provider-status-config {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
     padding-top: 12px;
     border-top: 1px solid var(--border);
+
   }
 
   .provider-status-config-row {
@@ -177,6 +187,7 @@
     flex-direction: column;
     gap: 4px;
   }
+
 
   .provider-status-config-value {
     display: block;
@@ -187,22 +198,26 @@
 
   .provider-status-health {
     display: flex;
+
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
     padding-top: 12px;
     margin-bottom: 12px;
     border-top: 1px solid var(--border);
   }
 
+
   .provider-status-health-state {
     display: inline-flex;
     align-items: center;
     padding: 1px 8px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
+
     border: 1px solid var(--border);
     font-size: 12px;
     font-weight: 600;
   }
+
 
   /* Health palette: reads identically to the card's status pill (which keeps
      its half of these rules in ProviderStatusCard.svelte). */
@@ -223,6 +238,7 @@
     border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
     background: color-mix(in srgb, var(--danger) 10%, transparent);
   }
+
 
   .provider-status-health-models {
     display: flex;
@@ -245,11 +261,11 @@
   .provider-status-health-model-meta {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
   }
 
   .provider-status-health-state.is-compact {
-    padding: 0 6px;
+    padding: 0 8px;
     font-size: 11px;
   }
 

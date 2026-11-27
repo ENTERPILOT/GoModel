@@ -26,6 +26,7 @@
   );
 </script>
 
+
 <EditorDialog
   open={store.formOpen}
   title={store.editingPath ? m.users_edit() : m.users_create()}
@@ -57,6 +58,7 @@
       data-modal-autofocus={store.editingPath ? undefined : true}
       bind:value={store.form.user_path}
     />
+
   </div>
 
   <div class="form-field">
@@ -83,6 +85,7 @@
     </div>
     {#if noModelsRemain}
       <p class="form-error user-no-models-warning" role="alert">{m.users_no_models_warning()}</p>
+
     {/if}
   </div>
 
@@ -92,17 +95,19 @@
       rows="2"
       placeholder={m.users_description_placeholder()}
       bind:value={store.form.description}
+
     ></textarea>
   </FormField>
 </EditorDialog>
 
 <style>
+
   .user-allowed-models-select :global(.search-select) {
     display: flex;
     width: 100%;
   }
 
   .user-no-models-warning {
-    margin-top: 6px;
+    margin-top: 8px;
   }
 </style>

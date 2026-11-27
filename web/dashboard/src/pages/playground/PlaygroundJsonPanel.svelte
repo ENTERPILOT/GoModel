@@ -252,6 +252,7 @@
         <p class="playground-json-placeholder">{m.playground_json_empty_response()}</p>
       {:else}
         {#if source.responseMeta}
+
           <p class="playground-json-meta mono">{metaParts(source.responseMeta).join(" · ")}</p>
         {/if}
         <pre class="playground-json-code mono">{responseText}</pre>
@@ -265,12 +266,13 @@
     position: relative;
     display: flex;
     flex: 0 0 var(--playground-json-panel-width, 420px);
+
     flex-direction: column;
     width: var(--playground-json-panel-width, 420px);
     min-height: 0;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     overflow: hidden;
   }
 
@@ -292,12 +294,14 @@
   }
 
   .playground-json-header {
+
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
+    gap: 12px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--border);
+
   }
 
   .playground-json-header h3 {
@@ -308,24 +312,28 @@
   .playground-json-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+
+    gap: 8px;
     margin-left: auto;
   }
 
   .playground-json-actions :global(.copy-feedback-btn) {
-    padding: 5px 10px;
+
+    padding: 4px 12px;
     font-size: 12px;
   }
+
 
   .playground-json-body {
     flex: 1 1 0;
     min-height: 0;
-    padding: 12px 14px;
+    padding: 12px 16px;
     overflow: auto;
   }
 
   .playground-json-meta {
-    margin-bottom: 10px;
+
+    margin-bottom: 12px;
     color: var(--text-muted);
     font-size: 11px;
   }
@@ -344,8 +352,10 @@
     overflow-wrap: anywhere;
   }
 
+
   /* Mobile: the panel takes the whole viewport. A partial overlay left a
      sliver of the page peeking out that was neither readable nor tappable,
+
      and dragging the edge is not a phone gesture. */
   @media (max-width: 768px) {
     .playground-json-panel {

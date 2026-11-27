@@ -25,6 +25,7 @@
   });
 </script>
 
+
 <div>
   <div class="page-header">
     <h2>{m.api_keys_title()}</h2>
@@ -43,24 +44,29 @@
         </button>
       {/if}
     </div>
+
   </div>
 
   {#if !store.available && !auth.authError}
     <div class="alert alert-warning">{m.api_keys_unavailable()}</div>
   {/if}
   {#if store.error && !auth.authError && !store.formOpen}
+
     <p class="form-error" role="alert" aria-live="assertive">{store.error}</p>
   {/if}
 
   {#if store.available && !auth.authError}
     <p class="form-hint auth-keys-help-notice">
+
       {m.api_keys_help()}
     </p>
   {/if}
 
+
   <AuthKeyEditor />
   <AuthKeyNameEditor />
   <AuthKeyLabelsEditor />
+
   <AuthKeyAllowedModelsEditor />
 
   {#if store.loading && store.keys.length === 0}
@@ -93,9 +99,11 @@
         {/if}
         <InactiveToggle
           bind:checked={store.showInactive}
+
           label={m.api_keys_show_inactive()}
           count={store.inactiveCount}
         />
+
       </div>
     </div>
   {/if}
@@ -104,13 +112,16 @@
     <AuthKeyList />
   {/if}
 
+
   {#if store.keys.length > 0 && store.visibleKeys.length === 0 && store.available}
     <p class="empty-state">
       {m.api_keys_no_match()}{store.inactiveCount > 0 && !store.showInactive
+
         ? " " + m.api_keys_hidden({ count: store.inactiveCount })
         : ""}
     </p>
   {/if}
+
 
   {#if store.keys.length === 0 && !store.loading && !auth.authError && !store.error && store.available}
     <p class="empty-state">{m.api_keys_empty()}</p>
@@ -123,13 +134,15 @@
   margin-bottom: 20px;
 }
 
+
 .auth-keys-path-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 6px 3px 8px;
+  gap: 8px;
+  padding: 4px 8px 4px 8px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
+
   background: color-mix(in srgb, var(--accent) 10%, var(--bg));
   font-size: 12px;
 }

@@ -97,6 +97,7 @@
       >
         <Icon icon={Download} class="form-action-icon" />
         <span>CSV</span>
+
       </button>
     </div>
   </div>
@@ -148,6 +149,7 @@
           {#each DEPTHS as depth (depth)}
             <option value={String(depth)}>{depth ? m.usage_pivot_depth_levels({ count: depth }) : m.usage_pivot_depth_full()}</option>
           {/each}
+
         </select>
       </label>
     {/if}
@@ -199,16 +201,19 @@
         </tfoot>
       </table>
     </div>
+
   {/if}
   {#if data && (data.row_dimension === "label" || data.column_dimension === "label")}
     <p class="usage-pivot-note">{m.usage_pivot_label_note()}</p>
   {/if}
+
 </section>
 
 <style>
   .usage-pivot {
     margin-bottom: var(--space-stack);
   }
+
 
   .usage-pivot-actions {
     display: flex;
@@ -237,14 +242,17 @@
     height: 320px;
   }
 
+
   .usage-pivot-table {
     min-width: max-content;
   }
+
 
   .usage-pivot-table :global(th),
   .usage-pivot-table :global(td) {
     white-space: nowrap;
   }
+
 
   .usage-pivot-total {
     font-weight: 600;

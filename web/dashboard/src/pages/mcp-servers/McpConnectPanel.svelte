@@ -53,6 +53,7 @@
   const snippetCopy = createCopyState({ logPrefix: "Failed to copy MCP client config:" });
 </script>
 
+
 <details class="mcp-server-advanced mcp-connect">
   <summary>
     <span class="mcp-server-advanced-summary-copy">
@@ -94,6 +95,7 @@
     </div>
     {#if insecure}
       <p class="alert alert-warning mcp-connect-warning">{m.mcp_connect_insecure_warning()}</p>
+
     {/if}
 
     <div class="mcp-connect-row">
@@ -116,6 +118,7 @@
         : m.mcp_connect_default_note({
             mode: defaultMode,
             header: MCP_TOOL_DISCOVERY_HEADER,
+
           })}
     </p>
 
@@ -132,9 +135,11 @@
       </div>
       <pre class="mcp-connect-code mono">{snippet}</pre>
       <p class="form-hint">{m.mcp_connect_key_hint({ placeholder: MCP_API_KEY_PLACEHOLDER })}</p>
+
     </div>
   </div>
 </details>
+
 
 <style>
   .mcp-connect {
@@ -142,11 +147,13 @@
   }
 
   .mcp-connect-row {
+
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
   }
+
 
   .mcp-connect-label {
     min-width: 140px;
@@ -166,6 +173,7 @@
     font-size: 13px;
   }
 
+
   /* The panel's flex gap spaces rows; drop the alert's own margin. */
   .mcp-connect-warning {
     margin: 0;
@@ -181,7 +189,7 @@
     margin: 0;
     padding: 12px;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     background: var(--bg);
     color: var(--text);
     font-size: 12px;

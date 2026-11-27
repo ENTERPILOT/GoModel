@@ -16,6 +16,7 @@
   const members = $derived(mcpVirtualMemberOptions(mcpServers.servers, mcpServers.virtualForm.servers));
 </script>
 
+
 <EditorDialog
   open={mcpServers.virtualFormOpen}
   title={mcpServers.virtualFormMode === "edit" ? m.mcp_virtual_edit() : m.mcp_virtual_add()}
@@ -27,6 +28,7 @@
 >
   {#snippet headerHint()}
     <p class="form-hint">{m.mcp_virtual_editor_help()}</p>
+
   {/snippet}
 
   <FormField id="mcp-virtual-name" label={m.mcp_name()}>
@@ -41,6 +43,7 @@
     />
     <small class="form-hint">
       {mcpServers.virtualFormMode === "edit" ? m.mcp_virtual_name_edit_help() : m.mcp_virtual_name_help()}
+
     </small>
   </FormField>
 
@@ -49,6 +52,7 @@
       id="mcp-virtual-description"
       type="text"
       placeholder="Code review tools"
+
       bind:value={mcpServers.virtualForm.description}
     />
   </FormField>
@@ -69,6 +73,7 @@
             <span class="form-hint">{m.mcp_virtual_missing_member()}</span>
           {/if}
         </label>
+
       {/each}
     </div>
     <small class="form-hint">{m.mcp_virtual_servers_help()}</small>
@@ -78,11 +83,13 @@
     <select id="mcp-virtual-discovery" class="form-select" bind:value={mcpServers.virtualForm.tool_discovery}>
       <option value="">{m.mcp_virtual_discovery_default()}</option>
       <option value={MCP_TOOL_DISCOVERY_OFF}>{m.mcp_connect_mode_all()}</option>
+
       <option value={MCP_TOOL_DISCOVERY_SEARCH}>{m.mcp_connect_mode_search()}</option>
     </select>
     <small class="form-hint">{m.mcp_virtual_discovery_help()}</small>
   </FormField>
 </EditorDialog>
+
 
 <style>
   .mcp-virtual-member-field {
@@ -94,13 +101,15 @@
   .mcp-virtual-member-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
+
     max-height: 260px;
     overflow-y: auto;
-    padding: 8px 10px;
+    padding: 8px 12px;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     background: var(--bg);
+
   }
 
   .mcp-virtual-member {

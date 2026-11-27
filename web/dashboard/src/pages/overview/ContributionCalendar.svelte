@@ -106,6 +106,7 @@
   <div
     class="contribution-calendar-tooltip"
     style="left: {tooltip.x}px; top: {tooltip.y - 40}px"
+
   >{tooltip.text}</div>
 {/if}
 
@@ -113,7 +114,8 @@
   .contribution-calendar-section {
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
+
     padding: var(--space-block);
     margin-top: 24px;
   }
@@ -125,6 +127,7 @@
     margin-bottom: 16px;
   }
 
+
   .contribution-calendar-header :global(h3) {
     font-size: 16px;
     font-weight: 600;
@@ -135,12 +138,14 @@
     gap: 8px;
   }
 
+
   .contribution-calendar-day-labels {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding-top: 22px;
+    padding-top: 24px;
   }
+
 
   .contribution-calendar-day-labels :global(span) {
     height: 13px;
@@ -162,10 +167,12 @@
   .contribution-calendar-months {
     display: grid;
     grid-auto-columns: var(--contribution-week-size);
+
     grid-auto-flow: column;
     gap: var(--contribution-week-gap);
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     height: 16px;
+
   }
 
   .contribution-calendar-month-label {
@@ -186,15 +193,19 @@
   }
 
   .contribution-calendar-cell {
+
     width: var(--contribution-week-size);
     height: var(--contribution-week-size);
-    border-radius: 2px;
+    border-radius: var(--radius-control);
+
     background: var(--cal-level-0);
   }
+
 
   .contribution-calendar-cell.level-1 {
     background: var(--cal-level-1);
   }
+
 
   .contribution-calendar-cell.level-2 {
     background: var(--cal-level-2);
@@ -204,9 +215,11 @@
     background: var(--cal-level-3);
   }
 
+
   .contribution-calendar-cell.level-4 {
     background: var(--cal-level-4);
   }
+
 
   .contribution-calendar-cell.level-5 {
     background: var(--cal-level-5);
@@ -275,10 +288,10 @@
     background: var(--bg-surface);
     color: var(--text);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: var(--radius-panel);
     padding: 4px 8px;
     font-size: 12px;
-    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
     white-space: nowrap;
     pointer-events: none;
     transform: translateX(-50%);

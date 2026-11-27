@@ -16,6 +16,7 @@
   const selectorOptions = $derived(authKeySelectorOptions(modelsStore.models));
 </script>
 
+
 <EditorDialog
   open={store.formOpen}
   title={m.api_keys_create()}
@@ -186,6 +187,7 @@
       </FormField>
     </div>
   {/if}
+
 </EditorDialog>
 
 <style>
@@ -197,6 +199,7 @@
     margin: 0 0 12px;
     font-size: 13px;
   }
+
 
   .auth-key-allowed-models-select :global(.search-select) {
     display: flex;
@@ -212,12 +215,14 @@
   }
 
   .auth-key-issued-banner {
+
     background: color-mix(in srgb, var(--success) 8%, var(--bg-surface));
     border: 1px solid color-mix(in srgb, var(--success) 30%, var(--border));
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     padding: 16px;
     margin-bottom: 20px;
   }
+
 
   .auth-key-issued-warning {
     font-size: 13px;
@@ -225,6 +230,7 @@
     margin-bottom: 12px;
     color: color-mix(in srgb, var(--success) 80%, var(--text));
   }
+
 
   .auth-key-issued-value-row {
     display: flex;
@@ -241,7 +247,7 @@
     padding: 8px 12px;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     font-size: 13px;
     word-break: break-all;
   }

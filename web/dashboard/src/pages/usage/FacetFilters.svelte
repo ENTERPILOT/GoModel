@@ -23,6 +23,7 @@
   });
 </script>
 
+
 <div class="usage-page-filters" role="group" aria-label={m.usage_filters_label()}>
   <SearchSelect
     class="usage-page-filters-select"
@@ -122,6 +123,7 @@
       usagePage.onUsageFilterChanged();
     }}
   />
+
 </div>
 
 <style>
@@ -130,7 +132,8 @@
   .usage-page-filters {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 12px;
+
     margin-bottom: 20px;
   }
 
@@ -151,6 +154,7 @@
   .usage-page-filters-user-path :global(.user-path-tree-select) {
     flex: 1 1 auto;
   }
+
 
   .usage-page-filters :global(.usage-page-filters-session) {
     flex: 1 1 220px;

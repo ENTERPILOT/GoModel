@@ -84,11 +84,13 @@
     <span class="workflow-node-badge workflow-node-status" title={status}>{status}</span>
   {/if}
   {#if sub}
+
     <span class="workflow-node-sub">{sub}</span>
   {/if}
 {/snippet}
 
 {#snippet node({ icon, label, variant = "workflow-node-feature", state, sub, badge, status })}
+
   <div class={["workflow-node", variant, state]}>
     {@render nodeBody({ icon, label, variant, sub, badge, status })}
   </div>
@@ -111,11 +113,13 @@
       onclick={() => toggleGuardrails(phase)}
     >
       {@render nodeBody({ icon: Shield, label: m.workflows_guardrails(), badge, sub, status })}
+
     </button>
   {:else}
     {@render node({ icon: Shield, label: m.workflows_guardrails(), badge, sub, state, status })}
   {/if}
 {/snippet}
+
 
 <div class="workflow-pipeline">
   {#if chart.workflowID}
@@ -123,6 +127,7 @@
   {/if}
   <div class="workflow-pipeline-row">
     {@render node({ icon: User, label: m.workflows_client(), variant: "workflow-node-endpoint" })}
+
 
     <div class="workflow-conn"></div>
     {@render node({
@@ -133,6 +138,7 @@
     })}
 
     {#if chart.showCache}
+
       <div class={["workflow-conn", chart.cacheConnClass]}></div>
       {@render node({
         icon: Database,
@@ -141,6 +147,7 @@
         badge: chart.cacheStatusLabel,
       })}
     {/if}
+
 
     {#if chart.showBudget}
       <div class="workflow-conn"></div>
@@ -152,6 +159,7 @@
       })}
     {/if}
 
+
     {#if chart.showGuardrails}
       <div class="workflow-conn"></div>
       {@render guardrailNode({
@@ -159,6 +167,7 @@
         badge: chart.guardrailBadge,
         sub: chart.guardrailLabel,
         state: chart.guardrailNodeClass,
+
         status: chart.guardrailStatusLabel,
       })}
     {/if}
@@ -169,6 +178,7 @@
       variant: "workflow-node-ai",
       state: chart.aiNodeClass,
       sub: chart.aiSublabel,
+
     })}
 
     {#if chart.showFailover}
@@ -179,6 +189,7 @@
         state: chart.failoverNodeClass,
         badge: chart.failoverStatusLabel,
         sub: chart.failoverTargetLabel,
+
       })}
     {/if}
 
@@ -189,6 +200,7 @@
         badge: chart.responseGuardrailBadge,
         sub: chart.responseGuardrailLabel,
         state: chart.responseGuardrailNodeClass,
+
         status: chart.responseGuardrailStatusLabel,
       })}
     {/if}
@@ -199,6 +211,7 @@
         phase: "stream",
         badge: chart.streamGuardrailBadge,
         sub: chart.streamGuardrailLabel,
+
         state: chart.streamGuardrailNodeClass,
         status: chart.streamGuardrailStatusLabel,
       })}
@@ -264,6 +277,7 @@
                   class:workflow-flow-ref-danger={tone === "danger"}
                   class:workflow-flow-ref-skipped={tone === "skipped"}
                   title={refTitle(outcome, mutator) || undefined}
+
                 >
                   {#if mutator}
                     <Icon icon={Pencil} />
@@ -290,6 +304,7 @@
           variant: "workflow-node-feature workflow-node-async",
           state: chart.usageNodeClass,
         })}
+
       {/if}
       {#if chart.showUsage && chart.showRequestLog}
         <div class="workflow-conn workflow-conn-async"></div>
@@ -308,6 +323,7 @@
   {/if}
 </div>
 
+
 <style>
   /* ═══════════════════════════════════════════════════════════════
      Workflow Pipeline Visualization
@@ -316,12 +332,14 @@
     position: relative;
     display: flex;
     flex-direction: column;
+
     gap: 0;
     min-width: 0;
     max-width: 100%;
-    padding: 18px 20px 4px;
+
+    padding: 20px 20px 4px;
     margin-bottom: 12px;
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     border: 1px solid var(--border);
     background: var(--bg);
   }
@@ -346,7 +364,8 @@
     justify-content: center;
     width: 28px;
     height: 28px;
-    border-radius: var(--radius);
+
+    border-radius: var(--radius-control);
     background: var(--bg);
     color: var(--text-muted);
   }
@@ -372,31 +391,33 @@
 
   .workflow-node-sub {
     font-size: 10px;
+
     font-weight: 500;
     color: var(--text-muted);
     white-space: nowrap;
     max-width: 120px;
     overflow: hidden;
     text-overflow: ellipsis;
+
     line-height: 1.2;
-    font-family: var(--font-mono, ui-monospace, monospace);
+    font-family: var(--font-mono);
   }
 
   .workflow-node-badge {
     display: inline-flex;
     align-items: center;
-    padding: 2px 7px;
-    border-radius: var(--radius);
+    padding: 2px 8px;
+    border-radius: var(--radius-control);
     font-size: 9px;
+
     font-weight: 800;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
     white-space: nowrap;
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--text-muted);
     line-height: 1.5;
   }
+
 
   .workflow-node-status {
     max-width: 132px;
@@ -406,23 +427,28 @@
   }
 
   /* ─── Endpoint nodes (Client / Response) ─── */
+
   .workflow-node-endpoint {
     flex-direction: row;
-    padding: 10px 14px;
-    border-radius: var(--radius);
+    padding: 12px 16px;
+    border-radius: var(--radius-control);
     min-width: auto;
-    gap: 7px;
+
+    gap: 8px;
     border-color: var(--border);
     background: var(--bg-surface);
   }
 
+
   .workflow-node-icon-endpoint {
     width: auto;
+
     height: auto;
     justify-content: flex-start;
     padding: 0;
+
     background: transparent;
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     color: var(--text-muted);
   }
 
@@ -459,9 +485,10 @@
   /* ─── AI node ─── */
   .workflow-node-ai {
     min-width: 96px;
+
     padding: 12px 16px;
-    border-radius: var(--radius);
-    gap: 6px;
+    border-radius: var(--radius-control);
+    gap: 8px;
   }
 
   /* ─── Async section ─── */
@@ -471,6 +498,7 @@
    * flow right-to-left: Request Log on the right, Usage on the left.
    *
    * [Client] ──→ [Cache?] ──── [AI] ──────── [Response]
+
    *                                               │
    *                                               │ (dashed drop)
    *                                               │
@@ -482,10 +510,11 @@
     margin-left: auto;
   }
 
+
   /* L-turn connector: centered horizontal leg plus vertical rise back to Response */
   .workflow-async-turn {
     flex: 0 0 60px;
-    margin-left: 7px;
+    margin-left: 8px;
     position: relative; /* for arrowhead + vertical rise */
     height: 2px;
     background: repeating-linear-gradient(
@@ -493,6 +522,7 @@
       color-mix(in srgb, var(--text-muted) 45%, var(--border)) 0,
       color-mix(in srgb, var(--text-muted) 45%, var(--border)) 5px,
       transparent 5px,
+
       transparent 9px
     );
   }
@@ -510,6 +540,7 @@
     clip-path: polygon(100% 0, 0 50%, 100% 100%);
   }
 
+
   /* Vertical dashed rise that connects the inline turn back up to Response */
   .workflow-async-turn::after {
     content: "";
@@ -522,6 +553,7 @@
   }
 
   /* Dashed left-pointing connector between async nodes */
+
   .workflow-conn-async {
     flex: 0 0 24px;
     background: repeating-linear-gradient(
@@ -545,17 +577,20 @@
   /* Async nodes — horizontal inline pills */
   .workflow-node-async {
     flex-direction: row;
-    padding: 7px 12px;
-    border-radius: var(--radius);
+    padding: 8px 12px;
+    border-radius: var(--radius-control);
+
     border-style: dashed;
     min-width: auto;
-    gap: 7px;
+    gap: 8px;
   }
+
 
   .workflow-node-async .workflow-node-icon {
     width: 12px;
     height: 12px;
-    border-radius: var(--radius);
+
+    border-radius: var(--radius-control);
   }
 
   .workflow-node-async .workflow-node-icon :global(svg) {
@@ -568,15 +603,13 @@
     font-weight: 700;
   }
 
-  /* "ASYNC" label inline on the right of the branch */
+  /* "Async" label inline on the right of the branch */
   .workflow-async-label {
     display: inline-flex;
     align-items: center;
     margin-left: 8px;
     font-size: 9px;
     font-weight: 800;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
     color: var(--text-muted);
     opacity: 0.55;
     white-space: nowrap;
@@ -601,9 +634,10 @@
   }
 
   .workflow-node-button:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--primary-ring);
     outline-offset: 2px;
   }
+
 
   .workflow-node-open {
     position: relative;
@@ -642,10 +676,10 @@
   .workflow-guardrail-flow {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
     margin: -4px 0 16px;
-    padding: 12px 14px;
-    border-radius: var(--radius);
+    padding: 12px 16px;
+    border-radius: var(--radius-panel);
     border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
     background: color-mix(in srgb, var(--accent) 4%, var(--bg-surface));
   }
@@ -655,19 +689,19 @@
     flex-wrap: wrap;
     align-items: baseline;
     justify-content: space-between;
-    gap: 6px 16px;
+    gap: 8px 16px;
   }
 
   .workflow-guardrail-flow-title {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
+
     font-size: 10px;
     font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
     color: var(--accent);
   }
+
 
   .workflow-guardrail-flow-title :global(svg) {
     width: 12px;
@@ -704,8 +738,9 @@
      checks. */
   .workflow-flow-ref-mutator {
     display: inline-flex;
+
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     border-width: 2px;
     background: color-mix(in srgb, var(--accent) 16%, var(--bg-surface));
   }
@@ -718,6 +753,7 @@
     fill: none;
     stroke-width: 2;
   }
+
 
   .workflow-sr-only {
     position: absolute;
@@ -732,35 +768,43 @@
   }
 
   .workflow-flow-refs {
+
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
+
     margin: 0;
     padding: 0;
     list-style: none;
+
   }
 
   .workflow-flow-ref {
-    padding: 6px 10px;
-    border-radius: var(--radius);
+    padding: 8px 12px;
+    border-radius: var(--radius-control);
     border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--border));
     background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
     color: var(--text);
-    font-family: var(--font-mono, ui-monospace, monospace);
+    font-family: var(--font-mono);
+
     font-size: 11px;
     font-weight: 600;
     white-space: nowrap;
+
     max-width: 180px;
     overflow: hidden;
     text-overflow: ellipsis;
+
   }
 
   /* Editor draft step with no ref chosen yet. */
+
   .workflow-flow-ref-blank {
     border-style: dashed;
     color: var(--text-muted);
     font-weight: 500;
   }
+
 
   /* Recorded outcome of the instance (request log charts only). These follow the
      base and mutator rules so the tint wins at equal specificity. */
@@ -769,35 +813,41 @@
     background: color-mix(in srgb, var(--success) 9%, var(--bg-surface));
   }
 
+
   .workflow-flow-ref-warning {
     border-color: color-mix(in srgb, var(--warning) 52%, var(--border));
     background: color-mix(in srgb, var(--warning) 9%, var(--bg-surface));
   }
+
 
   .workflow-flow-ref-danger {
     border-color: color-mix(in srgb, var(--danger) 52%, var(--border));
     background: color-mix(in srgb, var(--danger) 9%, var(--bg-surface));
   }
 
+
   .workflow-flow-ref-skipped {
     opacity: 0.4;
   }
 
+
   /* "edited" marker of an instance that changed the request or response. */
   .workflow-flow-ref-edited {
     display: inline-block;
-    margin-left: 6px;
-    padding: 0 5px;
-    border-radius: var(--radius);
+
+    margin-left: 8px;
+    padding: 0 4px;
+    border-radius: var(--radius-control);
+
     background: color-mix(in srgb, var(--text-muted) 14%, var(--bg));
     color: var(--text-muted);
     font-family: inherit;
+
     font-size: 9px;
     font-weight: 800;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
     vertical-align: middle;
   }
+
 
   /* Fork/join bracket around a parallel stack: a vertical bar on each side
      of the column, with a short tick from every ref to the bars. */
@@ -805,6 +855,7 @@
     position: relative;
     padding: 0 12px;
   }
+
 
   .workflow-flow-step-parallel .workflow-flow-refs::before,
   .workflow-flow-step-parallel .workflow-flow-refs::after {
@@ -816,9 +867,11 @@
     background: color-mix(in srgb, var(--accent) 44%, var(--border));
   }
 
+
   .workflow-flow-step-parallel .workflow-flow-refs::before {
     left: 0;
   }
+
 
   .workflow-flow-step-parallel .workflow-flow-refs::after {
     right: 0;
@@ -839,9 +892,11 @@
     background: color-mix(in srgb, var(--accent) 44%, var(--border));
   }
 
+
   .workflow-flow-step-parallel .workflow-flow-ref::before {
     right: 100%;
   }
+
 
   .workflow-flow-step-parallel .workflow-flow-ref::after {
     left: 100%;
@@ -849,6 +904,7 @@
 
   /* Status variants of the node internals. The state classes
      (workflow-node-success/current/...) are computed in
+
      workflowChartLogic.js; these rules must live AFTER the base
      icon/label/sub/badge rules above so they win the cascade —
      as global rules they would lose ties to the scoped bases. */
@@ -857,13 +913,16 @@
     color: var(--success);
   }
 
+
   .workflow-node-success .workflow-node-icon-endpoint {
     color: var(--success);
   }
 
+
   .workflow-node-success .workflow-node-label {
     color: color-mix(in srgb, var(--success) 85%, var(--text));
   }
+
 
   .workflow-node-success .workflow-node-sub {
     color: color-mix(in srgb, var(--success) 74%, var(--text-muted));
@@ -876,26 +935,26 @@
   }
 
   .workflow-node-current .workflow-node-icon {
-    background: color-mix(in srgb, var(--info) 16%, var(--bg));
-    color: var(--info);
+    background: color-mix(in srgb, var(--category-1) 16%, var(--bg));
+    color: var(--category-1);
   }
 
   .workflow-node-current .workflow-node-icon-endpoint {
-    color: var(--info);
+    color: var(--category-1);
   }
 
   .workflow-node-current .workflow-node-label {
-    color: color-mix(in srgb, var(--info) 85%, var(--text));
+    color: color-mix(in srgb, var(--category-1) 85%, var(--text));
   }
 
   .workflow-node-current .workflow-node-sub {
-    color: color-mix(in srgb, var(--info) 72%, var(--text-muted));
+    color: color-mix(in srgb, var(--category-1) 72%, var(--text-muted));
   }
 
   .workflow-node-current .workflow-node-badge {
-    background: color-mix(in srgb, var(--info) 13%, var(--bg));
-    border-color: color-mix(in srgb, var(--info) 36%, var(--border));
-    color: var(--info);
+    background: color-mix(in srgb, var(--category-1) 13%, var(--bg));
+    border-color: color-mix(in srgb, var(--category-1) 36%, var(--border));
+    color: var(--category-1);
   }
 
   .workflow-node-warning .workflow-node-icon {
@@ -986,8 +1045,8 @@
   }
 
   .workflow-node-current {
-    border-color: color-mix(in srgb, var(--info) 56%, var(--border));
-    background: color-mix(in srgb, var(--info) 10%, var(--bg-surface));
+    border-color: color-mix(in srgb, var(--category-1) 56%, var(--border));
+    background: color-mix(in srgb, var(--category-1) 10%, var(--bg-surface));
   }
 
   .workflow-node-warning {

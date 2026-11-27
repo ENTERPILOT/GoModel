@@ -14,6 +14,7 @@
   }
 </script>
 
+
 <form
   class="playground-composer"
   onsubmit={(event) => {
@@ -45,6 +46,7 @@
       </button>
     {/if}
   </div>
+
 </form>
 
 <style>
@@ -55,7 +57,8 @@
     padding: 12px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+
+    border-radius: var(--radius-panel);
   }
 
   .playground-composer-input {
@@ -73,6 +76,7 @@
     justify-content: space-between;
     gap: 12px;
   }
+
 
   .playground-composer-hint {
     color: var(--text-muted);

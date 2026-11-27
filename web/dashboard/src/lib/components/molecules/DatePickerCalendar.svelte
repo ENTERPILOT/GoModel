@@ -102,6 +102,7 @@
         {day.day}
       </button>
     {/each}
+
   </div>
 </div>
 
@@ -119,6 +120,7 @@
     padding: 0 4px;
   }
 
+
   .dp-cal-title {
     font-size: 13px;
     font-weight: 600;
@@ -131,10 +133,12 @@
     width: 28px;
     height: 28px;
     background: transparent;
+
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     color: var(--text-muted);
     cursor: pointer;
+
     transition: all 0.15s;
   }
 
@@ -151,6 +155,7 @@
 
   /* The right pane owns the only "previous" button once the left pane is
      hidden on narrow screens. */
+
   .dp-nav-prev-mobile {
     display: none;
   }
@@ -161,6 +166,7 @@
     text-align: center;
     margin-bottom: 4px;
   }
+
 
   .dp-weekdays span {
     font-size: 11px;
@@ -177,23 +183,28 @@
 
   .dp-day {
     display: flex;
+
     align-items: center;
     justify-content: center;
     width: 32px;
+
     height: 32px;
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     color: var(--text);
+
     font-size: 12px;
     font-family: inherit;
     cursor: pointer;
     transition: all 0.1s;
   }
 
+
   .dp-day:hover:not(.disabled):not(.other-month) {
     background: var(--bg-surface-hover);
   }
+
 
   .dp-day.other-month {
     color: var(--text-muted);
@@ -201,11 +212,13 @@
     cursor: default;
   }
 
+
   .dp-day.today {
     color: var(--accent);
     font-weight: 700;
     box-shadow: inset 0 0 0 1.5px var(--accent);
   }
+
 
   .dp-day.in-range {
     background: color-mix(in srgb, var(--accent) 15%, transparent);
@@ -213,21 +226,23 @@
   }
 
   .dp-day.range-start {
-    background: var(--accent);
-    color: #fff;
-    border-radius: 6px 0 0 6px;
+
+    background: var(--primary);
+    color: var(--on-fill);
+    border-radius: var(--radius-control) 0 0 var(--radius-control);
     font-weight: 600;
   }
 
+
   .dp-day.range-end {
-    background: var(--accent);
-    color: #fff;
-    border-radius: 0 6px 6px 0;
+    background: var(--primary);
+    color: var(--on-fill);
+    border-radius: 0 var(--radius-control) var(--radius-control) 0;
     font-weight: 600;
   }
 
   .dp-day.range-start.range-end {
-    border-radius: 6px;
+    border-radius: var(--radius-control);
   }
 
   .dp-day.range-start.today,

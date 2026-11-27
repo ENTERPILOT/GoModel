@@ -19,6 +19,8 @@ export function chartColors() {
   };
 }
 
+// Canvas cannot resolve var(), so the mono stack is spelled out here. Keep
+// in sync with --font-mono (themes.css) — covered by tests/fonts.test.js.
 export function chartTickFont() {
   return { size: 11, family: "'SF Mono', Menlo, Consolas, monospace" };
 }

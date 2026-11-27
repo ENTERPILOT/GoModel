@@ -14,6 +14,7 @@
   let { rules } = $props();
 </script>
 
+
 <div class="budget-list">
       {#each rules as item (rateLimits.rateLimitKey(item))}
         <section class="budget-row">

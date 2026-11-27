@@ -104,7 +104,9 @@
           <Icon icon={Plus} class="form-action-icon" />
           <span>{m.rate_limits_create()}</span>
         </button>
+
       {/if}
+
     </div>
   </div>
 
@@ -116,6 +118,7 @@
   {#if rateLimits.rateLimitError && !auth.authError}
     <p class="form-error" role="alert" aria-live="assertive">
       {rateLimits.rateLimitError}
+
     </p>
   {/if}
   {#if rateLimits.rateLimitsLoading && !auth.authError}
@@ -128,7 +131,9 @@
         <FilterInput
           id="rate-limit-filter"
           placeholder={m.rate_limits_filter_placeholder()}
+
           label={m.rate_limits_filter_label()}
+
           bind:value={rateLimits.rateLimitFilter}
         />
       </div>
@@ -149,6 +154,7 @@
           tabindex={rateLimits.rateLimitActiveScope === tab.scope ? 0 : -1}
           class="rate-limit-tab scope-{tab.scope}"
           class:active={rateLimits.rateLimitActiveScope === tab.scope}
+
           onclick={() => rateLimits.setActiveScope(tab.scope)}
           onkeydown={onTabKeydown}
         >
@@ -174,6 +180,7 @@
           {/each}
         {:else if visibleGroup.rows.length > 0}
           <RateLimitList rules={visibleGroup.rows} />
+
         {:else if rateLimits.rateLimits.length === 0}
           <!-- Stored rules missing entirely: only this case shows the per-group
                empty copy. Stored rules exist but the filter emptied the panel?
@@ -181,6 +188,7 @@
           <p class="rate-limit-group-empty">{m.rate_limits_no_rules()}</p>
         {/if}
       </div>
+
     {/if}
   {/if}
 
@@ -192,6 +200,7 @@
   {/if}
 </div>
 
+
 <style>
   /* Tab strip: pill idiom from the Models page category tabs, adapted to the
      scope-hue system. flex: 1 spreads the three tabs evenly across the row —
@@ -200,7 +209,7 @@
      the strip reads as part of the rail design below, not a separate widget. */
   .rate-limit-tabs {
     display: flex;
-    gap: 6px;
+    gap: 8px;
     margin-bottom: 16px;
   }
 
@@ -212,23 +221,28 @@
     justify-content: center;
     gap: 8px;
     min-width: 0;
-    padding: 8px 14px;
+    padding: 8px 16px;
     font: inherit;
+
     font-size: 13px;
     font-weight: 500;
     color: var(--text-muted);
+
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
+
     cursor: pointer;
     transition:
       color 0.15s,
       background 0.15s,
+
       border-color 0.15s;
   }
 
   .rate-limit-tab.scope-provider {
-    --scope-hue: var(--info);
+
+    --scope-hue: var(--category-1);
   }
 
   .rate-limit-tab.scope-model {
@@ -259,14 +273,16 @@
 
   .rate-limit-tab-count {
     flex: 0 0 auto;
+
     min-width: 20px;
-    padding: 1px 7px;
+    padding: 1px 8px;
     font-size: 11px;
     font-weight: 600;
     text-align: center;
     color: var(--text-muted);
     background: var(--bg);
-    border-radius: 999px;
+
+    border-radius: var(--radius-pill);
   }
 
   .rate-limit-tab.active .rate-limit-tab-count {
@@ -276,6 +292,7 @@
 
   @media (max-width: 768px) {
     /* The strip scrolls sideways so a label is never truncated to "Provi…". */
+
     .rate-limit-tabs {
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
@@ -283,15 +300,18 @@
 
     .rate-limit-tab {
       flex: 1 0 auto;
-      padding: 6px 10px;
+      padding: 8px 12px;
       font-size: 12px;
-      gap: 6px;
+      gap: 8px;
+
     }
   }
+
 
   /* Scope rail: each group gets a categorical hue drawn from the dashboard's
      own palette (user_path = accent tan, provider = info blue, model = olive
      from the budget period badges). The rail runs the group's full height so
+
      the scope identity is scannable without reading the header. */
   .rate-limit-group {
     --scope-hue: var(--accent);
@@ -305,14 +325,16 @@
     position: absolute;
     left: 0;
     top: 2px;
+
     bottom: 2px;
     width: 3px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--scope-hue);
+
   }
 
   .rate-limit-group.scope-provider {
-    --scope-hue: var(--info);
+    --scope-hue: var(--category-1);
   }
 
   .rate-limit-group.scope-model {
@@ -320,18 +342,19 @@
   }
 
   .rate-limit-group-header {
+
     display: flex;
     align-items: baseline;
-    gap: 10px;
-    margin-bottom: 10px;
+    gap: 12px;
+
+    margin-bottom: 12px;
   }
 
   .rate-limit-group-title {
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
     /* Mix toward --text so the hue stays readable in both themes: it
+
        lightens the tan/olive on dark, darkens the blue on light. */
     color: color-mix(in srgb, var(--scope-hue) 62%, var(--text));
   }
@@ -361,8 +384,8 @@
     font-size: 12px;
     font-weight: 600;
     color: color-mix(in srgb, var(--scope-hue) 45%, var(--text-muted));
-    margin: 10px 0 6px;
-    font-family: "SF Mono", Menlo, Consolas, monospace;
+    margin: 12px 0 8px;
+    font-family: var(--font-mono);
   }
 
   .rate-limit-group-empty {

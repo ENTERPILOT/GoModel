@@ -60,6 +60,7 @@
   }
 </script>
 
+
 {#if open}
   <div {@attach portal}>
     <div class={backdropClass} aria-hidden="true"></div>
@@ -68,6 +69,7 @@
       {@render children?.()}
     </div>
   </div>
+
 {/if}
 
 <style>
@@ -103,6 +105,7 @@
     padding: 20px;
     overflow-y: auto;
   }
+
 
   /* Stacked modal over another open modal: the modal below already dims
      the page, so only dim a little more and sit above its shell. */

@@ -6,20 +6,21 @@
   margin-bottom: var(--space-stack);
 }
 
+
 .card {
   min-width: 0;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
   padding: var(--space-card);
+
 }
 
 .card-label {
   font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
   color: var(--text-muted);
+
   margin-bottom: 8px;
 }
 
@@ -33,17 +34,20 @@
 .cache-meter {
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+
+  border-radius: var(--radius-panel);
   padding: var(--space-block);
   margin-bottom: var(--space-stack);
 }
 
 .chart-container {
+
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
   padding: var(--space-block);
 }
+
 
 .chart-container h3 {
   font-size: 16px;
@@ -61,6 +65,7 @@
   margin-bottom: 16px;
 }
 
+
 .chart-container-header h3 {
   margin-bottom: 0;
 }
@@ -71,9 +76,10 @@
 }
 
 .live-dot {
+
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--text-muted);
   flex-shrink: 0;
 }
@@ -85,15 +91,17 @@
 
 /* The expanding ring. It rides on a pseudo-element animating transform and
    opacity — both compositor properties — because the equivalent box-shadow
+
    keyframes repaint the dot on every frame, forever, for every streaming row.
    The negative z-index puts it behind the dot's own background (.live-dot is
    positioned but creates no stacking context), matching the old spread ring. */
 .live-dot.is-streaming::after {
   content: "";
   position: absolute;
+
   inset: 0;
   z-index: -1;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: color-mix(in srgb, var(--success) 55%, transparent);
   animation: live-dot-pulse 1.8s ease-out infinite;
 }

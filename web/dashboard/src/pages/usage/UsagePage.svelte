@@ -53,6 +53,7 @@
   });
 </script>
 
+
 <div class="page-with-sticky-date">
   <div class="page-header date-range-page-header">
     <h2>{m.usage_title()}</h2>
@@ -73,10 +74,13 @@
     {#if invoiceExportVisible(runtimeConfig)}
       <ExportInvoiceButton />
     {/if}
+
   </div>
+
 
   <!-- Page-level data filters: every widget below follows them -->
   <FacetFilters />
+
 
   <!-- Period totals for the active filters -->
   <UsageStatCards />
@@ -84,16 +88,21 @@
   <!-- Usage charts: two per row, a chart alone in its row stretches to full width -->
   <div class="usage-charts-grid">
     <UsageBreakdownChart kind="model" />
+
     <UsageBreakdownChart kind="userPath" />
     <UsageBreakdownChart kind="label" />
+
     <UsageBreakdownChart kind="type" />
   </div>
+
 
   <!-- Two-dimension breakdown (e.g. cost per month by user path). -->
   <UsagePivot />
 
+
   <!-- Cost per active user of a group, per month. -->
   <UsageBenchmark />
+
 
   <!-- Session cardinality and identifiers need the full page width. -->
   <div class="usage-session-breakdown-wrap">
@@ -104,6 +113,7 @@
 </div>
 
 <style>
+
   /* Usage page: the Tokens/Costs toggle shares the sticky bar with the date
      picker so both stay reachable while scrolling. */
   .usage-sticky-controls {
@@ -113,6 +123,7 @@
     flex-wrap: wrap;
     gap: 12px;
   }
+
 
   /* Usage Mode Toggle */
   /* Usage charts flow two per row; a section alone in its row (odd count,

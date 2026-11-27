@@ -13,6 +13,7 @@
   } = $props();
 </script>
 
+
 <div class={["segmented-control", className]} role="group" aria-label={ariaLabel}>
   {#each options as option (option.value)}
     <button
@@ -24,6 +25,7 @@
       onclick={() => onchange?.(option.value)}
     >{option.label}</button>
   {/each}
+
 </div>
 
 <style>
@@ -33,7 +35,8 @@
     align-items: center;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
+
     padding: 2px;
   }
 
@@ -41,10 +44,10 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 5px 12px;
+    padding: 4px 12px;
     background: transparent;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-control);
     color: var(--text-muted);
     font-size: 12px;
     font-family: inherit;
@@ -54,18 +57,26 @@
     white-space: nowrap;
   }
 
+  .segmented-btn:active:not(:disabled) {
+    transition: none;
+
+  }
+
   .segmented-btn:hover:not(:disabled) {
     color: var(--text);
   }
 
+
   .segmented-btn:disabled {
+    opacity: var(--disabled-opacity);
+    color: var(--text-disabled);
+
     cursor: not-allowed;
-    opacity: 0.6;
   }
 
   .segmented-btn.active {
-    background: var(--accent);
-    color: #fff;
+    background: var(--primary);
+    color: var(--on-fill);
   }
 
   @media (max-width: 768px) {

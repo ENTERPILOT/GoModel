@@ -6,6 +6,7 @@
   align-items: center;
 }
 
+
 .table-toolbar-main {
   flex: 1;
   min-width: 0;
@@ -19,18 +20,16 @@
 
 input:is([type="text"], [type="password"], [type="date"], [type="number"]) {
   width: 100%;
-  padding: 8px 12px;
+  height: 32px;
+  padding: 0 12px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
+
   font-family: inherit;
   outline: none;
-}
-
-input:is([type="text"], [type="password"], [type="date"], [type="number"]):focus {
-  border-color: var(--accent);
 }
 
 /* Shared disabled look for every text-like form control, so a read-only
@@ -40,7 +39,9 @@ input:is([type="text"], [type="password"], [type="date"], [type="number"]):focus
 input:is([type="text"], [type="password"], [type="date"], [type="number"]):disabled,
 textarea:disabled,
 .form-input:disabled {
-  opacity: 0.6;
+
+  opacity: var(--disabled-opacity);
+  color: var(--text-disabled);
   cursor: not-allowed;
 }
 
@@ -50,11 +51,13 @@ textarea:disabled,
 .table-wrapper {
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+
+  border-radius: var(--radius-panel);
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
 }
+
 
 .data-table {
   width: 100%;
@@ -64,14 +67,14 @@ textarea:disabled,
 
 .data-table th {
   text-align: left;
+
   padding: 12px var(--space-cell);
-  font-weight: 600;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-weight: 500;
+  font-size: 14px;
   color: var(--text-muted);
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+
 }
 
 .data-table th.model-actions-header {
@@ -82,9 +85,15 @@ textarea:disabled,
 }
 
 .data-table td {
-  padding: 10px var(--space-cell);
+
+  /* 9px vertical padding is Arco's own table-cell metric
+     (.arco-table-td { padding: 9px 16px }) and stays off the 4px grid on
+     purpose (DESIGN.md §7 #12). The header keeps our taller 12px. */
+
+  padding: 9px var(--space-cell);
   border-bottom: 1px solid var(--border);
 }
+
 
 .data-table tr:last-child td {
   border-bottom: none;
@@ -94,8 +103,9 @@ textarea:disabled,
   background: var(--bg-surface-hover);
 }
 
+
 .mono {
-  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 .font-size-md {
@@ -109,20 +119,23 @@ textarea:disabled,
   text-align: right;
 }
 
+
 td.col-price {
-  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   color: var(--text-muted);
   white-space: nowrap;
 }
 
+
 .provider-badge {
   display: inline-block;
-  padding: 2px 10px;
+  padding: 2px 12px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   font-size: 12px;
+
   font-weight: 500;
 }
 
@@ -171,7 +184,7 @@ td.col-price {
   height: 16px;
   border: 2px solid var(--border);
   border-top-color: var(--accent);
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   animation: loading-spin 0.8s linear infinite;
 }
 
@@ -183,19 +196,32 @@ td.col-price {
 
 .table-action-btn {
   display: inline-flex;
+
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 8px;
+  /* Fixed 32px height (the app-wide control height, same as .btn) with
+     horizontal padding only — the 4px grid has no vertical padding to
+
+     give a table-row button, and .table-icon-btn next to it is 32px too. */
+  height: 32px;
+  padding: 0 12px;
   background: var(--bg);
+
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   color: var(--text);
   font-size: 12px;
   font-family: inherit;
+
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
+
+}
+
+.table-action-btn:active:not(:disabled) {
+  transition: none;
 }
 
 .table-action-btn:hover:not(:disabled) {
@@ -203,9 +229,12 @@ td.col-price {
 }
 
 .table-action-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
+  opacity: var(--disabled-opacity);
+
+  color: var(--text-disabled);
+  cursor: not-allowed;
 }
+
 
 .table-action-btn-danger {
   color: var(--danger);
@@ -218,9 +247,12 @@ td.col-price {
   border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
 }
 
+
+
 .table-action-btn-active:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 18%, var(--bg-surface-hover));
 }
+
 
 .table-icon-btn {
   width: 32px;
@@ -232,12 +264,15 @@ td.col-price {
      icon-only action button (row actions, remove-row buttons in MCP
      servers/Providers/Virtual Models forms, ...) reads as the same
      shape as Budgets' label-expanding action buttons instead of a circle. */
-  border-radius: 6px;
+
+  border-radius: var(--radius-control);
 }
+
 
 .table-icon-btn.table-action-btn-active {
   position: relative;
 }
+
 
 .table-icon-btn.table-action-btn-active::after {
   content: "";
@@ -246,10 +281,11 @@ td.col-price {
   right: 4px;
   width: 6px;
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-circle);
   background: var(--accent);
   box-shadow: 0 0 0 2px var(--bg-surface);
 }
+
 
 
 .table-icon-svg {
@@ -259,6 +295,7 @@ td.col-price {
 }
 
 /* Mobile: the actions column stays pinned to the right edge so row actions
+
    are reachable without dragging to the end of every row. */
 @media (max-width: 768px) {
   .data-table th.col-actions,
@@ -288,7 +325,7 @@ td.col-price {
     flex-wrap: wrap;
     justify-content: flex-end;
     width: 70px;
-    gap: 6px;
+    gap: 8px;
   }
 }
 

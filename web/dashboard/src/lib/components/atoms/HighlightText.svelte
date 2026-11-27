@@ -17,10 +17,12 @@
   const segments = $derived(matchSegments(text, needle));
 </script>
 
+
 <span class={["text-match", className]}>
   {#each segments as segment, index (index)}
     {#if segment.hit}<mark class="text-match-hit">{segment.text}</mark>{:else}{segment.text}{/if}
   {/each}
+
 </span>
 
 <style>
@@ -31,7 +33,7 @@
   .text-match-hit {
     background: color-mix(in srgb, var(--accent) 34%, transparent);
     color: var(--text);
-    border-radius: 2px;
+    border-radius: var(--radius-control);
     padding: 0 1px;
     margin: 0 -1px;
   }

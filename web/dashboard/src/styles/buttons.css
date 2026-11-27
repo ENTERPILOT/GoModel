@@ -6,37 +6,77 @@
   padding: 12px 0 0;
 }
 
+
 /* Buttons — the app-wide base and its variants. Pair `.btn` with at most one
    of `-primary` / `-danger` / `-danger-outline`, and add `-with-icon` when the
-   button holds an <Icon> next to its label. */
+   button holds an <Icon> next to its label.
+
+   Arco component spec (DESIGN.md §5): height 32px, padding 0 15px, 14px text,
+   2px radius, no glow shadow, a fast linear transition. box-sizing is
+   border-box app-wide, so the height comes from line-height, not min-height:
+   14px text at line-height 20px plus the 1px borders lands exactly on 32.
+   The 15px horizontal padding is Arco's own metric and stays off the 4px
+   grid on purpose (DESIGN.md §7 #12): the grid governs the app's own layout
+   spacing, not the component metrics measured from Arco.
+
+   States follow Arco's compile output, with one deliberate deviation: filled
+   buttons hover/active on the TEXT-SAFE ramp tiers (--primary-hover/active =
+   level 7/8) instead of Arco's 5/7, because Arco keeps white text and its
+   own hover fills drop below AA against white. Themes.css documents why the
+   same two levels work in both themes (the ramps invert). Keyboard focus is
+   a 2px outer ring: --primary-ring on neutral surfaces, --ring-on-fill for
+   the filled variants, whose ring pixels land on the button's own fill —
+   a hue can never clear 3:1 against its own ramp (themes.css documents the
+   measurements). */
 .btn {
-  padding: 6px 16px;
+  padding: 0 15px;
+  height: 32px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 20px;
   font-family: inherit;
+
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.1s cubic-bezier(0, 0, 1, 1);
 }
 
 .btn:hover:not(:disabled) {
   background: var(--bg-surface-hover);
 }
 
-.btn-primary {
-  background: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 70%, #000 10%);
-  color: #fff;
-  font-weight: 600;
-  box-shadow: 0 10px 22px rgba(59, 130, 246, 0.18);
+/* Arco kills the transition while pressed so the state change is instant. */
+.btn:active:not(:disabled) {
+  transition: none;
 }
 
-.btn-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 90%, #fff 10%);
-  border-color: color-mix(in srgb, var(--accent) 78%, #000 12%);
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--primary-ring);
 }
+
+
+.btn-primary {
+  background: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 70%, #000 10%);
+  color: var(--on-fill);
+  font-weight: 600;
+}
+
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: color-mix(in srgb, var(--primary-hover) 70%, #000 10%);
+}
+
+.btn-primary:active:not(:disabled) {
+
+  background: var(--primary-active);
+  border-color: color-mix(in srgb, var(--primary-active) 70%, #000 10%);
+}
+
 
 .btn-danger-outline {
   color: var(--danger);
@@ -45,22 +85,36 @@
   font-weight: 600;
 }
 
+
 .btn-danger-outline:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 10%, var(--bg));
   border-color: color-mix(in srgb, var(--danger) 75%, var(--border));
 }
 
 .btn-danger {
-  color: #fff;
+  color: var(--on-fill);
   border-color: color-mix(in srgb, var(--danger) 76%, #000 12%);
   background: var(--danger);
   font-weight: 600;
-  box-shadow: 0 10px 22px color-mix(in srgb, var(--danger) 20%, transparent);
 }
 
 .btn-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 90%, #fff 10%);
   border-color: color-mix(in srgb, var(--danger) 82%, #000 14%);
+}
+
+.btn-danger:active:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 96%, #fff 4%);
+
+  border-color: color-mix(in srgb, var(--danger) 88%, #000 16%);
+}
+
+/* Filled variants: the ring lands on the button's own fill, so it takes the
+
+   page color instead of the hue ramp (≥4.79:1 dark / ≥4.89:1 light). */
+.btn-primary:focus-visible,
+.btn-danger:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring-on-fill);
 }
 
 .btn-with-icon {
@@ -76,6 +130,7 @@
 }
 
 .btn:disabled {
-  opacity: 0.4;
-  cursor: default;
+  opacity: var(--disabled-opacity);
+  color: var(--text-disabled);
+  cursor: not-allowed;
 }

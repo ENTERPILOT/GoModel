@@ -29,6 +29,7 @@
   }
 </script>
 
+
 <div class="table-wrapper mcp-server-table-wrapper">
   <table class="data-table">
     <thead>
@@ -162,6 +163,7 @@
       {/each}
     </tbody>
   </table>
+
 </div>
 
 <style>
@@ -178,7 +180,8 @@
   }
 
   .mcp-server-excluded-count {
-    margin-left: 6px;
+    margin-left: 8px;
+
     color: var(--text-muted);
     font-size: 12px;
   }

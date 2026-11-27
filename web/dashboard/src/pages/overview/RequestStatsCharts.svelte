@@ -36,6 +36,7 @@
   }
 </script>
 
+
 {#if requestStatsHasData(stats)}
   <div class="model-chart-section request-log-stats-section">
     <div class="model-chart-header request-log-stats-header">
@@ -82,6 +83,7 @@
           requestStatusChartConfig(chartColors(), stats.buckets, chartOptions())}
       />
     </div>
+
   </div>
 
   {#if requestLatencyHasData(stats)}
@@ -122,6 +124,7 @@
   <!-- First load: hold the section's place instead of popping it in. -->
   <div class="model-chart-section request-log-stats-section">
     <LoadingState label={m.overview_loading_request_stats()} />
+
   </div>
 {/if}
 
@@ -130,27 +133,32 @@
   /* The Activity calendar above only spaces itself upward, so these sections
      bring their own top margin; between the two charts it collapses with the
      24px bottom margin into a single gap. */
+
   .request-log-stats-section {
     margin-top: 24px;
   }
+
 
   .request-log-stats-header {
     align-items: flex-start;
   }
 
   .request-log-stats-kpis {
+
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 14px;
+    gap: 16px;
   }
 
   .request-log-stats-kpi {
     display: inline-flex;
+
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: 12px;
     color: var(--text-muted);
+
     white-space: nowrap;
   }
 
@@ -160,9 +168,11 @@
   }
 
   .request-log-stats-kpi-dot {
+
     width: 8px;
     height: 8px;
-    border-radius: 2px;
+    border-radius: var(--radius-control);
+
     flex-shrink: 0;
   }
 

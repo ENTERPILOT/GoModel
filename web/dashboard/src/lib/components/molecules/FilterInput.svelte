@@ -29,6 +29,7 @@
   }
 </script>
 
+
 <div class={["filter-input-wrap", className]}>
   <Icon icon={Search} class="filter-input-icon" />
   <input
@@ -57,6 +58,7 @@
       <Icon icon={X} />
     </button>
   {/if}
+
 </div>
 
 <style>
@@ -71,12 +73,14 @@
   .filter-input {
     flex: 1;
     min-width: 0;
+
     width: 100%;
-    padding-left: 34px;
+    padding-left: 36px;
   }
 
+
   .filter-input-clearable {
-    padding-right: 34px;
+    padding-right: 36px;
   }
 
   /* The class rides on the Icon child's own <svg>, so it needs :global. */
@@ -114,10 +118,12 @@
     justify-content: center;
     width: 24px;
     height: 24px;
+
     padding: 0;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--radius-control);
     background: transparent;
+
     color: var(--text-muted);
     cursor: pointer;
     transform: translateY(-50%);

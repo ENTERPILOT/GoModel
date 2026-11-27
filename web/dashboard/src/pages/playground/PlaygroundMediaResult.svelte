@@ -20,6 +20,7 @@
   }
 </script>
 
+
 <div class="playground-media-result" aria-live="polite" aria-busy={media.sending}>
   {#if media.sending}
     <p class="playground-media-status" role="status">
@@ -74,6 +75,7 @@
   {:else}
     <pre class="playground-media-transcript">{media.transcript}</pre>
   {/if}
+
 </div>
 
 <style>
@@ -100,26 +102,30 @@
     font-size: 13px;
   }
 
+
   .playground-media-images {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 12px;
   }
 
+
   .playground-media-image {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     margin: 0;
   }
 
   .playground-media-image img {
+
     display: block;
     width: 100%;
     height: auto;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+
+    border-radius: var(--radius-panel);
   }
 
   .playground-media-image figcaption {
@@ -135,12 +141,14 @@
 
   .playground-media-transcript {
     margin: 0;
-    padding: 12px 14px;
+    padding: 12px 16px;
+
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     color: var(--text);
     font-family: inherit;
+
     font-size: 13px;
     line-height: 1.6;
     white-space: pre-wrap;
@@ -150,14 +158,16 @@
   .playground-embeddings {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+
+    gap: 12px;
   }
 
   .playground-embeddings-summary {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 16px;
+    gap: 8px 16px;
     margin: 0;
+
     color: var(--text);
     font-size: 13px;
     font-weight: 600;
@@ -166,20 +176,23 @@
   .playground-embeddings-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     margin: 0;
+
     padding: 0;
     list-style: none;
   }
 
   .playground-embeddings-list li {
+
     display: flex;
     align-items: baseline;
-    gap: 10px;
+    gap: 12px;
     padding: 8px 12px;
     background: var(--bg-surface);
+
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     font-size: 12px;
   }
 

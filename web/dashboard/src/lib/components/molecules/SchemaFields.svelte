@@ -216,6 +216,7 @@
         {/each}
       </div>
       {#if field.help}
+
         <small class="form-hint" id={idPrefix + "-help-" + field.key}
           >{field.help}</small
         >
@@ -223,6 +224,7 @@
     </fieldset>
   {/if}
 {/each}
+
 
 <style>
   .form-field-fieldset {
@@ -233,17 +235,18 @@
   }
 
   .form-field-legend {
+
     color: var(--text-muted);
     font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.5px;
     padding: 0;
-    text-transform: uppercase;
   }
 
+
   .schema-field-required {
-    margin-left: 3px;
+    margin-left: 4px;
     color: var(--danger);
+
   }
 
   .schema-range {

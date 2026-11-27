@@ -58,6 +58,7 @@
   });
 </script>
 
+
 <div
   class="vm-target-row"
   class:vm-target-columns={showColumns}
@@ -187,6 +188,7 @@
   {:else if showColumns}
     <span class="vm-target-remove-space" aria-hidden="true"></span>
   {/if}
+
 </div>
 
 <style>
@@ -195,6 +197,7 @@
   .vm-target-effort-inherit {
     color: var(--text-muted);
   }
+
 
   .vm-target-effort-inherit option {
     color: var(--text);
@@ -205,7 +208,7 @@
     align-items: center;
     justify-content: center;
     cursor: grab;
-    padding: 8px 4px 8px 10px;
+    padding: 8px 4px 8px 12px;
     width: 24px;
     /* The handle hangs in the dialog's padding and gives back the row's gap,
        so the picker starts where it does on a row without a handle, under
@@ -213,9 +216,11 @@
     margin-left: -24px;
     margin-right: -8px;
     color: var(--muted, var(--text));
+
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
+
   }
 
   .vm-target-move:active {

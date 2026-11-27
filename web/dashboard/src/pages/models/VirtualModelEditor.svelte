@@ -60,6 +60,7 @@
   });
 </script>
 
+
 <EditorDialog
   open={vm.vmFormOpen}
   ariaLabel={m.models_editor_label()}
@@ -84,11 +85,13 @@
         {m.models_help()}
       {/snippet}
     </InlineHelpSection>
+
   {/snippet}
 
   {#if vm.vmFormManaged}
     <p class="form-hint" role="status">
       {m.models_managed_help()}
+
     </p>
   {/if}
 
@@ -100,6 +103,7 @@
       placeholder="smart"
       bind:value={vm.vmForm.source}
       disabled={vm.vmFormSourceLocked || vm.vmFormManaged}
+
       data-modal-autofocus
     />
   </FormField>
@@ -151,12 +155,14 @@
         onclick={() => vm.addVmTarget()}
       >
         <Icon icon={Plus} class="form-action-icon" />
+
         <span>{m.models_add_target()}</span>
       </button>
     </div>
   </div>
 
   {@const summary = vm.vmRoutingSummary()}
+
   {#if summary.text}
     <p class="form-hint vm-routing-summary" class:vm-routing-replaces={summary.replaces} role="status">
       {summary.text}
@@ -218,6 +224,7 @@
         <input
           type="checkbox"
           bind:checked={vm.vmForm.failover}
+
           disabled={vm.vmFormManaged || vmFormStrategyPending(vm.vmForm)}
         />
         <span>{m.models_failover_option()}</span>
@@ -240,6 +247,7 @@
     </InlineHelpSection>
     <textarea
       id="virtual-model-user-paths"
+
       rows="4"
       class="mono"
       placeholder={"/\n/team/alpha\n/non-existing"}
@@ -249,6 +257,7 @@
   </div>
 
   <FormField id="virtual-model-description" label={m.models_description()}>
+
     <textarea
       id="virtual-model-description"
       rows="3"
@@ -265,6 +274,7 @@
         type="number"
         min="0"
         max="10"
+
         step="0.1"
         placeholder={m.models_off()}
         bind:value={vm.vmForm.slowdown}
@@ -300,6 +310,7 @@
           max={TIMEOUT_MAX_SECONDS}
           step="1"
           placeholder={m.models_inherit()}
+
           bind:value={vm.vmForm.response_header_timeout}
           disabled={vm.vmFormManaged}
           aria-invalid={responseHeaderTimeoutInvalid}
@@ -316,6 +327,7 @@
         id="virtual-model-reasoning-effort"
         class="form-select"
         bind:value={vm.vmForm.reasoning_effort}
+
         disabled={vm.vmFormManaged}
       >
         <option value="">{m.models_reasoning_effort_client()}</option>
@@ -333,6 +345,7 @@
         id="virtual-model-params"
         rows="4"
         class="mono"
+
         placeholder={'{\n  "temperature": 0.2\n}'}
         bind:value={vm.vmForm.params}
         disabled={vm.vmFormManaged}
@@ -351,6 +364,7 @@
         id="virtual-model-default-params"
         rows="4"
         class="mono"
+
         placeholder={'{\n  "top_p": 0.9\n}'}
         bind:value={vm.vmForm.default_params}
         disabled={vm.vmFormManaged}
@@ -375,6 +389,7 @@
       </span>
     {/if}
     <div class="vm-status-toggle">
+
       <EnabledToggle
         enabled={vm.vmForm.enabled}
         restricted={vm.vmFormToggleRestricted()}
@@ -388,6 +403,7 @@
         }}
       />
     </div>
+
   </div>
 
   {#snippet extraActions()}
@@ -398,13 +414,16 @@
         disabled={vm.vmDeleting || vm.vmSubmitting}
         onclick={() => vm.deleteVirtualModel()}
       >
+
         Remove
       </button>
     {/if}
   {/snippet}
+
 </EditorDialog>
 
 <style>
+
   .vm-option-checkbox {
     display: inline-flex;
     align-items: center;
@@ -414,6 +433,7 @@
     cursor: pointer;
     user-select: none;
   }
+
 
   .vm-option-checkbox input {
     accent-color: var(--accent);
@@ -428,9 +448,9 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    padding: 10px 12px;
+    padding: 12px 12px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-panel);
     background: var(--bg);
   }
 

@@ -30,6 +30,7 @@
   const needle = $derived(preview ? "" : wf.filter);
 </script>
 
+
 <article class="workflow-card" class:workflow-preview-card={preview}>
   <div class="workflow-card-head">
     <div class="workflow-card-title">
@@ -41,10 +42,14 @@
         <span class="provider-badge"><HighlightText text={workflowScopeLabel(workflow)} {needle} /></span>
       </div>
     {/if}
+
   </div>
 
   {#if workflow.description}
+
     <p class="workflow-card-description"><HighlightText text={workflow.description} {needle} /></p>
+
+
   {/if}
 
   <WorkflowChart {chart} />
@@ -78,6 +83,7 @@
         <span class="provider-badge mono">
           {m.workflows_created_at({ date: timezone.formatTimestamp(workflow.created_at) })}
         </span>
+
         <span class="provider-badge mono">{m.workflows_hash({ hash: shortHash(workflow.workflow_hash) })}</span>
       </div>
     </div>
@@ -90,12 +96,14 @@
     flex-direction: column;
     gap: 16px;
     min-width: 0;
+
     max-width: 100%;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     padding: var(--space-card);
   }
+
 
   .workflow-card-head {
     display: flex;
@@ -108,18 +116,21 @@
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 10px;
+    gap: 12px;
   }
+
 
   /* Name first, scope type after it on the same baseline in a lighter,
      smaller face; the pair wraps only when the name is long. */
   .workflow-card-title {
     display: flex;
     flex-wrap: wrap;
+
     align-items: baseline;
-    gap: 4px 10px;
+    gap: 4px 12px;
     min-width: 0;
   }
+
 
   .workflow-card-head :global(h3) {
     font-size: 18px;
@@ -127,13 +138,14 @@
     margin: 0;
   }
 
+
   .workflow-card-scope-type {
     color: var(--text-muted);
     font-size: 13px;
+
     font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
   }
+
 
   .workflow-card-badges, .workflow-card-meta {
     display: flex;

@@ -15,6 +15,7 @@
   } = $props();
 </script>
 
+
 <button
   type="button"
   class={["dialog-close-btn", className]}
@@ -24,6 +25,7 @@
   bind:this={el}
 >
   <Icon icon={X} class={iconClass} />
+
 </button>
 
 <style>
@@ -38,11 +40,12 @@
     padding: 0;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     color: var(--text-muted);
     cursor: pointer;
     font: inherit;
     line-height: 1;
+
     transition: background 0.15s, border-color 0.15s, color 0.15s;
   }
 
@@ -52,7 +55,7 @@
   }
 
   .dialog-close-btn:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
+    outline: 2px solid var(--primary-ring);
     outline-offset: 2px;
   }
 </style>

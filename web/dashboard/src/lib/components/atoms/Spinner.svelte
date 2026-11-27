@@ -3,11 +3,13 @@
   let { size = 16, label = "Loading", class: className = "" } = $props();
 </script>
 
+
 <span
   class={["spinner", className]}
   style="--spinner-size: {size}px"
   role="status"
   aria-label={label}
+
 ></span>
 
 <style>
@@ -17,8 +19,9 @@
     height: var(--spinner-size);
     border: 2px solid var(--border, rgba(128, 128, 128, 0.35));
     border-top-color: var(--accent, currentColor);
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     animation: spinner-rotate 0.7s linear infinite;
+
     flex: none;
   }
 

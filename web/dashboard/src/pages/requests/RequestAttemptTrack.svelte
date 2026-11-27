@@ -18,6 +18,7 @@
   const count = $derived(track.length > 0 ? requestAttemptTrackCount(entry) : "");
 </script>
 
+
 {#if track.length > 0}
   <span class="request-log-attempt-track" role="img" {title} aria-label={title}>
     <span class="request-log-attempt-track-pips">
@@ -32,27 +33,32 @@
     </span>
     <span class="request-log-attempt-track-count mono">{count}</span>
   </span>
+
 {/if}
 
 <style>
   .request-log-attempt-track {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
+
     cursor: pointer;
   }
 
   .request-log-attempt-track-pips {
     display: inline-flex;
+
     align-items: center;
-    gap: 3px;
+    gap: 4px;
   }
 
   .request-log-attempt-pip {
     width: 8px;
+
     height: 8px;
-    border-radius: 2px;
+    border-radius: var(--radius-control);
     background: var(--text-muted);
+
   }
 
   .request-log-attempt-pip.request-log-attempt-success {

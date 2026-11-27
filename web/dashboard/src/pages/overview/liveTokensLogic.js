@@ -140,6 +140,8 @@ export function liveTokensChartConfig(colors, seriesColors, series, granularity)
       if (!meta || !meta.data || !area) return;
       const ctx = chart.ctx;
       ctx.save();
+      // Canvas cannot resolve var(); keep in sync with --font-mono
+      // (themes.css) — covered by tests/fonts.test.js.
       ctx.font = "10px 'SF Mono', Menlo, Consolas, monospace";
       let prevKey = null;
       for (let i = 0; i < stamps.length && i < meta.data.length; i++) {

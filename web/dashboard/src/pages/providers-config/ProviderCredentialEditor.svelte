@@ -67,6 +67,7 @@
   onsubmit={() => providersConfig.submitForm()}
 >
   {#snippet headerHint()}
+
     <p class="form-hint">{m.providers_identity_help()}</p>
   {/snippet}
 
@@ -92,6 +93,7 @@
     {#if typeError}
       <small class="form-field-error" id="provider-credential-type-error" role="alert">{typeError}</small>
     {:else}
+
       <small class="form-hint" id="provider-credential-type-hint">{m.providers_type_help()}</small>
     {/if}
   </div>
@@ -115,12 +117,15 @@
       <small class="form-field-error" id="provider-credential-name-error" role="alert">{nameError}</small>
     {:else if providersConfig.formMode === "create"}
       <small class="form-hint" id="provider-credential-name-hint">{m.providers_name_create_help()}</small>
+
     {:else}
       <small class="form-hint" id="provider-credential-name-hint">{m.providers_name_edit_help()}</small>
     {/if}
+
   </div>
 
   {#if !providersConfig.form.type}
+
     <p class="form-hint">{m.providers_pick_type()}</p>
   {/if}
 
@@ -130,6 +135,7 @@
 
   <div class="vm-status-row">
     <div class="vm-status-toggle">
+
       <EnabledToggle
         enabled={providersConfig.form.enabled}
         label={m.providers_provider_toggle()}
@@ -142,6 +148,7 @@
     <details
       class="mcp-server-advanced"
       open={providersConfig.advancedOpen}
+
       ontoggle={(event) => (providersConfig.advancedOpen = event.currentTarget.open)}
     >
       <summary>

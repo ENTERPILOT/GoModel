@@ -31,6 +31,7 @@
   );
 </script>
 
+
 <div class="cards">
   <div class="card">
     <div class="card-label">{m.overview_total_requests()}</div>
@@ -92,6 +93,7 @@
     </div>
   {/if}
   <CacheOverviewCards />
+
 </div>
 
 <style>

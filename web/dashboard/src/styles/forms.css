@@ -1,10 +1,11 @@
 .model-editor {
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
   padding: var(--space-block);
   margin-bottom: 16px;
 }
+
 
 .alias-kind-badge {
   display: inline-flex;
@@ -12,16 +13,15 @@
   justify-content: center;
   gap: 4px;
   min-height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: var(--bg);
-  color: var(--accent);
+  color: var(--primary-text);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.2px;
-  text-transform: uppercase;
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+
 }
 
 .form h3 {
@@ -60,8 +60,8 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  border-radius: 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
@@ -71,20 +71,26 @@
   transition: all 0.15s;
 }
 
+.alias-toggle:active:not(:disabled) {
+  transition: none;
+}
+
 .alias-toggle:hover:not(:disabled) {
   background: var(--bg-surface-hover);
 }
 
 .alias-toggle:disabled {
-  opacity: 0.45;
-  cursor: default;
+  opacity: var(--disabled-opacity);
+  color: var(--text-disabled);
+  cursor: not-allowed;
 }
 
 .alias-toggle-track {
   position: relative;
   width: 34px;
   height: 18px;
-  border-radius: 6px;
+  border-radius: var(--radius-pill);
+
   background: color-mix(in srgb, var(--border) 80%, var(--bg));
   transition: background 0.15s;
 }
@@ -92,39 +98,47 @@
 .alias-toggle-thumb {
   position: absolute;
   top: 1px;
+
   left: 2px;
   width: 16px;
   height: 16px;
-  border-radius: 6px;
+  border-radius: var(--radius-circle);
   background: var(--text-muted);
+
   transition:
     transform 0.15s,
     background 0.15s;
+
 }
 
 .alias-toggle.enabled {
   border-color: color-mix(in srgb, var(--success) 50%, var(--border));
 }
 
+
 .alias-toggle.enabled .alias-toggle-track {
   background: color-mix(in srgb, var(--success) 55%, var(--bg));
 }
 
+
 .alias-toggle.enabled .alias-toggle-thumb {
   transform: translateX(14px);
-  background: #fff;
+  background: var(--switch-thumb);
 }
 
-/* Restricted: an enabled model scoped to specific user paths. Reuses the
-   accent color of the former access-state pill, on the toggle itself. */
+/* Restricted: an enabled model scoped to specific user paths. Being scoped
+   is not an error state, so it stays neutral instead of borrowing the
+   primary blue that marks the main action. */
+
 .alias-toggle.restricted {
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
-  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+  border-color: var(--border-strong);
+  color: var(--text-muted);
 }
 
 .alias-toggle.restricted .alias-toggle-track {
-  background: color-mix(in srgb, var(--accent) 55%, var(--bg));
+  background: var(--bg-surface-hover);
 }
+
 
 .editor-header {
   display: flex;
@@ -133,6 +147,7 @@
   gap: 12px;
   margin-bottom: 20px;
 }
+
 
 .form {
   display: flex;
@@ -150,23 +165,24 @@
   gap: 12px;
 }
 
+
 .form-field {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+
 .form-field-label {
   display: inline-block;
   font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
   color: var(--text-muted);
 }
 
 /* One load-balancing target row: model selector, reasoning effort, weight,
    and remove button. The head row above the targets labels those columns, so
+
    both share the column widths. */
 .vm-target-row,
 .vm-target-head {
@@ -174,6 +190,7 @@
   gap: 8px;
   align-items: center;
 }
+
 
 :is(.vm-target-row, .vm-target-head) .vm-target-model {
   flex: 1 1 auto;
@@ -194,6 +211,7 @@
   width: 100%;
   min-width: 0;
 }
+
 
 /* Stands in for the remove button (.table-icon-btn) where there is none. */
 .vm-target-remove-space {
@@ -264,10 +282,11 @@
 }
 
 .form-error {
-  padding: 10px 12px;
+  padding: 12px 12px;
   margin: 0;
   border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--border));
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
+
   background: color-mix(in srgb, var(--danger) 10%, var(--bg-surface));
   color: var(--danger);
   font-size: 13px;
@@ -276,11 +295,13 @@
   overflow-wrap: anywhere;
 }
 
+
 .form-error:empty {
   display: none;
 }
 
 /* Per-field validation message, shown in place of the field's hint so the
+
    complaint sits where the value that caused it is. */
 .form-field-error {
   color: var(--danger);
@@ -291,51 +312,62 @@
 }
 
 .form-field-required {
-  margin-left: 3px;
+
+  margin-left: 4px;
   color: var(--danger);
 }
+
 
 :is(input, textarea, select)[aria-invalid="true"] {
   border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
 }
 
+
 :is(input, textarea, select)[aria-invalid="true"]:focus {
   border-color: var(--danger);
 }
 
+/* Inputs share the Arco control spec with .btn: 32px tall, 14px text, 2px
+   radius. Focus is a primary border plus a 2px outer ring of --primary-ring
+   (Arco's dark value: rgba(primary-6, 0.35) — see themes.css). The ring
+   lives on the element itself — no scrollbar side effects, and :focus (not
+
+   :focus-visible) is intentional: text fields take focus on click, and
+   keyboard users already see the border change. */
+:is(input, textarea, select):focus {
+  border-color: var(--primary);
+
+  outline: 2px solid var(--primary-ring);
+  outline-offset: 0;
+}
+
 textarea {
+
   width: 100%;
   min-height: 60px;
   resize: vertical;
-  padding: 10px 12px;
+  padding: 8px 12px;
   background: var(--bg-surface);
+
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   outline: none;
-}
-
-textarea:focus {
-  border-color: var(--accent);
 }
 
 .form-input {
   width: 100%;
-  min-height: 38px;
-  padding: 8px 10px;
+  height: 32px;
+  padding: 0 12px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   outline: none;
-}
-
-.form-input:focus {
-  border-color: var(--accent);
 }
 
 .form-actions {

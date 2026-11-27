@@ -25,6 +25,7 @@
   });
 </script>
 
+
 <details class="request-log-columns" bind:this={menu}>
   <summary
     class="usage-log-select request-log-checklist-summary request-log-columns-summary"
@@ -45,6 +46,7 @@
       </label>
     {/each}
   </fieldset>
+
 </details>
 
 <style>
@@ -56,8 +58,9 @@
      shorter chevron inset, no minimum width. */
   .request-log-columns-summary {
     min-width: 0;
-    padding: 4px 28px 4px 10px;
+    padding: 4px 28px 4px 12px;
     background-position:
+
       calc(100% - 15px) 50%,
       calc(100% - 10px) 50%;
   }

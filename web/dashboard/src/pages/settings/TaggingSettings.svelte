@@ -215,17 +215,20 @@
 </div>
 <div>
   {#if error}
+
     <div class="alert alert-warning settings-refresh-alert" role="alert" aria-live="assertive">
       {error}
     </div>
   {/if}
 </div>
 
+
 <style>
   .tagging-settings-grid {
     display: grid;
     gap: 12px;
   }
+
 
   .tagging-settings-row {
     display: grid;
@@ -235,12 +238,14 @@
   }
 
   .tagging-do-not-pass {
+
     align-items: center;
     color: var(--text);
     display: flex;
     font-size: 13px;
-    gap: 6px;
+    gap: 8px;
     min-height: 35px;
+
     white-space: nowrap;
   }
 
@@ -253,16 +258,19 @@
 
   /* Font size comes from the global .settings-refresh-section p rule (14px),
      which always outranked the 13px declared here — dropped to keep the
+
      shipped look now that scoping would flip the outcome. */
   .tagging-settings-empty {
     color: var(--text-muted);
     margin: 0;
   }
 
+
   .tagging-settings-actions {
     display: flex;
+
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 12px;
   }
 
   @media (max-width: 768px) {

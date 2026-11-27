@@ -9,6 +9,7 @@
   import { Check, KeyRound, LockKeyhole } from "lucide";
 </script>
 
+
 <Modal
   open={auth.dialogOpen}
   variant="auth"
@@ -87,6 +88,7 @@
       </div>
     </form>
   </div>
+
 </Modal>
 
 <style>
@@ -99,7 +101,8 @@
 .auth-dialog-separator {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
+
     color: var(--text-muted);
     font-size: 12px;
 }
@@ -117,10 +120,12 @@
 
 .auth-dialog-input {
     width: 100%;
-    padding: 11px 12px 11px 38px;
+    height: 32px;
+    padding: 0 12px 0 40px;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+
+    border-radius: var(--radius-control);
     color: var(--text);
     font-size: 14px;
     font-family: inherit;
@@ -128,7 +133,8 @@
   }
 
 .auth-dialog-input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+    border-color: var(--primary);
+    outline: 2px solid var(--primary-ring);
+    outline-offset: 0;
   }
 </style>

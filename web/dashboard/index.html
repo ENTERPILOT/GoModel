@@ -4,7 +4,28 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="robots" content="noindex, nofollow, nosnippet, noimageindex" />
-    <title>GoModel Dashboard</title>
+    <title>DavAi Gateway Dashboard</title>
+    <script>
+      // Resolve the theme before the first paint so the dashboard never
+      // flashes the wrong palette. This mirrors themeStore.apply() in
+      // src/lib/stores/ui.svelte.js: "system" resolves to the OS preference
+      // and data-theme always ends up a concrete "light" or "dark".
+      (function () {
+        var mode = "dark";
+        try {
+          var stored = localStorage.getItem("gomodel_theme");
+          mode =
+            stored === "light" || stored === "dark"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+        } catch (err) {
+          /* Storage blocked: keep the dark default. */
+        }
+        document.documentElement.setAttribute("data-theme", mode);
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
     <link rel="stylesheet" href="%BASE_URL%fonts/inter.css" />
   </head>

@@ -67,6 +67,7 @@
   });
 </script>
 
+
 <div class="playground" class:playground-panel-open={store.panelOpen}>
   <section class="playground-main" aria-label={m.playground_title()}>
     <div class="page-header playground-header">
@@ -83,9 +84,12 @@
           <span>{store.panelOpen ? m.playground_json_hide() : m.playground_json_show()}</span>
         </button>
       </div>
+
     </div>
 
+
     <PlaygroundToolbar {modelOptions} />
+
 
     {#if error}
       <div class="alert alert-warning playground-error" role="alert">{error}</div>
@@ -104,10 +108,13 @@
           <p class="empty-state">{m.playground_empty()}</p>
         {:else}
           {#each store.messages as message (message.id)}
+
             <PlaygroundMessage {message} />
           {/each}
         {/if}
+
       </div>
+
 
       <PlaygroundComposer />
     {/if}
@@ -117,6 +124,7 @@
 </div>
 
 <style>
+
   .playground {
     display: flex;
     align-items: stretch;
@@ -124,6 +132,7 @@
     height: 100%;
     min-height: 480px;
   }
+
 
   .playground-main {
     display: flex;
@@ -141,15 +150,18 @@
     margin-bottom: 12px;
   }
 
+
   .playground-history {
     display: flex;
     flex: 1 1 0;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
+
     min-height: 0;
     padding: 4px 2px 12px;
     overflow-y: auto;
     scroll-behavior: smooth;
+
   }
 
   /* Dragged rows translate over their siblings; scrolling mid-drag would

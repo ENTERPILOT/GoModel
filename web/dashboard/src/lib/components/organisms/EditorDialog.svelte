@@ -122,6 +122,7 @@
   }
 </script>
 
+
 <Modal {open} variant="editor" onclose={requestClose}>
   <div
     class={["model-editor", dialogClass]}
@@ -154,7 +155,9 @@
           label={"Close " + (ariaLabel || title).toLowerCase()}
           onclick={requestClose}
         />
+
       </div>
+
 
       {@render children?.()}
 
@@ -179,6 +182,7 @@
           <span>{submitting ? submittingLabel : submitLabel}</span>
         </button>
       </div>
+
     </form>
   </div>
 </Modal>

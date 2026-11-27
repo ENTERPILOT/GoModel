@@ -81,6 +81,7 @@
   }
 </script>
 
+
 <Modal
   open={mcpServers.toolCatalogOpen}
   variant="editor"
@@ -96,6 +97,7 @@
         label={m.mcp_all_tools_close()}
         onclick={() => mcpServers.closeToolCatalog()}
       />
+
     </div>
 
     {#if mcpServers.toolCatalogLoading}
@@ -123,12 +125,14 @@
         <label class="mcp-all-tools-excluded-toggle">
           <input type="checkbox" bind:checked={mcpServers.toolCatalogShowExcluded} />
           <span>{m.mcp_all_tools_show_excluded()}</span>
+
         </label>
       </div>
 
       <p class="form-hint mcp-all-tools-summary">
         {m.mcp_all_tools_summary({
           tools: formatNumber(summary.tools),
+
           servers: formatNumber(summary.servers),
         })}
       </p>
@@ -147,6 +151,7 @@
                   <span class="mcp-all-tools-issue-error">{issue.error}</span>
                 {/if}
               </li>
+
             {/each}
           </ul>
         </div>
@@ -197,6 +202,7 @@
           {/each}
         </ul>
       {:else if mcpServers.toolCatalogQuery}
+
         <p class="empty-state">{m.mcp_all_tools_no_match()}</p>
       {:else if issues.length === 0}
         <p class="empty-state">{m.mcp_all_tools_empty()}</p>
@@ -224,6 +230,7 @@
         <Icon icon={Download} class="form-action-icon" />
         <span>{m.mcp_all_tools_export_json()}</span>
       </button>
+
       <button type="button" class="btn" onclick={() => mcpServers.closeToolCatalog()}
         >{m.mcp_close()}</button
       >
@@ -232,6 +239,7 @@
 </Modal>
 
 <style>
+
   .mcp-all-tools-toolbar {
     display: flex;
     flex-wrap: wrap;
@@ -239,6 +247,7 @@
     gap: 8px 12px;
     margin-top: 12px;
   }
+
 
   .mcp-all-tools-toolbar :global(.filter-input-wrap) {
     flex: 1 1 220px;
@@ -249,27 +258,32 @@
     max-width: 100%;
   }
 
+
   .mcp-all-tools-excluded-toggle {
+
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
+
     font-size: 13px;
   }
 
   .mcp-all-tools-summary {
-    margin: 10px 0 0;
+
+    margin: 12px 0 0;
   }
 
   .mcp-all-tools-issues {
-    margin-top: 12px;
 
+    margin-top: 12px;
     p {
-      margin: 0 0 6px;
+      margin: 0 0 8px;
     }
+
 
     ul {
       margin: 0;
-      padding-left: 18px;
+      padding-left: 20px;
     }
 
     li + li {
@@ -281,6 +295,7 @@
     font-size: 12px;
     overflow-wrap: anywhere;
   }
+
 
   .mcp-all-tools-list {
     list-style: none;
@@ -303,10 +318,11 @@
 
   .mcp-all-tools-badge {
     display: inline-block;
-    margin-left: 6px;
-    padding: 0 6px;
+
+    margin-left: 8px;
+    padding: 0 8px;
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     color: var(--text-muted);
     font-size: 11px;
     line-height: 18px;

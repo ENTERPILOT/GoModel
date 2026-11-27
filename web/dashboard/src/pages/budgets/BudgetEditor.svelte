@@ -43,6 +43,7 @@
   }
 </script>
 
+
 <EditorDialog
   open={store.formOpen}
   title={store.editing ? m.budgets_edit_title() : m.budgets_create_title()}
@@ -170,6 +171,7 @@
       {m.budgets_edit_help()}
     </p>
   {/if}
+
 </EditorDialog>
 
 <Modal
@@ -223,6 +225,7 @@
         </button>
       </div>
     </form>
+
   </div>
 </Modal>
 
@@ -235,9 +238,11 @@
     cursor: pointer;
   }
 
+
   .per-child-option input {
     margin-top: 0.2rem;
   }
+
 
   .per-child-option span {
     display: grid;

@@ -10,6 +10,7 @@
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
+
 {#if versionStore.noticeVisible}
   <aside
     class="update-banner"
@@ -41,19 +42,21 @@
       <Icon icon={X} class="update-banner-dismiss-icon" />
     </button>
   </aside>
+
 {/if}
 
 <style>
   .update-banner {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     margin-bottom: 20px;
-    padding: 10px 14px;
+    padding: 12px 16px;
     border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     background: color-mix(in srgb, var(--accent) 12%, var(--bg-surface));
     color: var(--text);
+
     font-size: 13px;
   }
 
@@ -89,10 +92,12 @@
     flex-shrink: 0;
     width: 24px;
     height: 24px;
+
     padding: 0;
     border: 1px solid transparent;
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     background: transparent;
+
     color: var(--text-muted);
     cursor: pointer;
   }

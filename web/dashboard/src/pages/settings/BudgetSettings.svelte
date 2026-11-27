@@ -260,6 +260,7 @@
       </button>
       {#if loading}
         <Spinner size={16} label={m.settings_budget_loading()} />
+
       {/if}
     </div>
   </div>
@@ -268,10 +269,12 @@
     {#if error}
       <div class="alert alert-warning settings-refresh-alert" role="alert" aria-live="assertive">
         {error}
+
       </div>
     {/if}
   </div>
 {/if}
+
 
 <style>
   .budget-settings-section {
@@ -283,6 +286,7 @@
     gap: 12px;
   }
 
+
   .budget-settings-row {
     display: grid;
     grid-template-columns: 96px minmax(170px, 1fr) minmax(110px, 140px) minmax(110px, 140px) minmax(220px, 280px);
@@ -290,16 +294,17 @@
     gap: 12px;
   }
 
+
   .budget-settings-period {
     align-self: end;
     color: var(--text);
+
     font-size: 12px;
     font-weight: 700;
-    letter-spacing: 0;
     min-height: 35px;
-    padding-bottom: 9px;
-    text-transform: uppercase;
+    padding-bottom: 8px;
   }
+
 
   .budget-settings-spacer {
     min-height: 1px;
@@ -311,8 +316,10 @@
     min-height: 35px;
   }
 
+
   .budget-settings-help-cell :global(.inline-help-copy) {
-    margin: 22px 0 0;
+    margin: 24px 0 0;
+
     max-width: 280px;
     font-size: 12px;
     line-height: 1.35;

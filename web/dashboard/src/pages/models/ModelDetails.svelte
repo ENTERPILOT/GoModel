@@ -39,6 +39,7 @@
   );
 </script>
 
+
 <tr class="model-details-row" {id}>
   <td colspan={colspan}>
     {#if viewOptions.length > 0}
@@ -90,6 +91,7 @@
       {/each}
     </div>
   </td>
+
 </tr>
 
 <style>
@@ -113,6 +115,7 @@
     color: var(--text-muted);
   }
 
+
   .model-details {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -123,14 +126,14 @@
     min-width: 0;
   }
 
+
   .model-details-title {
     margin: 0 0 8px;
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
     color: var(--text-muted);
   }
+
 
   .model-details-list {
     display: grid;
@@ -140,9 +143,11 @@
     font-size: 13px;
   }
 
+
   .model-details-list dt {
     color: var(--text-muted);
   }
+
 
   .model-details-list dd {
     margin: 0;
@@ -150,22 +155,25 @@
     overflow-wrap: anywhere;
   }
 
+
   .model-details-hint {
     margin-left: 2px;
     color: var(--text-muted);
   }
 
   .model-details-source {
-    margin-left: 6px;
+    margin-left: 8px;
+
     font-size: 11px;
     color: var(--text-muted);
     white-space: nowrap;
   }
 
+
   .model-details-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -178,6 +186,7 @@
 
   /* Text for assistive technology only: the chip's status and a price's
      time-window hint are otherwise carried by non-focusable title tooltips. */
+
   .model-details-sr-only {
     position: absolute;
     width: 1px;

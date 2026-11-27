@@ -12,6 +12,7 @@
   const po = pricingOverrides;
 </script>
 
+
 <EditorDialog
   open={po.modelPricingOverrideFormOpen}
   ariaLabel={m.models_pricing_editor()}
@@ -25,6 +26,7 @@
   {#snippet header()}
     <p class="form-kicker">{m.models_pricing_override()}</p>
     <h3>{po.modelPricingOverrideFormDisplayName || po.modelPricingOverrideForm.selector || m.models_pricing()}</h3>
+
   {/snippet}
 
   <div class="form-grid">
@@ -35,6 +37,7 @@
         class="mono"
         bind:value={po.modelPricingOverrideForm.selector}
         disabled
+
       />
     </FormField>
 
@@ -50,9 +53,11 @@
             <option value={option.value}>{option.label}</option>
           {/each}
         </select>
+
       </FormField>
     {/if}
   </div>
+
 
   <p class="form-hint">
     {m.models_pricing_help()}
@@ -90,6 +95,7 @@
           class="table-action-btn-danger table-icon-btn pricing-override-remove-row"
           onclick={() => po.removeModelPricingOverrideRow(row)}
         >
+
           <Icon icon={X} class="table-icon-svg" />
         </TableActionButton>
       </div>
@@ -100,11 +106,13 @@
     <button
       type="button"
       class="btn btn-with-icon"
+
       onclick={() => po.addModelPricingOverrideRow()}
     >
       <Icon icon={Plus} class="form-action-icon" />
       <span>{m.models_add_price()}</span>
     </button>
+
   </div>
 
   {#if po.modelPricingOverrideFormPreservedTiers.length > 0}
@@ -124,6 +132,7 @@
     {/if}
     {#each po.modelPricingEffectivePreviewRows() as row (row.field)}
       <div class="pricing-preview-row">
+
         <span>{row.label}</span>
         <span class="mono">
           {row.value === null || row.value === undefined ? "-" : formatPriceFine(Number(row.value))}
@@ -137,21 +146,25 @@
     {#if po.modelPricingOverrideFormHasExistingOverride}
       <button
         type="button"
+
         class="btn btn-danger-outline"
         disabled={po.modelPricingOverrideSubmitting}
         onclick={() => po.deleteModelPricingOverride()}
       >
         {m.models_remove_override()}
+
       </button>
     {/if}
   {/snippet}
 </EditorDialog>
 
 <style>
+
 .pricing-override-rows {
     display: grid;
     gap: 12px;
   }
+
 
 .pricing-override-row {
     display: grid;
@@ -160,32 +173,38 @@
     align-items: end;
   }
 
+
 .pricing-override-row-actions {
     display: flex;
     justify-content: flex-start;
   }
 
+
 .pricing-override-tier-note {
-    padding: 10px 12px;
+    padding: 12px 12px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-panel);
     background: var(--bg);
     color: var(--text-muted);
     font-size: 13px;
+
   }
 
 .pricing-preview {
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-panel);
     overflow: hidden;
+
   }
 
 .pricing-preview-header, .pricing-preview-row {
     display: grid;
+
     grid-template-columns: minmax(150px, 1fr) minmax(90px, auto) minmax(130px, 0.8fr);
     gap: 12px;
     align-items: center;
-    padding: 10px 12px;
+    padding: 12px 12px;
+
   }
 
 .pricing-preview-header {
@@ -193,7 +212,6 @@
     color: var(--text-muted);
     font-size: 12px;
     font-weight: 600;
-    text-transform: uppercase;
   }
 
 .pricing-preview-row {

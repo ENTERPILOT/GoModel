@@ -23,6 +23,7 @@
   const hasHelp = $derived(Boolean(text) || Boolean(help) || external);
 </script>
 
+
 <div class="inline-help-section">
   <div class="inline-help-title-row">
     {@render title?.()}
@@ -46,6 +47,7 @@
       {#if help}{@render help()}{:else}{text}{/if}
     </p>
   {/if}
+
 </div>
 
 <style>

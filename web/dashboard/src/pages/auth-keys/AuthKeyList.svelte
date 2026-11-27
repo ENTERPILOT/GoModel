@@ -12,6 +12,7 @@
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
+
 <div class="table-wrapper auth-keys-table-wrapper">
   <table class="data-table">
     <thead>
@@ -219,6 +220,7 @@
       {/each}
     </tbody>
   </table>
+
 </div>
 
 <style>
@@ -235,10 +237,12 @@
     background: color-mix(in srgb, var(--label-color, var(--accent)) 14%, var(--bg));
   }
 
+
   .auth-key-redacted {
     color: var(--text-muted);
     font-size: 13px;
   }
+
 
   .auth-key-selector-list {
     display: flex;
@@ -247,10 +251,12 @@
   }
 
   .auth-key-selector {
+
     font-size: 12px;
-    padding: 2px 6px;
-    border-radius: var(--radius);
+    padding: 2px 8px;
+    border-radius: var(--radius-control);
     background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+
     white-space: nowrap;
   }
 
@@ -266,22 +272,26 @@
   }
 
   .auth-key-effective-none {
+
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    color: var(--danger, #c0392b);
+    color: var(--danger-text);
     font-weight: 600;
+
   }
 
   .auth-key-actions-cell {
     white-space: nowrap;
   }
 
+
   /* Deactivated keys are kept for the record only — recede them, but leave
      the actions cell at full strength so its "Deactivated" pill stays legible. */
   .auth-key-row-deactivated td:not(.auth-key-actions-cell) {
     opacity: 0.55;
   }
+
 
   .auth-key-expiry {
     display: inline-flex;
@@ -300,6 +310,6 @@
   .auth-key-row-actions {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
   }
 </style>

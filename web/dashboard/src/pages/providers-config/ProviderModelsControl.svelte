@@ -102,17 +102,20 @@
     class="provider-models-view"
     options={viewOptions}
     value={providersConfig.modelsView}
+
     ariaLabel={m.providers_models_view()}
     onchange={(view) => providersConfig.setModelsView(view)}
   />
 </div>
 
 <style>
+
   .provider-models-list {
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
+
 
   .provider-models-actions {
     display: flex;

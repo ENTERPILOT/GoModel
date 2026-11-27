@@ -8,6 +8,7 @@
   const dialog = $derived(confirmDialog.state);
 </script>
 
+
 <Modal
   open={dialog.open}
   variant="auth"

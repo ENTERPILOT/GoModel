@@ -195,6 +195,7 @@
         <Icon
           icon={interactionsOpen ? ChevronLeft : ChevronRight}
           class="request-log-conversation-trigger-svg"
+
         />
       </button>
     {/if}
@@ -206,31 +207,36 @@
     list-style: none;
     display: flex;
     align-items: center;
+
     justify-content: space-between;
     gap: 12px;
-    padding: 5px 14px;
+    padding: 4px 16px;
+
     position: relative;
     cursor: pointer;
   }
+
 
   .request-log-entry-summary::-webkit-details-marker {
     display: none;
   }
 
   .request-log-entry-summary-live-in-progress {
-    background: color-mix(in srgb, var(--info) 7%, var(--bg));
+    background: color-mix(in srgb, var(--primary) 7%, var(--bg));
   }
 
   .request-log-entry-summary-has-interactions {
     padding-right: 44px;
   }
 
+
   .request-log-entry-summary-live-in-progress::before {
     content: "";
     position: absolute;
     inset: 0 auto 0 0;
     width: 3px;
-    background: var(--info);
+
+    background: var(--primary);
     pointer-events: none;
     animation: request-log-live-summary-stripe-blink 1.2s ease-in-out infinite;
   }
@@ -252,7 +258,7 @@
   .request-log-entry-right {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     color: var(--text-muted);
     flex-shrink: 0;
     min-height: 28px;
@@ -264,18 +270,22 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 3px;
+
+    gap: 4px;
     flex-shrink: 0;
     height: 28px;
     min-width: 28px;
-    padding: 0 7px 0 4px;
-    border-radius: 6px;
+
+    padding: 0 8px 0 4px;
+    border-radius: var(--radius-control);
     border: 1px solid var(--border);
     background: var(--bg-surface);
+
     color: var(--text-muted);
     cursor: pointer;
     transition:
       background 0.1s ease-out,
+
       color 0.1s ease-out;
   }
 
@@ -294,16 +304,18 @@
     font-weight: 600;
   }
 
+
   .request-log-session-usage {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+
     flex-shrink: 0;
     width: 28px;
     height: 28px;
     padding: 0;
     border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: color-mix(in srgb, var(--accent) 10%, var(--bg));
     color: var(--accent-strong, var(--accent));
     cursor: pointer;
@@ -339,6 +351,7 @@
       color 0.1s ease-out;
   }
 
+
   .request-log-conversation-trigger:hover {
     background: color-mix(in srgb, var(--accent) 20%, var(--bg));
   }
@@ -352,6 +365,7 @@
   .request-log-conversation-trigger-active:hover {
     background: color-mix(in srgb, var(--accent) 34%, var(--bg));
   }
+
 
   /* The Icon atom hard-codes lucide's round caps and 24px attribute size;
      these CSS declarations win over presentation attributes, keeping the
@@ -373,14 +387,16 @@
 
   .request-log-request-badge {
     flex-shrink: 0;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
     white-space: nowrap;
+
   }
 
   .request-log-timestamp-time {
     display: none;
   }
+
 
   /* Request labels are informational here; the shared chip is a filter
      button on the usage page. */
@@ -395,18 +411,22 @@
   /* The token rate shares the provider/model pill so it does not read as
      part of the plain timestamp and duration text next to it. */
   .request-log-provider-model,
+
   .request-log-token-rate {
     height: 24px;
-    padding: 0 10px;
+    padding: 0 12px;
     display: inline-flex;
+
     align-items: center;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     border: 1px solid var(--border);
     font-size: 12px;
     background: var(--bg-surface);
+
     color: var(--text-muted);
     white-space: nowrap;
   }
+
 
   .request-log-provider-model {
     max-width: 420px;

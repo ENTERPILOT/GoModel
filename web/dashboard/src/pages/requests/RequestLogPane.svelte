@@ -74,6 +74,7 @@
   }
 </script>
 
+
 <section
   class="request-log-pane"
   class:request-log-pane-split={pane && pane.layout === "split"}
@@ -202,6 +203,7 @@
   {#if pane.showTooLarge}
     <p class="request-log-size-warning">{pane.tooLargeMessage}</p>
   {/if}
+
 </section>
 
 <style>
@@ -211,7 +213,8 @@
   .request-log-pane-split {
     display: grid;
     grid-template-columns: 1fr 2fr;
-    gap: 10px 14px;
+    gap: 12px 16px;
+
     align-items: start;
   }
 
@@ -223,30 +226,34 @@
     display: inline-flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
+
+    gap: 8px;
     margin-bottom: 2px;
   }
 
   .request-log-pane-model-strip-chip {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     max-width: 320px;
-    padding: 3px 9px;
+    padding: 4px 8px;
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--bg-surface);
     font-family: inherit;
     font-size: 11px;
+
     text-align: left;
     appearance: none;
     cursor: pointer;
   }
 
+
   .request-log-pane-model-strip-chip:hover {
     background: color-mix(in srgb, var(--text) 6%, var(--bg-surface));
     border-color: color-mix(in srgb, var(--border) 60%, var(--text) 40%);
   }
+
 
   .request-log-pane-model-strip-chip .mono {
     overflow: hidden;
@@ -255,19 +262,21 @@
     font-size: 11px;
   }
 
+
   .request-log-pane-model-strip-label {
     flex: 0 0 auto;
     color: var(--text-muted);
+
     font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
   }
+
 
   .request-log-pane-model-strip-arrow {
     color: var(--text-muted);
     font-size: 12px;
   }
+
 
   .request-log-pane-split-single {
     grid-template-columns: minmax(0, 1fr);
@@ -288,15 +297,16 @@
   }
 
   .request-log-pane-block > :global(h5) {
-    margin-bottom: 6px;
+    margin-bottom: 8px;
   }
+
 
   .request-log-pane-block-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
   }
 
   .request-log-pane-block-title {
@@ -309,13 +319,16 @@
   /* The modifier class rides on the CopyButton child's own <button>. */
   .request-log-pane-block-head :global(.request-log-copy-btn) {
     display: inline-flex;
+
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     flex: 0 0 auto;
     padding: 4px 8px;
+
     background-color: var(--bg-surface);
     border: 1px solid color-mix(in srgb, var(--border) 70%, var(--text) 30%);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
+
     color: var(--text);
     cursor: pointer;
     font-family: inherit;
@@ -335,20 +348,25 @@
     background: color-mix(in srgb, var(--success) 18%, var(--bg-surface));
   }
 
+
   .request-log-json {
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: 6px;
+
+    border-radius: var(--radius-panel);
     box-sizing: border-box;
-    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
+
     font-size: 12px;
     line-height: 1.45;
     max-width: 100%;
-    padding: 10px;
+    padding: 12px;
+
     max-height: 220px;
     overflow-x: auto;
     overflow-y: auto;
     white-space: pre;
+
     color: var(--text);
   }
 
@@ -363,6 +381,7 @@
   .request-log-pane-clickable-preview:hover {
     background: color-mix(in srgb, var(--danger) 8%, transparent);
   }
+
 
   .request-log-json-body {
     white-space: pre;
@@ -383,7 +402,7 @@
   .request-log-pane-streaming {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     padding-left: 4px;
     font-size: 11px;
     font-weight: 600;

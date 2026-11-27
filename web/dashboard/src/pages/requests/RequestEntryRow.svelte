@@ -58,6 +58,7 @@
   }
 </script>
 
+
 <details
   class="request-log-entry"
   class:request-log-entry-interactions-open={interactionsOpen}
@@ -85,16 +86,18 @@
       <RequestEntryMetadata {entry} />
     </div>
   {/if}
+
 </details>
 
 <style>
   .request-log-entry {
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     background: var(--bg);
     overflow: hidden;
     transition:
       background 0.12s ease-out,
+
       border-color 0.12s ease-out;
   }
 

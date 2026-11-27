@@ -31,6 +31,7 @@
   }
 </script>
 
+
 <div class="request-log-request-response">
   <div class="request-log-pane-tablist" role="tablist" aria-label={m.requests_request_response_label()}>
     {#each panes as p (p.id)}
@@ -103,6 +104,7 @@
       {/if}
     </div>
   {/each}
+
 </div>
 
 <style>
@@ -129,7 +131,7 @@
     padding: 8px 12px;
     border: 1px solid var(--border);
     border-bottom-color: transparent;
-    border-radius: 6px 6px 0 0;
+    border-radius: var(--radius-control) var(--radius-control) 0 0;
     margin-bottom: -1px;
     margin-right: 12px;
     background: transparent;
@@ -138,10 +140,12 @@
     font-size: 13px;
     cursor: pointer;
     transition:
+
       color 0.15s,
       border-color 0.15s,
       background-color 0.15s;
   }
+
 
   .request-log-pane-tab:not(.request-log-pane-tab-active):hover {
     color: var(--text);
@@ -151,12 +155,14 @@
   /* Active tab reads as a card: bordered top + sides with slightly rounded top
      corners, and a background-colored bottom edge that blends into the content
      area (covering the tablist underline). */
+
   .request-log-pane-tab-active {
     color: var(--text);
     border-color: var(--border);
     border-bottom-color: var(--bg);
     background: var(--bg);
   }
+
 
   .request-log-pane-tab-label {
     font-weight: 600;
@@ -167,9 +173,11 @@
   }
 
   /* Direction icon: request (→) vs response (←), distinct hues so the two panes
+
      are scannable at a glance without relying on success/error color. The hue
      class is composed from pane.direction, so the compiler cannot see it —
      hence :global, kept in a compound so it still outranks the base rule. */
+
   .request-log-pane-icon {
     display: inline-flex;
     align-items: center;
@@ -177,12 +185,14 @@
     color: var(--text-muted);
   }
 
+
   .request-log-pane-icon:global(.request-log-pane-icon-request) {
     color: var(--accent);
   }
 
+
   .request-log-pane-icon:global(.request-log-pane-icon-response) {
-    color: var(--info);
+    color: var(--primary-text);
   }
 
   .request-log-pane-icon :global(svg) {
@@ -190,16 +200,19 @@
     height: 16px;
   }
 
+
   .request-log-pane-seq {
     color: var(--text-muted);
     font-size: 12px;
   }
 
+
   /* Attempt type rendered as a pill, accented so failover/retry stand out.
      Same dynamic-class caveat as the direction icon above. */
   .request-log-pane-kind {
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    
+    
+
     font-size: 10px;
     font-weight: 600;
   }
@@ -222,14 +235,15 @@
 
   /* Share of the request body removed by a rewrite (e.g. token compression),
      shown on the Rewritten tab next to the rewriter pill. Same blue family as
-     the cached tokens in the charts (both derive from --info); the prompt-cache
-     variables carry the per-theme tone mix that keeps the text readable. */
+     the cached tokens in the charts (both derive from --chart-prompt); the
+     prompt-cache variables carry the per-theme tone mix that keeps the text
+     readable. */
   .request-log-savings-pill {
     display: inline-flex;
     align-items: center;
-    padding: 1px 7px;
+    padding: 1px 8px;
     border: 1px solid color-mix(in srgb, var(--prompt-cache-color) 45%, var(--border));
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--prompt-cache-color-bg);
     color: var(--prompt-cache-color);
     font-size: 11px;
@@ -242,9 +256,9 @@
   .request-log-step-pill {
     display: inline-flex;
     align-items: center;
-    padding: 1px 7px;
+    padding: 1px 8px;
     border: 1px dashed var(--border);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     color: var(--text-muted);
     font-size: 11px;
     letter-spacing: 0.02em;

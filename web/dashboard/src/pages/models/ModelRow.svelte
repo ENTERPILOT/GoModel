@@ -121,6 +121,7 @@ import {
   const timeoutsLabel = $derived(upstreamTimeoutsLabel(rowUpstreamTimeouts(row)));
 </script>
 
+
 <tr id={rowAnchorID(row) || undefined} class={displayRowClass(row)}>
   <td class="model-name-col">
     <div class="model-name-cell">
@@ -282,13 +283,16 @@ import {
 </tr>
 {#if expanded}
   <ModelDetails {row} {colspan} id={detailsID} />
+
 {/if}
 
 <style>
   /* Rows sit indented under their provider header so groups and their
      models read apart at a glance. */
   .model-name-col {
-    padding-left: calc(var(--space-cell) + 22px);
+
+
+    padding-left: calc(var(--space-cell) + 24px);
   }
 
 
@@ -311,9 +315,10 @@ import {
   }
 
   .alias-strategy {
+
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     font-size: 12px;
     color: var(--text-muted);
     white-space: nowrap;
@@ -335,6 +340,7 @@ import {
 
   /* The targets take what is left of the line and cut off with an ellipsis
      rather than wrap; the title carries the full list. */
+
   .alias-targets {
     flex: 1 1 0;
     min-width: 0;
@@ -356,14 +362,17 @@ import {
   .model-details-toggle {
     appearance: none;
     display: inline-flex;
+
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     margin: 0;
+
     padding: 0;
     border: 0;
     background: none;
     color: inherit;
     font: inherit;
+
     text-align: left;
     cursor: pointer;
   }
@@ -372,10 +381,12 @@ import {
     color: var(--accent);
   }
 
+
   .model-details-toggle:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    outline: 2px solid var(--primary-ring);
     outline-offset: 2px;
-    border-radius: 4px;
+
+    border-radius: var(--radius-control);
   }
 
   /* The class rides on the Icon child's own <svg>, so it needs :global. */
@@ -406,21 +417,28 @@ import {
     text-decoration: underline;
   }
 
+
   .model-redirect-remove-btn:disabled {
-    opacity: 0.45;
-    cursor: default;
+    opacity: var(--disabled-opacity);
+    color: var(--text-disabled);
+    cursor: not-allowed;
+
   }
 
   .model-kind-icon {
     display: inline-flex;
+
     align-items: center;
     justify-content: center;
     width: 24px;
     height: 24px;
+
+
     flex: 0 0 24px;
     border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
-    border-radius: 999px;
+    border-radius: var(--radius-circle);
     background: var(--bg);
+
     color: var(--accent);
   }
 

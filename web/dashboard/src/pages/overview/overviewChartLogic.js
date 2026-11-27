@@ -1,9 +1,11 @@
 // Overview usage chart + prompt-cache gauge logic.
 // Pure functions so the chart math is testable with node.
 
+
 import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
 import { formatNumber } from "../../lib/i18n/locale.js";
 import * as m from "../../lib/paraglide/messages.js";
+
 import { tokenAxisTicks } from "./chartStyle.js";
 
 function dateToKey(date) {
@@ -13,6 +15,7 @@ function dateToKey(date) {
     String(date.getUTCMonth() + 1).padStart(2, "0") +
     "-" +
     String(date.getUTCDate()).padStart(2, "0")
+
   );
 }
 
@@ -47,6 +50,7 @@ export function fillMissingDays(daily, interval, startDate, endDate) {
         billed_cost: null,
       },
     );
+
   }
   return result;
 }
@@ -66,6 +70,7 @@ export function buildOverviewSeries(filledDaily, filledCacheDaily) {
       num(d.cached_input_tokens);
     return split > 0
       ? num(d.uncached_input_tokens) + num(d.cache_write_input_tokens)
+
       : num(d.input_tokens);
   });
   const output = filledDaily.map((d) => num(d.output_tokens));
@@ -74,8 +79,10 @@ export function buildOverviewSeries(filledDaily, filledCacheDaily) {
   const cacheByDate = {};
   (filledCacheDaily || []).forEach((d) => {
     cacheByDate[d.date] = d;
+
   });
   const local = labels.map((label) => {
+
     const c = cacheByDate[label];
     return c ? num(c.input_tokens) + num(c.output_tokens) : 0;
   });
@@ -87,6 +94,7 @@ export function buildOverviewSeries(filledDaily, filledCacheDaily) {
 // served from the prompt cache. Denominator is the input "parts" (uncached +
 // prompt-cached + cache writes), matching the cache meter's provider split.
 export function promptCacheRate(summary) {
+
   const s = summary || {};
   const uncached = Math.max(0, Number(s.uncached_input_tokens) || 0);
   const cached = Math.max(0, Number(s.cached_input_tokens) || 0);
@@ -95,10 +103,12 @@ export function promptCacheRate(summary) {
   return denom > 0 ? (cached / denom) * 100 : 0;
 }
 
+
 export function promptCacheRateHasData(summary) {
   const s = summary || {};
   const denom =
     (Number(s.uncached_input_tokens) || 0) +
+
     (Number(s.cached_input_tokens) || 0) +
     (Number(s.cache_write_input_tokens) || 0);
   return denom > 0;
@@ -150,7 +160,7 @@ export function overviewChartConfig(colors, series, options = {}) {
   ];
   if (cacheEnabled) {
     datasets.push(
-      line(m.overview_locally_cached(), series.local, fade("var(--info)", 35), {
+      line(m.overview_locally_cached(), series.local, fade("var(--primary)", 35), {
         fill: "-1",
         borderDash: [2, 3],
       }),
@@ -196,6 +206,7 @@ export function overviewChartConfig(colors, series, options = {}) {
           },
         },
         y: {
+
           stacked: true,
           beginAtZero: true,
           grid: { color: colors.grid },

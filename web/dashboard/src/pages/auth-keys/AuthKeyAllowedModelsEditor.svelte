@@ -11,6 +11,7 @@
   const selectorOptions = $derived(authKeySelectorOptions(modelsStore.models));
 </script>
 
+
 <EditorDialog
   open={store.allowedModelsEditor.open}
   title={m.api_keys_edit_allowed_models()}
@@ -25,6 +26,7 @@
 >
   {#snippet headerHint()}
     <p class="form-hint">{store.allowedModelsEditor.name}</p>
+
   {/snippet}
 
   <FormField id="auth-key-allowed-models-edit" label={m.api_keys_allowed_models_field()}>
@@ -44,6 +46,7 @@
     <p class="form-hint">
       {m.api_keys_allowed_models_edit_help()}
     </p>
+
   </FormField>
 </EditorDialog>
 

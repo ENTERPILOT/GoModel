@@ -21,6 +21,7 @@
   });
 </script>
 
+
 <EditorDialog
   open={mcpServers.oauthOpen}
   title={m.mcp_oauth_title({ name })}
@@ -35,11 +36,13 @@
 >
   {#snippet headerHint()}
     <p class="form-hint">{m.mcp_oauth_help()}</p>
+
   {/snippet}
 
   <div class="form-field">
     <span class="form-field-label">{m.mcp_oauth_redirect_uri()}</span>
     <code class="mono mcp-oauth-redirect">{redirectURI}</code>
+
     <small class="form-hint">{m.mcp_oauth_redirect_uri_help()}</small>
   </div>
 
@@ -73,6 +76,7 @@
         bind:value={mcpServers.oauthForm.client_secret}
       />
       <small class="form-hint">{m.mcp_oauth_client_secret_help()}</small>
+
     </FormField>
   </details>
 </EditorDialog>

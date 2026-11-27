@@ -21,4 +21,5 @@
   }
 </script>
 
+
 <canvas class={className} aria-label={ariaLabel} {@attach chart}></canvas>

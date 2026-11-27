@@ -45,12 +45,14 @@
   }
 </script>
 
+
 <section class="mcp-tools" aria-labelledby="mcp-tools-title">
   <div class="mcp-tools-header">
     <span id="mcp-tools-title" class="form-field-label">{m.mcp_tools_title()}</span>
     {#if summary.total > 0}
       <span class="mcp-tools-summary">{m.mcp_tools_summary(summary)}</span>
     {/if}
+
   </div>
 
   <div class="mcp-tools-mode">
@@ -67,6 +69,7 @@
     {allowMode ? m.mcp_tools_mode_allow_help() : m.mcp_tools_mode_exclude_help()}
     {#if modeLocked}
       {m.mcp_tools_mode_locked()}
+
     {/if}
   </small>
 
@@ -97,6 +100,7 @@
         disabled={visibleDiscovered.length === 0}
         onclick={() => mcpServers.setToolsExposed(visibleDiscovered, false)}
         >{m.mcp_tools_hide_all()}</button
+
       >
     </div>
   {/if}
@@ -149,6 +153,7 @@
           {/if}
         </li>
       {/each}
+
     </ul>
   {:else if discovered.length > 0}
     <p class="form-hint mcp-tools-empty">{m.mcp_tools_no_match()}</p>
@@ -168,6 +173,7 @@
       class="btn"
       disabled={!mcpServers.toolDraft.trim()}
       onclick={() => mcpServers.addToolDraft()}
+
       >{allowMode ? m.mcp_tools_add_allow() : m.mcp_tools_add_exclude()}</button
     >
   </div>
@@ -179,14 +185,16 @@
      with many tools (GitHub reports ~90) keep the editor compact. */
   .mcp-tools {
     display: flex;
+
     flex-direction: column;
-    gap: 10px;
-    padding: 14px;
+    gap: 12px;
+    padding: 16px;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
   }
 
   .mcp-tools-header,
+
   .mcp-tools-mode {
     display: flex;
     align-items: center;
@@ -195,15 +203,18 @@
     gap: 8px;
   }
 
+
   .mcp-tools-summary,
   .mcp-tools-mode-label {
     color: var(--text-muted);
     font-size: 13px;
   }
 
+
   .mcp-tools-summary {
     font-variant-numeric: tabular-nums;
   }
+
 
   .mcp-tools-toolbar,
   .mcp-tools-add {
@@ -211,6 +222,7 @@
     align-items: center;
     gap: 8px;
   }
+
 
   .mcp-tools-toolbar :global(.filter-input-wrap) {
     min-width: 0;
@@ -230,33 +242,39 @@
   }
 
   .mcp-tools-list {
+
     max-height: 320px;
     margin: 0;
     padding: 0;
+
     overflow-y: auto;
     list-style: none;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
   }
 
   .mcp-tools-row {
     display: flex;
+
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 8px 10px;
+    padding: 8px 12px;
+
   }
 
   .mcp-tools-row + .mcp-tools-row {
     border-top: 1px solid var(--border);
   }
 
+
   .mcp-tools-toggle {
     display: flex;
     flex: 1;
     align-items: flex-start;
-    gap: 10px;
+    gap: 12px;
     min-width: 0;
+
     cursor: pointer;
   }
 
@@ -264,6 +282,7 @@
     flex: 0 0 auto;
     margin-top: 2px;
   }
+
 
   .mcp-tools-copy {
     display: flex;
@@ -274,15 +293,17 @@
 
   .mcp-tools-name-line {
     display: flex;
+
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
   }
 
   .mcp-tools-name {
     font-size: 13px;
     overflow-wrap: anywhere;
   }
+
 
   .mcp-tools-row-hidden .mcp-tools-name {
     color: var(--text-muted);
@@ -301,9 +322,9 @@
 
   .mcp-tools-badge {
     display: inline-block;
-    padding: 0 6px;
+    padding: 0 8px;
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     color: var(--text-muted);
     font-size: 11px;
     line-height: 18px;

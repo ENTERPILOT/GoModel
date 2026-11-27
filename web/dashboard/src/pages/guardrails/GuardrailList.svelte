@@ -15,6 +15,7 @@
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
+
 <section class="settings-panel settings-guardrails-list">
   <div class="editor-header">
     <div>
@@ -35,6 +36,7 @@
       <Icon icon={Plus} class="form-action-icon" />
       <span>{m.guardrails_create()}</span>
     </button>
+
   </div>
 
   {#if store.available}
@@ -47,8 +49,10 @@
           bind:value={store.filter}
         />
       </div>
+
     </div>
   {/if}
+
 
   {#if store.loading && store.filtered.length === 0}
     <LoadingState label={m.guardrails_loading()} />
@@ -128,10 +132,12 @@
               </td>
             </tr>
           {/each}
+
         </tbody>
       </table>
     </div>
   {/if}
+
 
   {#if store.filtered.length === 0 && !store.loading && store.available && !store.error && !auth.authError}
     <p class="empty-state">{m.guardrails_empty()}</p>
@@ -140,18 +146,20 @@
 
 <style>
   .settings-guardrail-health {
-    margin-left: 6px;
-    font-family: var(--font-sans, inherit);
+
+    margin-left: 8px;
+    font-family: var(--font-sans);
     font-size: 11px;
+
     font-weight: 600;
-    letter-spacing: 0.3px;
-    text-transform: uppercase;
     white-space: nowrap;
   }
+
 
   .settings-guardrail-health.is-degraded {
     color: var(--danger);
   }
+
 
   .settings-guardrails-list {
     min-width: 0;
@@ -170,12 +178,14 @@
   }
 
   .settings-guardrail-type-pill {
+
     display: inline-flex;
     align-items: center;
-    padding: 6px 10px;
+    padding: 8px 12px;
     border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: color-mix(in srgb, var(--accent) 12%, transparent);
+
     color: var(--text);
     font-size: 12px;
     font-weight: 600;
@@ -186,21 +196,21 @@
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
-    margin-top: 6px;
+    margin-top: 8px;
   }
+
 
   .settings-guardrail-phase {
     display: inline-flex;
     align-items: center;
-    padding: 2px 7px;
+    padding: 2px 8px;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+
+    border-radius: var(--radius-control);
     background: var(--bg);
     color: var(--text-muted);
     font-size: 9px;
     font-weight: 800;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
     white-space: nowrap;
     line-height: 1.5;
   }
@@ -212,7 +222,7 @@
   }
 
   .settings-guardrail-description {
-    margin-top: 6px;
+    margin-top: 8px;
     color: var(--text-muted);
     font-size: 12px;
   }

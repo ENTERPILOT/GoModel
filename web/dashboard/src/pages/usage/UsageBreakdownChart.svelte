@@ -193,6 +193,7 @@ import { endpointListSummary, endpointsSelected } from "./usage-endpoints.js";
       onclick={() => usagePage.toggleUsageChartView(kind, "table")}
     >
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M9 6v12M15 6v12" /></svg>
+
     </button>
   </div>
 {/snippet}
@@ -369,12 +370,14 @@ import { endpointListSummary, endpointsSelected } from "./usage-endpoints.js";
   </div>
 {:else if loading}
   <!-- Loading affordance while the breakdown fetch is in flight. -->
+
   <div class="model-chart-section usage-breakdown-loading">
     <Spinner size={20} label={m.usage_loading_breakdown({ noun: meta.noun })} />
   </div>
 {/if}
 
 <style>
+
   /* Keep the grouping switch beside the view toggle, right of the title. */
   .model-chart-header :global(.usage-grouping-toggle) {
     margin-left: auto;
@@ -389,10 +392,11 @@ import { endpointListSummary, endpointsSelected } from "./usage-endpoints.js";
   }
 .chart-view-toggle {
   display: inline-flex;
+
   align-items: center;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   padding: 2px;
 }
 
@@ -402,22 +406,26 @@ import { endpointListSummary, endpointsSelected } from "./usage-endpoints.js";
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-control);
+
   color: var(--text-muted);
   cursor: pointer;
   transition: all 0.15s;
 }
+
 
 .chart-view-btn:hover {
   color: var(--text);
 }
 
 .chart-view-btn.active {
-  background: var(--accent);
-  color: #fff;
+  background: var(--primary);
+  color: var(--on-fill);
 }
+
 
 .chart-view-btn :global(svg) {
   width: 16px;

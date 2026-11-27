@@ -40,6 +40,7 @@
   });
 </script>
 
+
 <div>
   <div class="page-header">
     <div>
@@ -70,6 +71,7 @@
         </button>
       {/if}
     </div>
+
   </div>
 
   {#if !mcpServers.available && !auth.authError}
@@ -79,10 +81,12 @@
     <p class="form-error" role="alert" aria-live="assertive">{mcpServers.error}</p>
   {/if}
   {#if mcpServers.loading && !auth.authError}
+
     <LoadingState label={m.mcp_loading()} />
   {/if}
 
   <!-- Waits for runtime config so the panel never shows a fallback default. -->
+
   {#if runtimeConfig.loaded && mcpServers.available && !auth.authError}
     <McpConnectPanel />
   {/if}
@@ -95,17 +99,21 @@
           placeholder={m.mcp_filter_placeholder()}
           label={m.mcp_filter_label()}
           bind:value={mcpServers.filter}
+
         />
       </div>
     </div>
   {/if}
 
+
   <McpServerEditor />
   <McpCatalogModal />
+
   <McpToolCatalogModal />
   <McpOAuthDialog />
 
   {#if mcpServers.filtered.length > 0 && mcpServers.available && !auth.authError}
+
     <McpServerList />
   {/if}
 

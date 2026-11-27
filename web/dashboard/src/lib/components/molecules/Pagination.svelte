@@ -6,6 +6,7 @@
   let { total = 0, offset = 0, limit = 25, onprev, onnext } = $props();
 </script>
 
+
 {#if total > 0}
   <div class="pagination">
     <span class="pagination-info">
@@ -30,6 +31,7 @@
       >
     </div>
   </div>
+
 {/if}
 
 <style>

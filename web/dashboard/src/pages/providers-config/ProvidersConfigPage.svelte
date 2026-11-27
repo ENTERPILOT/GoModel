@@ -22,6 +22,7 @@
   });
 </script>
 
+
 <div>
   <div class="page-header">
     <div>
@@ -48,6 +49,7 @@
         </button>
       {/if}
     </div>
+
   </div>
 
   {#if !providersConfig.available && !auth.needsAuth}
@@ -57,6 +59,7 @@
     <p class="form-error" role="alert" aria-live="assertive">{providersConfig.error}</p>
   {/if}
   {#if providersConfig.loading && !auth.needsAuth}
+
     <LoadingState label="Loading providers..." />
   {/if}
 
@@ -69,9 +72,12 @@
           label={m.providers_filter_label()}
           bind:value={providersConfig.filter}
         />
+
       </div>
+
     </div>
   {/if}
+
 
   <ProviderCredentialEditor />
 

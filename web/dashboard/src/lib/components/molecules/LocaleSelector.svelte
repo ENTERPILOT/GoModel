@@ -11,6 +11,7 @@
   }));
 </script>
 
+
 {#if availableLocales.length > 1}
   <div class="settings-refresh-section locale-settings">
     <label class="locale-selector-label" for="dashboard-locale">
@@ -28,6 +29,7 @@
       {/each}
     </select>
   </div>
+
 {/if}
 
 <style>

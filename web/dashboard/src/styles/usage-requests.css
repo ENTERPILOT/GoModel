@@ -2,10 +2,11 @@
 .model-chart-section {
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
   padding: var(--space-block);
   margin-bottom: var(--space-stack);
 }
+
 
 .model-chart-section h3 {
   font-size: 16px;
@@ -26,7 +27,8 @@
 @media (max-width: 768px) {
   .model-chart-header {
     flex-wrap: wrap;
-    gap: 10px 16px;
+
+    gap: 12px 16px;
   }
 }
 
@@ -40,8 +42,9 @@
 .usage-log-select {
   appearance: none;
   -webkit-appearance: none;
-  padding: 8px 34px 8px 12px;
-  background-color: var(--bg);
+  height: 32px;
+  padding: 0 36px 0 12px;
+  background-color: var(--bg-surface);
   background-image:
     linear-gradient(45deg, transparent 50%, currentcolor 50%),
     linear-gradient(135deg, currentcolor 50%, transparent 50%);
@@ -51,24 +54,23 @@
   background-repeat: no-repeat;
   background-size: 5px 5px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
+
   font-family: inherit;
   outline: none;
   cursor: pointer;
   min-width: 140px;
 }
 
+
 .form-select:disabled,
 .usage-log-select:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
+  opacity: var(--disabled-opacity);
+  color: var(--text-disabled);
 
-.form-select:focus,
-.usage-log-select:focus {
-  border-color: var(--accent);
+  cursor: not-allowed;
 }
 
 .form-select {
@@ -80,6 +82,7 @@
    (so it matches the native selects) and whose panel lists checkboxes. Shared
    by the Requests page request-type filter and the Columns menu; the owner positions
    the <details> (position: relative). */
+
 .request-log-checklist-summary {
   display: block;
   list-style: none;
@@ -98,14 +101,16 @@
   z-index: 20;
   top: calc(100% + 4px);
   left: 0;
+
   min-width: 100%;
   margin: 0;
-  padding: 6px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
+
   box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
 }
 
@@ -119,14 +124,16 @@
 }
 
 .request-log-checklist-option {
+
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 8px 8px;
+  border-radius: var(--radius-control);
   font-size: 13px;
   white-space: nowrap;
   cursor: pointer;
+
 }
 
 .request-log-checklist-option:hover {
@@ -145,14 +152,17 @@
 .usage-label-chip {
   display: inline-flex;
   align-items: center;
+
   min-height: 20px;
-  padding: 1px 9px;
+  padding: 1px 8px;
   border: 1px solid color-mix(in srgb, var(--label-color, var(--accent)) 45%, var(--border));
-  border-radius: 999px;
+
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--label-color, var(--accent)) 14%, var(--bg));
   color: var(--text);
   font-size: 11px;
   font-weight: 600;
+
   font-family: inherit;
   font-style: normal;
   line-height: 1.4;
@@ -183,18 +193,21 @@
 
 .request-log-status-badge {
   display: inline-flex;
+
   align-items: center;
   justify-content: center;
   min-width: 46px;
   height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
+
+  padding: 0 8px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--border);
+
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  font-weight: 500;
   background: var(--bg-surface);
 }
+
 
 .request-log-status-badge.status-success {
   color: var(--success);
@@ -222,35 +235,40 @@
 
 .request-log-pane {
   border: 1px solid var(--border);
+
   border-top: 0;
-  border-radius: 0 0 8px 8px;
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
   background: var(--bg);
   min-width: 0;
+
   padding: 12px;
 }
 
 .request-log-pane h5 {
   font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
+
   color: var(--text-muted);
 }
 
 .request-log-prompt-cache-pill {
   display: inline-flex;
+
   align-items: center;
   min-height: 20px;
   padding: 2px 8px;
   border: 1px solid color-mix(in srgb, var(--prompt-cache-color) 45%, var(--border));
-  border-radius: 999px;
+
+  border-radius: var(--radius-pill);
   background: var(--prompt-cache-color-bg);
   color: var(--prompt-cache-color);
   font-size: 11px;
+
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: none;
 }
+
 
 .request-log-prompt-cache-highlight {
   color: var(--prompt-cache-color);
@@ -280,6 +298,7 @@
   padding: 4px 0;
 }
 
+
 .request-log-audio-icon {
   font-size: 20px;
   line-height: 1;
@@ -305,6 +324,7 @@
   white-space: normal;
 }
 
+
 .request-log-image-gallery {
   display: flex;
   flex-wrap: wrap;
@@ -322,21 +342,26 @@
 .request-log-image-preview {
   display: block;
   max-width: 260px;
+
   max-height: 260px;
-  border-radius: 6px;
+  border-radius: var(--radius-panel);
   border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
+
   background: repeating-conic-gradient(rgba(127, 127, 127, 0.15) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
 }
 
 .request-log-image-caption,
+
 .request-log-image-note {
   font-size: 12px;
   color: var(--text-muted);
 }
 
+
 .request-log-image-empty {
   padding: 4px 0;
 }
+
 
 .request-log-image-icon {
   font-size: 20px;
@@ -362,7 +387,7 @@
   display: inline;
   border-left: 2px solid color-mix(in srgb, var(--accent) 70%, var(--border));
   background: color-mix(in srgb, var(--accent) 10%, transparent);
-  border-radius: 2px;
+  border-radius: var(--radius-control);
   margin: 0 0 0 -2px;
   padding: 0 0 0 2px;
   cursor: pointer;

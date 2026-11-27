@@ -137,6 +137,7 @@
       <Icon icon={X} class="table-icon-svg" />
       <span>{m.common_action_clear()}</span>
     </button>
+
   </div>
 </div>
 
@@ -144,15 +145,18 @@
   .request-log-toolbar {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin-bottom: 14px;
+
+    gap: 12px;
+    margin-bottom: 16px;
   }
 
   .request-log-filter-row {
+
     display: grid;
     grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 10px;
+    gap: 12px;
   }
+
 
   .request-log-filter-select {
     grid-column: span 2;
@@ -169,9 +173,11 @@
     max-width: none;
   }
 
+
   .request-log-filter-row-controls .request-log-filter-select {
     grid-column: span 2;
   }
+
 
   .request-log-filter-row-controls :global(.btn) {
     grid-column: 11 / -1;
@@ -184,10 +190,12 @@
     grid-column: span 3;
   }
 
+
   /* Colors come from the shared .btn styles: the stylesheet
      originally declared a white variant here, but the later .btn
      base rule always overrode it, so the shipped button is the plain one.
      Scoping would resurrect the dead declarations — keep only the live ones. */
+
   .request-log-clear-btn {
     display: inline-flex;
     align-items: center;
@@ -195,6 +203,7 @@
     gap: 8px;
     font-weight: 600;
   }
+
 
   .request-log-clear-btn :global(.table-icon-svg) {
     width: 12px;

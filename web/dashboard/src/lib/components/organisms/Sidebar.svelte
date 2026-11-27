@@ -130,7 +130,7 @@
         ></span>
       {/if}
     </div>
-    <h1>GoModel</h1>
+    <h1>DavAi Gateway</h1>
     {#if license}
       <span
         class="license-badge"
@@ -234,6 +234,7 @@
   onpointerdown={startResize}
   onpointermove={dragResize}
   onpointerup={finishResize}
+
   onpointercancel={finishResize}
   onlostpointercapture={finishResize}
   onkeydown={resizeWithKeyboard}
@@ -264,12 +265,14 @@
     transition: none;
   }
 
+
 .sidebar-header {
     padding: 20px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 10px;
+
+    gap: 12px;
   }
 
 .sidebar-logo {
@@ -288,25 +291,29 @@
     position: relative;
   }
 
+
 .license-badge {
     flex-shrink: 0;
-    padding: 2px 6px;
-    border-radius: 999px;
-    background: var(--accent);
-    color: #fff;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    background: var(--primary);
+    color: var(--on-fill);
     font-size: 10.5px;
     font-weight: 700;
     letter-spacing: 0.06em;
     line-height: 1.4;
   }
 
+
 .license-chip {
     flex-shrink: 0;
-    padding: 1px 6px;
+    padding: 1px 8px;
+
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     color: var(--text-muted);
     font-size: 10.5px;
+
     font-weight: 700;
     line-height: 1.4;
     white-space: nowrap;
@@ -323,17 +330,21 @@
     color: var(--danger);
   }
 
+
 /* Stands in for the badge and chip when the header has no room for them;
    the header's title carries the text. */
 .license-dot {
+
     display: none;
     position: absolute;
     top: -3px;
     right: -5px;
     width: 9px;
+
     height: 9px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: var(--accent);
+
     box-shadow: 0 0 0 2px var(--bg-surface);
   }
 
@@ -346,6 +357,7 @@
   }
 
 /* Set by classOnOverflow at runtime, so it never carries the scope hash. */
+
 .sidebar-header:global(.license-compact) .license-badge,
 .sidebar-header:global(.license-compact) .license-chip {
     display: none;
@@ -371,13 +383,15 @@
 
 .nav-item {
     display: flex;
+
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     padding: 8px 12px;
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     color: var(--text-muted);
     text-decoration: none;
     font-size: 14px;
+
     font-weight: 500;
     transition: all 0.15s;
   }
@@ -387,26 +401,31 @@
     color: var(--text);
   }
 
+
 .nav-item.active {
-    background: var(--accent);
-    color: #fff;
+    background: var(--primary);
+    color: var(--on-fill);
   }
 
 /* Anchors the notification dot, which sits over the icon when the sidebar is
    collapsed and the label is hidden. */
+
 .nav-item {
     position: relative;
   }
 
+
 .nav-notify {
     width: 8px;
     height: 8px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
+
     background: var(--warning);
     flex-shrink: 0;
   }
 
 /* Collapsed: no label to sit beside, so pin it to the icon's corner. A ring
+
    in the sidebar's own background keeps it legible against the active
    item's accent fill. */
 .sidebar.sidebar-collapsed .nav-notify {
@@ -415,6 +434,7 @@
     right: 6px;
     box-shadow: 0 0 0 2px var(--bg-surface);
   }
+
 
 .nav-label {
     flex: 1;
@@ -439,6 +459,7 @@
     gap: 8px;
     margin-top: 8px;
 }
+
 
 .external-auth-user {
     display: flex;
@@ -467,6 +488,7 @@
     font-size: 12px;
 }
 
+
 .access-scope span {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -475,27 +497,32 @@
 
 .sidebar.sidebar-collapsed .sidebar-footer .access-scope {
     display: none;
-}
+  }
 
 .api-key-open-btn {
     width: 100%;
     display: inline-flex;
     align-items: center;
+
     justify-content: center;
     gap: 8px;
-    padding: 8px 10px;
+    padding: 8px 12px;
+
     background: transparent;
     border: 1px solid var(--accent);
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     color: var(--accent);
+
     font-size: 13px;
     font-family: inherit;
     font-weight: 600;
     cursor: pointer;
+
     transition:
       background-color 0.15s,
       border-color 0.15s;
   }
+
 
 .api-key-open-btn:hover {
     background: color-mix(in srgb, var(--accent) 10%, transparent);
@@ -504,9 +531,11 @@
   }
 
 .api-key-open-btn:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
+
+    outline: 2px solid var(--primary-ring);
     outline-offset: 2px;
   }
+
 
 /* Sidebar toggle handle */
 .sidebar-toggle {
@@ -528,7 +557,8 @@
   }
 
 .sidebar-toggle:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
+    outline: 2px solid var(--primary-ring);
+
     outline-offset: 2px;
   }
 
@@ -537,13 +567,16 @@
     user-select: none;
   }
 
+
 .sidebar.sidebar-collapsed .sidebar-header {
     justify-content: center;
     padding: 16px;
   }
 
+
 .sidebar.sidebar-collapsed .sidebar-header :global(h1),
 .sidebar.sidebar-collapsed .license-badge,
+
 .sidebar.sidebar-collapsed .license-chip {
     display: none;
   }
@@ -552,32 +585,39 @@
     display: block;
   }
 
+
 .sidebar.sidebar-collapsed .sidebar-nav .nav-item {
     justify-content: center;
-    padding: 10px;
+    padding: 12px;
   }
+
 
 .sidebar.sidebar-collapsed .sidebar-nav .nav-label {
     display: none;
   }
 
+
 .sidebar.sidebar-collapsed .sidebar-footer {
     padding: 8px;
   }
+
 
 .sidebar.sidebar-collapsed .sidebar-footer .api-key-section {
     display: none;
   }
 
+
+
 .sidebar.sidebar-collapsed .sidebar-footer .external-auth-section {
     display: none;
-}
+  }
 
 @media (max-width: 768px) {
   .sidebar {
           width: 60px;
           flex-basis: 60px;
         }
+
 
   .sidebar-header {
           justify-content: center;
@@ -596,7 +636,7 @@
 
   .sidebar-nav .nav-item {
           justify-content: center;
-          padding: 10px;
+          padding: 12px;
         }
 
   .sidebar-nav .nav-item .nav-label {

@@ -17,6 +17,7 @@
   });
 </script>
 
+
 <!-- novalidate: validation lives in rateLimitFormPayload(), which surfaces
      the store's error copy; native constraint checks (e.g. a 0 typed into a
      min=1 number field) would block the submit before it runs. -->
@@ -139,6 +140,7 @@
       {m.rate_limits_edit_help()}
     </p>
   {/if}
+
 </EditorDialog>
 
 <style>
@@ -150,9 +152,11 @@
     cursor: pointer;
   }
 
+
   .per-child-option input {
     margin-top: 0.2rem;
   }
+
 
   .per-child-option span {
     display: grid;

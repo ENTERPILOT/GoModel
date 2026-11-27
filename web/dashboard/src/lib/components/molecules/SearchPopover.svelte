@@ -171,6 +171,7 @@
     <span
       class="search-select-value"
       class:search-select-clip={!multiple}
+
       class:search-select-wrap={multiple}
       class:search-select-placeholder={!hasSelection}
       title={triggerTitle}
@@ -207,12 +208,14 @@
         />
       </div>
       <!-- Out of the listbox on purpose: a listbox may only contain options
+
            and groups, and this line is neither. Mounted even when empty: a
            live region that appears together with its text is not announced,
            so the element stays and only its text changes. -->
       <p class="search-select-notice" aria-live="polite">{notice}</p>
       <ul class="search-select-list" id={listID} role="listbox" aria-multiselectable={multiple || undefined}>
         {@render children?.()}
+
       </ul>
     </div>
   {/if}
@@ -231,32 +234,40 @@
     gap: 8px;
     width: 100%;
     min-width: 0;
+
     min-height: 32px;
-    padding: 5px 8px 5px 10px;
+    padding: 4px 8px 4px 12px;
     background: var(--bg-surface);
+
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     color: var(--text);
-    font-size: 12px;
+    font-size: 14px;
+
     font-family: inherit;
     text-align: left;
     cursor: pointer;
     transition: border-color 0.15s, background 0.15s;
   }
 
+
   .search-select-trigger.mono {
-    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
   }
+
 
   .search-select-trigger:hover:not(:disabled),
   .search-select-open .search-select-trigger {
     border-color: var(--accent);
   }
 
+
   .search-select-trigger:disabled {
-    opacity: 0.6;
+    opacity: var(--disabled-opacity);
+    color: var(--text-disabled);
     cursor: not-allowed;
   }
+
 
   .search-select-value {
     flex: 1 1 auto;
@@ -291,6 +302,7 @@
     text-overflow: clip;
   }
 
+
   .search-select :global(.search-select-clip.marquee-active .search-select-text) {
     display: inline-block;
     animation: search-select-marquee var(--marquee-duration, 3s) ease-in-out infinite alternate;
@@ -319,6 +331,7 @@
     color: var(--text-muted);
   }
 
+
   /* Icon classes render inside the Icon atom's <svg>, hence :global. */
   .search-select :global(.search-select-chevron) {
     flex-shrink: 0;
@@ -335,6 +348,7 @@
   .search-select-popover {
     position: fixed;
     z-index: 100;
+
     display: flex;
     flex-direction: column;
     width: max-content;
@@ -342,10 +356,11 @@
     max-width: min(480px, 90vw);
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
     overflow: hidden;
   }
+
 
   .search-select-search {
     position: relative;
@@ -368,44 +383,53 @@
   .search-select-search-input {
     width: 100%;
     min-width: 0;
-    padding: 7px 10px 7px 30px;
+    padding: 8px 12px 8px 32px;
+
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
+
     color: var(--text);
     font-size: 13px;
     font-family: inherit;
   }
+
 
   .search-select-search-input:focus {
     border-color: var(--accent);
     outline: none;
   }
 
+
   .search-select-list {
     max-height: 280px;
     /* Shrinks with the popover when the viewport leaves it less room. */
+
     min-height: 0;
     margin: 0;
-    padding: 6px;
+    padding: 8px;
     list-style: none;
+
     overflow-y: auto;
   }
 
   .search-select :global(.search-select-option) {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 7px 10px;
-    border-radius: 6px;
+    gap: 12px;
+
+    padding: 8px 12px;
+    border-radius: var(--radius-control);
     color: var(--text);
     font-size: 12px;
     cursor: pointer;
+
   }
 
   .search-select :global(.search-select-option.mono) {
-    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
   }
+
 
   /* Keyboard/hover highlight; the committed value is aria-selected and
      announced through aria-activedescendant on the search input. */
@@ -444,7 +468,7 @@
 
   .search-select-notice {
     margin: 0;
-    padding: 0 10px 6px;
+    padding: 0 12px 8px;
     color: var(--text-muted);
     font-size: 12px;
   }
@@ -455,7 +479,7 @@
   }
 
   .search-select :global(.search-select-empty) {
-    padding: 12px 10px;
+    padding: 12px 12px;
     color: var(--text-muted);
     font-size: 12px;
     text-align: center;

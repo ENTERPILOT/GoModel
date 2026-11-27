@@ -80,6 +80,7 @@
     placeholder={m.playground_message_placeholder()}
     readonly={message.pending}
     bind:value={message.content}
+
   ></textarea>
 </article>
 
@@ -87,20 +88,23 @@
   .playground-message {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 10px 12px 12px;
+    gap: 8px;
+    padding: 12px 12px 12px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
+
     border-left: 3px solid var(--playground-role-color, var(--border));
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
   }
+
 
   .playground-message-system {
     --playground-role-color: var(--warning);
   }
 
   .playground-message-user {
-    --playground-role-color: var(--info);
+
+    --playground-role-color: var(--primary-text);
   }
 
   .playground-message-assistant {
@@ -116,7 +120,7 @@
   .playground-message-head {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
   }
 
   .playground-drag-handle {
@@ -125,15 +129,18 @@
     justify-content: center;
     width: 24px;
     height: 24px;
+
     margin-left: -4px;
     padding: 0;
     background: transparent;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--radius-control);
+
     color: var(--text-muted);
     cursor: grab;
     touch-action: none;
   }
+
 
   .playground-drag-handle:hover:not(:disabled),
   .playground-drag-handle:focus-visible {
@@ -142,8 +149,9 @@
   }
 
   .playground-drag-handle:disabled {
-    opacity: 0.35;
-    cursor: default;
+    opacity: var(--disabled-opacity);
+    color: var(--text-disabled);
+    cursor: not-allowed;
   }
 
   .playground-message:global(.is-dragging) .playground-drag-handle {
@@ -151,15 +159,18 @@
   }
 
   .playground-role-select {
-    padding: 3px 6px;
+
+    padding: 4px 8px;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     color: var(--playground-role-color, var(--text));
     font-size: 12px;
     font-weight: 600;
+
     cursor: pointer;
   }
+
 
   .playground-role-select:disabled {
     cursor: default;
@@ -180,7 +191,7 @@
 
   .playground-message-body {
     min-height: 44px;
-    padding: 8px 10px;
+    padding: 8px 12px;
     background: var(--bg);
     font-size: 13px;
     line-height: 1.5;

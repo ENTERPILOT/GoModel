@@ -123,6 +123,7 @@
       copyState.copy(conversationMessageCopyText(msg));
     }}
   >
+
     <Icon icon={copyState.copied ? CircleCheck : Copy} width="14" height="14" />
   </button>
 </article>
@@ -132,11 +133,13 @@
     position: relative;
     overflow: hidden;
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 10px 42px 10px 12px;
+    border-radius: var(--radius-panel);
+
+    padding: 12px 44px 12px 12px;
     max-width: 94%;
     background: var(--bg);
   }
+
 
   .chat-message.is-anchor {
     border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
@@ -144,9 +147,11 @@
   }
 
   .chat-message.is-after-anchor,
+
   .chat-function-note.is-after-anchor {
     opacity: 0.46;
   }
+
 
   .chat-message.role-user {
     align-self: flex-start;
@@ -170,23 +175,24 @@
     background: color-mix(in srgb, var(--danger) 10%, var(--bg));
   }
 
+
   .chat-message.role-error .chat-role {
     color: color-mix(in srgb, var(--danger) 75%, var(--text-muted));
   }
+
 
   .chat-message-meta {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 6px;
+
+    margin-bottom: 8px;
   }
 
   .chat-role {
     font-size: 12px;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
     color: var(--text-muted);
   }
 
@@ -196,14 +202,9 @@
     white-space: nowrap;
   }
 
+
   .chat-content {
-    font-family:
-      Inter,
-      -apple-system,
-      BlinkMacSystemFont,
-      "Segoe UI",
-      Roboto,
-      sans-serif;
+    font-family: var(--font-sans);
     font-size: 13px;
     line-height: 1.5;
     white-space: pre-wrap;
@@ -212,6 +213,7 @@
   }
 
   .chat-message::before,
+
   .chat-function-note::before {
     content: "";
     position: absolute;
@@ -238,6 +240,7 @@
   .chat-message-copy {
     position: absolute;
     right: 6px;
+
     bottom: 6px;
     z-index: 2;
     display: inline-flex;
@@ -247,18 +250,22 @@
     height: 26px;
     padding: 0;
     border: 1px solid var(--border);
-    border-radius: 6px;
+
+    border-radius: var(--radius-control);
     background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
     color: var(--text-muted);
     opacity: 0;
+
     pointer-events: none;
     transform: translateY(3px);
     transition: opacity 120ms ease, transform 120ms ease, color 120ms ease,
       background-color 120ms ease, border-color 120ms ease;
+
   }
 
   .chat-message:hover .chat-message-copy,
   .chat-function-note:hover .chat-message-copy,
+
   .chat-message:focus-within .chat-message-copy,
   .chat-function-note:focus-within .chat-message-copy,
   .chat-message-copy.is-copied {
@@ -273,7 +280,7 @@
   }
 
   .chat-message-copy:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline: 2px solid var(--primary-ring);
     outline-offset: 1px;
   }
 
@@ -285,30 +292,34 @@
   /* Tool call footer on assistant bubbles */
   .chat-tool-calls {
     margin-top: 8px;
-    padding-top: 6px;
+
+    padding-top: 8px;
     border-top: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
   }
 
   .chat-tool-call {
+
     position: relative;
     overflow: hidden;
-    padding: 3px 5px;
-    border-radius: 5px;
+    padding: 4px 4px;
+    border-radius: var(--radius-panel);
     font-size: 11px;
     color: var(--text-muted);
-    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
     min-width: 0;
   }
 
   .chat-tool-call-summary {
     display: flex;
     align-items: baseline;
-    gap: 6px;
+
+    gap: 8px;
     min-width: 0;
     cursor: pointer;
+
   }
 
   .chat-tool-call-preview {
@@ -321,10 +332,12 @@
   }
 
   .chat-tool-call-arguments {
-    margin-top: 5px;
-    padding: 6px 8px;
-    border-radius: 6px;
+    margin-top: 4px;
+
+    padding: 8px 8px;
+    border-radius: var(--radius-panel);
     background: color-mix(in srgb, var(--border) 45%, transparent);
+
     color: var(--text);
     font: inherit;
     line-height: 1.45;
@@ -332,6 +345,7 @@
     overflow-wrap: anywhere;
     max-height: 200px;
     overflow: auto;
+
   }
 
   .chat-tool-call-name::before {
@@ -342,12 +356,14 @@
   .chat-function-note {
     position: relative;
     overflow: hidden;
+
     align-self: center;
     max-width: 94%;
-    padding: 4px 42px 4px 12px;
-    border-radius: 12px;
+    padding: 4px 44px 4px 12px;
+    border-radius: var(--radius-panel);
     font-size: 12px;
     color: var(--text-muted);
+
     background: color-mix(in srgb, var(--border) 40%, transparent);
     border: 1px dashed var(--border);
   }
@@ -357,32 +373,36 @@
   }
 
   .chat-function-note-inner {
+
     display: flex;
     align-items: baseline;
-    gap: 6px;
+    gap: 8px;
     min-height: 26px;
     overflow: hidden;
   }
+
 
   .chat-function-note-inner .chat-time {
     margin-left: auto;
     flex-shrink: 0;
   }
 
+
   .chat-function-call-id {
-    margin-top: 6px;
+    margin-top: 8px;
     font-size: 10px;
     color: var(--text-muted);
     overflow-wrap: anywhere;
+
   }
 
   .chat-function-label {
+
     font-weight: 600;
     font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
     white-space: nowrap;
     flex-shrink: 0;
+
   }
 
   .chat-function-label::before {
@@ -397,12 +417,13 @@
   }
 
   .chat-function-detail {
-    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
 
   .chat-function-note.role-function-call {
     align-self: flex-end;
@@ -415,6 +436,7 @@
     background: color-mix(in srgb, var(--success) 8%, transparent);
     border-color: color-mix(in srgb, var(--success) 30%, var(--border));
   }
+
 
   .chat-function-note.is-anchor.role-function-call, .chat-function-note.is-anchor.role-function-result {
     border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
@@ -435,11 +457,11 @@
   }
 
   .chat-function-expanded {
-    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     line-height: 1.45;
-    margin-top: 6px;
-    padding-top: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
     border-top: 1px solid var(--border);
     white-space: pre-wrap;
     overflow-wrap: anywhere;

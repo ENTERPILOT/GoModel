@@ -362,6 +362,7 @@
         title={showPromptCache
           ? m.interaction_hide_cache_fill()
           : m.interaction_show_cache_fill()}
+
         onclick={togglePromptCacheFill}
       >
         <span class="conversation-cache-switch" class:is-active={showPromptCache} aria-hidden="true">
@@ -396,6 +397,7 @@
           type="button"
           aria-label={m.interaction_next_message()}
           title={m.interaction_next_message()}
+
           onclick={() => scrollToConversationMessage(1)}
         >
           <Icon icon={ArrowDown} width="14" height="14" />
@@ -403,9 +405,11 @@
       </div>
     {/if}
     {#if drawer.conversationError}
+
       <div class="alert alert-warning">{drawer.conversationError}</div>
     {/if}
     {#if drawer.conversationLoading}
+
       <p class="empty-state">{m.interaction_loading()}</p>
     {/if}
     {#if !drawer.conversationLoading && !drawer.followUpSending && !drawer.conversationError && drawer.conversationMessages.length === 0 && !drawer.conversationLiveWaiting()}
@@ -413,6 +417,7 @@
     {/if}
 
     {#if drawer.conversationMessages.length > 0}
+
       <div class="conversation-thread" bind:this={drawer.conversationThreadEl}>
         {#each drawer.conversationMessages as msg (msg.uid)}
           <ChatMessage {msg} {showPromptCache} />
@@ -447,6 +452,7 @@
           aria-label={m.interaction_send_label()}
           placeholder={m.interaction_placeholder()}
           bind:value={drawer.followUpText}
+
           disabled={drawer.followUpSending || drawer.conversationLiveWaiting()}
         ></textarea>
         {#if drawer.followUpError}
@@ -461,6 +467,7 @@
           </button>
         </div>
       </form>
+
     </div>
   {/if}
 </aside>
@@ -508,6 +515,7 @@
     }
   }
 
+
   .conversation-resize-handle {
     position: absolute;
     z-index: 2;
@@ -524,6 +532,7 @@
     outline: none;
   }
 
+
   .conversation-resize-handle::after {
     content: "";
     position: absolute;
@@ -535,10 +544,12 @@
     transition: background 0.15s;
   }
 
+
   .conversation-resize-handle:hover::after,
   .conversation-resize-handle:focus-visible::after {
     background: color-mix(in srgb, var(--accent) 70%, var(--border));
   }
+
 
   :global(body.conversation-panel-resizing) {
     cursor: col-resize;
@@ -547,29 +558,33 @@
 
   .conversation-drawer-header {
     display: flex;
+
     flex-direction: column;
-    gap: 9px;
-    padding: 14px 16px;
+    gap: 8px;
+    padding: 16px 16px;
     border-bottom: 1px solid var(--border);
+
   }
 
   .conversation-drawer-header-row {
+
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: 12px;
   }
 
   .conversation-drawer-header-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
   }
 
   .conversation-drawer-title {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: 8px;
+
     min-width: 0;
   }
 
@@ -590,6 +605,7 @@
     position: relative;
   }
 
+
   .conversation-message-navigation {
     position: sticky;
     top: 12px;
@@ -607,6 +623,7 @@
     transition: opacity 120ms ease, transform 120ms ease;
   }
 
+
   #interactions-drawer-content:hover .conversation-message-navigation,
   .conversation-message-navigation:focus-within {
     opacity: 1;
@@ -623,11 +640,13 @@
     min-height: 30px;
     padding: 0;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
+
     background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
     color: var(--text-muted);
     box-shadow: 0 1px 3px color-mix(in srgb, #000 16%, transparent);
   }
+
 
   .conversation-message-navigation button:hover {
     color: var(--text);
@@ -635,41 +654,47 @@
   }
 
   .conversation-message-navigation button:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline: 2px solid var(--primary-ring);
     outline-offset: 1px;
+
   }
 
   .conversation-drawer-footer {
     flex-shrink: 0;
     border-top: 1px solid var(--border);
-    padding: 10px 16px;
+    padding: 12px 16px;
     background: var(--bg-surface);
     display: flex;
+
     flex-direction: column;
-    gap: 9px;
+    gap: 8px;
   }
+
 
   .conversation-composer {
     display: flex;
     flex-direction: column;
-    gap: 7px;
+    gap: 8px;
   }
+
 
   .conversation-composer textarea {
     width: 100%;
     min-height: 50px;
     resize: vertical;
     border: 1px solid var(--border);
-    border-radius: 7px;
-    padding: 9px 10px;
+    border-radius: var(--radius-control);
+
+    padding: 8px 12px;
     background: var(--bg);
     color: var(--text);
+
     font: inherit;
     line-height: 1.45;
   }
 
   .conversation-composer textarea:focus {
-    outline: 2px solid color-mix(in srgb, var(--accent) 38%, transparent);
+    outline: 2px solid var(--primary-ring);
     outline-offset: 1px;
   }
 
@@ -679,9 +704,10 @@
 
   .conversation-composer-actions {
     display: flex;
+
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: 12px;
   }
 
   .conversation-endpoint {
@@ -693,13 +719,15 @@
     font-size: 11px;
   }
 
+
   .conversation-send-error {
     color: var(--danger);
     font-size: 12px;
   }
 
   .conversation-truncated {
-    padding: 0 16px 14px;
+    padding: 0 16px 16px;
+
     color: var(--text-muted);
     font-size: 12px;
   }
@@ -707,10 +735,12 @@
   .conversation-step-picker {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     color: var(--text-muted);
+
     font-size: 11px;
   }
+
 
   .conversation-step-picker span {
     flex: 0 0 auto;
@@ -719,30 +749,35 @@
   .conversation-step-picker select {
     min-width: 0;
     max-width: 100%;
-    padding: 3px 6px;
+    padding: 4px 8px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: var(--bg);
+
     color: var(--text);
     font-size: 11px;
     font-family: inherit;
+
   }
 
   .conversation-step-picker select:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 38%, transparent);
+
+    outline: 2px solid var(--primary-ring);
     outline-offset: 1px;
   }
 
   .conversation-cache-legend {
     display: flex;
+
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     padding: 0;
     border: 0;
     background: transparent;
     color: var(--text-muted);
     font-size: 11px;
     font-family: inherit;
+
     text-align: left;
     cursor: pointer;
   }
@@ -751,10 +786,11 @@
     color: var(--text);
   }
 
+
   .conversation-cache-legend:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--prompt-cache-color) 35%, transparent);
     outline-offset: 3px;
-    border-radius: 3px;
+    border-radius: var(--radius-control);
   }
 
   .conversation-cache-switch {
@@ -762,7 +798,7 @@
     width: 28px;
     height: 16px;
     flex: 0 0 auto;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: color-mix(in srgb, var(--text-muted) 30%, var(--border));
     transition: background-color 150ms ease;
   }
@@ -777,8 +813,8 @@
     left: 2px;
     width: 12px;
     height: 12px;
-    border-radius: 50%;
-    background: #fff;
+    border-radius: var(--radius-circle);
+    background: var(--switch-thumb);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
     transition: transform 150ms ease;
   }
@@ -792,16 +828,16 @@
   }
 
   .conversation-thread {
-    padding: 14px 16px 20px;
+    padding: 16px 16px 20px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
   }
 
   .conversation-live-status {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     padding: 4px 16px 20px;
     color: var(--text-muted);
     font-size: 13px;

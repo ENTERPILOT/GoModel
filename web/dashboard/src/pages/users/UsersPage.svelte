@@ -23,6 +23,7 @@
   });
 </script>
 
+
 <div>
   <div class="page-header">
     <div>
@@ -46,16 +47,20 @@
         </button>
       {/if}
     </div>
+
   </div>
 
   {#if !store.available && !auth.authError}
     <div class="alert alert-warning">{m.users_unavailable()}</div>
   {/if}
   {#if store.error && !auth.authError && !store.formOpen}
+
     <p class="form-error" role="alert" aria-live="assertive">{store.error}</p>
+
   {/if}
 
   <UserEditor />
+
 
   {#if store.loading && store.nodes.length === 0}
     <LoadingState label={m.users_loading()} />
@@ -74,9 +79,11 @@
         <InactiveToggle
           bind:checked={store.showInactive}
           label={m.users_show_inactive()}
+
           count={store.inactiveCount}
         />
       </div>
+
     </div>
   {/if}
 
@@ -88,6 +95,7 @@
     <p class="empty-state">
       {#if store.filter.trim()}
         {m.users_no_match()}{store.inactiveCount > 0 && !store.showInactive
+
           ? " " + m.users_hidden({ count: store.inactiveCount })
           : ""}
       {:else}
