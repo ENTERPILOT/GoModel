@@ -67,11 +67,28 @@ Test conventions:
 - Fake upstream provider servers with `internal/providers/providertest` (`JSONServer`, `SSEServer`, `RouteServer`) and read what was sent from its capture.
 - A provider built on the shared OpenAI-compatible adapter gets one `TestChatCompatibleContract` that calls `providertest.AssertChatCompatible`; set `NativeResponses` when it forwards Responses to `/responses`. Add provider-specific tests only for behavior the contract does not cover.
 
+## Architecture Decisions
+
+`docs/adr/` holds the architecture decision records, one numbered file per decision (`0011-field-forwarding-on-translated-paths.md`). Most tasks touch none of them.
+
+- Before changing behavior an ADR describes, read it. Code comments cite the one that applies (`ADR-0011`).
+- When a change alters a recorded decision, amend that ADR in the same PR.
+- When a change makes a new architectural decision, add the ADR with it: next number, then `Context`, `Decision`, `Consequences`.
+
 ## Documentation
 
 Documentation in `docs/` directory is Mintlify based. It should be concise, practical, and user-focused.
 
 Show defaults, explain when to change them, and include minimal examples when useful.
+
+### Translations
+
+English is the source for the docs and the dashboard; German, Polish, and Chinese follow it.
+
+- Docs: each page in the `docs/docs.json` navigation has a copy at the same path in `docs/de/`, `docs/pl/`, and `docs/zh/`, with its own navigation entry per language. Change the copies in the same PR as the English page. Files outside the navigation (`docs/adr/`, `docs/dev/`, `docs/DEVELOPMENT.md`) are English only.
+- Dashboard: strings live in `web/dashboard/messages/`, with `en.json` as the source. Add each key to every catalog with the same placeholders; `make test-dashboard` fails otherwise. See `web/dashboard/src/lib/i18n/README.md`.
+- Translate prose, headings, navigation labels, and code comments. Keep the meaning, and leave code, endpoint paths, field and config names, placeholders, and markup as they are. Link to the translated page and its translated heading anchor (`/de/...`).
+- Follow the form of address and terminology the surrounding page or catalog already uses. Conventions differ per language; do not apply one language's to another.
 
 ## Commit and PR Format
 
