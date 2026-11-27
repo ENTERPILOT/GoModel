@@ -44,6 +44,11 @@ off.
 | `xhigh` / `max` | `max` |
 | anything else | passed through by GoModel, then rejected by DeepSeek |
 
+Under a user path's [`max_reasoning_effort`](/features/users#request-policy) a
+level above the ceiling is never sent: a ceiling of `high` or `xhigh` sends
+`high` at most, and a ceiling below `high` sends `none`, since DeepSeek has no
+lower reasoning level.
+
 GoModel rewrites the OpenAI-shaped `"reasoning": {"effort": "..."}` into
 DeepSeek's top-level `reasoning_effort` — no client change required. Validate
 or normalize custom client values to `high` or `max` before calling GoModel.

@@ -34,6 +34,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	if err != nil {
 		return nil, err
 	}
+	withinRequestCeilings(ctx, anthropicReq)
 	stream, err := p.openMessagesStream(ctx, anthropicReq, req.Model)
 	if err != nil {
 		return nil, err

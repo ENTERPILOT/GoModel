@@ -1,10 +1,21 @@
 name: CodeQL
 
+# Pull requests that change only docs/ or Markdown skip the scan; the Go and
+# JavaScript examples under docs/ stay in (later patterns win). Pushes to main
+# are never filtered: code scanning compares a pull request with the analysis
+# of its base commit, and a skipped push leaves that commit without one.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+    paths:
+      - "**"
+      - "!docs/**"
+      - "docs/example_plugins/**"
+      - "docs/examples/**"
+      - "!**/*.md"
+      - "!**/*.mdx"
   schedule:
     - cron: "31 3 * * 1"
 

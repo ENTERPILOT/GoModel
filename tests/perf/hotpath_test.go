@@ -512,14 +512,14 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// with typed payloads; per-delta cost is unchanged.
 			name:      "openai_responses_stream_converter",
 			bench:     BenchmarkOpenAIResponsesStreamConverter,
-			maxAllocs: 132,   // baseline 126
-			maxBytes:  20480, // baseline ~19.1 KB (leaves headroom for pool cold-starts)
+			maxAllocs: 112,   // baseline 109
+			maxBytes:  19456, // baseline ~18.2 KB (leaves headroom for pool cold-starts)
 		},
 		{
 			name:      "shared_stream_request_log_and_usage_observers",
 			bench:     BenchmarkSharedStreamingRequestLogAndUsageObservers,
-			maxAllocs: 157,  // baseline 155 (incl. request labels on both observers)
-			maxBytes:  9088, // baseline ~8.8 KB (incl. auth key id, markup and billed cost on the usage entry)
+			maxAllocs: 130,  // baseline 128 (incl. request labels on both observers)
+			maxBytes:  8128, // baseline ~7.8 KB (incl. auth key id, markup and billed cost on the usage entry)
 		},
 		{
 			// Default configuration: request log body capture off, so the observed
@@ -527,8 +527,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// A regression that decodes every chunk again would blow this limit.
 			name:      "shared_stream_observers_default_config",
 			bench:     BenchmarkSharedStreamingObserversDefaultConfig,
-			maxAllocs: 62,   // baseline 60 (incl. request labels on both observers)
-			maxBytes:  3712, // baseline ~3.5 KB (request log entry carries the guardrail outcome trail)
+			maxAllocs: 51,   // baseline 49 (incl. request labels on both observers)
+			maxBytes:  3456, // baseline ~3.3 KB (request log entry carries the guardrail outcome trail)
 		},
 		{
 			// include_usage stream shape: every content chunk carries
@@ -536,8 +536,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// every one of those chunks was decoded (196 allocs, ~9.2 KB).
 			name:      "streaming_observers_include_usage",
 			bench:     BenchmarkSharedStreamingObserversIncludeUsage,
-			maxAllocs: 50,   // baseline 48
-			maxBytes:  3200, // baseline ~3.1 KB (incl. markup and billed cost on the usage entry)
+			maxAllocs: 41,   // baseline 39
+			maxBytes:  2880, // baseline ~2.8 KB (incl. markup and billed cost on the usage entry)
 		},
 	}
 

@@ -43,6 +43,11 @@ mit zwei Reasoning-Stufen, `high` und `max`, sowie `none`, das Reasoning abschal
 | `xhigh` / `max` | `max` |
 | alles andere | wird von GoModel durchgereicht und dann von DeepSeek abgelehnt |
 
+Unter dem [`max_reasoning_effort`](/de/features/users#request-policy) eines
+User Paths wird nie eine Stufe über der Obergrenze gesendet: Eine Obergrenze
+von `high` oder `xhigh` sendet höchstens `high`, und eine Obergrenze unter
+`high` sendet `none`, da DeepSeek keine niedrigere Reasoning-Stufe hat.
+
 GoModel schreibt das OpenAI-förmige `"reasoning": {"effort": "..."}` in das DeepSeek-Feld
 `reasoning_effort` auf oberster Ebene um – eine Änderung am Client ist nicht erforderlich.
 Validieren oder normalisieren Sie benutzerdefinierte Client-Werte auf `high` oder `max`, bevor Sie

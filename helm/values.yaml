@@ -82,7 +82,9 @@ persistence:
 updateStrategy: {}
 
 metrics:
-  # -- Expose Prometheus metrics at /metrics (unauthenticated).
+  # -- Expose Prometheus metrics at /metrics. Unauthenticated unless
+  # env.METRICS_REQUIRE_AUTH is "true" on a gateway that requires credentials;
+  # an ingress or HTTPRoute on / exposes it too.
   enabled: true
   serviceMonitor:
     # -- Create a ServiceMonitor for the Prometheus Operator.
@@ -90,6 +92,10 @@ metrics:
     interval: 30s
     # -- Namespace for the ServiceMonitor. Empty uses the release namespace.
     namespace: ""
+    # -- Secret key holding the bearer token Prometheus sends, for
+    # env.METRICS_REQUIRE_AUTH. The Secret must be in the ServiceMonitor's
+    # namespace. Example: {name: gomodel-metrics, key: token}
+    bearerTokenSecret: {}
     labels: {}
 
 service:

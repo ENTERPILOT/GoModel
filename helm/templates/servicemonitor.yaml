@@ -20,4 +20,10 @@ spec:
     - port: http
       path: {{ include "gomodel.pathWithBasePath" (dict "root" . "path" (.Values.env.METRICS_ENDPOINT | default "/metrics")) | quote }}
       interval: {{ .Values.metrics.serviceMonitor.interval }}
+      {{- with .Values.metrics.serviceMonitor.bearerTokenSecret }}
+      authorization:
+        type: Bearer
+        credentials:
+          {{- toYaml . | nindent 10 }}
+      {{- end }}
 {{- end }}

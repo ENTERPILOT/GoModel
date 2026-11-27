@@ -1,10 +1,26 @@
 name: CI
 
+# Changes that touch only docs/, helm/ or Markdown files skip this workflow.
+# docs.yml validates docs/ and helm.yml the chart; other Markdown has no check.
+# docs/example_plugins stays in: it is Go code the e2e suite builds and loads.
+# Later patterns win, so the order matters.
 on:
   push:
     branches: [main]
+    paths:
+      - "**"
+      - "!docs/**"
+      - "docs/example_plugins/**"
+      - "!helm/**"
+      - "!**/*.md"
   pull_request:
     branches: [main]
+    paths:
+      - "**"
+      - "!docs/**"
+      - "docs/example_plugins/**"
+      - "!helm/**"
+      - "!**/*.md"
 
 # Cancel redundant runs on the same branch
 concurrency:
@@ -25,6 +41,39 @@ permissions:
   contents: read
 
 jobs:
+  # A pull request that changes only Go tests (*_test.go, tests/, testdata/)
+  # leaves the binary and its dependency graph untouched, so it skips the
+  # Dashboard, Build and Vulnerability Scan jobs. Pushes to main run them all.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      source: ${{ steps.diff.outputs.source }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          # The pull request merge commit's first parent is the base branch,
+          # so a depth of 2 is enough to diff against it.
+          fetch-depth: 2
+
+      - name: Check for non-test changes
+        id: diff
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "source=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # --no-renames lists both sides of a rename, so moving a source file
+          # into a test path still counts as a source change.
+          changed=$(git diff --name-only --no-renames HEAD^1 HEAD)
+          if grep -qvE '(_test\.go$|^tests/|(^|/)testdata/)' <<< "$changed"; then
+            echo "source=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "source=false" >> "$GITHUB_OUTPUT"
+            echo "Only Go test files changed; skipping Dashboard, Build and Vulnerability Scan."
+          fi
+
   lint:
     name: lint
     runs-on: ubuntu-latest
@@ -70,6 +119,8 @@ jobs:
   # sources and package-lock.json only. See docs/adr/0010-dashboard-built-in-ci.md.
   frontend:
     name: Dashboard
+    needs: changes
+    if: needs.changes.outputs.source == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -263,6 +314,8 @@ jobs:
 
   vulncheck:
     name: Vulnerability Scan
+    needs: changes
+    if: needs.changes.outputs.source == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -287,58 +340,13 @@ jobs:
           govulncheck ./...
           govulncheck -tags=swagger ./...
 
-  # Only runs when the pull request touches docs/. Pushes to main always run
-  # it. The check needs a full Node toolchain (libsecret, mint) that costs
-  # more than the validation itself.
-  docs-validate:
-    name: Docs Validation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-          # The pull request merge commit's first parent is the base branch,
-          # so a depth of 2 is enough to diff against it.
-          fetch-depth: 2
-
-      - name: Check for docs changes
-        id: changes
-        run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "docs=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only HEAD^1 HEAD -- docs/ | grep -q .; then
-            echo "docs=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "docs=false" >> "$GITHUB_OUTPUT"
-            echo "No docs/ changes; skipping validation."
-          fi
-
-      # To avoid possible issues related to missing libsecret binary on the runner runner
-      - name: Install system dependencies
-        if: steps.changes.outputs.docs == 'true'
-        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
-
-      - name: Setup Node.js
-        if: steps.changes.outputs.docs == 'true'
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: '22'
-
-      # Pinned: a bare `npx mint` installs the release published last, and a
-      # mint release reaches npm a few minutes before the @mintlify/cli version
-      # it depends on, so a run in that window fails with ETARGET. Dependabot
-      # does not see this pin; bump it by hand.
-      - name: Validate docs.json
-        if: steps.changes.outputs.docs == 'true'
-        run: npx mint@4.3.37 validate
-        working-directory: docs
-
   # Compiling the binary doesn't depend on tests passing, so this runs in
   # parallel with the test jobs rather than gating behind them. It is the one
   # Go job that embeds the real dashboard bundle.
   build:
     name: Build
     runs-on: ubuntu-latest
+    # Skipped with the Dashboard job when only Go tests changed.
     needs: frontend
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

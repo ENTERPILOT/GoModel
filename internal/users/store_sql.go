@@ -17,9 +17,19 @@ var sqlTable = `CREATE TABLE IF NOT EXISTS users (
 		user_path TEXT PRIMARY KEY,
 		allowed_models ` + sqlx.TypeJSONText + ` NOT NULL DEFAULT '[]',
 		description TEXT NOT NULL DEFAULT '',
+		default_model TEXT NOT NULL DEFAULT '',
+		max_reasoning_effort TEXT NOT NULL DEFAULT '',
+		max_output_tokens ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL
 	)`
+
+// userMigrations backfill columns added after the table's first release.
+var userMigrations = []string{
+	"ALTER TABLE users ADD COLUMN default_model TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE users ADD COLUMN max_reasoning_effort TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE users ADD COLUMN max_output_tokens " + sqlx.TypeInt64 + " NOT NULL DEFAULT 0",
+}
 
 // NewSQLStore creates the users table if needed.
 func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
@@ -29,12 +39,15 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err := db.Schema(ctx, sqlTable); err != nil {
 		return nil, fmt.Errorf("failed to create users table: %w", err)
 	}
+	if err := sqlx.AddColumns(ctx, db, userMigrations...); err != nil {
+		return nil, err
+	}
 	return &SQLStore{db: db}, nil
 }
 
 func (s *SQLStore) List(ctx context.Context) ([]User, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT user_path, allowed_models, description, created_at, updated_at
+		SELECT user_path, allowed_models, description, default_model, max_reasoning_effort, max_output_tokens, created_at, updated_at
 		FROM users
 		ORDER BY user_path ASC
 	`)
@@ -47,13 +60,14 @@ func (s *SQLStore) List(ctx context.Context) ([]User, error) {
 	for rows.Next() {
 		var user User
 		var allowedJSON string
-		var createdAt, updatedAt int64
-		if err := rows.Scan(&user.UserPath, &allowedJSON, &user.Description, &createdAt, &updatedAt); err != nil {
+		var maxOutputTokens, createdAt, updatedAt int64
+		if err := rows.Scan(&user.UserPath, &allowedJSON, &user.Description, &user.DefaultModel, &user.MaxReasoningEffort, &maxOutputTokens, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		if user.AllowedModels, err = sqlutil.DecodeJSONStrings([]byte(allowedJSON)); err != nil {
 			return nil, fmt.Errorf("decode allowed_models: %w", err)
 		}
+		user.MaxOutputTokens = int(maxOutputTokens)
 		user.CreatedAt = sqlutil.TimeFromUnix(createdAt)
 		user.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
 		result = append(result, user)
@@ -66,13 +80,16 @@ func (s *SQLStore) List(ctx context.Context) ([]User, error) {
 
 func (s *SQLStore) Upsert(ctx context.Context, user User) error {
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO users (user_path, allowed_models, description, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO users (user_path, allowed_models, description, default_model, max_reasoning_effort, max_output_tokens, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_path) DO UPDATE SET
 			allowed_models = excluded.allowed_models,
 			description = excluded.description,
+			default_model = excluded.default_model,
+			max_reasoning_effort = excluded.max_reasoning_effort,
+			max_output_tokens = excluded.max_output_tokens,
 			updated_at = excluded.updated_at
-	`, user.UserPath, sqlutil.JSONStrings(user.AllowedModels), user.Description, user.CreatedAt.Unix(), user.UpdatedAt.Unix())
+	`, user.UserPath, sqlutil.JSONStrings(user.AllowedModels), user.Description, user.DefaultModel, user.MaxReasoningEffort, int64(user.MaxOutputTokens), user.CreatedAt.Unix(), user.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("upsert user: %w", err)
 	}
