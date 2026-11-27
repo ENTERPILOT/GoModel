@@ -175,6 +175,9 @@ W Cline wybierz:
 - API Key: `change-me`
 - Model ID: model zwracany przez `GET /v1/models`
 
+Jak dalej korzystać z modeli swojego konta Cline, opisuje sekcja
+[Śledzenie wbudowanych modeli agenta](#śledzenie-wbudowanych-modeli-agenta).
+
 ### Roo Code
 
 W Roo Code wybierz:
@@ -238,6 +241,34 @@ Otwórz stronę „Requesty” w dashboardzie GoModel:
 To najszybszy sposób, aby potwierdzić, że Twój agent programistyczny dociera do GoModel,
 i przejrzeć każdą interakcję. W tym samym dashboardzie możesz na bieżąco
 śledzić ruch i użycie GoModel.
+
+## Śledzenie wbudowanych modeli agenta
+
+Gdy wybierasz wbudowanego providera agenta (jego własne konto, kredyty lub
+subskrypcję), agent wywołuje tę usługę bezpośrednio i GoModel nigdy nie widzi
+tego ruchu. Żeby zachować te modele i mimo to rejestrować ich użycie, dodaj tę
+samą usługę do GoModel jako providera i skieruj agenta na GoModel:
+
+`Agent -> GoModel -> usługa modeli agenta`
+
+| Wbudowany provider | Provider GoModel | Konfiguracja |
+| ------------------ | ---------------- | ------------ |
+| Cline (kredyty) i ClinePass | `cline` | [Cline](/pl/providers/cline) |
+| OpenCode Go | `opencode_go` | [OpenCode Go](/pl/providers/opencode-go) |
+| Kilo Gateway (Kilo Code) | `kilo` | [Przegląd providerów](/pl/providers/overview) |
+| GitHub Copilot | `github-copilot` | [GitHub Copilot](/pl/providers/github-copilot) |
+| Subskrypcja ChatGPT (Codex) | `chatgpt` | [Codex](/pl/guides/codex) |
+| Subskrypcja Claude (Claude Code) | `anthropic` | [Claude Code](/pl/guides/claude-code) |
+| Kimi Code | `kimicode` | [Kimi Code CLI](/pl/guides/kimi-code-cli) |
+
+Na przykład, żeby Cline dalej używał modelu rozliczanego na Twoim koncie Cline,
+uruchom GoModel z `CLINE_API_KEY` i ustaw w Cline Model ID na
+`cline/anthropic/claude-sonnet-4-6`.
+
+Działa to tylko dla usług, które wydają dane uwierzytelniające, jakie można
+skonfigurować w GoModel. Wbudowanych modeli bez takich danych, na przykład
+modeli Cursora, nie da się kierować przez GoModel, a katalog pay-as-you-go
+OpenCode Zen nie ma jeszcze dedykowanego providera.
 
 ## Obecny status
 

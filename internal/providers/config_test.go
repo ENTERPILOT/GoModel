@@ -62,6 +62,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"kilo": {
 		DefaultBaseURL: "https://api.kilo.ai/api/gateway",
 	},
+	"cline": {
+		DefaultBaseURL: "https://api.cline.bot/api/v1",
+	},
 	"zai": {
 		DefaultBaseURL: "https://api.z.ai/api/paas/v4",
 	},
@@ -775,6 +778,7 @@ func TestApplyProviderEnvVars_DiscoversTypeFromAPIKeyWithDefaultBaseURL(t *testi
 	}{
 		{providerType: "openrouter", envVar: "OPENROUTER_API_KEY", apiKey: "sk-openrouter"},
 		{providerType: "kilo", envVar: "KILO_API_KEY", apiKey: "kilo-key"},
+		{providerType: "cline", envVar: "CLINE_API_KEY", apiKey: "cline-key"},
 		{providerType: "deepseek", envVar: "DEEPSEEK_API_KEY", apiKey: "deepseek-key"},
 		{providerType: "chutes", envVar: "CHUTES_API_KEY", apiKey: "cpk_test"},
 		{providerType: "deepinfra", envVar: "DEEPINFRA_API_KEY", apiKey: "deepinfra-key"},

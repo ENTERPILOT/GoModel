@@ -175,6 +175,9 @@ In Cline, choose:
 - API Key: `change-me`
 - Model ID: a model returned by `GET /v1/models`
 
+To keep using the models of your Cline account, see
+[Track built-in agent models](#track-built-in-agent-models).
+
 ### Roo Code
 
 In Roo Code, choose:
@@ -238,6 +241,34 @@ Open the Requests page in the GoModel dashboard:
 This is the quickest way to confirm that your coding agent is reaching GoModel
 and to inspect each interaction. From the same dashboard, you can keep
 following your GoModel traffic and usage.
+
+## Track built-in agent models
+
+When you select an agent's built-in provider (its own account, credits, or
+subscription), the agent calls that service directly and GoModel never sees
+the traffic. To keep those models and still record their usage, add the same
+service to GoModel as a provider and point the agent at GoModel instead:
+
+`Agent -> GoModel -> the agent's model service`
+
+| Built-in provider | GoModel provider | Setup |
+| ----------------- | ---------------- | ----- |
+| Cline (credits) and ClinePass | `cline` | [Cline](/providers/cline) |
+| OpenCode Go | `opencode_go` | [OpenCode Go](/providers/opencode-go) |
+| Kilo Gateway (Kilo Code) | `kilo` | [Providers overview](/providers/overview) |
+| GitHub Copilot | `github-copilot` | [GitHub Copilot](/providers/github-copilot) |
+| ChatGPT subscription (Codex) | `chatgpt` | [Codex](/guides/codex) |
+| Claude subscription (Claude Code) | `anthropic` | [Claude Code](/guides/claude-code) |
+| Kimi Code | `kimicode` | [Kimi Code CLI](/guides/kimi-code-cli) |
+
+For example, to keep Cline on a model billed to your Cline account, start
+GoModel with `CLINE_API_KEY` and set Cline's Model ID to
+`cline/anthropic/claude-sonnet-4-6`.
+
+This works only for services that issue a credential you can configure in
+GoModel. Built-in models without one, such as Cursor's, cannot be routed through
+GoModel, and OpenCode Zen's pay-as-you-go catalog has no dedicated provider
+yet.
 
 ## Current status
 

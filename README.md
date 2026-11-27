@@ -123,6 +123,7 @@ The official SDKs therefore work unchanged. Configure their base URLs as follows
 - Z.ai
 - Alibaba Cloud Model Studio (Bailian)
 - Kilo AI
+- Cline
 - Eden AI
 - MiniMax
 - Mistral AI

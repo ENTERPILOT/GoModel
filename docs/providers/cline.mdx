@@ -1,0 +1,102 @@
+---
+title: "Cline"
+description: "Route the models of a Cline account (Cline credits and ClinePass) through GoModel so their usage is tracked."
+icon: "bot"
+tag: "Beta"
+keywords: ["Cline", "ClinePass", "Cline API", "coding agent", "built-in models", "provider setup"]
+---
+
+<Warning>
+  Cline support is in beta. It follows the public Cline API documentation and
+  is covered by automated tests against a simulated API, but chat requests have
+  not yet been verified against the live Cline service. Please report any
+  issues you hit.
+</Warning>
+
+The `cline` provider calls the [Cline API](https://docs.cline.bot/api/overview),
+the model service behind the Cline agent's built-in **Cline** (pay-as-you-go
+credits) and **ClinePass** (subscription) providers. Usage is billed to your
+Cline account, and every request shows up in GoModel:
+
+`Cline -> GoModel -> Cline API`
+
+| GoModel endpoint | Cline API |
+| ---------------- | --------- |
+| `/v1/chat/completions` | `/chat/completions` |
+| `/v1/responses` | translated through chat completions |
+| `/v1/embeddings` | not supported (returns `invalid_request_error`) |
+
+## Configure
+
+Create an API key at [app.cline.bot](https://app.cline.bot) under
+**Settings > API Keys** and set:
+
+```bash
+CLINE_API_KEY=...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  cline:
+    type: cline
+    api_key: "${CLINE_API_KEY}"
+    # base_url defaults to "https://api.cline.bot/api/v1".
+```
+
+## Models
+
+GoModel reads Cline's `/models` listing. Model IDs use `provider/model` and are
+forwarded unchanged. Prefix the provider name to pin the route, which is needed
+whenever the ID starts with the name of another configured provider:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "cline/anthropic/claude-sonnet-4-6", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+### ClinePass models
+
+Cline's listing leaves out the ClinePass models (`cline-pass/...`). Name the
+ones you use, with `merge` mode to keep the listed models as well:
+
+```bash
+CLINE_MODELS=cline-pass/qwen3.7-max,cline-pass/kimi-k3
+CLINE_MODELS_MODE=merge
+```
+
+In the default `allowlist` mode, only the models in `CLINE_MODELS` are
+served. See [Models modes](/advanced/config-yaml#models-modes), and the
+[ClinePass page](https://docs.cline.bot/getting-started/clinepass) for the
+current model IDs.
+
+## Keep using Cline with its built-in models
+
+To track the traffic of the Cline agent itself, point it at GoModel instead of
+selecting its built-in provider:
+
+- API Provider: `OpenAI Compatible`
+- Base URL: `http://localhost:8080/v1`
+- API Key: your GoModel key
+- Model ID: `cline/anthropic/claude-sonnet-4-6`, or any other model from
+  `GET /v1/models`
+
+See [Coding Agents](/guides/opencode-and-other-agents) for the full walkthrough.
+
+## Behavior notes
+
+- **Buffered responses are requested explicitly.** The Cline API streams unless
+  told otherwise and wraps buffered replies in a legacy envelope by default, so
+  GoModel sends `"stream": false` and the `X-Response-Format: openai` header.
+  Clients need no changes.
+- **Costs come from GoModel's pricing data**, not from the `usage.cost` figure
+  Cline reports. Token usage is always recorded; a model that no
+  [pricing source](/advanced/model-metadata) covers has no cost until you add
+  pricing in `config.yaml` or set a
+  [pricing override](/features/cost-tracking#override-pricing).
+- **Passthrough is opt-in.** Add `cline` to `ENABLED_PASSTHROUGH_PROVIDERS` to
+  expose `/p/cline/...`. GoModel adds `X-Response-Format: openai` unless the
+  caller sends its own value, and forwards the body as is.
