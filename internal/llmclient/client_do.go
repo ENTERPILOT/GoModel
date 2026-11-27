@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-json"
 
@@ -75,16 +76,29 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 	var lastErr error
 	var lastStatusCode int
 	lastErrFromTransport := false
-	maxAttempts := c.maxAttempts()
+	rules := c.retryRulesForContext(ctx)
+	gatewayAttempts := c.maxAttempts()
+	maxAttempts := gatewayAttempts
+	// A configured rule may allow more retries for its status than the global
+	// policy. The loop covers the largest budget, while every failure type
+	// enforces its own budget below so unmatched failures keep the gateway's.
+	for _, rule := range rules {
+		if budget := rule.MaxRetries + 1; budget > maxAttempts {
+			maxAttempts = budget
+		}
+	}
 	if req.RawBodyReader != nil {
+		gatewayAttempts = 1
 		maxAttempts = 1
 	}
+	var nextDelay time.Duration
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if err := c.waitForRetryAttempt(ctx, scope, attempt); err != nil {
+		if err := c.waitForRetryAttemptWithDelay(ctx, scope, attempt, nextDelay); err != nil {
 			closeRawBodyReader(req)
 			return nil, err
 		}
+		nextDelay = 0
 
 		resp, err := c.doRequest(ctx, req)
 		if err != nil {
@@ -102,21 +116,35 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 			lastErrFromTransport = true
 			// Client-side timeouts are already the caller's latency budget. Do
 			// not retry them, or the logical request can outlive HTTP_TIMEOUT.
-			if scope.halfOpenProbe || isClientTimeoutGatewayError(lastErr) {
+			if scope.halfOpenProbe || isClientTimeoutGatewayError(lastErr) || attempt+1 >= gatewayAttempts {
 				c.completeScope(scope, lastStatusCode, lastErr, lastErr)
 				return nil, lastErr
 			}
 			continue
 		}
 
-		// Check for retryable status codes
-		if c.isRetryable(resp.StatusCode) {
+		// Check for retryable status codes. A configured rule decides both
+		// whether this status retries and how many times: max_retries 0
+		// disables retries even when the gateway policy would retry it.
+		rule, hasRule := ruleForStatus(rules, resp.StatusCode)
+		retryable := c.isRetryable(resp.StatusCode)
+		if hasRule {
+			retryable = rule.MaxRetries > 0
+		}
+		if retryable {
 			lastErr = attachResponseHeaders(core.ParseProviderError(c.config.ProviderName, resp.StatusCode, resp.Body, nil), resp.Header)
 			lastStatusCode = resp.StatusCode
 			lastErrFromTransport = false
-			if scope.halfOpenProbe {
+			budget := gatewayAttempts
+			if hasRule {
+				budget = rule.MaxRetries + 1
+			}
+			if scope.halfOpenProbe || attempt+1 >= budget {
 				c.completeScope(scope, lastStatusCode, lastErr, nil)
 				return nil, lastErr
+			}
+			if hasRule {
+				nextDelay = rule.Delay
 			}
 			continue
 		}
@@ -134,7 +162,19 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 			lastErr = attachResponseHeaders(embedded, resp.Header)
 			lastStatusCode = embedded.StatusCode
 			lastErrFromTransport = false
-			if c.isRetryable(embedded.StatusCode) && !scope.halfOpenProbe {
+			embeddedRule, hasEmbeddedRule := ruleForStatus(rules, embedded.StatusCode)
+			embeddedRetryable := c.isRetryable(embedded.StatusCode)
+			if hasEmbeddedRule {
+				embeddedRetryable = embeddedRule.MaxRetries > 0
+			}
+			embeddedBudget := gatewayAttempts
+			if hasEmbeddedRule {
+				embeddedBudget = embeddedRule.MaxRetries + 1
+			}
+			if embeddedRetryable && !scope.halfOpenProbe && attempt+1 < embeddedBudget {
+				if hasEmbeddedRule {
+					nextDelay = embeddedRule.Delay
+				}
 				continue
 			}
 			c.completeScope(scope, lastStatusCode, lastErr, nil)
@@ -281,16 +321,28 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 	}
 	ctx = scope.ctx
 
-	maxAttempts := 1
-	if canRetryPassthrough(req) {
-		maxAttempts = c.maxAttempts()
+	replayable := canRetryPassthrough(req)
+	gatewayAttempts := 1
+	if replayable {
+		gatewayAttempts = c.maxAttempts()
 	}
+	maxAttempts := gatewayAttempts
+	rules := c.retryRulesForContext(ctx)
+	for _, rule := range rules {
+		if replayable {
+			if budget := rule.MaxRetries + 1; budget > maxAttempts {
+				maxAttempts = budget
+			}
+		}
+	}
+	var nextDelay time.Duration
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if err := c.waitForRetryAttempt(ctx, scope, attempt); err != nil {
+		if err := c.waitForRetryAttemptWithDelay(ctx, scope, attempt, nextDelay); err != nil {
 			closeRawBodyReader(req)
 			return nil, err
 		}
+		nextDelay = 0
 
 		resp, err := c.doHTTPRequest(ctx, req)
 		if err != nil {
@@ -302,18 +354,29 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 				c.finishRequestWithoutBreaker(scope, statusCode, err)
 				return nil, err
 			}
-			if scope.halfOpenProbe || isClientTimeoutGatewayError(err) || attempt == maxAttempts-1 {
+			if scope.halfOpenProbe || isClientTimeoutGatewayError(err) || attempt+1 >= gatewayAttempts {
 				c.completeScope(scope, statusCode, err, err)
 				return nil, err
 			}
 			continue
 		}
 
+		rule, hasRule := ruleForStatus(rules, resp.StatusCode)
 		retryable := c.isRetryable(resp.StatusCode)
+		if hasRule {
+			retryable = rule.MaxRetries > 0
+		}
 		if retryable {
-			if scope.halfOpenProbe || attempt == maxAttempts-1 {
+			budget := gatewayAttempts
+			if hasRule {
+				budget = rule.MaxRetries + 1
+			}
+			if scope.halfOpenProbe || attempt+1 >= budget {
 				c.completeScope(scope, resp.StatusCode, nil, nil)
 				return resp, nil
+			}
+			if hasRule {
+				nextDelay = rule.Delay
 			}
 			_ = resp.Body.Close()
 			continue

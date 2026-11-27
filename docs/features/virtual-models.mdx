@@ -312,6 +312,51 @@ virtual_models:
 - Native AWS SDK calls (Bedrock) and realtime WebSocket handshakes keep the
   gateway-wide timeouts.
 
+## Set retry rules per status
+
+By default every upstream attempt follows the gateway-wide
+[retry policy](/advanced/resilience): the configured statuses retry up to
+`RETRY_MAX_RETRIES` times with exponential backoff. Set `retry_rules` on a
+redirect or a concrete model to change that behavior for specific upstream
+HTTP statuses. Each rule names a `status` (400-599), a `max_retries` count,
+and an optional fixed `delay` before each retry. `max_retries` is required and
+is capped at 10. A rule with `max_retries: 0` disables retries for that status.
+Whether the failure then moves on to the next [failover](/features/failover)
+target still depends on the configured failover policy matching that error. A
+status with no rule keeps the gateway policy. Each retry gets the per-attempt
+timeout described above.
+
+```yaml
+virtual_models:
+  - source: extract
+    target: anthropic/claude-sonnet-4-6
+    retry_rules:
+      - status: 429
+        max_retries: 2
+        delay: 1s
+      - status: 503
+        max_retries: 1
+        delay: 250ms
+      - status: 500
+        max_retries: 0
+```
+
+- Rules merge per status: the redirects the request routed through win
+  (outermost first), then the resolved model's exact policy fills statuses the
+  redirects did not set, then its model-wide one fills the rest. A policy whose
+  `user_paths` exclude the caller is skipped. Failover targets use their own
+  concrete-model rules, never the primary target's.
+- A rule for a status outside the gateway's `retry_on_statuses` makes that
+  status retryable; a rule with `max_retries: 0` makes a normally retryable
+  status fail immediately.
+- A fixed `delay` replaces exponential backoff for that status and is capped at
+  one hour. Omit it (or set `0`) to keep the gateway backoff. YAML accepts Go
+  duration strings such as `1s`; JSON and the admin API encode it as integer
+  nanoseconds.
+- Only a redirect or a concrete model accepts retry rules; provider-wide
+  (`openai/`) and global (`/`) policies reject them. Callers cannot set them
+  with request headers.
+
 The rest of this page covers redirects.
 
 ## Use stable names
@@ -547,7 +592,8 @@ Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
 [Failover](/features/failover)), `user_paths`, `description`,
 `slowdown` (`0` disables inherited slowdown; active factors range from `0.1` to
 `10`), `timeout` and `response_header_timeout` (see
-[Set upstream timeouts](#set-upstream-timeouts)), `reasoning_effort` (see [Force a reasoning effort](#force-a-reasoning-effort)),
+[Set upstream timeouts](#set-upstream-timeouts)), `retry_rules` (see
+[Set retry rules per status](#set-retry-rules-per-status)), `reasoning_effort` (see [Force a reasoning effort](#force-a-reasoning-effort)),
 `params` and `default_params` (see
 [Set request parameters](#set-request-parameters)), and `enabled`.
 A target has `model` and optional `provider`, `weight`, and `reasoning_effort`

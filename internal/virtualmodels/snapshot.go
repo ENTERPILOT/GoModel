@@ -140,7 +140,7 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 				next.overrides = true
 				next.recordRoute = true
 			}
-			if normalized.setsTimeouts() {
+			if normalized.setsTimeouts() || normalized.setsRetryRules() {
 				next.recordRoute = true
 			}
 			continue

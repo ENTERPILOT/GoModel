@@ -4,7 +4,16 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
+
+// RetryRuleConfig overrides retry behavior for one upstream HTTP status.
+// A rule with MaxRetries zero explicitly disables retries for its status.
+type RetryRuleConfig struct {
+	Status     int           `yaml:"status" json:"status"`
+	MaxRetries *int          `yaml:"max_retries" json:"max_retries"`
+	Delay      time.Duration `yaml:"delay" json:"delay"`
+}
 
 // VirtualModelConfig declares one virtual model in config.yaml or the
 // VIRTUAL_MODELS env var, so operators can manage redirects, load balancers, and
@@ -70,6 +79,11 @@ type VirtualModelConfig struct {
 	// ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in
 	// seconds, for each upstream attempt. Omitted inherits.
 	ResponseHeaderTimeout *int `yaml:"response_header_timeout,omitempty" json:"response_header_timeout,omitempty"`
+
+	// RetryRules overrides gateway retry behavior per upstream HTTP status.
+	// Empty inherits the gateway policy; a rule with max_retries 0 disables
+	// retries for its status. Each retry gets the per-attempt timeout above.
+	RetryRules []RetryRuleConfig `yaml:"retry_rules,omitempty" json:"retry_rules,omitempty"`
 
 	// ReasoningEffort forces the reasoning effort sent upstream for requests
 	// through this redirect or to this model ("none", "minimal", "low",

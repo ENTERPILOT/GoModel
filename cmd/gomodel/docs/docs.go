@@ -11217,6 +11217,13 @@ const docTemplate = `{
                     "description": "ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in\nseconds (1 to 86400), for every upstream attempt. Omitted inherits.",
                     "type": "integer"
                 },
+                "retry_rules": {
+                    "description": "RetryRules overrides gateway retry behavior per upstream HTTP status.\nOmitted inherits; max_retries 0 disables retries for that status.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/virtualmodels.RetryRule"
+                    }
+                },
                 "session_affinity": {
                     "description": "SessionAffinity keeps a detected session on the target that served it\nbefore. Omitted means enabled; false restores stateless balancing.",
                     "type": "boolean"
@@ -15659,6 +15666,20 @@ const docTemplate = `{
                 }
             }
         },
+        "virtualmodels.RetryRule": {
+            "type": "object",
+            "properties": {
+                "delay": {
+                    "type": "integer"
+                },
+                "max_retries": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "integer"
+                }
+            }
+        },
         "virtualmodels.Target": {
             "type": "object",
             "properties": {
@@ -15721,6 +15742,12 @@ const docTemplate = `{
                 "response_header_timeout": {
                     "description": "ResponseHeaderTimeout is the per-attempt wait for upstream response\nheaders in seconds; omitted inherits.",
                     "type": "integer"
+                },
+                "retry_rules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/virtualmodels.RetryRule"
+                    }
                 },
                 "scope_kind": {
                     "type": "string"
@@ -15809,6 +15836,13 @@ const docTemplate = `{
                 "response_header_timeout": {
                     "description": "ResponseHeaderTimeout overrides HTTP_RESPONSE_HEADER_TIMEOUT, in\nseconds, for every upstream attempt. Nil inherits.",
                     "type": "integer"
+                },
+                "retry_rules": {
+                    "description": "RetryRules overrides gateway retry behavior per upstream HTTP status.\nNil inherits; a rule with MaxRetries zero disables retries for its\nstatus. Each retry gets the per-attempt timeout above.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/virtualmodels.RetryRule"
+                    }
                 },
                 "session_affinity": {
                     "description": "SessionAffinity keeps requests of one detected session on the target that\nserved it before, while that target stays available. Tri-state: nil means\nenabled (the default); explicit false restores stateless balancing.",

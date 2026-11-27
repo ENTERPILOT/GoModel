@@ -227,7 +227,10 @@ virtual_models:
 			"stop":                 nil,
 		}),
 		DefaultParams: sets(map[string]any{"temperature": 0.2, "metadata": map[string]any{"team": "platform"}}),
-		Enabled:       true,
+		RetryRules: []virtualmodels.RetryRule{
+			{Status: 429, MaxRetries: new(0), Delay: time.Second},
+		},
+		Enabled: true,
 	}
 	secret := virtualmodels.VirtualModel{
 		Source:  "signed",
@@ -275,6 +278,7 @@ virtual_models:
 	assertParams(sets(map[string]any{"temperature": 0.7}), bySource["declared"].DefaultParams)
 	assertParams(saved.Params, bySource["capped"].Params)
 	assertParams(saved.DefaultParams, bySource["capped"].DefaultParams)
+	assert.Equal(t, saved.RetryRules, bySource["capped"].RetryRules)
 	// A secret in a parameter is written as a reference, like any other.
 	assert.Contains(t, string(bySource["signed"].Params["extra_body"]), "${env:")
 }

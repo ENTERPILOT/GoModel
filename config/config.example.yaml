@@ -98,6 +98,9 @@ models:
 #     slowdown: 0.5 # add 50%; use 0 to disable inherited slowdown (active range: 0.1-10)
 #     # timeout: 120 # per-attempt upstream timeout in seconds (1-86400); overrides http.timeout for this redirect
 #     # response_header_timeout: 60 # per-attempt wait for response headers in seconds (1-86400); empty inherits
+#     # retry_rules: # per-status upstream retries; a status with no rule keeps the gateway retry policy
+#     #   - { status: 429, max_retries: 2, delay: 1s } # 0 retries disables retries for that status
+#     #   - { status: 503, max_retries: 1, delay: 250ms }
 #     # reasoning_effort: medium # force this effort upstream (none | minimal | low | medium | high | xhigh | max); empty keeps the client's value
 #   - source: qwen-thinking-low # one of several aliases of a self-hosted model with its own sampling settings
 #     target: vllm/Qwen3.8-27B

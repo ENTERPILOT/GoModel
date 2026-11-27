@@ -64,6 +64,7 @@ func (s *modelCallService) prepare(c *echo.Context, model, providerHint string) 
 	requested := core.NewRequestedModelSelector(model, providerHint)
 	route.slowdown = resolveModelSlowdown(ctx, s.modelResolver, requested, selector)
 	ctx = withModelTimeouts(ctx, s.modelResolver, requested, selector, vmRoute)
+	ctx = withModelRetryRules(ctx, s.modelResolver, requested, selector, vmRoute)
 	return ctx, route, nil
 }
 

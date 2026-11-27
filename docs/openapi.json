@@ -15874,6 +15874,13 @@
             "minimum": 1,
             "maximum": 86400
           },
+          "retry_rules": {
+            "description": "RetryRules overrides gateway retry behavior per upstream HTTP status.\nOmitted inherits; max_retries 0 disables retries for that status.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/virtualmodels.RetryRule"
+            }
+          },
           "session_affinity": {
             "description": "SessionAffinity keeps a detected session on the target that served it\nbefore. Omitted means enabled; false restores stateless balancing.",
             "type": "boolean"
@@ -20370,6 +20377,20 @@
           }
         }
       },
+      "virtualmodels.RetryRule": {
+        "type": "object",
+        "properties": {
+          "delay": {
+            "type": "integer"
+          },
+          "max_retries": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "integer"
+          }
+        }
+      },
       "virtualmodels.Target": {
         "type": "object",
         "properties": {
@@ -20434,6 +20455,12 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 86400
+          },
+          "retry_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/virtualmodels.RetryRule"
+            }
           },
           "scope_kind": {
             "type": "string"
@@ -20538,6 +20565,13 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 86400
+          },
+          "retry_rules": {
+            "description": "RetryRules overrides gateway retry behavior per upstream HTTP status.\nNil inherits; a rule with MaxRetries zero disables retries for its\nstatus. Each retry gets the per-attempt timeout above.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/virtualmodels.RetryRule"
+            }
           },
           "session_affinity": {
             "description": "SessionAffinity keeps requests of one detected session on the target that\nserved it before, while that target stays available. Tri-state: nil means\nenabled (the default); explicit false restores stateless balancing.",

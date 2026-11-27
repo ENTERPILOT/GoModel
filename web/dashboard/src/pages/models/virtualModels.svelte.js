@@ -28,6 +28,7 @@ import { modelAccessStateClass, splitVirtualModelViews } from "./routing.js";
 import {
   buildAliasTogglePayload,
   buildModelTogglePayload,
+  retryRulesPayloadFields,
   timeoutPayloadFields,
 } from "./vmForm.js";
 
@@ -456,6 +457,7 @@ class VirtualModelsStore {
         enabled: alias.enabled !== false,
         ...(alias.slowdown != null ? { slowdown: Number(alias.slowdown) } : {}),
         ...timeoutPayloadFields(alias),
+        ...retryRulesPayloadFields(alias),
         ...(alias.reasoning_effort
           ? { reasoning_effort: alias.reasoning_effort }
           : {}),

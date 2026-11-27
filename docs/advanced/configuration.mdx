@@ -529,6 +529,8 @@ These control timeouts and connection pooling for upstream API requests to LLM p
 To give one model or redirect a different `HTTP_TIMEOUT` or
 `HTTP_RESPONSE_HEADER_TIMEOUT`, see
 [Set upstream timeouts](/features/virtual-models#set-upstream-timeouts).
+To override retry behavior for particular upstream statuses, see
+[Set retry rules per status](/features/virtual-models#set-retry-rules-per-status).
 
 A stream that goes quiet for longer than `HTTP_STREAM_IDLE_TIMEOUT` is closed
 with a `504` provider error instead of hanging until `HTTP_TIMEOUT`. The wait

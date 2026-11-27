@@ -1808,7 +1808,7 @@ func TestWaitForRetry_ContextCancelled(t *testing.T) {
 			}
 
 			start := time.Now()
-			err := client.waitForRetry(ctx, tt.attempt)
+			err := client.waitForRetryWithDelay(ctx, tt.attempt, 0)
 			elapsed := time.Since(start)
 			require.ErrorIs(t, err, tt.want)
 			require.LessOrEqual(t, elapsed, time.Second)

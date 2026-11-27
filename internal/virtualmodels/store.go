@@ -98,6 +98,31 @@ func decodeParams(field string, data []byte) (requestparams.Set, error) {
 	return set, nil
 }
 
+func encodeRetryRules(rules []RetryRule) (string, error) {
+	if len(rules) == 0 {
+		return "[]", nil
+	}
+	data, err := json.Marshal(rules)
+	if err != nil {
+		return "", fmt.Errorf("encode retry_rules: %w", err)
+	}
+	return string(data), nil
+}
+
+func decodeRetryRules(data []byte) ([]RetryRule, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var rules []RetryRule
+	if err := json.Unmarshal(data, &rules); err != nil {
+		return nil, fmt.Errorf("decode retry_rules: %w", err)
+	}
+	if len(rules) == 0 {
+		return nil, nil
+	}
+	return rules, nil
+}
+
 func decodeTargets(data []byte) ([]Target, error) {
 	if len(data) == 0 {
 		return nil, nil

@@ -28,3 +28,29 @@ func withModelTimeouts(
 		ResponseHeaderTimeout: timeouts.ResponseHeaderTimeout,
 	})
 }
+
+// withModelRetryRules attaches the per-status retry rules configured for the
+// model to ctx. Endpoints that run without a workflow (audio, images) use it;
+// workflow-backed requests resolve them per concrete attempt instead.
+func withModelRetryRules(
+	ctx context.Context,
+	resolver RequestModelResolver,
+	requested core.RequestedModelSelector,
+	resolved core.ModelSelector,
+	route []string,
+) context.Context {
+	retryResolver, ok := resolver.(gateway.ModelRetryRulesResolver)
+	if !ok {
+		return ctx
+	}
+	resolvedRules := retryResolver.ResolveRetryRules(ctx, requested, resolved, route)
+	rules := make([]httpclient.AttemptRetryRule, len(resolvedRules))
+	for i, rule := range resolvedRules {
+		rules[i] = httpclient.AttemptRetryRule{
+			Status:     rule.Status,
+			MaxRetries: rule.MaxRetries,
+			Delay:      rule.Delay,
+		}
+	}
+	return httpclient.WithAttemptRetryRules(ctx, rules)
+}
