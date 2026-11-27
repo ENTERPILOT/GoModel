@@ -566,6 +566,7 @@
   "overview_total_requests": "Łączna liczba Request'ów",
   "overview_cache_hits": "Trafienia cache",
   "overview_estimated_cost": "Szacowany koszt",
+  "overview_usage_chart_label": "Użycie tokenów i szacowany koszt w czasie",
   "overview_local_cache": "Lokalny cache",
   "overview_prompt_cache_rate": "Wskaźnik prompt cache",
   "overview_prompt_cache_rate_help": "Część input tokens obsłużona przez prompt cache dostawcy w wybranym okresie",

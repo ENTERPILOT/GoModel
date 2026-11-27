@@ -167,6 +167,8 @@ GoModel can return the cost it calculated for a request to the client that made 
 
 A `---` value means the cost is unknown because no pricing was available, which is not the same as `$0`.
 
+The overview's usage chart draws the **Estimated Cost** as a line on a right-hand axis over the stacked token bands, so you can see how spend follows token volume. Like the card, each point sums the requests that had pricing. A period whose usage has no pricing at all leaves a gap in the line instead of dropping to `$0`. When no period in the window has a known cost above `$0`, the chart shows tokens only.
+
 ## Filter and break down spend
 
 The usage page filters every card, chart, and the request log by model, provider, label, API key, endpoint, user path, and session. Each dropdown takes several values: a request matches a filter when it has any of the selected values, and it must match every filter. The user path picker lists known paths as a tree grouped by prefix; picking a node includes everything below it, and you can type a path that is not listed.

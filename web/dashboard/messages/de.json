@@ -561,6 +561,7 @@
   "overview_total_requests": "Anfragen gesamt",
   "overview_cache_hits": "Cache-Treffer",
   "overview_estimated_cost": "Geschätzte Kosten",
+  "overview_usage_chart_label": "Token-Nutzung und geschätzte Kosten im Zeitverlauf",
   "overview_local_cache": "Lokaler Cache",
   "overview_prompt_cache_rate": "Prompt-Cache-Quote",
   "overview_prompt_cache_rate_help": "Anteil der Eingabe-Tokens, die im gewählten Zeitraum aus dem Prompt-Cache des Anbieters bedient wurden",

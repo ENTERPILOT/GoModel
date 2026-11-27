@@ -489,6 +489,7 @@
   "overview_total_requests": "请求总数",
   "overview_cache_hits": "缓存命中",
   "overview_estimated_cost": "预估费用",
+  "overview_usage_chart_label": "Token 用量与预估费用随时间的变化",
   "overview_local_cache": "本地缓存",
   "overview_prompt_cache_rate": "Prompt 缓存率",
   "overview_prompt_cache_rate_help": "所选时间段内由供应商 Prompt 缓存提供的输入 Token 占比",

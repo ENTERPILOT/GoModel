@@ -46,6 +46,9 @@
      label) so they stand out from the muted axis text: bright on dark,
      dark on light. */
   --chart-day-marker: var(--text);
+  /* Estimated cost line on the overview usage chart: the text color, so it
+     contrasts with the brown/blue token bands in both themes. */
+  --chart-cost: var(--text);
   --chart-tooltip-bg: #1e1d1c;
   --chart-tooltip-border: #2a2826;
   --chart-tooltip-text: #e8e0d6;
@@ -96,6 +99,7 @@
   --chart-grid: #e8e0d6;
   --chart-text: #7a7068;
   --chart-day-marker: var(--text);
+  --chart-cost: var(--text);
   --chart-tooltip-bg: #ffffff;
   --chart-tooltip-border: #e8e0d6;
   --chart-tooltip-text: #2d2519;
@@ -145,6 +149,7 @@
       --chart-grid: #e8e0d6;
       --chart-text: #7a7068;
       --chart-day-marker: var(--text);
+      --chart-cost: var(--text);
       --chart-tooltip-bg: #ffffff;
       --chart-tooltip-border: #e8e0d6;
       --chart-tooltip-text: #2d2519;
