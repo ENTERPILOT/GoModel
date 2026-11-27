@@ -859,6 +859,7 @@ func geminiGenerationConfig(req *core.ChatRequest) map[string]any {
 		copyJSONNumber(req.ExtraFields.Lookup("top_k"), cfg, "topK")
 		copyJSONNumber(req.ExtraFields.Lookup("candidate_count"), cfg, "candidateCount")
 	}
+	copyJSONNumber(req.ExtraFields.Lookup("seed"), cfg, "seed")
 	// presence_penalty and frequency_penalty are never forwarded: every
 	// current generateContent model (Gemini 2.5, 3.x, 4, Gemma 4, the image
 	// models) answers HTTP 400 "Penalty is not enabled for this model", and

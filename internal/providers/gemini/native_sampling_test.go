@@ -121,3 +121,19 @@ func TestGeminiGenerationConfig_CapsStopSequences(t *testing.T) {
 		})
 	}
 }
+
+// seed is part of generateContent's GenerationConfig and is not one of the
+// sampling parameters Gemini 3 dropped, so it is forwarded for every model.
+func TestGeminiGenerationConfig_ForwardsSeed(t *testing.T) {
+	for _, model := range []string{"gemini-2.5-flash", "gemini-3.8-flash", "gemma-4-31b-it"} {
+		t.Run(model, func(t *testing.T) {
+			var req core.ChatRequest
+			body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}],"seed":7}`, model)
+			require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+			cfg := geminiGenerationConfig(&req)
+
+			assert.Equal(t, float64(7), cfg["seed"])
+		})
+	}
+}
