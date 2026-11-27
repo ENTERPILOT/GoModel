@@ -75,6 +75,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	withinRequestCeilings(ctx, anthropicReq)
 
 	var anthropicResp anthropicResponse
 	err = p.client.Do(ctx, llmclient.Request{

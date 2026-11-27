@@ -104,6 +104,7 @@ const (
 	providerEnvFieldAPIMode
 	providerEnvFieldVertexProject
 	providerEnvFieldVertexLocation
+	providerEnvFieldVertexLabels
 	providerEnvFieldServiceAccountFile
 	providerEnvFieldServiceAccountJSON
 	providerEnvFieldServiceAccountJSONBase64
@@ -166,6 +167,8 @@ type providerEnvValues struct {
 	Billable                 *bool
 	FairnessFromUserPath     *bool
 	WorkloadIdentity         config.WorkloadIdentityConfig
+	// VertexLabels is VERTEX_LABELS parsed; it replaces vertex_labels whole.
+	VertexLabels map[string]string
 	// pending holds the settings whose value contains "${", unparsed, until
 	// resolveSettings resolves them. A pending field counts as set.
 	pending map[providerEnvField]envVar
@@ -269,6 +272,7 @@ func (v providerEnvValues) empty() bool {
 		strings.TrimSpace(v.GCPScope) == "" &&
 		strings.TrimSpace(v.ProxyURL) == "" &&
 		strings.TrimSpace(v.InferenceObjective) == "" &&
+		len(v.VertexLabels) == 0 &&
 		v.SessionStickyKeys == nil &&
 		v.Billable == nil &&
 		v.FairnessFromUserPath == nil &&
@@ -378,6 +382,17 @@ func (v *providerEnvValues) setField(field providerEnvField, index int, key, val
 		v.VertexProject = value
 	case providerEnvFieldVertexLocation:
 		v.VertexLocation = value
+	case providerEnvFieldVertexLabels:
+		// Billing attribution: a malformed list must fail loading, not leave
+		// calls unlabeled.
+		labels, err := parseLabelList(value)
+		if err != nil {
+			if v.invalid == nil {
+				v.invalid = fmt.Errorf("%s: %w", key, err)
+			}
+			break
+		}
+		v.VertexLabels = labels
 	case providerEnvFieldServiceAccountFile:
 		v.ServiceAccountFile = value
 	case providerEnvFieldServiceAccountJSON:
@@ -488,6 +503,7 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 			{name: "PROJECT", field: providerEnvFieldVertexProject},
 			{name: "LOCATION", field: providerEnvFieldVertexLocation},
 			{name: "GCP_SCOPE", field: providerEnvFieldGCPScope},
+			{name: "LABELS", field: providerEnvFieldVertexLabels},
 		}, fields...)
 	}
 	fields = append(workloadIdentityEnvNames(spec.WorkloadIdentity), fields...)
@@ -666,6 +682,7 @@ func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) 
 		APIMode:                  v.APIMode,
 		VertexProject:            v.VertexProject,
 		VertexLocation:           v.VertexLocation,
+		VertexLabels:             v.VertexLabels,
 		ServiceAccountFile:       v.ServiceAccountFile,
 		ServiceAccountJSON:       v.ServiceAccountJSON,
 		ServiceAccountJSONBase64: v.ServiceAccountJSONBase64,
@@ -720,6 +737,9 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	}
 	if values.VertexLocation != "" {
 		existing.VertexLocation = values.VertexLocation
+	}
+	if len(values.VertexLabels) > 0 {
+		existing.VertexLabels = values.VertexLabels
 	}
 	if values.ServiceAccountFile != "" {
 		existing.ServiceAccountFile = values.ServiceAccountFile
@@ -828,6 +848,7 @@ func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig)
 	drop("session_sticky_keys", providerEnvFieldSessionStickyKeys, v.SessionStickyKeys != nil, existing.SessionStickyKeys != nil, func() { v.SessionStickyKeys = nil })
 	drop("billable", providerEnvFieldBillable, v.Billable != nil, existing.Billable != nil, func() { v.Billable = nil })
 	drop("fairness_from_user_path", providerEnvFieldFairnessFromUserPath, v.FairnessFromUserPath != nil, existing.FairnessFromUserPath != nil, func() { v.FairnessFromUserPath = nil })
+	drop("vertex_labels", providerEnvFieldVertexLabels, len(v.VertexLabels) > 0, len(existing.VertexLabels) > 0, func() { v.VertexLabels = nil })
 	drop("models", providerEnvFieldModels, len(v.Models) > 0, rawProviderHasResolvedModel(existing), func() { v.Models = nil })
 	drop("model_filter.include", providerEnvFieldModelFilterInclude, len(v.ModelFilterInclude) > 0, len(existing.ModelFilter.Include) > 0, func() { v.ModelFilterInclude = nil })
 	drop("model_filter.exclude", providerEnvFieldModelFilterExclude, len(v.ModelFilterExclude) > 0, len(existing.ModelFilter.Exclude) > 0, func() { v.ModelFilterExclude = nil })

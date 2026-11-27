@@ -259,10 +259,29 @@ export function extractRequestPromptTextSegments(body) {
 // error field: pull whatever readable content the payload carries.
 const errorTextFallback = (parsed) => extractText(parsed);
 
+// memoizeByObject keeps the result of a pure read of one request or response
+// body for as long as that body object lives. Bodies are never edited in
+// place: a live event, a detail fetch or a conversation fetch always brings a
+// new object, and the request log record merge keeps the old one otherwise.
+// The transcript is rebuilt on every live event of an open conversation, so
+// without this each rebuild reads every body of the session again.
+function memoizeByObject(compute) {
+    const cache = new WeakMap();
+    return (value) => {
+        if (value === null || typeof value !== 'object') return compute(value);
+        if (!cache.has(value)) cache.set(value, compute(value));
+        return cache.get(value);
+    };
+}
+
+// The walk tries to parse every string in the body as JSON.
+const responseBodyErrorMessage = memoizeByObject((responseBody) =>
+    findNestedErrorMessage(responseBody, 0, errorTextFallback));
+
 export function extractConversationErrorMessage(entry) {
     if (!entry || !entry.data) return '';
 
-    const responseBodyMessage = findNestedErrorMessage(entry.data.response_body, 0, errorTextFallback);
+    const responseBodyMessage = responseBodyErrorMessage(entry.data.response_body);
     if (responseBodyMessage) return responseBodyMessage;
 
     const rawError = entry.data.error_message;
@@ -603,6 +622,15 @@ export function mergedConversationEntryIDs(existingIDs, entries) {
         if (id && !ids.includes(id)) ids.push(id);
     });
     return ids;
+}
+
+// unchangedConversationEntries returns `previous` when `next` lists the same
+// record objects in the same order, and `next` otherwise. A record that
+// changes is always a new object (see mergeRequestLogRecord).
+export function unchangedConversationEntries(previous, next) {
+    const same = Array.isArray(previous) && previous.length === next.length &&
+        previous.every((entry, index) => entry === next[index]);
+    return same ? previous : next;
 }
 
 function hasConversationPayload(entry) {
@@ -1107,7 +1135,10 @@ function registerCallIds(map, item, name) {
     });
 }
 
-function collectCallIds(map, requestBody, responseBody) {
+// requestCallIds and responseCallIds map the tool call ids a body declares to
+// their function names.
+const requestCallIds = memoizeByObject((requestBody) => {
+    const map = {};
     if (requestBody && Array.isArray(requestBody.messages)) {
         requestBody.messages.forEach((m) => {
             if (!m) return;
@@ -1131,6 +1162,11 @@ function collectCallIds(map, requestBody, responseBody) {
             registerCallIds(map, item, name);
         });
     }
+    return map;
+});
+
+const responseCallIds = memoizeByObject((responseBody) => {
+    const map = {};
     if (responseBody && Array.isArray(responseBody.choices)) {
         const first = responseBody.choices[0];
         if (first && first.message && Array.isArray(first.message.tool_calls)) {
@@ -1156,7 +1192,8 @@ function collectCallIds(map, requestBody, responseBody) {
             registerCallIds(map, item, name);
         });
     }
-}
+    return map;
+});
 
 function stableJSON(value) {
     if (Array.isArray(value)) return '[' + value.map(stableJSON).join(',') + ']';
@@ -1167,7 +1204,7 @@ function stableJSON(value) {
     return JSON.stringify(value);
 }
 
-function fullSnapshotLineage(requestBody) {
+const fullSnapshotLineage = memoizeByObject((requestBody) => {
     if (!requestBody || typeof requestBody !== 'object') return null;
     const values = [];
     if (requestBody.system !== undefined) values.push({ system: requestBody.system });
@@ -1179,8 +1216,13 @@ function fullSnapshotLineage(requestBody) {
     } else {
         return null;
     }
-    return values.map(stableJSON);
-}
+    return values;
+});
+
+// lineageKey is the form in which two lineage values are compared. Only the
+// selected request and the ones after it are compared, so the keys are made on
+// demand instead of for every body.
+const lineageKey = memoizeByObject(stableJSON);
 
 function conversationReference(requestBody) {
     const value = requestBody && requestBody.conversation;
@@ -1200,6 +1242,178 @@ function compareConversationEntries(a, b) {
     return aID < bID ? -1 : aID > bID ? 1 : 0;
 }
 
+// messageSignature identifies a transcript message by what it says, so the
+// same message in two request snapshots compares equal. The text is always a
+// string and is compared as it is: signatures are kept with the request body
+// they come from, and a serialized copy would hold every message twice.
+function messageSignature(message) {
+    return {
+        text: message.text,
+        rest: JSON.stringify({
+            role: message.role,
+            toolCalls: message.toolCalls,
+            functionName: message.functionName,
+            functionCallID: message.functionCallID,
+        }),
+    };
+}
+
+function sameSignature(a, b) {
+    return a.text === b.text && a.rest === b.rest;
+}
+
+// extractRequestDrafts reads a request body into the transcript messages it
+// carries. A draft is a message without the fields that depend on where the
+// request sits in the conversation (see conversationMessage). callName
+// resolves a tool call id to its function name.
+function extractRequestDrafts(requestBody, callName) {
+    const messages = [];
+    const message = (role, text, options = {}) => ({ role, text, options });
+    const cachedPrompt = (text, sourceSegments) =>
+        measurePromptCache(text, sourceSegments);
+    const cachedToolCalls = (toolCalls) =>
+        measureToolCallPromptCache(toolCalls);
+
+    if (requestBody && requestBody.system !== undefined) {
+        const text = extractText(requestBody.system);
+        if (text) messages.push(message('system', text, {
+            promptCache: cachedPrompt(text, extractTextSegments(requestBody.system)),
+        }));
+    }
+    if (requestBody && requestBody.instructions !== undefined) {
+        const text = extractText(requestBody.instructions);
+        if (text) messages.push(message('system', text, {
+            promptCache: cachedPrompt(text, extractTextSegments(requestBody.instructions)),
+        }));
+    }
+
+    if (requestBody && Array.isArray(requestBody.messages)) {
+        requestBody.messages.forEach((m) => {
+            if (!m) return;
+            const role = (m.role || 'user').toLowerCase();
+            if (role === 'tool') {
+                const text = extractText(m.content);
+                const fnName = m.name || callName(m.tool_call_id) || '';
+                if (text) messages.push(message('function_result', text, {
+                    functionName: fnName,
+                    functionCallID: m.tool_call_id || '',
+                    promptCache: cachedPrompt(text, extractTextSegments(m.content)),
+                }));
+                return;
+            }
+            if (role === 'assistant') {
+                const text = extractMessageText(m);
+                const toolCalls = [
+                    ...extractToolCallsList(m.tool_calls),
+                    ...extractContentToolCalls(m.content),
+                ];
+                if (text || toolCalls.length > 0) {
+                    const promptCache = cachedPrompt(text, extractTextSegments(m.content));
+                    messages.push(message(role, text, {
+                        toolCalls,
+                        promptCache,
+                        toolPromptCache: cachedToolCalls(toolCalls),
+                    }));
+                }
+                return;
+            }
+            extractContentToolResults(m.content).forEach((result) => {
+                if (!result.text) return;
+                messages.push(message('function_result', result.text, {
+                    functionName: callName(result.id) || '',
+                    functionCallID: result.id,
+                    promptCache: cachedPrompt(result.text, [result.text]),
+                }));
+            });
+            const text = extractMessageText(m);
+            if (text) messages.push(message(role, text, {
+                promptCache: cachedPrompt(text, extractTextSegments(m.content)),
+            }));
+        });
+    }
+
+    if (requestBody && requestBody.input !== undefined) {
+        if (Array.isArray(requestBody.input)) {
+            requestBody.input.forEach((item) => {
+                if (!item || typeof item !== 'object') return;
+                if (item.type === 'function_call_output' || item.type === 'tool_result') {
+                    const isToolResult = item.type === 'tool_result';
+                    const output = isToolResult ? item.content : item.output;
+                    const callID = isToolResult
+                        ? item.tool_use_id || item.call_id || ''
+                        : item.call_id || '';
+                    const text = typeof output === 'string' ? output : extractText(output);
+                    if (text) messages.push(message('function_result', text, {
+                        functionName: callName(callID) || item.name || '',
+                        functionCallID: callID,
+                        promptCache: cachedPrompt(
+                            text,
+                            isToolResult ? extractTextSegments(item.content) : [text],
+                        ),
+                    }));
+                } else if (item.type === 'function_call' || item.type === 'tool_use') {
+                    const toolCalls = extractToolCallsList([item]);
+                    messages.push(message('function_call', '', {
+                        toolCalls,
+                        toolPromptCache: cachedToolCalls(toolCalls),
+                    }));
+                } else if (item.role) {
+                    const role = String(item.role).toLowerCase();
+                    const text = extractText(item.content);
+                    if (text) messages.push(message(role, text, {
+                        promptCache: cachedPrompt(text, extractTextSegments(item.content)),
+                    }));
+                }
+            });
+        } else {
+            extractResponsesInputMessages(requestBody.input).forEach((m) => {
+                if (!m.text) return;
+                let sourceSegments = [];
+                if (typeof requestBody.input === 'string') sourceSegments = [requestBody.input];
+                else if (requestBody.input && typeof requestBody.input === 'object') {
+                    sourceSegments = extractTextSegments(requestBody.input.content);
+                    if (typeof requestBody.input.text === 'string') sourceSegments.push(requestBody.input.text);
+                }
+                messages.push(message(m.role, m.text, {
+                    promptCache: cachedPrompt(m.text, sourceSegments),
+                }));
+            });
+        }
+    }
+
+    return messages;
+}
+
+// requestDrafts returns a request body's drafts and their signatures. A long
+// session resends its whole history in every request, so reading and signing
+// every body on every rebuild costs time quadratic in the session length.
+// Both are kept per body object instead (bodies are never edited in place,
+// see memoizeByObject). The function names a body resolved through the
+// conversation-wide call id map are kept with it: when one of them resolves
+// differently, the body is read again.
+const requestDraftCache = new WeakMap();
+
+function requestDrafts(requestBody, callIdMap) {
+    const cacheable = !!requestBody && typeof requestBody === 'object';
+    const cached = cacheable ? requestDraftCache.get(requestBody) : null;
+    if (cached && cached.callNames.every(([id, name]) => callIdMap[id] === name)) {
+        return cached;
+    }
+    const callNames = [];
+    const drafts = extractRequestDrafts(requestBody, (id) => {
+        callNames.push([id, callIdMap[id]]);
+        return callIdMap[id];
+    });
+    const request = {
+        drafts,
+        signatures: drafts.map((draft) => messageSignature(
+            conversationMessage(draft.role, draft.text, draft.options))),
+        callNames,
+    };
+    if (cacheable) requestDraftCache.set(requestBody, request);
+    return request;
+}
+
 export function buildConversationView(entries, anchorID, options) {
     if (!Array.isArray(entries) || entries.length === 0) return { messages: [], entryIDs: [] };
     const anchorRequestStep = options && options.anchorRequestStep != null
@@ -1212,7 +1426,7 @@ export function buildConversationView(entries, anchorID, options) {
     sorted.forEach((entry) => {
         const rb = entry.data && entry.data.request_body ? entry.data.request_body : null;
         const rsb = entry.data && entry.data.response_body ? entry.data.response_body : null;
-        collectCallIds(callIdMap, rb, rsb);
+        Object.assign(callIdMap, requestCallIds(rb), responseCallIds(rsb));
     });
 
     const messages = [];
@@ -1223,14 +1437,6 @@ export function buildConversationView(entries, anchorID, options) {
     let anchorLineage = null;
     let idx = 0;
     const anchorIndex = sorted.findIndex((entry) => entry.id === anchorID);
-
-    const signature = (message) => JSON.stringify({
-        role: message.role,
-        text: message.text,
-        toolCalls: message.toolCalls,
-        functionName: message.functionName,
-        functionCallID: message.functionCallID,
-    });
 
     sorted.forEach((entry, entryIndex) => {
         const isAnchor = entry.id === anchorID;
@@ -1246,11 +1452,6 @@ export function buildConversationView(entries, anchorID, options) {
             ? conversationRequestStepBody(entry, anchorRequestStep) || originalRequestBody
             : originalRequestBody;
         const responseBody = entry.data && entry.data.response_body ? entry.data.response_body : null;
-        const requestStart = messages.length;
-        const cachedPrompt = (text, sourceSegments) =>
-            measurePromptCache(text, sourceSegments);
-        const cachedToolCalls = (toolCalls) =>
-            measureToolCallPromptCache(toolCalls);
         const message = (role, text, {
             toolCalls,
             functionName,
@@ -1270,112 +1471,7 @@ export function buildConversationView(entries, anchorID, options) {
             toolPromptCache,
         });
 
-        if (requestBody && requestBody.system !== undefined) {
-            const text = extractText(requestBody.system);
-            if (text) messages.push(message('system', text, {
-                promptCache: cachedPrompt(text, extractTextSegments(requestBody.system)),
-            }));
-        }
-        if (requestBody && requestBody.instructions !== undefined) {
-            const text = extractText(requestBody.instructions);
-            if (text) messages.push(message('system', text, {
-                promptCache: cachedPrompt(text, extractTextSegments(requestBody.instructions)),
-            }));
-        }
-
-        if (requestBody && Array.isArray(requestBody.messages)) {
-            requestBody.messages.forEach((m) => {
-                if (!m) return;
-                const role = (m.role || 'user').toLowerCase();
-                if (role === 'tool') {
-                    const text = extractText(m.content);
-                    const fnName = m.name || callIdMap[m.tool_call_id] || '';
-                    if (text) messages.push(message('function_result', text, {
-                        functionName: fnName,
-                        functionCallID: m.tool_call_id || '',
-                        promptCache: cachedPrompt(text, extractTextSegments(m.content)),
-                    }));
-                    return;
-                }
-                if (role === 'assistant') {
-                    const text = extractMessageText(m);
-                    const toolCalls = [
-                        ...extractToolCallsList(m.tool_calls),
-                        ...extractContentToolCalls(m.content),
-                    ];
-                    if (text || toolCalls.length > 0) {
-                        const promptCache = cachedPrompt(text, extractTextSegments(m.content));
-                        messages.push(message(role, text, {
-                            toolCalls,
-                            promptCache,
-                            toolPromptCache: cachedToolCalls(toolCalls),
-                        }));
-                    }
-                    return;
-                }
-                extractContentToolResults(m.content).forEach((result) => {
-                    if (!result.text) return;
-                    messages.push(message('function_result', result.text, {
-                        functionName: callIdMap[result.id] || '',
-                        functionCallID: result.id,
-                        promptCache: cachedPrompt(result.text, [result.text]),
-                    }));
-                });
-                const text = extractMessageText(m);
-                if (text) messages.push(message(role, text, {
-                    promptCache: cachedPrompt(text, extractTextSegments(m.content)),
-                }));
-            });
-        }
-
-        if (requestBody && requestBody.input !== undefined) {
-            if (Array.isArray(requestBody.input)) {
-                requestBody.input.forEach((item) => {
-                    if (!item || typeof item !== 'object') return;
-                    if (item.type === 'function_call_output' || item.type === 'tool_result') {
-                        const isToolResult = item.type === 'tool_result';
-                        const output = isToolResult ? item.content : item.output;
-                        const callID = isToolResult
-                            ? item.tool_use_id || item.call_id || ''
-                            : item.call_id || '';
-                        const text = typeof output === 'string' ? output : extractText(output);
-                        if (text) messages.push(message('function_result', text, {
-                            functionName: callIdMap[callID] || item.name || '',
-                            functionCallID: callID,
-                            promptCache: cachedPrompt(
-                                text,
-                                isToolResult ? extractTextSegments(item.content) : [text],
-                            ),
-                        }));
-                    } else if (item.type === 'function_call' || item.type === 'tool_use') {
-                        const toolCalls = extractToolCallsList([item]);
-                        messages.push(message('function_call', '', {
-                            toolCalls,
-                            toolPromptCache: cachedToolCalls(toolCalls),
-                        }));
-                    } else if (item.role) {
-                        const role = String(item.role).toLowerCase();
-                        const text = extractText(item.content);
-                        if (text) messages.push(message(role, text, {
-                            promptCache: cachedPrompt(text, extractTextSegments(item.content)),
-                        }));
-                    }
-                });
-            } else {
-                extractResponsesInputMessages(requestBody.input).forEach((m) => {
-                    if (!m.text) return;
-                    let sourceSegments = [];
-                    if (typeof requestBody.input === 'string') sourceSegments = [requestBody.input];
-                    else if (requestBody.input && typeof requestBody.input === 'object') {
-                        sourceSegments = extractTextSegments(requestBody.input.content);
-                        if (typeof requestBody.input.text === 'string') sourceSegments.push(requestBody.input.text);
-                    }
-                    messages.push(message(m.role, m.text, {
-                        promptCache: cachedPrompt(m.text, sourceSegments),
-                    }));
-                });
-            }
-        }
+        const request = requestDrafts(requestBody, callIdMap);
 
         // Chat-completions and Messages requests are complete conversation
         // snapshots. Treat the newest snapshot as authoritative and preserve
@@ -1385,8 +1481,9 @@ export function buildConversationView(entries, anchorID, options) {
         //
         // Responses requests using previous_response_id/conversation may carry
         // only a delta, so those continue to extend the rendered transcript.
-        const requestMessages = messages.splice(requestStart);
-        const requestSignatures = requestMessages.map(signature);
+        const requestMessages = request.drafts.map((draft) =>
+            message(draft.role, draft.text, draft.options));
+        const requestSignatures = request.signatures;
         const lineage = fullSnapshotLineage(originalRequestBody);
         const isFullSnapshot = lineage !== null;
         const parentID = interactionParentID(entry);
@@ -1399,12 +1496,12 @@ export function buildConversationView(entries, anchorID, options) {
 
         if (isAfterAnchor) {
             const retainsAnchor = isFullSnapshot && anchorLineage && anchorLineage.length > 0 &&
-                anchorLineage.every((value, i) => lineage[i] === value);
+                anchorLineage.every((value, i) => lineageKey(lineage[i]) === value);
             if ((isFullSnapshot && !retainsAnchor && !linkedParent) ||
                 (!isFullSnapshot && !linkedDelta)) return;
         }
         if (isAnchor && isFullSnapshot) {
-            anchorLineage = [...lineage];
+            anchorLineage = lineage.map((value) => lineageKey(value));
         }
 
         const entryID = String(entry.id || '').trim();
@@ -1420,7 +1517,7 @@ export function buildConversationView(entries, anchorID, options) {
         let commonPrefix = 0;
         while (commonPrefix < requestSignatures.length &&
             commonPrefix < historySignatures.length &&
-            requestSignatures[commonPrefix] === historySignatures[commonPrefix]) {
+            sameSignature(requestSignatures[commonPrefix], historySignatures[commonPrefix])) {
             commonPrefix++;
         }
         if (isFullSnapshot) {
@@ -1435,13 +1532,13 @@ export function buildConversationView(entries, anchorID, options) {
                 };
             }
             messages.splice(0, messages.length, ...requestMessages);
-            historySignatures = requestSignatures;
+            historySignatures = [...requestSignatures];
         } else {
             let overlap = Math.min(historySignatures.length, requestSignatures.length);
             while (overlap > 0) {
                 const historySuffix = historySignatures.slice(-overlap);
                 const requestPrefix = requestSignatures.slice(0, overlap);
-                if (historySuffix.every((value, i) => value === requestPrefix[i])) break;
+                if (historySuffix.every((value, i) => sameSignature(value, requestPrefix[i]))) break;
                 overlap--;
             }
             messages.push(...requestMessages.slice(overlap));
@@ -1470,7 +1567,7 @@ export function buildConversationView(entries, anchorID, options) {
                 if (text || toolCalls.length > 0) {
                     const responseMessage = message(role, text, { toolCalls });
                     messages.push(responseMessage);
-                    historySignatures.push(signature(responseMessage));
+                    historySignatures.push(messageSignature(responseMessage));
                 }
             }
         }
@@ -1483,7 +1580,7 @@ export function buildConversationView(entries, anchorID, options) {
                         toolCalls: extractToolCallsList([item]),
                     });
                     messages.push(responseMessage);
-                    historySignatures.push(signature(responseMessage));
+                    historySignatures.push(messageSignature(responseMessage));
                     return;
                 }
                 const role = (item.role || 'assistant').toLowerCase();
@@ -1491,7 +1588,7 @@ export function buildConversationView(entries, anchorID, options) {
                 if (text) {
                     const responseMessage = message(role, text);
                     messages.push(responseMessage);
-                    historySignatures.push(signature(responseMessage));
+                    historySignatures.push(messageSignature(responseMessage));
                 }
             });
         }
@@ -1506,7 +1603,7 @@ export function buildConversationView(entries, anchorID, options) {
             if (text || toolCalls.length > 0) {
                 const responseMessage = message(role, text, { toolCalls });
                 messages.push(responseMessage);
-                historySignatures.push(signature(responseMessage));
+                historySignatures.push(messageSignature(responseMessage));
             }
         }
 

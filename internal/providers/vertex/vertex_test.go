@@ -576,3 +576,21 @@ func TestNew_HostCredentialDestination(t *testing.T) {
 		})
 	}
 }
+
+// The deployment path: a labeled native-mode Vertex provider hands its labels
+// to the Gemini adapter, which sends them with generateContent.
+func TestNativeModeSendsVertexLabels(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, generateContentJSON)
+	cfg := testConfig()
+	cfg.APIMode = "native"
+	cfg.BaseURL = server.URL + nativeBasePath
+	cfg.VertexLabels = map[string]string{"code-review": "private"}
+	provider := newProvider(cfg, providers.ProviderOptions{}, authedTestClient(server.Client()), true)
+
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "google/gemini-2.5-flash",
+		Messages: []core.Message{{Role: "user", Content: "Hello"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"code-review": "private"}, capture.Last(t).JSON(t)["labels"])
+}

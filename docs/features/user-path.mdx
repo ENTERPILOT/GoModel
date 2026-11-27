@@ -126,6 +126,30 @@ may a group, user, or API key call. Each user path node and each managed API key
 optional `allowed_models` list; lists intersect down the tree, so a child can
 only narrow what its group allows. See [Users](/features/users).
 
+## Request policy
+
+A user path node can also set a `default_model` for chat, Responses, and
+Messages requests that name neither a model nor a provider, and ceilings on
+reasoning effort (`max_reasoning_effort`) and output tokens
+(`max_output_tokens`) for every model. Everything below the node inherits them: the nearest default wins, and the lowest ceiling up to `/`
+applies, so a child cannot loosen its group's ceiling. The effort ceiling only
+lowers an effort the request carries, so it never switches reasoning on; the
+token ceiling also sets the limit on a request that sends none. A policy on `/`
+binds every request, including those without a user path. Unlike a virtual
+model's `reasoning_effort`, which forces one value for one model, these bound
+every model the path uses; only a model that cannot reason below a minimum
+level keeps that minimum under a lower effort ceiling. See
+[Users](/features/users#request-policy).
+
+A key without a bound `user_path` picks its path through the header above, and
+with it its own subtree's policy. Put caps on keys with a fixed `user_path`, or
+on `/`.
+
+<Warning>
+Batches and passthrough under `/p/` are not capped. A capped key that may use
+them can bypass its request policy.
+</Warning>
+
 ## Exposed models
 
 `GET /v1/models` uses the effective `user_path` too.

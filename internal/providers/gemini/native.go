@@ -28,6 +28,9 @@ type geminiGenerateContentRequest struct {
 	GenerationConfig  map[string]any    `json:"generationConfig,omitempty"`
 	SafetySettings    []map[string]any  `json:"safetySettings,omitempty"`
 	CachedContent     string            `json:"cachedContent,omitempty"`
+	// Labels are Vertex AI request labels, for attributing billed usage.
+	// Only the Vertex AI backend sets them (see Provider.vertexLabels).
+	Labels map[string]string `json:"labels,omitempty"`
 	// Store is the Gemini API's per-request opt-out of Google's request
 	// storage, which is on by default for new paid-tier projects since
 	// October 2026. Only the AI Studio backend sets it: Vertex has no such

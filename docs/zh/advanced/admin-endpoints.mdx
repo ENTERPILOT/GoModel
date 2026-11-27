@@ -731,8 +731,8 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
 
 `allowed_models` 是节点自身的列表，采用规范形式（`anthropic/` 表示提供商通配符，`/` 表示全部）；`inherited_from` 列出其列表同样适用的祖先节点。`effective_models` 是路径级别的结果——节点自身的列表、祖先节点的列表以及模型侧的虚拟模型策略——通过推理时使用的同一授权器计算得出；托管 API 密钥自身的 `allowed_models` 可能会进一步缩小请求范围。空列表且 `restricted: true` 表示该节点的各个列表交集为空。对于仅由密钥或后代节点隐含存在的节点，`configured` 为 `false`；`managed: true` 标记在配置中声明的策略，这些策略在此处只读（`409`，错误码 `user_managed`）。
 
-`PUT /admin/users` 接受 `{"user_path": "/acme/eng", "allowed_models": ["anthropic/*"], "description": "..."}`
-并返回更新后的树。选择器会根据已配置的提供商进行校验。匹配规则参见[用户](/zh/features/users)。
+`PUT /admin/users` 接受 `{"user_path": "/acme/eng", "allowed_models": ["anthropic/*"], "default_model": "anthropic/claude-sonnet-4-6", "max_reasoning_effort": "medium", "max_output_tokens": 8000, "description": "..."}`
+并返回更新后的树。该调用会替换节点的 `allowed_models` 和 `description`：省略其中之一即被清空。`default_model`、`max_reasoning_effort` 和 `max_output_tokens` 是节点的请求策略，省略其中的字段（或设为 `null`）会保持原值，因此不发送这些字段的客户端无法在保存节点时解除上限；发送 `""` 或 `0` 可清空某个字段。`GET /admin/users` 中的节点在这些字段中给出自身的值，并在 `request_policy` 中给出与祖先合并后生效的值，每个值都带有其来源路径（例如 `max_output_tokens_from`）。选择器会根据已配置的提供商进行校验。匹配规则参见[用户](/zh/features/users)。
 
 ### GET /admin/models
 

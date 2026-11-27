@@ -11,11 +11,16 @@ import (
 )
 
 type mongoUserDocument struct {
-	ID            string    `bson:"_id"`
-	AllowedModels []string  `bson:"allowed_models"`
-	Description   string    `bson:"description,omitempty"`
-	CreatedAt     time.Time `bson:"created_at"`
-	UpdatedAt     time.Time `bson:"updated_at"`
+	ID            string   `bson:"_id"`
+	AllowedModels []string `bson:"allowed_models"`
+	Description   string   `bson:"description,omitempty"`
+	// The request policy fields are absent on documents written before they
+	// existed and decode to their zero values: no default, no ceiling.
+	DefaultModel       string    `bson:"default_model,omitempty"`
+	MaxReasoningEffort string    `bson:"max_reasoning_effort,omitempty"`
+	MaxOutputTokens    int       `bson:"max_output_tokens,omitempty"`
+	CreatedAt          time.Time `bson:"created_at"`
+	UpdatedAt          time.Time `bson:"updated_at"`
 }
 
 type mongoUserIDFilter struct {
@@ -49,10 +54,13 @@ func (s *MongoDBStore) List(ctx context.Context) ([]User, error) {
 			return nil, fmt.Errorf("decode user: %w", err)
 		}
 		user := User{
-			UserPath:    doc.ID,
-			Description: doc.Description,
-			CreatedAt:   doc.CreatedAt.UTC(),
-			UpdatedAt:   doc.UpdatedAt.UTC(),
+			UserPath:           doc.ID,
+			Description:        doc.Description,
+			DefaultModel:       doc.DefaultModel,
+			MaxReasoningEffort: doc.MaxReasoningEffort,
+			MaxOutputTokens:    doc.MaxOutputTokens,
+			CreatedAt:          doc.CreatedAt.UTC(),
+			UpdatedAt:          doc.UpdatedAt.UTC(),
 		}
 		if len(doc.AllowedModels) > 0 {
 			user.AllowedModels = doc.AllowedModels
@@ -72,9 +80,12 @@ func (s *MongoDBStore) Upsert(ctx context.Context, user User) error {
 	}
 	update := bson.M{
 		"$set": bson.M{
-			"allowed_models": allowed,
-			"description":    user.Description,
-			"updated_at":     user.UpdatedAt.UTC(),
+			"allowed_models":       allowed,
+			"description":          user.Description,
+			"default_model":        user.DefaultModel,
+			"max_reasoning_effort": user.MaxReasoningEffort,
+			"max_output_tokens":    user.MaxOutputTokens,
+			"updated_at":           user.UpdatedAt.UTC(),
 		},
 		"$setOnInsert": bson.M{
 			"created_at": user.CreatedAt.UTC(),

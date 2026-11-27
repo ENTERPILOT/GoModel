@@ -63,6 +63,10 @@ updates:
       default-days: 7
     labels:
       - "dependencies"
+    ignore:
+      # svelte-check supports TypeScript only up to 6.x; lift once it accepts 7.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     groups:
       npm:
         patterns:
@@ -80,6 +84,10 @@ updates:
       default-days: 3
     labels:
       - "dependencies"
+    ignore:
+      # v2.6.0's image cannot be pulled from ghcr.io; see scorecard.yml.
+      - dependency-name: "ossf/scorecard-action"
+        versions: ["2.6.0"]
     groups:
       github-actions:
         patterns:

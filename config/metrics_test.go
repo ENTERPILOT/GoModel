@@ -23,6 +23,9 @@ func TestResolveMetricsEndpoint(t *testing.T) {
 		"/mcp/github":            "/metrics",
 		"/administration":        "/administration",
 		"/mcp-metrics":           "/mcp-metrics",
+		"/*":                     "/metrics",
+		"/swagger/*":             "/metrics",
+		"/metrics/:name":         "/metrics",
 	}
 	for input, want := range tests {
 		got := ResolveMetricsEndpoint(input)

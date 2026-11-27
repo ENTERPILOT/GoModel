@@ -166,6 +166,41 @@ BEDROCK_EU_MODELS=amazon.nova-lite-v1:0
 To rejestruje providerów `bedrock-us` i `bedrock-eu`. Dane uwierzytelniające Bedrocka
 nadal pochodzą ze standardowego łańcucha danych uwierzytelniających AWS.
 
+## Przypisywanie kosztów
+
+Bedrock nie ma etykiety rozliczeniowej na poziomie żądania. Żeby podzielić koszty Bedrocka
+w AWS Cost Explorer, wywołuj model przez otagowany
+[application inference profile](https://docs.aws.amazon.com/bedrock/latest/userguide/cost-mgmt-application-inference-profiles.html):
+AWS przypisuje koszt każdego żądania wysłanego przez profil do tagów tego profilu.
+
+Utwórz profil dla modelu, a następnie udostępnij jego ARN:
+
+```bash
+aws bedrock create-inference-profile \
+  --inference-profile-name search-nova-micro \
+  --model-source copyFrom=arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0 \
+  --tags key=team,value=search
+```
+
+```bash
+BEDROCK_MODELS=arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc123example
+```
+
+Klienci wysyłają ARN jako `model`. Chat, streaming i Responses API działają tak samo jak
+dla każdego innego modelu Bedrocka.
+
+- Profil obejmuje jeden model. Utwórz osobny profil dla każdego modelu i każdego zestawu
+  tagów.
+- Aktywuj tagi jako tagi alokacji kosztów w AWS Billing; wcześniej nie pojawią się w Cost
+  Explorer.
+- ARN nie zawiera nazwy modelu, więc GoModel nie ma dla niego ceny z katalogu i zapisuje
+  zużycie bez kosztu. Ustaw dla ARN
+  [nadpisanie cennika](/pl/features/cost-tracking#nadpisywanie-cennika), żeby zachować
+  śledzenie kosztów w GoModel.
+- Żeby dać klientom czytelną nazwę, skieruj
+  [wirtualny model](/pl/features/virtual-models#używanie-stabilnych-nazw) na
+  `bedrock/<ARN profilu>`.
+
 ## Dozwolone narzędzia
 
 Bedrock Converse nie potrafi ograniczyć tury do podzbioru zadeklarowanych narzędzi. Dla

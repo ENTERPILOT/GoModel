@@ -196,7 +196,7 @@ func (p *CompatibleProvider) ChatCompletion(ctx context.Context, req *core.ChatR
 	if req == nil {
 		return nil, core.NewInvalidRequestError("chat request is required", nil)
 	}
-	adapted, err := p.adaptedChatRequest(req)
+	adapted, err := p.adaptedChatRequest(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +242,7 @@ func (p *CompatibleProvider) StreamChatCompletion(ctx context.Context, req *core
 	if req == nil {
 		return nil, core.NewInvalidRequestError("chat request is required", nil)
 	}
-	adapted, err := p.adaptedChatRequest(req)
+	adapted, err := p.adaptedChatRequest(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -269,9 +269,9 @@ func (p *CompatibleProvider) StreamChatCompletion(ctx context.Context, req *core
 	return providers.EnsureChatCompletionSSE(stream), nil
 }
 
-func (p *CompatibleProvider) adaptedChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
+func (p *CompatibleProvider) adaptedChatRequest(ctx context.Context, req *core.ChatRequest) (*core.ChatRequest, error) {
 	if p.adaptChatRequest != nil {
-		adapted, err := p.adaptChatRequest(req)
+		adapted, err := p.adaptWithinEffortCeiling(ctx, req)
 		if err != nil {
 			return nil, err
 		}
@@ -281,6 +281,33 @@ func (p *CompatibleProvider) adaptedChatRequest(req *core.ChatRequest) (*core.Ch
 		return req, nil
 	}
 	return narrowAllowedTools(req)
+}
+
+// adaptWithinEffortCeiling runs the provider's AdaptChatRequest hook, and
+// keeps the reasoning effort the hook sends within the effort ceiling of the
+// caller's policy: a hook that rounds the gateway's level up to one its model
+// takes gets the request again with a lower effort (see
+// providers.ChatWithinEffortCeiling). The hook runs once for a request under
+// no ceiling or within it.
+func (p *CompatibleProvider) adaptWithinEffortCeiling(ctx context.Context, req *core.ChatRequest) (*core.ChatRequest, error) {
+	adapted, err := p.adaptChatRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	lowered := providers.ChatWithinEffortCeiling(ctx, req, func(candidate *core.ChatRequest) string {
+		if candidate == req {
+			return providers.SentEffort(adapted)
+		}
+		probe, err := p.adaptChatRequest(candidate)
+		if err != nil {
+			return ""
+		}
+		return providers.SentEffort(probe)
+	})
+	if lowered == req {
+		return adapted, nil
+	}
+	return p.adaptChatRequest(lowered)
 }
 
 // narrowAllowedTools rewrites an allowed_tools tool_choice for an upstream not

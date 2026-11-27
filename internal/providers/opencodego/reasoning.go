@@ -1,11 +1,15 @@
 package opencodego
 
 import (
+	"context"
 	"os"
 	"strings"
 
+	"github.com/goccy/go-json"
+
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
 // defaultReasoningEffortEnvVar names the override for the reasoning effort
@@ -61,6 +65,54 @@ func normalizeReasoningEffort(effort string) string {
 	default:
 		return normalized
 	}
+}
+
+// effortLevels are the levels OpenCode Zen accepts, in ascending order.
+var effortLevels = []string{"low", "high", "max"}
+
+// withinEffortCeiling keeps the effort this adapter sends within the effort
+// ceiling of the caller's policy. The gateway lowers the client's effort, but
+// the adapter then injects defaultEffort into a request that set none and
+// rounds levels it does not know to its own (xhigh becomes max). When that
+// would exceed the ceiling, the request gets the highest accepted level at or
+// below it; "low" when the ceiling is below every level, since the models
+// that need the parameter cannot think less.
+func withinEffortCeiling(ctx context.Context, req *core.ChatRequest, defaultEffort string) *core.ChatRequest {
+	ceiling := core.RequestCeilingsFromContext(ctx).ReasoningEffort
+	if req == nil || ceiling == "" {
+		return req
+	}
+	sent := upstreamEffort(req, defaultEffort)
+	limit := requestparams.EffortRank(ceiling)
+	if sent == "" || (requestparams.EffortRank(sent) >= 0 && requestparams.EffortRank(sent) <= limit) {
+		return req
+	}
+	within := effortLevels[0]
+	for _, level := range effortLevels {
+		if requestparams.EffortRank(level) <= limit {
+			within = level
+		}
+	}
+	adapted := *req
+	adapted.Reasoning = &core.Reasoning{Effort: within}
+	adapted.ExtraFields = req.ExtraFields.Without("reasoning_effort")
+	return &adapted
+}
+
+// upstreamEffort is the effort adaptChatRequest sends for req, or "" when it
+// sends none.
+func upstreamEffort(req *core.ChatRequest, defaultEffort string) string {
+	if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Effort) != "" {
+		return normalizeReasoningEffort(req.Reasoning.Effort)
+	}
+	if raw := req.ExtraFields.Lookup("reasoning_effort"); raw != nil {
+		var flat string
+		if json.Unmarshal(raw, &flat) != nil {
+			return "?"
+		}
+		return flat
+	}
+	return defaultEffort
 }
 
 // loadDefaultReasoningEffort resolves the effort injected for requests without

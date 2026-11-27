@@ -30,7 +30,7 @@ func (p *Provider) CountChatTokens(ctx context.Context, req *core.ChatRequest) (
 	countedReq := &counted
 	_, viaResponses := responsesRoute(countedReq)
 	if !viaResponses {
-		adapted, err := p.adaptedChatRequest(countedReq)
+		adapted, err := p.adaptedChatRequest(ctx, countedReq)
 		if err != nil {
 			return 0, core.ErrMessagesTokenCountUnsupported
 		}

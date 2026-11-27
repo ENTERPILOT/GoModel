@@ -128,6 +128,11 @@ func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
 		p.configErr = fmt.Errorf("vertex AI requires base_url or vertex_project and vertex_location")
 		return
 	}
+	if len(providerCfg.VertexLabels) > 0 && useAnthropicAPI(providerCfg.APIMode) {
+		// Refused rather than dropped: Claude calls would bill unlabeled.
+		p.configErr = fmt.Errorf("vertex_labels requires api_mode native: labels are sent only on Gemini generateContent calls, not Claude ones")
+		return
+	}
 	if !validAuthType(providerCfg.AuthType) {
 		p.configErr = fmt.Errorf("unsupported vertex AI auth type %q", providerCfg.AuthType)
 		return

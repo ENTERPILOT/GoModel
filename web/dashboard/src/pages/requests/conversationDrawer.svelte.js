@@ -31,6 +31,7 @@ import {
   normalizedConversationRequestStep,
   renderBodyWithConversationHighlights,
   shouldHydrateConversation,
+  unchangedConversationEntries,
 } from "./conversation-helpers.js";
 
 const FOLLOW_UP_TIMEOUT_MS = 10 * 60 * 1000;
@@ -65,11 +66,19 @@ class ConversationDrawerStore {
   conversationCloseBtnEl = $state(null);
   conversationThreadEl = $state(null);
 
-  get conversationEntries() {
-    return (this.conversationEntryIDs || [])
-      .map((id) => liveLogs.requestLogRecord(id))
-      .filter(Boolean);
-  }
+  // The record cache is replaced on every live event of every request. The
+  // list keeps its identity while this conversation's own records are
+  // unchanged, so only its own events rebuild the transcript.
+  _conversationEntries = [];
+  conversationEntries = $derived.by(() => {
+    this._conversationEntries = unchangedConversationEntries(
+      this._conversationEntries,
+      (this.conversationEntryIDs || [])
+        .map((id) => liveLogs.requestLogRecord(id))
+        .filter(Boolean),
+    );
+    return this._conversationEntries;
+  });
 
   conversationView = $derived.by(() =>
     buildConversationView(this.conversationEntries, this.conversationAnchorID, {
@@ -202,7 +211,9 @@ class ConversationDrawerStore {
 
   _applyConversationView() {
     const entries = this.conversationEntries;
-    const view = buildConversationView(entries, this.conversationAnchorID);
+    // Which entries belong to the branch does not depend on the previewed
+    // request step, so the view the drawer renders answers that as well.
+    const view = this.conversationView;
     if (this.conversationFollowLatest) {
       const latest = latestRenderableConversationEntry(entries, view.entryIDs);
       if (latest && latest.id && String(latest.id) !== this.conversationAnchorID) {
