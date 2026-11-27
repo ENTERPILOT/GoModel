@@ -147,20 +147,20 @@
   .per-child-option {
     grid-column: 1 / -1;
     display: flex;
-    gap: 0.65rem;
+    gap: 8px;
     align-items: flex-start;
     cursor: pointer;
   }
 
 
   .per-child-option input {
-    margin-top: 0.2rem;
+    margin-top: 2px;
   }
 
 
   .per-child-option span {
     display: grid;
-    gap: 0.2rem;
+    gap: 4px;
   }
 
   .per-child-option small {

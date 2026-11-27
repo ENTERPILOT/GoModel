@@ -114,10 +114,11 @@
   }
 
   .flash-toast-error {
-
-    background: var(--warning-bg);
-    border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
-    color: var(--warning-text);
+    /* Errors are errors, not warnings: the danger ramp, matching Arco's own
+       error alert/message color. */
+    background: var(--danger-bg);
+    border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+    color: var(--danger-text);
   }
 
 

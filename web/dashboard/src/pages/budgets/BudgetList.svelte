@@ -315,7 +315,7 @@
 
 <style>
   .per-child-summary {
-    padding: 0.75rem 0.9rem;
+    padding: 12px 16px;
     border: 1px solid var(--border);
     border-radius: var(--radius-panel);
     color: var(--text-muted);
@@ -354,7 +354,8 @@
 
   .budget-bar-text-row-on-fill {
     /* The period fills are dark in both themes, so their on-fill caption is
-       always light. The themed usage/danger fills are overridden below. */
+       always light — except the light custom-period fill, overridden to dark
+       text below alongside the themed usage/danger fills. */
 
     color: var(--on-dark-fill);
     clip-path: inset(0 calc(100% - var(--budget-progress, 0%)) 0 0);

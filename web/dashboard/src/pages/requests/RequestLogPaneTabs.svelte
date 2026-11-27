@@ -191,8 +191,11 @@
   }
 
 
+  /* --category-1, NOT --primary-text: --accent aliases --primary-text, so
+     the two direction icons would render the identical hue. The categorical
+     cyan channel is exactly the non-status distinct hue this comment wants. */
   .request-log-pane-icon:global(.request-log-pane-icon-response) {
-    color: var(--primary-text);
+    color: var(--category-1);
   }
 
   .request-log-pane-icon :global(svg) {

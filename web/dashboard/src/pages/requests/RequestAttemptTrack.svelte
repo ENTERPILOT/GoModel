@@ -56,7 +56,9 @@
     width: 8px;
 
     height: 8px;
-    border-radius: var(--radius-control);
+    /* Status dot: a circle (a 2px control radius would leave an 8px dot
+       nearly square). */
+    border-radius: var(--radius-circle);
     background: var(--text-muted);
 
   }

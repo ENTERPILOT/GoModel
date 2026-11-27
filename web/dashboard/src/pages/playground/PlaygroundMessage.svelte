@@ -159,8 +159,10 @@
   }
 
   .playground-role-select {
-
-    padding: 4px 8px;
+    /* App-wide control height, horizontal padding only — aligns the
+       message header with the other Playground controls. */
+    height: 32px;
+    padding: 0 8px;
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-control);

@@ -104,9 +104,7 @@
           <Icon icon={Plus} class="form-action-icon" />
           <span>{m.rate_limits_create()}</span>
         </button>
-
       {/if}
-
     </div>
   </div>
 
@@ -236,12 +234,10 @@
     transition:
       color 0.15s,
       background 0.15s,
-
       border-color 0.15s;
   }
 
   .rate-limit-tab.scope-provider {
-
     --scope-hue: var(--category-1);
   }
 
@@ -309,10 +305,10 @@
 
 
   /* Scope rail: each group gets a categorical hue drawn from the dashboard's
-     own palette (user_path = accent tan, provider = info blue, model = olive
-     from the budget period badges). The rail runs the group's full height so
-
-     the scope identity is scannable without reading the header. */
+     own palette (user_path = accent tan, provider = the cyan --category-1
+     channel, model = olive from the budget period badges). The rail runs the
+     group's full height so the scope identity is scannable without reading
+     the header. */
   .rate-limit-group {
     --scope-hue: var(--accent);
     position: relative;

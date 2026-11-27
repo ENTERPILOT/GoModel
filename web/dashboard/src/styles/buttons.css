@@ -13,8 +13,9 @@
 
    Arco component spec (DESIGN.md §5): height 32px, padding 0 15px, 14px text,
    2px radius, no glow shadow, a fast linear transition. box-sizing is
-   border-box app-wide, so the height comes from line-height, not min-height:
-   14px text at line-height 20px plus the 1px borders lands exactly on 32.
+   border-box app-wide and the height is set explicitly — the 20px
+   line-height plus the 1px borders only sums to 22px, so do not delete the
+   height expecting line-height to carry it.
    The 15px horizontal padding is Arco's own metric and stays off the 4px
    grid on purpose (DESIGN.md §7 #12): the grid governs the app's own layout
    spacing, not the component metrics measured from Arco.
@@ -53,7 +54,11 @@
 }
 
 .btn:focus-visible {
-  outline: none;
+  /* Transparent, not none: forced-colors mode drops box-shadow, and a
+     transparent outline is repainted in the system highlight color there,
+     so keyboard focus survives Windows High Contrast. */
+  outline: 2px solid transparent;
+  outline-offset: 0;
   box-shadow: 0 0 0 2px var(--primary-ring);
 }
 

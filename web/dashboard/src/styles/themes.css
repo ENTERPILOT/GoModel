@@ -114,7 +114,7 @@
      own 5/7: Arco keeps white text and its dark hover fill #306FFF drops
      to 4.36:1 — under AA. Our fills carry dark text (--on-fill), and the
      inverted dark ramp makes level 7 the adjacent lighter step, so moving
-     6 → 7 → 8 brightens the button on hover and keeps ≥7:1. */
+     6 → 7 → 8 brightens the button on hover and keeps ≥6.8:1. */
   --primary: var(--primary-6);
   --primary-hover: var(--primary-7);
   --primary-active: var(--primary-8);
@@ -178,7 +178,7 @@
   --token-local: color-mix(in srgb, var(--chart-prompt) 20%, transparent);
   /* The meter is a filled bar carrying a white label, so its uncached slice
      is a deeper brown than the chart line: #d18f52 would put white text at
-     3.2:1. */
+     2.7:1. */
   --cache-meter-uncached: #96662f;
   --cache-meter-local: var(--token-local);
   --cache-meter-prompt: var(--token-prompt);

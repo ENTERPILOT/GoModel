@@ -277,6 +277,13 @@ test("the palette is defined exactly once per theme", () => {
     1,
     "themes.css must define the light palette exactly once",
   );
+  // And no second DARK palette either: blockBody() only parses the first
+  // :root, so a later override could silently drift while this test passes.
+  assert.equal(
+    CSS_NO_COMMENTS.match(/:root\s*\{/g)?.length ?? 0,
+    1,
+    "themes.css must define the dark palette (:root) exactly once",
+  );
 });
 
 test("the tokens the audit found broken are defined", () => {

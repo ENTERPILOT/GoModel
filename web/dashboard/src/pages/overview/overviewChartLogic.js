@@ -127,8 +127,6 @@ export function promptCacheRateText(summary) {
 export function overviewChartConfig(colors, series, options = {}) {
   const cacheEnabled = !!options.cacheEnabled;
   const resolve = options.resolve || ((expr) => expr);
-  const fade = (expr, pct) =>
-    resolve("color-mix(in srgb, " + expr + " " + pct + "%, transparent)");
   const line = (label, data, color, opts) =>
     Object.assign(
       {
@@ -160,7 +158,10 @@ export function overviewChartConfig(colors, series, options = {}) {
   ];
   if (cacheEnabled) {
     datasets.push(
-      line(m.overview_locally_cached(), series.local, fade("var(--primary)", 35), {
+      // --token-local, not a local fade of --primary: the live-throughput
+      // and usage charts paint the same "locally cached" series with this
+      // token, and the tier/alpha differ from --primary-6 at 35%.
+      line(m.overview_locally_cached(), series.local, resolve("var(--token-local)"), {
         fill: "-1",
         borderDash: [2, 3],
       }),

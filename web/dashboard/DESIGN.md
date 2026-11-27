@@ -1,6 +1,6 @@
 # DavAi Gateway Dashboard 设计规范（对齐 Arco Design）
 
-> **状态**：P0 已实施并通过校验（`npm run check` / `npm test` / `npm run build`）
+> **状态**：P0–P4 已实施并通过校验（`npm run check` / `npm test` / `npm run build`）
 > **适用范围**：`web/dashboard/`（Svelte 5 + 原生 CSS 管理后台）
 > **配套约定**：实现层面的规则见 [`CONVENTIONS.md`](./CONVENTIONS.md)。本文是**视觉规范的事实源**，CONVENTIONS.md 是**编码约定的事实源**，两者职责不重叠。
 
@@ -171,7 +171,7 @@
 | `--text-muted` | `#646E7D` | 偏离 gray-7，见 §7 | 4.65:1 on 最差底 |
 | `--text-disabled` | `#A9AEB8` | gray-5 / text-4 | 豁免 |
 | `--primary` | `#165DFF` | primary-6（填充 / 描边） | 5.19:1 on surface |
-| `--primary-hover` | `#4080FF` | primary-5 | — |
+| `--primary-hover` | `#0E42D2` | primary-7（文字安全级，偏离 Arco 的 5，见 §7 #10） | 7.70:1 白字 on hover 填充 |
 | `--primary-text` | `#165DFF` | primary-6（主色作为文字） | 4.89:1 on 页面底 |
 | `--accent` | → `--primary-text` | 兼容别名 | 5.19:1 on surface |
 | `--accent-strong` | `#0E42D2` | primary-7 | 7.70:1 on surface |
@@ -204,7 +204,7 @@
 | `--text-muted` | `rgba(255,255,255,.7)` | 8.36:1 on surface |
 | `--text-disabled` | `rgba(255,255,255,.3)` | 豁免 |
 | `--primary` | `#3C7EFF` | primary-6（填充 / 描边） |
-| `--primary-hover` | `#306FFF` | — |
+| `--primary-hover` | `#689FFF` | primary-7（文字安全级，见 §7 #10） | 6.81:1 深字 on hover 填充 |
 | `--primary-text` | `#689FFF` | primary-7（文字） | 5.98:1 on surface |
 | `--accent` | → `--primary-text` | 兼容别名 | 5.98:1 on surface |
 | `--accent-strong` | `#93BEFF` | primary-8 | 8.26:1 on surface |
@@ -340,9 +340,6 @@ Arco 还定义了 `--border-radius-large: 8px`，但编译产物里**没有任�
 | 焦点环 `#072CA6` / 页面底 | 10.29 | 通过 3:1 非文本门槛 |
 | 焦点环 / surface | 10.94 | 通过 3:1 非文本门槛 |
 | 焦点环 / 行悬停底 | 9.85 | 通过 3:1 非文本门槛 |
-| 填色按钮环 页面底白 / `#165DFF` | 4.89 | 通过 3:1 非文本门槛 |
-| 填色按钮环 / 悬停填充 `#0E42D2` | 7.24 | 通过 3:1 非文本门槛 |
-| 填色按钮环 / 按下填充 `#072CA6` | 10.29 | 通过 3:1 非文本门槛 |
 
 ### 深色
 
@@ -368,9 +365,6 @@ Arco 还定义了 `--border-radius-large: 8px`，但编译产物里**没有任�
 | 焦点环 `#93BEFF` / 页面底 | 9.41 | 通过 3:1 非文本门槛 |
 | 焦点环 / surface | 8.26 | 通过 3:1 非文本门槛 |
 | 焦点环 / 行悬停底 | 7.55 | 通过 3:1 非文本门槛 |
-| 填色按钮环 `#17171A` / `#3C7EFF` | 4.79 | 通过 3:1 非文本门槛 |
-| 填色按钮环 / 悬停填充 `#689FFF` | 6.81 | 通过 3:1 非文本门槛 |
-| 填色按钮环 / 按下填充 `#93BEFF` | 9.41 | 通过 3:1 非文本门槛 |
 
 > 焦点环是非文本 UI 元素，门槛是 WCAG 1.4.11 的 3:1，不是文字的 4.5:1。
 > 守护测试解析 CSS 时必须**先剥离注释**再切分声明，否则注释后的第一条声明会被吞掉；带 alpha 的背景与文字必须**先与已知底色合成**再计算，否则会得到错误结论。

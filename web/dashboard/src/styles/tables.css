@@ -202,7 +202,6 @@ td.col-price {
   gap: 8px;
   /* Fixed 32px height (the app-wide control height, same as .btn) with
      horizontal padding only — the 4px grid has no vertical padding to
-
      give a table-row button, and .table-icon-btn next to it is 32px too. */
   height: 32px;
   padding: 0 12px;
@@ -349,3 +348,4 @@ td.col-price .price-hint-text {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+

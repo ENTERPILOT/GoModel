@@ -70,7 +70,9 @@
     min-height: 28px;
     padding: 4px 8px;
     border: 1px solid color-mix(in srgb, var(--warning) 42%, var(--border));
-    border-radius: var(--radius-panel);
+    /* Button-like link: control radius (the banner around it keeps the
+       panel radius). */
+    border-radius: var(--radius-control);
 
     color: var(--text);
     font-size: 12px;

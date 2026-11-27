@@ -329,12 +329,13 @@
 
 /* Inputs share the Arco control spec with .btn: 32px tall, 14px text, 2px
    radius. Focus is a primary border plus a 2px outer ring of --primary-ring
-   (Arco's dark value: rgba(primary-6, 0.35) — see themes.css). The ring
-   lives on the element itself — no scrollbar side effects, and :focus (not
-
-   :focus-visible) is intentional: text fields take focus on click, and
-   keyboard users already see the border change. */
-:is(input, textarea, select):focus {
+   (primary-8 in both themes — see themes.css). The ring lives on the element
+   itself — no scrollbar side effects, and :focus (not :focus-visible) is
+   intentional: text fields take focus on click, and keyboard users already
+   see the border change. Checkboxes and radios are excluded — they are
+   click-toggled, so :focus would paint a ring on every click; the global
+   :focus-visible fallback still covers keyboard focus for them. */
+:is(input:not([type="checkbox"], [type="radio"]), textarea, select):focus {
   border-color: var(--primary);
 
   outline: 2px solid var(--primary-ring);

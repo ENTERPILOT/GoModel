@@ -82,8 +82,10 @@
 
     align-items: center;
     justify-content: center;
+    /* Fixed-width icon slot: no horizontal padding — box-sizing leaves only
+       width − border for the 13px icon, so padding would clip it. */
     width: 28px;
-    padding: 0 8px;
+    padding: 0;
 
     border-left: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
   }

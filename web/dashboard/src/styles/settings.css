@@ -119,7 +119,7 @@
 /* The button row every settings section uses. Without an explicit gap the
    buttons are separated only by collapsed HTML whitespace, which disappears
    once they wrap onto their own lines on a narrow screen and leaves them
-   touching. Matches the 10px the composed variants already declare. */
+   touching. Matches the 12px the composed variants already declare. */
 .settings-refresh-actions {
   display: flex;
   flex-wrap: wrap;

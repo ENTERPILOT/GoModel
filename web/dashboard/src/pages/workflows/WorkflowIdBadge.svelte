@@ -63,7 +63,8 @@
     min-width: 0;
     max-width: calc(100% - 28px);
     padding: 2px 12px;
-    border-radius: var(--radius-panel);
+    /* Count-pill shape (CONVENTIONS: metadata pills are capsules). */
+    border-radius: var(--radius-pill);
     border: 1px solid var(--border);
     background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
     color: var(--text-muted);

@@ -92,18 +92,18 @@
   }
 
   /* The L: a vertical drop from the row above with a rounded arm into the
-     child row. Negative top offset bridges the 10px flex gap. */
+     child row. Negative top offset bridges the 12px flex gap. */
   .request-log-thread-child::before,
   .request-log-thread-loading::before {
     content: "";
     position: absolute;
     left: -14px;
-    top: -10px;
+    top: -12px;
     width: 12px;
-    height: calc(50% + 10px);
+    height: calc(50% + 12px);
     border-left: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
-    border-bottom-left-radius: 6px;
+    border-bottom-left-radius: var(--radius-circle);
     pointer-events: none;
   }
 
@@ -113,7 +113,7 @@
     position: absolute;
     left: -14px;
     top: 50%;
-    bottom: -10px;
+    bottom: -12px;
     border-left: 1px solid var(--border);
     pointer-events: none;
   }

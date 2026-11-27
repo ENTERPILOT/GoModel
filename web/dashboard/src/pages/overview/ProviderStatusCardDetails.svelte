@@ -198,7 +198,6 @@
 
   .provider-status-health {
     display: flex;
-
     flex-direction: column;
     gap: 12px;
     padding-top: 12px;
@@ -206,13 +205,11 @@
     border-top: 1px solid var(--border);
   }
 
-
   .provider-status-health-state {
     display: inline-flex;
     align-items: center;
     padding: 1px 8px;
     border-radius: var(--radius-pill);
-
     border: 1px solid var(--border);
     font-size: 12px;
     font-weight: 600;

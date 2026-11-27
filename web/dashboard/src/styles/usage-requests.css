@@ -78,6 +78,16 @@
   min-width: 0;
 }
 
+/* The checklist dropdown triggers (request-type filter, Columns menu) are
+   <summary> elements, so forms.css's input :focus rule never reaches them
+   and the outline: none above would also hide the global :focus-visible
+   fallback. Give keyboard focus the same treatment inputs get. */
+.usage-log-select:focus-visible {
+  border-color: var(--primary);
+  outline: 2px solid var(--primary-ring);
+  outline-offset: 0;
+}
+
 /* Checklist dropdown: a <details> whose <summary> carries .usage-log-select
    (so it matches the native selects) and whose panel lists checkboxes. Shared
    by the Requests page request-type filter and the Columns menu; the owner positions

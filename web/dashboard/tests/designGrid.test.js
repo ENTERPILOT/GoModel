@@ -93,9 +93,13 @@ function stripComments(css) {
   return css.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-const RADIUS_DECL = /(?<![\w-])border-radius\s*:\s*([^;{}]+)/g;
+// The radius family includes the four corner-specific properties; the
+// spacing family includes the logical (inline/block) and axis-specific
+// (row-/column-gap) forms, so nothing escapes by picking a rarer property.
+const RADIUS_DECL =
+  /(?<![\w-])(?:border-radius|border-(?:top|bottom)-(?:left|right)-radius)\s*:\s*([^;{}]+)/g;
 const SPACE_DECL =
-  /(?<![\w-])((?:padding|margin|gap)(?:-(?:top|right|bottom|left))?)\s*:\s*([^;{}]+)/g;
+  /(?<![\w-])((?:padding|margin)(?:-(?:top|right|bottom|left|inline|block|inline-start|inline-end|block-start|block-end))?|(?:row-|column-)?gap)\s*:\s*([^;{}]+)/g;
 
 /** The selector of the rule that owns a declaration, and the file it is in. */
 function rules(css) {
@@ -156,6 +160,13 @@ test("every spacing length sits on the 4px grid", () => {
             e.value === value,
         );
         if (allowed) continue;
+        // Non-px lengths (rem/em/%) dodge the grid by not matching the px
+        // scan below; reject them outright. auto / calc() / var() carry no
+        // unit literal and pass (calc spacing references --space-* tokens).
+        if (/(^|\s)-?\d*\.?\d+(?:r?em|%|ch|ex|vw|vh)\b/.test(value)) {
+          offenders.push(`${rel}: ${selector} { ${property}: ${value} }`);
+          continue;
+        }
         for (const num of value.matchAll(/(-?\d*\.?\d+)px/g)) {
           const length = Math.abs(Number(num[1]));
           if (length === 0 || OPTICAL.has(length)) continue;

@@ -247,7 +247,8 @@
     font-size: 11px;
     font-weight: 500;
     padding: 4px 8px;
-    border-radius: var(--radius-control);
+    /* Floating surface: panel radius, like the other popups. */
+    border-radius: var(--radius-panel);
     white-space: nowrap;
     transform: translate(12px, -50%);
     display: flex;

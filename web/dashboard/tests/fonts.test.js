@@ -142,7 +142,7 @@ test("form controls inherit the font stack", () => {
     "form controls must inherit the font stack, not fall back to Arial",
   );
   // Every control type Arco resets has to be covered.
-  for (const selector of ["button", "input", "select", "textarea"]) {
+  for (const selector of ["button", "input", "optgroup", "select", "textarea"]) {
     assert.match(
       rule[1],
       new RegExp(`(^|,)\\s*${selector}\\b`),
