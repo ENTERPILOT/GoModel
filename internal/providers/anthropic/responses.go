@@ -152,6 +152,7 @@ type responsesStreamConverter struct {
 	closed               bool
 	sentCreate           bool
 	sentDone             bool
+	failed               bool   // upstream sent an error event
 	sawStop              bool   // upstream signalled the end of the message
 	stopReason           string // Anthropic stop_reason, used for incomplete_details
 	pendingErr           error  // upstream read error deferred until terminal events are drained
@@ -228,6 +229,10 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 			return 0, err
 		}
 		if handled {
+			if sc.failed {
+				// Drain response.failed, then end the stream.
+				sc.pendingErr = io.EOF
+			}
 			if n == 0 {
 				continue
 			}
@@ -377,8 +382,31 @@ func (sc *responsesStreamConverter) newResponsesToolCallState(contentBlock *anth
 	return state
 }
 
+// failedEvents ends the response as response.failed after an upstream error event.
+func (sc *responsesStreamConverter) failedEvents(upstream *anthropicError) string {
+	sc.failed = true
+	sc.sentDone = true
+	gatewayErr := anthropicStreamEventError(sc.providerName, upstream)
+	return sc.startResponse() + sc.output.FinishResponse("response.failed", map[string]any{
+		"id":         sc.responseID,
+		"object":     "response",
+		"status":     "failed",
+		"model":      sc.model,
+		"provider":   sc.providerName,
+		"created_at": sc.createdAt,
+		"output":     []map[string]any{},
+		"error": map[string]any{
+			"code":    *gatewayErr.Code,
+			"message": gatewayErr.Message,
+		},
+	})
+}
+
 func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) string {
 	switch event.Type {
+	case "error":
+		return sc.failedEvents(event.Error)
+
 	case "message_start":
 		if event.Message != nil {
 			if mergeAnthropicUsage(&sc.usage, &event.Message.Usage) {

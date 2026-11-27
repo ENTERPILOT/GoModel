@@ -12,6 +12,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/streaming"
+	"github.com/goccy/go-json"
 )
 
 // openMessagesStream sends an already-converted Anthropic request to /messages
@@ -59,6 +60,7 @@ type streamConverter struct {
 	hasUsage          bool
 	buffer            streaming.StreamBuffer
 	closed            bool
+	failed            bool // upstream sent an error event
 	emittedToolCalls  bool
 }
 
@@ -133,6 +135,13 @@ func (sc *streamConverter) Read(p []byte) (n int, err error) {
 			return 0, err
 		}
 		if handled {
+			if sc.failed {
+				// Nothing follows the error, not even [DONE]. The rest of it
+				// stays buffered for the next Read.
+				sc.closed = true
+				_ = sc.body.Close() //nolint:errcheck
+				return n, nil
+			}
 			if n == 0 {
 				continue
 			}
@@ -171,6 +180,14 @@ func (sc *streamConverter) formatChatChunk(delta map[string]any, finishReason an
 
 func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 	switch event.Type {
+	case "error":
+		sc.failed = true
+		frame, err := json.Marshal(anthropicStreamEventError(sc.providerName, event.Error).ToJSON())
+		if err != nil {
+			return ""
+		}
+		return "data: " + string(frame) + "\n\n"
+
 	case "message_start":
 		role := ""
 		if event.Message != nil {

@@ -139,6 +139,13 @@ type anthropicStreamEvent struct {
 	ContentBlock *anthropicContent  `json:"content_block,omitempty"`
 	Message      *anthropicResponse `json:"message,omitempty"`
 	Usage        *anthropicUsage    `json:"usage,omitempty"`
+	Error        *anthropicError    `json:"error,omitempty"`
+}
+
+// anthropicError is the payload of an in-band "error" stream event.
+type anthropicError struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
 }
 
 // anthropicDelta represents a delta in streaming response

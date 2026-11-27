@@ -600,6 +600,21 @@ func malformedAnthropicStreamError(err error) error {
 	return core.NewProviderError("anthropic", http.StatusBadGateway, "failed to decode anthropic stream event: "+err.Error(), err)
 }
 
+// anthropicStreamEventError converts an "error" event, which Anthropic sends
+// inside a 200 stream (e.g. overloaded_error), into a gateway error.
+func anthropicStreamEventError(provider string, upstream *anthropicError) *core.GatewayError {
+	message, code := "anthropic stream failed", "provider_error"
+	if upstream != nil {
+		if upstream.Message != "" {
+			message = upstream.Message
+		}
+		if upstream.Type != "" {
+			code = upstream.Type
+		}
+	}
+	return core.NewProviderError(provider, http.StatusBadGateway, message, nil).WithCode(code)
+}
+
 func consumeAnthropicSSELine(p []byte, line []byte, body io.ReadCloser, buffer *streaming.StreamBuffer, convert func(*anthropicStreamEvent) string) (n int, handled bool, err error) {
 	line = bytes.TrimSpace(line)
 	if len(line) == 0 || bytes.HasPrefix(line, []byte("event:")) {
