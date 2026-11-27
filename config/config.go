@@ -413,6 +413,9 @@ func Load() (*LoadResult, error) {
 	if cfg.Server.StreamStallTimeout < 0 {
 		return nil, fmt.Errorf("server.stream_stall_timeout must be 0 or a positive number of seconds; got %d", cfg.Server.StreamStallTimeout)
 	}
+	if cfg.Server.AudioSpeechChunkChars < 0 {
+		return nil, fmt.Errorf("server.audio_speech_chunk_chars must be 0 or a positive number of characters; got %d", cfg.Server.AudioSpeechChunkChars)
+	}
 
 	if err := ValidateCacheConfig(&cfg.Cache); err != nil {
 		return nil, err

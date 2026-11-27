@@ -63,7 +63,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"CONFIG_STRICT",
-		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "MASTER_KEY_DISABLED", "AUTH_KEY_PREFIX", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
+		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "MASTER_KEY_DISABLED", "AUTH_KEY_PREFIX", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "AUDIO_SPEECH_CHUNK_CHARS", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
 		"SERVER_TRUSTED_PROXIES", "SERVER_CLIENT_IP_HEADER", "SERVER_TRUSTED_HOPS", "SERVER_TLS_CERT_FILE", "SERVER_TLS_KEY_FILE", "SERVER_TLS_CLIENT_CA_FILE",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL", "GOMODEL_OFFLINE", "GOMODEL_VERSION_CHECK_ENABLED", "ALLOWLIST_UPSTREAM_METADATA",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
@@ -2039,6 +2039,41 @@ server:
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "server.stream_stall_timeout")
 	})
+}
+
+func TestLoad_AudioSpeechChunkChars(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		env     string
+		want    int
+		wantErr string
+	}{
+		{name: "long input is not split by default", want: 0},
+		{name: "yaml", yaml: "server:\n  audio_speech_chunk_chars: 4096\n", want: 4096},
+		{name: "env overrides yaml", yaml: "server:\n  audio_speech_chunk_chars: 4096\n", env: "500", want: 500},
+		{name: "negative is rejected", env: "-1", wantErr: "server.audio_speech_chunk_chars"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(dir string) {
+				if tt.yaml != "" {
+					writeConfigYAML(t, dir, tt.yaml)
+				}
+				if tt.env != "" {
+					t.Setenv("AUDIO_SPEECH_CHUNK_CHARS", tt.env)
+				}
+				result, err := Load()
+				if tt.wantErr != "" {
+					require.ErrorContains(t, err, tt.wantErr)
+					return
+				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, result.Config.Server.AudioSpeechChunkChars)
+			})
+		})
+	}
 }
 
 func TestLoadRejectsMasterKeyFromUnsetVariable(t *testing.T) {

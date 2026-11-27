@@ -118,6 +118,47 @@ plain string.
 Synthesized audio is **relayed as the provider produces it** — see
 [Streaming](#streaming).
 
+### Long input
+
+Providers cap the text one speech request may carry (OpenAI: 4096 characters),
+and local models often get worse well before their limit. Set
+[`AUDIO_SPEECH_CHUNK_CHARS`](/advanced/configuration#server) to that limit and a
+client can send a whole article in one request:
+
+```bash
+AUDIO_SPEECH_CHUNK_CHARS=4096
+```
+
+- Input over the limit is split at **sentence boundaries**. Abbreviations,
+  initials and numbers (`Dr.`, `e.g.`, `3.14`) do not end a sentence, and
+  scripts that end sentences without a space (`。！？`) are recognized. A
+  sentence longer than the limit is cut at a line break, then at a comma, then
+  between words, and only as a last resort inside a word (a long URL, say).
+- The parts are synthesized **in order, with the same parameters**, and their
+  audio comes back as **one response**. The first bytes arrive as soon as the
+  first part is ready.
+- It stays **one request**: one request log entry, one usage record with the
+  characters sent to the provider and the audio duration, and one request against GoModel's rate
+  limits. The provider sees one request per part.
+
+Splitting applies to `response_format` `wav` and `pcm`, which can be joined
+without decoding. Every other format, the default `mp3` included, and
+`stream_format: "sse"` are forwarded unchanged, so the provider's own limit
+still applies to them. [audio.cpp](/providers/audiocpp) answers with WAV
+whatever format is requested unless it was built with the MP3 frontend, so ask
+it for `wav`. The joined WAV leaves its
+length open in the header, as OpenAI's own WAV responses do; players read it to
+the end.
+
+The default is `0`, which never splits. The setting is gateway-wide: use the
+smallest limit among your speech providers.
+
+<Note>
+  The first part is requested before the response starts, so a request the
+  provider rejects returns its error as usual. If a later part fails, the audio
+  ends there and the request log entry records `stream_error`.
+</Note>
+
 ## Speech-to-text
 
 <CodeGroup>

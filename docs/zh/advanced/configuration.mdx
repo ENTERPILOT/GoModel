@@ -48,6 +48,7 @@ GoModel 会根据常用的环境变量自动发现提供商。
 | `GOMODEL_DEMO_MODE`  | 在日志和控制台中启用公开演示警告  | `false`                |
 | `BODY_SIZE_LIMIT`    | 请求体大小上限（例如 `10M`、`1024K`、`500KB`），同时作用于压缩和解压后的大小 | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | 模型路由上的单次响应写入等待客户端读取的秒数；`0` 表示禁用 | `60`                   |
+| `AUDIO_SPEECH_CHUNK_CHARS` | 单次请求发送给提供商的 [`/v1/audio/speech` 输入](/zh/advanced/audio-api#长文本输入)的最大字符数；`response_format` 为 `wav` 或 `pcm`（非 SSE）且更长的输入会在句子边界处拆分，并作为一个音频流返回。`0` 表示从不拆分 | `0`                    |
 | `USER_PATH_HEADER`   | 用于读写请求 `user_path` 值的 Header  | `X-GoModel-User-Path`  |
 | `SERVER_TRUSTED_PROXIES` | 您自己的代理所在的网络；启用基于 Header 的客户端地址解析 | _（空）_ |
 | `SERVER_CLIENT_IP_HEADER` | 受信任代理用于传递客户端地址的 Header | `X-Forwarded-For` |

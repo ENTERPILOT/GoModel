@@ -173,6 +173,7 @@ func (b *bootstrap) initServerConfig() error {
 		DisableLiteLLMTags:              !appCfg.Tagging.LiteLLMTagsEnabled,
 		EnabledPassthroughProviders:     appCfg.Server.EnabledPassthroughProviders,
 		RealtimeEnabled:                 appCfg.Server.RealtimeEnabled,
+		AudioSpeechChunkChars:           appCfg.Server.AudioSpeechChunkChars,
 		AuthVerifyEnabled:               appCfg.Server.AuthVerifyEnabled,
 		AllowPassthroughV1Alias:         &allowPassthroughV1Alias,
 		UserPathHeader:                  appCfg.Server.UserPathHeader,

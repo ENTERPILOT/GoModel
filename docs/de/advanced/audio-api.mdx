@@ -122,6 +122,50 @@ einfacher String.
 Synthetisiertes Audio wird **so weitergereicht, wie der Provider es erzeugt** –
 siehe [Streaming](/de/advanced/audio-api#streaming).
 
+### Lange Eingaben
+
+Provider begrenzen den Text, den ein einzelner Speech-Request enthalten darf
+(OpenAI: 4096 Zeichen), und lokale Modelle werden oft schon deutlich vor ihrem
+Limit schlechter. Setzen Sie
+[`AUDIO_SPEECH_CHUNK_CHARS`](/de/advanced/configuration#server) auf dieses Limit,
+und ein Client kann einen ganzen Artikel in einem Request senden:
+
+```bash
+AUDIO_SPEECH_CHUNK_CHARS=4096
+```
+
+- Eingaben über dem Limit werden an **Satzgrenzen** geteilt. Abkürzungen,
+  Initialen und Zahlen (`Dr.`, `z.B.`, `3.14`, `3. Mai`) beenden keinen Satz,
+  und Schriften, die Sätze ohne Leerzeichen beenden (`。！？`), werden erkannt.
+  Ein Satz, der länger als das Limit ist, wird an einem Zeilenumbruch geteilt,
+  sonst an einem Komma, sonst zwischen Wörtern und nur als letzter Ausweg
+  innerhalb eines Worts (etwa einer langen URL).
+- Die Teile werden **der Reihe nach mit denselben Parametern** synthetisiert,
+  und ihr Audio kommt als **eine Response** zurück. Die ersten Bytes treffen
+  ein, sobald der erste Teil fertig ist.
+- Es bleibt **ein Request**: ein Request-Log-Eintrag, ein Usage-Eintrag mit den
+  an den Provider gesendeten Zeichen und der gesamten Audiodauer und ein Request gegen die
+  Rate Limits von GoModel. Der Provider sieht einen Request pro Teil.
+
+Geteilt wird bei `response_format` `wav` und `pcm`, die sich ohne Dekodieren
+zusammenfügen lassen. Alle anderen Formate, auch der Standard `mp3`, sowie
+`stream_format: "sse"` werden unverändert weitergeleitet; für sie gilt weiter
+das Limit des Providers. [audio.cpp](/de/providers/audiocpp) antwortet
+unabhängig vom angefragten Format mit WAV, sofern es nicht mit dem
+MP3-Frontend gebaut wurde; fragen Sie dort also `wav` an. Die
+zusammengefügte WAV-Datei lässt ihre Länge im Header offen, wie es auch die
+WAV-Responses von OpenAI tun; Player lesen sie bis zum Ende.
+
+Der Standard ist `0`: Eingaben werden nie geteilt. Die Einstellung gilt für das
+ganze Gateway. Verwenden Sie das kleinste Limit Ihrer Speech-Provider.
+
+<Note>
+  Der erste Teil wird angefordert, bevor die Response beginnt. Lehnt der
+  Provider den Request ab, kommt sein Fehler also wie gewohnt zurück. Schlägt ein
+  späterer Teil fehl, endet das Audio dort, und der Request-Log-Eintrag
+  verzeichnet `stream_error`.
+</Note>
+
 ## Speech-to-Text
 
 <CodeGroup>
