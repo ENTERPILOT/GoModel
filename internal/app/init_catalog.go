@@ -194,6 +194,7 @@ func (b *bootstrap) initPricing() error {
 	}
 
 	b.wrapUsageLoggerForMetrics()
+	b.wrapUsageLoggerForLago()
 	if err := b.wrapUsageLoggerForBilling(registry); err != nil {
 		return err
 	}

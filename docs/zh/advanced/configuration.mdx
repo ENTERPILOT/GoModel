@@ -268,6 +268,18 @@ server:
 | `USAGE_FLUSH_INTERVAL`         | 刷写间隔（秒）                      | `5`     |
 | `USAGE_RETENTION_DAYS`         | N 天后自动删除（0 = 永久保留）         | `90`    |
 
+#### Lago
+
+在 [Lago](/zh/guides/lago) 中为 Token 用量计费。默认关闭。
+
+| 变量                 | 说明                                                                           | 默认值                           |
+| -------------------- | ------------------------------------------------------------------------------ | -------------------------------- |
+| `LAGO_ENABLED`       | 将已映射客户的可计费、未命中响应缓存的请求的 Token 用量发送到 Lago；需要 `USAGE_ENABLED=true` | `false`                          |
+| `LAGO_API_URL`       | Lago API 基础 URL；使用欧盟集群或自托管实例时修改                              | `https://api.getlago.com/api/v1` |
+| `LAGO_API_KEY`       | Lago API 密钥；启用时必填                                                      | 无                               |
+| `LAGO_SUBSCRIPTIONS` | 以逗号分隔的 `user_path=external_subscription_id` 列表；启用时必填；没有任何已配置路径覆盖的请求不会发送 | 无                               |
+| `LAGO_BUFFER_SIZE`   | Lago 响应缓慢或不可达时可以等待的请求数；之后的请求会被丢弃并计数              | `10000`                          |
+
 #### 预算
 
 预算基于已追踪的用量成本记录。如果禁用了用量追踪，GoModel 会在禁用预算管理的状态下启动，并记录一条警告。

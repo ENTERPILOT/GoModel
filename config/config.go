@@ -31,6 +31,7 @@ type Config struct {
 	Media         MediaConfig         `yaml:"media"`
 	Usage         UsageConfig         `yaml:"usage"`
 	Pricing       PricingConfig       `yaml:"pricing"`
+	Lago          LagoConfig          `yaml:"lago"`
 	Budgets       BudgetsConfig       `yaml:"budgets"`
 	RateLimits    RateLimitsConfig    `yaml:"rate_limits"`
 	Metrics       MetricsConfig       `yaml:"metrics"`
@@ -221,6 +222,10 @@ func buildDefaultConfig() *Config {
 		Pricing: PricingConfig{
 			BillCacheHits: true,
 		},
+		Lago: LagoConfig{
+			APIURL:     DefaultLagoAPIURL,
+			BufferSize: DefaultLagoBufferSize,
+		},
 		Budgets: BudgetsConfig{
 			Enabled:                 true,
 			ProviderBilledCacheHits: true,
@@ -349,6 +354,12 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	if err := validatePricingConfig(&cfg.Pricing); err != nil {
+		return nil, err
+	}
+	if err := applyLagoEnv(cfg); err != nil {
+		return nil, err
+	}
+	if err := normalizeLagoConfig(&cfg.Lago); err != nil {
 		return nil, err
 	}
 	applyBudgetDependencies(cfg)

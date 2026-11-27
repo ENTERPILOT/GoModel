@@ -347,6 +347,25 @@ pricing:
   #   /acme/internal:
   #     "/": 0
 
+# Bill token usage in Lago (https://getlago.com). Each billable request of a
+# mapped customer, except response-cache hits, is sent as usage events to
+# POST /events/batch, one event per token kind with a positive count:
+# llm_input_tokens, llm_output_tokens, llm_cached_input_tokens and
+# llm_cache_creation_tokens. Needs usage.enabled.
+lago:
+  enabled: false # env: LAGO_ENABLED
+  api_url: "https://api.getlago.com/api/v1" # env: LAGO_API_URL; EU cluster or self-hosted: https://<host>/api/v1
+  # api_key: "${LAGO_API_KEY}" # env: LAGO_API_KEY; required when enabled
+  buffer_size: 10000 # env: LAGO_BUFFER_SIZE; requests that may wait while Lago is slow or unreachable
+  # user path -> external_subscription_id (env: LAGO_SUBSCRIPTIONS, as
+  # "/customers/acme=sub_acme,/customers/globex=sub_globex"). A path covers
+  # everything below it and the deepest one wins; a request no path covers is
+  # not sent to Lago.
+  subscriptions: {}
+  # subscriptions:
+  #   /customers/acme: sub_acme
+  #   /customers/globex: sub_globex
+
 budgets:
   enabled: true # env: BUDGETS_ENABLED; with no configured budgets this has no effect
   # GoModel Pro: provider budgets with cost_basis "billed" count billed
