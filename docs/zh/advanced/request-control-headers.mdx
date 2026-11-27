@@ -1,0 +1,62 @@
+---
+title: "请求控制头"
+description: "允许客户端通过 HTTP 请求头为单个请求更改网关设置。默认关闭；由你决定允许哪些请求头。"
+icon: "toggle-right"
+keywords: ["请求控制头", "按请求设置", "request control headers", "X-GoModel-Failover", "REQUEST_CONTROL_HEADERS"]
+---
+
+## 概览
+
+请求控制头允许客户端为自己的请求更改一项网关设置，例如“处理此请求时不进行故障转移”。
+
+网关设置由运维者决定，而控制头会把这一决定的一部分交给每个客户端。因此它们**默认关闭**：只有在你列出某个控制头之后，GoModel 才会读取它。
+
+## 允许某个请求头
+
+列出客户端可以发送的请求头，以逗号分隔：
+
+```bash
+REQUEST_CONTROL_HEADERS=X-GoModel-Failover
+```
+
+或在 `config.yaml` 中：
+
+```yaml
+server:
+  request_control_headers: ["X-GoModel-Failover"]
+```
+
+默认值为空：客户端无法控制任何设置。GoModel 不认识的名称会阻止启动，因此拼写错误不会让某个请求头悄无声息地处于关闭状态。
+
+该列表作用于整个网关，而不是单个 API 密钥。只有当每个能够通过认证的客户端都可以使用某个请求头时，才应添加它。
+
+## 支持的请求头
+
+| 请求头 | 值 | 效果 |
+| --- | --- | --- |
+| `X-GoModel-Failover` | `off` | 处理请求时不进行[故障转移](/zh/features/failover)：所选目标失败时，直接返回它的错误，而不再尝试其余目标。`on` 保持已配置的行为。 |
+
+开关接受 `on`/`off`、`true`/`false` 和 `1`/`0`，不区分大小写。
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "X-GoModel-Failover: off" \
+  -d '{"model": "resilient-chat", "messages": [{"role": "user", "content": "Hi"}]}'
+```
+
+## 规则
+
+- **未列出即忽略。** 你没有允许的控制头不会改变任何行为；请求会像客户端没有发送它一样被处理。
+- **从不转发。** 无论是否列出，控制头都留在网关。它们不会被发送给提供商，在[透传](/zh/features/passthrough-api)路由上也不会。
+- **无效值会被拒绝。** 已列出的请求头如果带有 GoModel 无法读取的值，或被发送了多次，会在调用任何提供商之前返回 `400 invalid_request_error`。
+- **仅限已认证的客户端。** 请求头在认证之后、在模型路由上读取。它们不影响 API 密钥检查、模型访问、[预算](/zh/features/budgets)或[速率限制](/zh/features/rate-limits)。
+- **仅限客户端自己的请求。** 网关在处理该请求期间自行发起的调用（例如护栏的评判模型）保持已配置的设置。
+- **在请求日志中可见。** 日志条目会记录实际生效的设置；使用 `X-GoModel-Failover: off` 处理的请求，其 `workflow_features` 中会显示 `failover: false`。
+
+`X-GoModel-Failover` 只能关闭故障转移。它无法开启已被虚拟模型、[工作流](/zh/advanced/workflows)或 `FAILOVER_ENABLED=false` 关闭的故障转移。
+
+<Note>
+  GoModel 一直以来就会读取的请求头，例如[用户路径请求头](/zh/features/user-path#http-请求头)、用于[响应缓存](/zh/features/cache)的 `Cache-Control` 以及[标签请求头](/zh/features/labelling#标签请求头)，都不是控制头：它们无需此设置即可使用。
+</Note>

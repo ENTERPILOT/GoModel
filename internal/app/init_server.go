@@ -176,6 +176,7 @@ func (b *bootstrap) initServerConfig() error {
 		AuthVerifyEnabled:               appCfg.Server.AuthVerifyEnabled,
 		AllowPassthroughV1Alias:         &allowPassthroughV1Alias,
 		UserPathHeader:                  appCfg.Server.UserPathHeader,
+		RequestControlHeaders:           appCfg.Server.RequestControlHeaders,
 		SwaggerEnabled:                  b.swaggerEnabled,
 		Tagging:                         app.tagging.Service,
 		SessionDetector:                 session.NewDetectorFromConfig(appCfg.Session),

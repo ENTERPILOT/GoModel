@@ -50,6 +50,7 @@ Der gängigste Weg, GoModel zu konfigurieren. Setzen Sie eine der folgenden Vari
 | `BODY_SIZE_LIMIT`    | Maximale Größe des Request-Bodys (z. B. `10M`, `1024K`, `500KB`), komprimiert und dekomprimiert | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | Sekunden, die ein einzelner Response-Schreibvorgang auf einer Modellroute darauf warten darf, dass der Client ihn liest; `0` deaktiviert | `60`                   |
 | `USER_PATH_HEADER`   | Header, über den `user_path`-Werte von Requests gelesen und geschrieben werden  | `X-GoModel-User-Path`  |
+| `REQUEST_CONTROL_HEADERS` | [Request-Control-Header](/de/advanced/request-control-headers), die Clients senden dürfen, um eine Gateway-Einstellung für ihren eigenen Request zu ändern, durch Kommas getrennt | _(leer, keiner erlaubt)_ |
 | `SERVER_TRUSTED_PROXIES` | Netzwerke, in denen Ihre eigenen Proxys stehen; aktiviert Client-Adressen aus Headern | _(leer)_ |
 | `SERVER_CLIENT_IP_HEADER` | Header, in dem ein vertrauenswürdiger Proxy die Client-Adresse übergibt | `X-Forwarded-For` |
 | `SERVER_TRUSTED_HOPS` | Anzahl der Proxys zwischen Client und Gateway; `0` durchsucht stattdessen die Kette | `0` |

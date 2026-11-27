@@ -134,6 +134,11 @@ Set `FAILOVER_ENABLED=false` (or `failover.enabled: false`) to switch the
 sweep off globally; a [workflow](/advanced/workflows) can also turn it off for
 its scope. The chosen target is still served, without retries.
 
+A client can turn failover off for a single request with the
+`X-GoModel-Failover: off` header once you allow it in
+[`REQUEST_CONTROL_HEADERS`](/advanced/request-control-headers). The header is
+ignored by default, and it can never turn failover on.
+
 ## Tune the failover policy
 
 The defaults above fit most deployments. Three settings under `failover`
