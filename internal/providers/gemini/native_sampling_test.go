@@ -133,7 +133,43 @@ func TestGeminiGenerationConfig_ForwardsSeed(t *testing.T) {
 
 			cfg := geminiGenerationConfig(&req)
 
-			assert.Equal(t, float64(7), cfg["seed"])
+			assert.Equal(t, int32(7), cfg["seed"])
+		})
+	}
+}
+
+// Gemini's seed is int32; a seed it would answer HTTP 400 for is dropped.
+func TestGeminiGenerationConfig_SeedRange(t *testing.T) {
+	tests := []struct {
+		seed string
+		want any
+	}{
+		{seed: `0`, want: int32(0)},
+		{seed: `-5`, want: int32(-5)},
+		{seed: `"42"`, want: int32(42)},
+		{seed: `2147483647`, want: int32(2147483647)},
+		{seed: `-2147483648`, want: int32(-2147483648)},
+		{seed: `2147483648`},
+		{seed: `-2147483649`},
+		{seed: `9223372036854775807`},
+		{seed: `1.5`},
+		{seed: `"abc"`},
+		{seed: `null`},
+		{seed: `true`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.seed, func(t *testing.T) {
+			var req core.ChatRequest
+			body := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],"seed":` + tt.seed + `}`
+			require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+			cfg := geminiGenerationConfig(&req)
+
+			if tt.want == nil {
+				assert.NotContains(t, cfg, "seed")
+				return
+			}
+			assert.Equal(t, tt.want, cfg["seed"])
 		})
 	}
 }
