@@ -190,6 +190,10 @@ class PlaygroundStore {
 
   clear() {
     this.stop();
+    // Detach the aborted send: its teardown must not write its response
+    // summary back over the state reset here.
+    this.#abort = null;
+    this.sending = false;
     this.messages = [];
     this.error = "";
     this.response = null;
@@ -198,6 +202,20 @@ class PlaygroundStore {
 
   stop() {
     if (this.#abort) this.#abort.abort();
+  }
+
+  // Replaces the conversation with a logged request (a playgroundSnapshot.js
+  // snapshot) so Send replays it. A snapshot without a model keeps the
+  // current selection.
+  loadSnapshot(snapshot) {
+    this.clear();
+    this.setMode("chat");
+    this.setEndpoint(snapshot.endpoint);
+    if (snapshot.model) this.setModel(snapshot.model);
+    this.setStream(snapshot.stream);
+    this.draft = "";
+    for (const message of snapshot.messages) this.addMessage(message.role, message.content);
+    this.panelTab = "request";
   }
 
   async send() {
@@ -297,9 +315,9 @@ class PlaygroundStore {
       if (this.#abort === controller) {
         this.#abort = null;
         this.sending = false;
+        this.responseMeta = meta;
+        if (this.response !== null || this.error) this.panelTab = "response";
       }
-      this.responseMeta = meta;
-      if (this.response !== null || this.error) this.panelTab = "response";
     }
   }
 }
