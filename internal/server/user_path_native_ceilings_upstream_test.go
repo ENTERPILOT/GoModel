@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -145,14 +144,12 @@ func TestCeilingLowersAPerMessageEffortOfANativeMessagesBody(t *testing.T) {
 		assert.Equal(t, `{"model":"claude-opus-5",`+body("low"), string(f.upstreams["anthropic"].Last(t).Body))
 	})
 
-	t.Run("a request the translated pipeline lowers carries no per-message effort", func(t *testing.T) {
+	t.Run("with a top-level effort above the ceiling in a body the pipeline could carry", func(t *testing.T) {
 		f := newUpstreamFixture(t, cappedRows, nil)
 		rec := f.post(t, "/low", "/v1/messages", `{"model":"anthropic/claude-opus-5","max_tokens":512,"output_config":{"effort":"max"},`+effortTurns("max")+`}`)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-		sent := string(f.upstreams["anthropic"].Last(t).Body)
-		assert.Equal(t, 1, strings.Count(sent, `"effort"`), sent)
-		assert.Equal(t, "low", object(t, f.sent(t, "anthropic"), "output_config")["effort"])
+		assert.Equal(t, `{"model":"claude-opus-5","max_tokens":512,"output_config":{"effort":"low"},`+effortTurns("low")+`}`, string(f.upstreams["anthropic"].Last(t).Body))
 	})
 }
 
@@ -167,11 +164,11 @@ func TestXHighCeilingSendsHighToAModelWithoutThatLevel(t *testing.T) {
 		want string
 	}{
 		{name: "chat completions", path: "/v1/chat/completions", body: `{"model":"anthropic/claude-opus-4-6","reasoning_effort":"max",` + hiMessages + `}`, want: "high"},
-		{name: "messages, lowered by the translated pipeline", path: "/v1/messages", body: `{"model":"anthropic/claude-opus-4-6","max_tokens":512,"output_config":{"effort":"max"},` + hiMessages + `}`, want: "high"},
+		{name: "messages, lowered in the forwarded body", path: "/v1/messages", body: `{"model":"anthropic/claude-opus-4-6","max_tokens":512,"output_config":{"effort":"max"},` + hiMessages + `}`, want: "high"},
 		{name: "messages, lowered in a native-only body", path: "/v1/messages", body: `{"model":"anthropic/claude-opus-4-6","max_tokens":512,"output_config":{"effort":"max"},` + serverToolHistory + `}`, want: "high"},
 		{name: "messages within the ceiling", path: "/v1/messages", body: `{"model":"anthropic/claude-opus-4-6","max_tokens":512,"output_config":{"effort":"high"},` + hiMessages + `}`, want: "high"},
 		{name: "sonnet 4.6, chat completions", path: "/v1/chat/completions", body: `{"model":"anthropic/claude-sonnet-4-6","reasoning_effort":"max",` + hiMessages + `}`, want: "high"},
-		{name: "sonnet 4.6, messages lowered by the translated pipeline", path: "/v1/messages", body: `{"model":"anthropic/claude-sonnet-4-6","max_tokens":512,"output_config":{"effort":"max"},` + hiMessages + `}`, want: "high"},
+		{name: "sonnet 4.6, messages lowered in the forwarded body", path: "/v1/messages", body: `{"model":"anthropic/claude-sonnet-4-6","max_tokens":512,"output_config":{"effort":"max"},` + hiMessages + `}`, want: "high"},
 		{name: "sonnet 4.6, messages lowered in a native-only body", path: "/v1/messages", body: `{"model":"anthropic/claude-sonnet-4-6","max_tokens":512,"output_config":{"effort":"max"},` + serverToolHistory + `}`, want: "high"},
 		{name: "a model with the level gets it", path: "/v1/chat/completions", body: `{"model":"anthropic/claude-opus-5","reasoning_effort":"max",` + hiMessages + `}`, want: "xhigh"},
 		{name: "a model with the level gets it in a native-only body", path: "/v1/messages", body: `{"model":"anthropic/claude-opus-5","max_tokens":512,"output_config":{"effort":"max"},` + serverToolHistory + `}`, want: "xhigh"},

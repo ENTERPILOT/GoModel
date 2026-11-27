@@ -31,12 +31,6 @@ func ResponsesRequestWithCeilings(req *core.ResponsesRequest, ceilings requestpa
 	return requestparams.CapResponsesTokens(req, ceilings)
 }
 
-// ChatRequestExceedsCeilings reports whether the ceilings would change req.
-func ChatRequestExceedsCeilings(req *core.ChatRequest, ceilings requestparams.Ceilings) bool {
-	capped, err := ChatRequestWithCeilings(req, ceilings)
-	return err != nil || capped != req
-}
-
 // effortWithinCeiling reports whether the efforts a request carries, in any
 // spelling, have to be replaced, and the effort that replaces them all. One
 // above ceiling is replaced by the ceiling, and so is one the common scale

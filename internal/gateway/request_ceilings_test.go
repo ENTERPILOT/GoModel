@@ -118,7 +118,6 @@ func TestChatRequestWithCeilingsReasoningEffort(t *testing.T) {
 			capped, err := ChatRequestWithCeilings(req, requestparams.Ceilings{ReasoningEffort: tt.ceiling})
 			require.NoError(t, err)
 
-			assert.Equal(t, !tt.unchanged, ChatRequestExceedsCeilings(req, requestparams.Ceilings{ReasoningEffort: tt.ceiling}))
 			if tt.unchanged {
 				assert.Same(t, req, capped)
 				return

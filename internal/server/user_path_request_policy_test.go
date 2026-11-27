@@ -347,8 +347,8 @@ func TestUserPathCeilingsOnADirectModelRequest(t *testing.T) {
 }
 
 // An Anthropic Messages request is forwarded verbatim while it stays within
-// the caller's ceilings and takes the translated pipeline, which can lower
-// it, once it exceeds them or names no model.
+// the caller's ceilings. One above them is forwarded too, with only its
+// limits lowered, so it keeps the members the translation does not model.
 func TestUserPathPolicyAndNativeMessagesForwarding(t *testing.T) {
 	newFixture := func(t *testing.T) (*capturingProvider, func(userPath, body string) *httptest.ResponseRecorder) {
 		t.Helper()
@@ -395,21 +395,23 @@ func TestUserPathPolicyAndNativeMessagesForwarding(t *testing.T) {
 		require.NotNil(t, provider.lastPassthroughReq, "the request should have been forwarded natively")
 		assert.Nil(t, provider.capturedChatReq)
 	})
-	t.Run("above the token ceiling is translated and capped", func(t *testing.T) {
+	t.Run("above the token ceiling is forwarded with the limit lowered in place", func(t *testing.T) {
 		provider, post := newFixture(t)
-		post("/eng/alice", `{"model":"anthropic/claude-test","max_tokens":32000,"messages":[{"role":"user","content":"hi"}]}`)
-		assert.Nil(t, provider.lastPassthroughReq)
-		require.NotNil(t, provider.capturedChatReq)
-		require.NotNil(t, provider.capturedChatReq.MaxTokens)
-		assert.Equal(t, 4096, *provider.capturedChatReq.MaxTokens)
+		post("/eng/alice", `{"model":"anthropic/claude-test","max_tokens":32000,"metadata":{"user_id":"u1"},"context_management":{"edits":[{"type":"clear_tool_uses_20250919"}]},"messages":[{"role":"user","content":"hi"}]}`)
+		require.NotNil(t, provider.lastPassthroughReq, "the request should have been forwarded natively")
+		assert.Nil(t, provider.capturedChatReq)
+		forwarded, err := io.ReadAll(provider.lastPassthroughReq.Body)
+		require.NoError(t, err)
+		assert.Equal(t, `{"model":"claude-test","max_tokens":4096,"metadata":{"user_id":"u1"},"context_management":{"edits":[{"type":"clear_tool_uses_20250919"}]},"messages":[{"role":"user","content":"hi"}]}`, string(forwarded))
 	})
-	t.Run("above the effort ceiling is translated and lowered", func(t *testing.T) {
+	t.Run("above the effort ceiling is forwarded with the effort lowered in place", func(t *testing.T) {
 		provider, post := newFixture(t)
 		post("/eng/alice", `{"model":"anthropic/claude-test","max_tokens":1024,"output_config":{"effort":"max"},"messages":[{"role":"user","content":"hi"}]}`)
-		assert.Nil(t, provider.lastPassthroughReq)
-		require.NotNil(t, provider.capturedChatReq)
-		require.NotNil(t, provider.capturedChatReq.Reasoning)
-		assert.Equal(t, "medium", provider.capturedChatReq.Reasoning.Effort)
+		require.NotNil(t, provider.lastPassthroughReq, "the request should have been forwarded natively")
+		assert.Nil(t, provider.capturedChatReq)
+		forwarded, err := io.ReadAll(provider.lastPassthroughReq.Body)
+		require.NoError(t, err)
+		assert.Equal(t, `{"model":"claude-test","max_tokens":1024,"output_config":{"effort":"medium"},"messages":[{"role":"user","content":"hi"}]}`, string(forwarded))
 	})
 	t.Run("a request served by the default model is forwarded with the model added", func(t *testing.T) {
 		provider, post := newFixture(t)
