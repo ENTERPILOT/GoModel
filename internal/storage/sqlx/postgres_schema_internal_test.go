@@ -36,6 +36,8 @@ func TestCreateIndexPattern(t *testing.T) {
 		`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_usage_model ON usage(model)`,
 		`DROP INDEX IF EXISTS idx_usage_model`,
 		`CREATE TABLE IF NOT EXISTS usage (id TEXT)`,
+		// Names tenant.events, not the table tenant.
+		`CREATE INDEX IF NOT EXISTS uq_events ON tenant . events(id)`,
 	} {
 		assert.Nil(t, createIndexPattern.FindStringSubmatch(statement), statement)
 	}

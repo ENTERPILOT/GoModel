@@ -187,3 +187,25 @@ func TestSchemaChangeRechecksAfterWaitingForAnotherReplica(t *testing.T) {
 		})
 	}
 }
+
+// A batch that drops an index and creates it again must create it: the
+// catalog is read before the drop runs, so the index still looks present.
+func TestSchemaRecreatesAnIndexDroppedEarlierInTheBatch(t *testing.T) {
+	pool := sqlxtest.NewPostgresPool(t)
+	if pool == nil {
+		return
+	}
+	db, err := sqlx.NewPostgreSQL(pool)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, db.Schema(ctx, lockedTable, `CREATE INDEX IF NOT EXISTS idx_locked_model ON locked(model)`))
+
+	require.NoError(t, db.Schema(ctx,
+		`DROP INDEX IF EXISTS idx_locked_model`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_locked_model ON locked(model)`))
+
+	var unique bool
+	require.NoError(t, db.QueryRow(ctx,
+		`SELECT indisunique FROM pg_index WHERE indexrelid = to_regclass('idx_locked_model')`).Scan(&unique))
+	assert.True(t, unique)
+}

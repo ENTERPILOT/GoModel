@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -47,7 +48,7 @@ const lockNotAvailable = "55P03"
 const pgIdentifier = `(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*)`
 
 var createIndexPattern = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+(` +
-	pgIdentifier + `)\s+ON\s+(` + pgIdentifier + `(?:\.` + pgIdentifier + `)?)`)
+	pgIdentifier + `)\s+ON\s+(` + pgIdentifier + `(?:\.` + pgIdentifier + `)?)\s*(?:\(|USING\b)`)
 
 // changeSchema runs fn in a transaction that holds the schema advisory lock
 // and gives up waiting for a table lock after lockWait.timeout, retrying the
@@ -93,12 +94,14 @@ func isLockTimeout(err error) bool {
 }
 
 // pendingSchema drops the CREATE INDEX IF NOT EXISTS statements whose index
-// already exists. A statement it cannot parse is kept, so it runs as written.
+// already exists. A statement it cannot parse is kept, so it runs as written,
+// and so is an index an earlier statement of the batch names: that statement
+// may drop it, and the catalog is read before any of them runs.
 func pendingSchema(ctx context.Context, q Querier, statements []string) ([]string, error) {
 	pending := make([]string, 0, len(statements))
-	for _, statement := range statements {
+	for i, statement := range statements {
 		match := createIndexPattern.FindStringSubmatch(statement)
-		if match == nil {
+		if match == nil || namedEarlier(statements[:i], identifierName(match[1])) {
 			pending = append(pending, statement)
 			continue
 		}
@@ -119,6 +122,12 @@ func pendingSchema(ctx context.Context, q Querier, statements []string) ([]strin
 		}
 	}
 	return pending, nil
+}
+
+func namedEarlier(statements []string, name string) bool {
+	return slices.ContainsFunc(statements, func(statement string) bool {
+		return strings.Contains(strings.ToLower(statement), strings.ToLower(name))
+	})
 }
 
 // identifierName is the name PostgreSQL stores for an identifier as written
