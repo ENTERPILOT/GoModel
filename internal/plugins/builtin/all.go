@@ -3,6 +3,7 @@ package builtin
 
 import (
 	"github.com/enterpilot/gomodel/internal/plugins/builtin/headeredit"
+	"github.com/enterpilot/gomodel/internal/plugins/builtin/inferencehook"
 	"github.com/enterpilot/gomodel/internal/plugins/builtin/llmaltering"
 	"github.com/enterpilot/gomodel/internal/plugins/builtin/llmjudge"
 	"github.com/enterpilot/gomodel/internal/plugins/builtin/presidio"
@@ -23,6 +24,7 @@ func All() []func() pluginapi.Plugin {
 		headeredit.New,
 		llmjudge.New,
 		presidio.New,
+		inferencehook.New,
 		routeexample.New,
 	}
 }

@@ -156,7 +156,7 @@ die **Inhalte bearbeiten** (`system_prompt`, `llm_based_altering`,
 `string_replace`, `presidio`), können sich keinen `order`-Wert mit einem anderen
 bearbeitenden Guardrail teilen; pro `order` ist nur ein bearbeitender Guardrail
 erlaubt, daneben beliebig viele nicht bearbeitende Prüfungen (`llm_judge`,
-`header_edit`). Entscheiden mehrere Guardrails mit demselben `order`-Wert
+`inference_hook`, `header_edit`). Entscheiden mehrere Guardrails mit demselben `order`-Wert
 unterschiedlich, gewinnt die strengste Entscheidung: `block` > `respond` >
 `warn` > `allow`.
 
@@ -218,7 +218,7 @@ Guardrail-Endpunkte und die Dashboard-Seite nicht zur Verfügung.
 
 ## Guardrail-Typen
 
-GoModel liefert sechs Typen mit. Jeder ist ein eingebautes Plugin; die Tabellen
+GoModel liefert acht Typen mit. Jeder ist ein eingebautes Plugin; die Tabellen
 listen seine Konfigurationsschlüssel so auf, wie sie unter `config:` und im
 Dashboard-Formular erscheinen.
 
@@ -825,6 +825,122 @@ daher dasselbe Format.
     entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
     restore: true
     restore_tools_exclude: ["web_search"]
+```
+
+### `inference_hook`
+
+Fragt einen AI-Security-Server nach einem Allow- oder Deny-Urteil und spricht
+dabei Anthropics
+[Inference-hooks](https://platform.claude.com/docs/en/manage-claude/inference-hooks)-Protokoll.
+Anthropic betreibt diese Hooks nur für Claude-Enterprise-Apps, nicht für API-,
+Amazon-Bedrock- oder Google-Cloud-Traffic. Mit diesem Guardrail ist
+stattdessen GoModel der Aufrufer, sodass ein für das Protokoll gebauter Server
+(Ihr eigener oder der eines Security-Anbieters) Requests an jeden Provider
+prüfen kann.
+
+GoModel sendet einen signierten `POST` und wartet auf `{"action": "allow"}`
+oder `{"action": "deny", "deny_reason": "..."}`:
+
+| Phase | Frame | Gesendet |
+| --- | --- | --- |
+| prompt | `prompt`: die bisherige Konversation | Einmal pro Request, bevor der Provider aufgerufen wird. Ein Failover-Versuch sendet ihn nicht erneut. |
+| response, stream | `tool_call`: die Assistant-Nachricht und ihre Tool-Calls | Nur wenn die Response Tools aufruft, bevor der Client sie ausführen kann. |
+
+**Phasen:** prompt, response, stream (gepuffert). **Bearbeitet Inhalte:** nein;
+das Protokoll kann einen Prompt nicht umschreiben.
+
+In der stream-Phase wird der gesamte Stream gepuffert, bis das Urteil
+vorliegt, sodass kein Tool-Call den Client vorher erreicht. Eine Response mit
+mehreren Choices sendet einen Frame pro Choice, die Tools aufruft, und ein Deny
+für eine davon lehnt die gesamte Response ab.
+
+#### Einstellungen
+
+| Schlüssel | Erforderlich | Standard | Beschreibung |
+| --- | -------- | ------- | ----------- |
+| `endpoint_url` | Ja | | URL des Security-Servers. Die gesamte URL ist der Endpunkt; Redirects werden nicht verfolgt. Verwenden Sie `https://`, außer der Server läuft auf localhost oder in einem Netz, dem Sie die Konversation anvertrauen. |
+| `signing_secret` | Ja | | [Standard-Webhooks](https://www.standardwebhooks.com/)-Secret, mit dem jeder Request signiert wird: Base64, mit oder ohne Präfix `whsec_`. Konfigurieren Sie denselben Wert auf dem Server. |
+| `auth_header` | Nein | `Authorization` | Name des statischen Headers, der `auth_value` trägt. |
+| `auth_value` | Nein | | Wert des Auth-Headers, unverändert gesendet (`Bearer <token>`), für einen Server, der seine Aufrufer zusätzlich authentifiziert. Benötigt eine `https://`-URL, außer der Server läuft auf localhost. |
+| `tenant_id` | Nein | `null` | `tenant_id` jedes Frames, für einen Server, der mehrere Organisationen bedient. |
+| `roles` | Nein | `["system", "user", "assistant", "tool"]` | Prompt-Nachrichten, die in der prompt-Phase gesendet werden. `system` umfasst auch Developer-Nachrichten; entfernen Sie es, um das zu senden, was Anthropic sendet, siehe [Was gesendet wird](#was-gesendet-wird). Eine Nachricht mit jeder anderen Rolle wird immer gesendet. |
+| `action` | Nein | `block` | Bei einem Deny-Urteil: `block` lehnt ab, `respond` antwortet mit einer Assistant-Antwort, `warn` fährt fort und protokolliert das Urteil. Nutzen Sie `warn` als Shadow-Modus, um eine Richtlinie an echtem Traffic zu erproben. |
+| `message` | Nein | `This request was blocked by policy` | Wird verwendet, wenn das Urteil kein `deny_reason` enthält. Andernfalls sieht der Client das `deny_reason` des Servers (höchstens 500 Zeichen). |
+| `block_status` | Nein | Phasenstandard | Ein HTTP-Statuscode zwischen 400 und 599 für `block`, zum Beispiel `403`. |
+| `verdict_timeout_ms` | Nein | `5000` | Wie lange ein Urteil dauern darf, Verbindungsaufbau eingeschlossen (1 bis 60000). Das `timeout_ms` der Regel gilt weiterhin, wenn es niedriger ist. |
+
+Ein Signing-Secret erzeugen Sie mit `echo "whsec_$(openssl rand -base64 32)"`.
+
+#### Fehler und Timeouts
+
+Ein Urteil ist HTTP 200 mit `action` gleich `allow` oder `deny`. Alles andere
+ist ein Fehler, niemals ein Deny: ein Timeout, ein Verbindungsfehler, jeder
+andere Status (auch ein Redirect) oder ein Body, der nicht lesbar oder größer
+als 64 KiB ist. Das `fail_mode` der Regel entscheidet, was ein Fehler bewirkt:
+
+- `closed` (Standard): Der Request wird mit HTTP 500 `plugin_failure`
+  abgelehnt. In der prompt-Phase erhält der Provider den Request nie; in der
+  response- und der stream-Phase erhält der Client die Response nie.
+- `open`: Der Request läuft ohne Urteil weiter, und der Fehler wird im
+  Request-Log festgehalten. Wählen Sie das nur, wenn Verfügbarkeit wichtiger
+  ist als die Prüfung.
+
+GoModel sendet außerdem den Verbindungstest des Protokolls (einen
+`prompt`-Frame mit `source.application` gleich `config-test`, der eine feste
+Testnachricht statt Inhalten eines Requests trägt), wenn der Guardrail gebaut wird und bei jedem
+Guardrail-Refresh, standardmäßig einmal pro Minute. Ohne gültiges Urteil,
+allow oder deny, wird der Guardrail im Dashboard als beeinträchtigt angezeigt.
+Fehlgeschlagene Requests werden nicht wiederholt.
+
+#### Was gesendet wird
+
+Jeder Request trägt `Content-Type: application/json`,
+`User-Agent: gomodel-inference-hook/1`, den Auth-Header sowie die Header
+`webhook-id`, `webhook-timestamp` und `webhook-signature`, die ein Server so
+prüft, wie [Anthropic es dokumentiert](https://platform.claude.com/docs/en/manage-claude/inference-hooks-endpoint#verify-the-signature).
+Der Body folgt dem Frame des Protokolls, mit diesen Werten:
+
+| Feld | Wert |
+| --- | --- |
+| `request_id` | Neu für jeden Frame; entspricht `webhook-id` und wird im Request-Log als `hook_request_id` gespeichert, neben der `reference_id` des Urteils. |
+| `actor` | `{"type": "user", "id": <API-Key-ID>}`; niemals der Key selbst. |
+| `source.application` | `gomodel` |
+| `model`, `session_id` | Das aufgelöste Provider-Modell und die erkannte Session, oder `null`. |
+| `metadata` | `gomodel_request_id`, `gomodel_user_path`, `gomodel_provider`. |
+| `messages` | Text, Tool-Calls und Tool-Ergebnisse. Jeder Bild-, Audio- oder Datei-Teil wird zu einem `attachment`-Block ohne Inhalt: Seine Bytes werden nie gesendet, Tool-Definitionen und andere Request-Parameter ebenfalls nicht. Inhalte, die GoModel nicht modelliert, etwa ein Reasoning-Item von `/v1/responses`, werden als `attachment` mit ihrem JSON als `text` gesendet. |
+
+GoModel extrahiert keinen Text aus Dateien. Ein Server, der keine Datei und
+kein Bild ungelesen durchlassen darf, kann jedes `attachment` ablehnen, dessen
+`text` `null` ist.
+
+Zwei Dinge unterscheiden sich von den Frames, die Anthropic sendet:
+
+- **System- und Developer-Nachrichten werden gesendet**, unter der Rolle
+  `user`. Über ein Gateway schreibt sie der Aufrufer; sie wegzulassen würde
+  ihm erlauben, Inhalte am Hook vorbeizuschleusen. Entfernen Sie `system` aus
+  `roles`, wenn die Richtlinie Ihres Servers sie nicht sehen darf.
+- **Reasoning, das der Aufrufer wieder einspielt**, wird in Assistant-Turns
+  aus demselben Grund als Text gesendet. Das eigene Reasoning des Modells in
+  einem `tool_call`-Frame nicht.
+
+#### Beispiel
+
+```yaml
+- name: "dlp"
+  type: "inference_hook"
+  order: 0
+  config:
+    endpoint_url: "https://security.example.com/hooks/verdict"
+    signing_secret: "${env:INFERENCE_HOOK_SECRET}"
+
+# Auch Tool-Calls prüfen, bevor der Client sie ausführt.
+- name: "dlp-tools"
+  type: "inference_hook"
+  phase: "response"
+  order: 0
+  config:
+    endpoint_url: "https://security.example.com/hooks/verdict"
+    signing_secret: "${env:INFERENCE_HOOK_SECRET}"
 ```
 
 ## Beispiele

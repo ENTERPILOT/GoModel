@@ -25,7 +25,8 @@ type GuardrailRuleConfig struct {
 
 	// Type selects the plugin the instance is built from: a built-in such as
 	// "system_prompt", "llm_based_altering", "string_replace", "tag_replace",
-	// "header_edit", "llm_judge", "presidio", or the manifest name of a loaded plugin.
+	// "header_edit", "llm_judge", "presidio", "inference_hook", or the manifest
+	// name of a loaded plugin.
 	Type string `yaml:"type"`
 
 	// UserPath scopes internal auxiliary guardrail requests for workflow
