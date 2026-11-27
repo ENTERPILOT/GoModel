@@ -376,10 +376,17 @@ this binary was built with go1.27.3, gomodel v0.1.91, flags (none). Rebuild it
 with `gomodel plugin build` from this GoModel version
 ```
 
-在 Docker 中，请构建 `Dockerfile.plugins` 的 `plugin-builder` 目标，并针对您的插件目录运行它：
+在 Docker 中，请构建 `Dockerfile.plugins` 的 `plugin-builder` 目标。GoModel 代码树中的插件（例如示例插件）已包含在镜像的 `/app` 下：
 
 ```sh
 docker build -f Dockerfile.plugins --target plugin-builder -t gomodel-plugin-builder .
+docker run --rm -v "$PWD/plugins:/out" gomodel-plugin-builder \
+  -o /out/keyword_block.so /app/docs/example_plugins/keywordblock
+```
+
+位于独立 Go 模块中的插件需挂载到 `/src`。请在其 `go.mod` 中通过 `replace github.com/enterpilot/gomodel => /app` 指向镜像中的 GoModel 源码：
+
+```sh
 docker run --rm -v "$PWD/my-plugin:/src" -v "$PWD/plugins:/out" \
   gomodel-plugin-builder -o /out/my-plugin.so /src
 ```
