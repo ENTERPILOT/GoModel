@@ -220,6 +220,20 @@ gomodel secrets reencrypt [--rotate-data-key]
 
 Zobacz [Szyfrowanie danych w spoczynku](/pl/advanced/encryption-at-rest).
 
+## Import użycia z innej instancji
+
+`gomodel usage import` kopiuje historię użycia innej instancji GoModel,
+odczytaną z jej pliku bazy SQLite, do bazy, której używa ta instancja (SQLite,
+PostgreSQL lub MongoDB). Uruchom polecenie z tą samą konfiguracją co gateway.
+Plik źródłowy jest otwierany tylko do odczytu, a istniejące już wiersze są
+pomijane, więc ponowne uruchomienie jest bezpieczne.
+
+```bash
+gomodel usage import /path/to/other/gomodel.db
+```
+
+Zobacz [Łączenie użycia z kilku instancji](/pl/features/cost-tracking#łączenie-użycia-z-kilku-instancji).
+
 ## Migracja z LiteLLM
 
 `gomodel migrate litellm` konwertuje plik `config.yaml` proxy LiteLLM na plik
