@@ -50,9 +50,10 @@ Ein Manifest darf sie deklarieren; GoModel prüft, ob die Interfaces implementie
 ignoriert sie zur Laufzeit. Die Art `route` wird von virtuellen Modellen verwendet, siehe
 [Routing-Strategie-Plugins](/de/advanced/plugins#routing-strategie-plugins).
 
-Die Phasen gelten für `/v1/chat/completions`, `/v1/responses` und `/v1/messages`.
-Anthropic-Requests werden vor jedem Hook in die Chat-Form übersetzt, sodass ein Plugin nur eine
-Struktur sieht; `Meta.Dialect` meldet `anthropic_messages`, wenn das relevant ist. Inline-Items von
+Die Phasen gelten für `/v1/chat/completions`, `/v1/responses`, `/v1/messages` und die
+Gemini-API-Routen. Anthropic- und Gemini-Requests werden vor jedem Hook in die Chat-Form
+übersetzt, sodass ein Plugin nur eine Struktur sieht; `Meta.Dialect` meldet `anthropic_messages`
+oder `gemini_generate_content`, wenn das relevant ist. Inline-Items von
 `/v1/batches` durchlaufen die Phase `prompt`, wenn `guardrails.enable_for_batch_processing`
 aktiviert ist.
 

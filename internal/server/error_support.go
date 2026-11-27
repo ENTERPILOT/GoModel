@@ -11,12 +11,13 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/anthropicapi"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/geminiapi"
 	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // handleError converts gateway errors to an HTTP response, rendered in the wire
-// dialect of the request path (Anthropic envelope for /v1/messages, otherwise
-// the OpenAI-compatible envelope).
+// dialect of the request path (Anthropic envelope for /v1/messages, Gemini
+// envelope for /v1beta, otherwise the OpenAI-compatible envelope).
 func handleError(c *echo.Context, err error) error {
 	return writeGatewayError(c, recordHandledError(c, err))
 }
@@ -77,8 +78,12 @@ func recordClientClosedRequest(c *echo.Context, err error) *core.GatewayError {
 // writeGatewayError renders a gateway error in the request's wire dialect
 // without logging or request log enrichment, for callers that already recorded it.
 func writeGatewayError(c *echo.Context, gatewayErr *core.GatewayError) error {
-	if requestDialect(c) == "anthropic" {
+	switch requestDialect(c) {
+	case "anthropic":
 		status, body := anthropicapi.ErrorFromGateway(gatewayErr)
+		return c.JSON(status, body)
+	case "gemini":
+		status, body := geminiapi.ErrorFromGateway(gatewayErr)
 		return c.JSON(status, body)
 	}
 	return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
@@ -224,16 +229,22 @@ func handleRouteNotFound(c *echo.Context) error {
 		status, body := anthropicapi.ErrorFromGateway(notFound)
 		return c.JSON(status, body)
 	}
-	return c.JSON(notFound.HTTPStatusCode(), notFound.ToJSON())
+	return writeGatewayError(c, notFound)
 }
 
 // requestDialect reports the ingress wire dialect classified for the request
-// path (e.g. "anthropic", "openai_compat"), or "" when unclassified.
+// path (e.g. "anthropic", "openai_compat"), or "" when unclassified. Every
+// /v1beta path is the Gemini dialect, classified or not: its model routes and
+// unknown methods answer Gemini SDK clients too.
 func requestDialect(c *echo.Context) string {
 	if c == nil || c.Request() == nil {
 		return ""
 	}
-	return core.DescribeEndpointPath(c.Request().URL.Path).Dialect
+	path := c.Request().URL.Path
+	if core.IsGeminiAPIPath(path) {
+		return "gemini"
+	}
+	return core.DescribeEndpointPath(path).Dialect
 }
 
 // invalidRequestBodyError renders a request-body decode failure for the client.

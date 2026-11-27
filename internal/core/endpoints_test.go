@@ -49,6 +49,11 @@ func TestDescribeEndpointPath(t *testing.T) {
 		{path: "/v1/systemone/other", managed: false, dialect: "", operation: "", bodyMode: BodyModeNone, interaction: false},
 		{path: "/p/openai/responses", managed: true, dialect: "provider_passthrough", operation: OperationProviderPassthrough, bodyMode: BodyModeOpaque, interaction: true},
 		{path: "/v1/models", managed: false, dialect: "", operation: "", bodyMode: BodyModeNone, interaction: false},
+		{path: "/v1beta/models/gemini-2.5-flash:generateContent", managed: true, dialect: "gemini", operation: OperationChatCompletions, bodyMode: BodyModeJSON, interaction: true},
+		{path: "/v1beta/models/openai/gpt-4o:streamGenerateContent", managed: true, dialect: "gemini", operation: OperationChatCompletions, bodyMode: BodyModeJSON, interaction: true},
+		{path: "/v1beta/models/gemini-2.5-flash:countTokens", managed: false, dialect: "", operation: "", bodyMode: BodyModeNone, interaction: false},
+		{path: "/v1beta/models/gemini-2.5-flash", managed: false, dialect: "", operation: "", bodyMode: BodyModeNone, interaction: false},
+		{path: "/v1beta/models", managed: false, dialect: "", operation: "", bodyMode: BodyModeNone, interaction: false},
 	}
 
 	for _, tt := range tests {

@@ -30,6 +30,10 @@ const EXACT_PATHS = {
   "/v1/chat/completions": "chat",
   "/v1/messages": "chat",
   "/v1/messages/count_tokens": "chat",
+  // The Gemini routes are recorded under their path template: the request
+  // path carries the model.
+  "/v1beta/models/{model}:generateContent": "chat",
+  "/v1beta/models/{model}:streamGenerateContent": "chat",
   "/v1/embeddings": "embeddings",
   "/v1/audio/speech": "audio",
   "/v1/audio/transcriptions": "audio",

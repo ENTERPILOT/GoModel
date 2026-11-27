@@ -13,7 +13,10 @@ type OperationPaths struct {
 // operationPaths mirrors describeEndpointPath. TestOperationPathsMatchDescribeEndpoint
 // keeps the two in sync.
 var operationPaths = map[Operation]OperationPaths{
-	OperationChatCompletions:     {Exact: []string{"/v1/chat/completions", "/v1/messages", "/v1/messages/count_tokens"}},
+	OperationChatCompletions: {Exact: []string{
+		"/v1/chat/completions", "/v1/messages", "/v1/messages/count_tokens",
+		GeminiGenerateContentEndpoint, GeminiStreamGenerateContentEndpoint,
+	}},
 	OperationResponses:           {Prefixes: []string{"/v1/responses"}},
 	OperationConversations:       {Prefixes: []string{"/v1/conversations"}},
 	OperationEmbeddings:          {Exact: []string{"/v1/embeddings"}},

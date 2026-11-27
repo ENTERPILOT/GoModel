@@ -43,9 +43,9 @@ keywords: ["插件", "护栏", "共享对象", "路由策略", "流式传输", "
 `request`（模型解析之前）和 `complete`（客户端响应写出之后）。manifest 可以声明它们；GoModel
 会校验相应接口是否已实现，但在运行时忽略它们。`route` 类型供虚拟模型使用，请参阅 [路由策略插件](#路由策略插件)。
 
-阶段适用于 `/v1/chat/completions`、`/v1/responses` 和 `/v1/messages`。
-Anthropic 请求会在任何 Hook 运行之前被转换为 chat 格式，因此插件看到的只有一种结构；必要时可通过
-`Meta.Dialect` 判断，其值为 `anthropic_messages`。当启用
+阶段适用于 `/v1/chat/completions`、`/v1/responses`、`/v1/messages` 以及 Gemini API 路由。
+Anthropic 和 Gemini 请求会在任何 Hook 运行之前被转换为 chat 格式，因此插件看到的只有一种结构；必要时可通过
+`Meta.Dialect` 判断，其值为 `anthropic_messages` 或 `gemini_generate_content`。当启用
 `guardrails.enable_for_batch_processing` 时，内联的 `/v1/batches` 条目会经过 `prompt` 阶段。
 
 ## 链式执行

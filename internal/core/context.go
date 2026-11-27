@@ -94,6 +94,9 @@ const (
 	RequestOriginPlugin RequestOrigin = "plugin"
 
 	RequestDialectAnthropicMessages RequestDialect = "anthropic_messages"
+	// RequestDialectGeminiGenerateContent marks a request that arrived on the
+	// Gemini API dialect (/v1beta/models/{model}:generateContent).
+	RequestDialectGeminiGenerateContent RequestDialect = "gemini_generate_content"
 )
 
 // WithRequestID returns a new context with the request ID attached.

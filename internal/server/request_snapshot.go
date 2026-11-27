@@ -64,13 +64,20 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 				req.Header.Set(canonicalUserPathHeader, userPath)
 			}
 
+			// The Gemini routes take a credential in the query, which the auth
+			// middleware reads from the URL; the snapshot must not keep it.
+			query := req.URL.Query()
+			if core.IsGeminiAPIPath(req.URL.Path) {
+				query.Del(geminiQueryKeyParam)
+			}
+
 			// Query/route/trace maps are freshly built here, so the snapshot can
 			// own them directly; only req.Header is live and gets cloned.
 			snapshot := core.NewRequestSnapshotWithOwnedMaps(
 				req.Method,
 				req.URL.Path,
 				snapshotRouteParams(req.URL.Path, routeParamsMap(c.PathValues())),
-				req.URL.Query(),
+				query,
 				req.Header,
 				req.Header.Get("Content-Type"),
 				nil,

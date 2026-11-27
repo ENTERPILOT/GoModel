@@ -1,0 +1,126 @@
+---
+title: "Gemini API"
+description: "将 Google Gen AI SDK 客户端指向 GoModel：generateContent 和 streamGenerateContent 请求会被路由到任意已配置的提供商，同时应用预算、护栏、故障转移和用量追踪。"
+icon: "sparkles"
+tag: "Beta"
+keywords: ["Gemini API", "generateContent", "streamGenerateContent", "google-genai", "Google Gen AI SDK", "x-goog-api-key", "API 转换", "API translation"]
+---
+
+## 概览
+
+除兼容 OpenAI 的 API 外，GoModel 还在 `POST /v1beta/models/{model}:generateContent` 上接收 **Gemini API** 请求格式。基于 Google Gen AI SDK（`google-genai`、`@google/genai`）构建的客户端只需更改基础 URL 和 API 密钥即可使用。
+
+请求在入口处被转换为 GoModel 的规范聊天类型，并经过与 `/v1/chat/completions` 相同的处理流水线，因此虚拟模型、工作流策略、护栏、速率限制、预算、故障转移、用量/成本追踪和请求日志都会生效。由于每个提供商都实现了聊天补全，Gemini 格式的请求可以路由到**任意**已配置的提供商（OpenAI、Anthropic、Bedrock 等），而不仅限于 Gemini。
+
+<Warning>
+  Gemini API 入口目前处于 Beta 阶段，涵盖文本、图片、函数调用和结构化输出。此范围之外的
+  Gemini 功能要么被 `400` 拒绝并指明该功能，要么被忽略，具体见[限制](#限制)。
+</Warning>
+
+## 支持的端点
+
+| 端点 | 行为 |
+| --- | --- |
+| `POST /v1beta/models/{model}:generateContent` | 通过转换后的模型路由生成响应。 |
+| `POST /v1beta/models/{model}:streamGenerateContent?alt=sse` | 以 SSE 流式返回响应，每个事件一个 `GenerateContentResponse`。必须带 `alt=sse`；SDK 会发送它。 |
+| `GET /v1beta/models` | 以 Gemini 列表格式返回与 `GET /v1/models` 相同的目录，一页返回全部。 |
+| `GET /v1beta/models/{model}` | 以 Gemini 模型格式返回单个模型。 |
+
+`{model}` 是 GoModel 提供的任意模型 ID：`gemini-2.5-flash`、`openai/gpt-4o-mini`、虚拟模型名称。模型列表返回的是资源名称（`models/openai/gpt-4o-mini`）：可以原样传给 SDK，在 REST 路径中则将其接在 `/v1beta/` 之后。
+
+## 认证
+
+GoModel 密钥的传递方式与 Gemini API 接收自身密钥的方式相同：
+
+- `x-goog-api-key: <key>`：SDK 发送的请求头。
+- `?key=<key>`：普通 REST 调用使用的查询参数。建议优先使用请求头：URL 中的密钥可能出现在网关前方代理的日志中。GoModel 会在自身的访问日志中将其脱敏，并在认证后将其从请求 URL 中移除。
+- `Authorization: Bearer <key>`：GoModel 的主要方式，存在时优先。
+
+`x-goog-api-key` 和 `?key=` 仅在 `/v1beta` 路由上读取。
+
+## 示例
+
+<CodeGroup>
+
+```bash curl
+curl "https://your-gateway/v1beta/models/gemini-2.5-flash:generateContent" \
+  -H "x-goog-api-key: $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "systemInstruction": {"parts": [{"text": "Be concise."}]},
+    "contents": [{"role": "user", "parts": [{"text": "Hello"}]}]
+  }'
+```
+
+```python Python
+import os
+
+from google import genai
+from google.genai import types
+
+client = genai.Client(
+    api_key=os.environ["GOMODEL_KEY"],
+    http_options=types.HttpOptions(base_url="https://your-gateway"),
+)
+
+response = client.models.generate_content(
+    model="openai/gpt-4o-mini",  # 任意已配置提供商的模型
+    contents="Hello",
+    config=types.GenerateContentConfig(system_instruction="Be concise."),
+)
+
+print(response.text)
+```
+
+```javascript JavaScript
+import { GoogleGenAI } from "@google/genai";
+
+const ai = new GoogleGenAI({
+  apiKey: process.env.GOMODEL_KEY,
+  httpOptions: { baseUrl: "https://your-gateway" },
+});
+
+const response = await ai.models.generateContent({
+  model: "openai/gpt-4o-mini", // 任意已配置提供商的模型
+  contents: "Hello",
+  config: { systemInstruction: "Be concise." },
+});
+
+console.log(response.text);
+```
+
+</CodeGroup>
+
+响应使用 Gemini 格式（`candidates`、`usageMetadata`、`modelVersion`、`responseId`）。错误使用 Gemini 错误结构（`{"error": {"code": 400, "message": "...", "status": "INVALID_ARGUMENT"}}`），认证错误和未知的 `/v1beta` 路由也是如此，因此 SDK 会抛出它们自己的类型化错误。
+
+## 可转换的内容
+
+| Gemini | 行为 |
+| --- | --- |
+| `contents`、`systemInstruction` | 文本部分，`camelCase` 或 `snake_case` 均可，因为 Gemini API 两者都接受。 |
+| `inlineData` | 图片会成为任意视觉模型的图片输入。其他媒体类型会作为文件附件转发，Gemini 模型会重新以内联数据的形式收到它，其他提供商仅在支持该文件类型时才接受。 |
+| `tools[].functionDeclarations` | 函数工具。`parameters`（Gemini 的 schema，使用 `"type": "OBJECT"` 和 `nullable`）会被转换为 JSON Schema；`parametersJsonSchema` 原样传递。 |
+| `toolConfig.functionCallingConfig` | `AUTO`、`ANY`、`NONE` 和 `VALIDATED`，以及 `allowedFunctionNames`。不带 `allowedFunctionNames` 的 `VALIDATED` 会按 `AUTO` 处理：其 schema 保证没有可移植的对应项。 |
+| `functionCall`、`functionResponse` | 完整的工具调用往返，包括并行调用。响应中的每个 `functionCall` 都带有 `id`；请像 SDK 那样原样回传该轮内容。不带 `id` 的 `functionResponse` 会按顺序对应同名的调用。 |
+| `thoughtSignature` | 在 Gemini 3 的函数调用上返回，并在对话继续时回传给 Gemini。 |
+| `generationConfig` | `temperature`、`topP`、`maxOutputTokens`、`stopSequences`、`seed`、`presencePenalty`、`frequencyPenalty`。 |
+| `responseMimeType`、`responseSchema`、`responseJsonSchema` | JSON 输出，给出 schema 时一并使用。 |
+| `thinkingConfig` | 转换为推理强度：`thinkingLevel` 按名称，`thinkingBudget` 按大小（`0` 关闭，不超过 1024 为 `low`，不超过 8192 为 `medium`，更高为 `high`）。设置 `includeThoughts` 时，提供商返回的推理内容会以 `thought` 部分返回。 |
+| `usageMetadata` | `promptTokenCount`（整个提示词，包含缓存的 Token）、`cachedContentTokenCount`、`candidatesTokenCount`、`thoughtsTokenCount`、`totalTokenCount`，适用于所有提供商。 |
+
+## 成本追踪与请求日志
+
+请求的追踪和日志记录方式与兼容 OpenAI 的路由相同，成本根据处理请求的提供商计算。由于请求路径中包含模型，用量和请求日志都将这些路由记录在路径模板下，即 `/v1beta/models/{model}:generateContent` 和 `/v1beta/models/{model}:streamGenerateContent`，因此一个筛选条件即可覆盖所有模型。模型记录在单独的字段中。
+
+## 限制
+
+每个请求都会经由 GoModel 的规范聊天类型进行转换，路由到 Gemini 模型的请求也不例外。因此，没有规范对应项的 Gemini 功能目前尚不可用：
+
+- **以 `400` 拒绝：** `cachedContent`、内置工具（`googleSearch`、`codeExecution`、`urlContext` 等）、`fileData` 部分（Files API 和 YouTube URI）、`executableCode` 和 `codeExecutionResult` 部分、大于 1 的 `candidateCount`、`TEXT` 以外的 `responseModalities`，以及 `text/plain` 和 `application/json` 以外的 `responseMimeType` 值。
+- **忽略：** `topK`、`safetySettings`（处理请求的提供商自身的安全默认设置生效），以及其他没有可移植对应项的调优参数，例如 `logprobs`、`mediaResolution` 和 `videoMetadata`。
+- **Gemini 模型的思考摘要**不会返回，精确的 `thinkingBudget` 会变为上述推理强度级别之一。
+- **生成的图片**不会返回；图片模型请使用 [`/v1/images/generations`](/zh/advanced/images-api)。
+- **不提供：** `countTokens`、`embedContent`、`batchGenerateContent`、Files 和缓存内容 API，以及 Vertex AI 的路径布局；未知方法返回 `404`。不带 `alt=sse` 的 `streamGenerateContent` 返回 `400`。
+- 这些路由**不会查询响应缓存**。
+
+设计依据以及通往 Gemini 的原生路径会带来什么，参见 [ADR-0017](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0017-gemini-api-ingress.md)。

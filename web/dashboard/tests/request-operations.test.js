@@ -14,6 +14,9 @@ test("requestTypeForPath mirrors the gateway endpoint classification", () => {
   const cases = [
     ["/v1/chat/completions", "chat"],
     ["/v1/messages", "chat"],
+    ["/v1beta/models/{model}:generateContent", "chat"],
+    ["/v1beta/models/{model}:streamGenerateContent", "chat"],
+    ["/v1beta/models", ""],
     ["/v1/messages/batches/b_1", "batches"],
     ["/v1/responses/resp_1/input_items", "responses"],
     ["/v1/conversations", "responses"],

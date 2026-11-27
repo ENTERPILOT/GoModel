@@ -8,7 +8,8 @@ import "time"
 type Meta struct {
 	// RequestID is the gateway request identifier.
 	RequestID string
-	// Dialect is the client API dialect: "openai" or "anthropic_messages".
+	// Dialect is the client API dialect: "openai", "anthropic_messages" or
+	// "gemini_generate_content".
 	Dialect string
 	// Endpoint is the request URL path, for example "/v1/chat/completions".
 	Endpoint string

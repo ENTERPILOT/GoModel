@@ -157,6 +157,11 @@ func storeWorkflow(c *echo.Context, workflow *core.Workflow) {
 }
 
 func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed bool, err error) {
+	// The Gemini API dialect names the model in the path; its body carries
+	// none the gateway may route on.
+	if model, _, ok := core.ParseGeminiModelMethodPath(c.Request().URL.Path); ok {
+		return model, "", true, nil
+	}
 	ctx := c.Request().Context()
 	if env := core.GetWhiteBoxPrompt(ctx); env != nil {
 		if model, provider, ok := cachedCanonicalSelectorHints(env); ok {

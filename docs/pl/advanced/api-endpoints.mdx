@@ -117,6 +117,17 @@ strona [ElevenLabs](/pl/providers/elevenlabs).
 | `/v1/messages`              | POST   | Anthropic Messages API z tłumaczonym routingiem modeli (obsługa streamingu)   |
 | `/v1/messages/count_tokens` | POST   | Heurystyczne oszacowanie tokenów wejściowych Anthropic Messages               |
 
+## API kompatybilne z Gemini
+
+Beta; zobacz [Gemini API](/pl/advanced/gemini-api).
+
+| Endpoint                                        | Metoda | Opis                                                                 |
+| ----------------------------------------------- | ------ | -------------------------------------------------------------------- |
+| `/v1beta/models/{model}:generateContent`        | POST   | Gemini `generateContent` z tłumaczonym routingiem modeli             |
+| `/v1beta/models/{model}:streamGenerateContent`  | POST   | Streaming `generateContent` jako server-sent events (`alt=sse`)      |
+| `/v1beta/models`                                | GET    | Katalog modeli w kształcie listy Gemini                              |
+| `/v1beta/models/{model}`                        | GET    | Jeden model w kształcie modelu Gemini                                |
+
 ## Decisions API
 
 Dostępne, gdy skonfigurowany jest provider `openai`, `jev` lub `openrouter`; zobacz
