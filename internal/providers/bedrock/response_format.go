@@ -2,7 +2,6 @@ package bedrock
 
 import (
 	"bytes"
-	"strings"
 
 	"github.com/goccy/go-json"
 
@@ -43,8 +42,8 @@ func applyResponseFormat(parts *converseParts, extraFields core.UnknownJSONField
 		return core.NewInvalidRequestError("response_format must be an object", err)
 	}
 
-	switch strings.TrimSpace(responseFormat.Type) {
-	case "", "text":
+	switch responseFormat.Type {
+	case "text":
 		return nil
 	case "json_object":
 		appendJSONObjectInstruction(parts)
@@ -55,6 +54,9 @@ func applyResponseFormat(parts *converseParts, extraFields core.UnknownJSONField
 			return core.NewInvalidRequestError("response_format.json_schema is required for json_schema", nil)
 		}
 		var schema map[string]any
+		if bytes.Equal(spec.Schema, []byte("null")) {
+			return core.NewInvalidRequestError("response_format.json_schema.schema must be an object", nil)
+		}
 		if len(spec.Schema) > 0 {
 			if err := json.Unmarshal(spec.Schema, &schema); err != nil {
 				return core.NewInvalidRequestError("response_format.json_schema.schema must be an object", err)
