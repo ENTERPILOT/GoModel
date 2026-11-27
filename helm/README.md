@@ -145,6 +145,26 @@ Otherwise exclude the path at the ingress or restrict who can reach the pods.
 With the Prometheus Operator, set `metrics.serviceMonitor.enabled: true` and add
 the labels your Prometheus selects on under `metrics.serviceMonitor.labels`.
 
+### Private registries and air-gapped clusters
+
+The chart pulls two images: the gateway and, for `helm test` only,
+`curlimages/curl`. Mirror both and point the chart at your registry:
+
+```yaml
+image:
+  repository: registry.internal/enterpilot/gomodel
+testConnection:
+  image:
+    repository: registry.internal/curlimages/curl
+imagePullSecrets:
+  - name: registry-credentials
+env:
+  GOMODEL_OFFLINE: "true"
+```
+
+`GOMODEL_OFFLINE` stops the gateway's own outbound calls; see
+[Air-gapped deployment](https://gomodel.enterpilot.io/guides/air-gapped).
+
 ### Cloud provider credentials
 
 Give the pod's ServiceAccount a cloud identity for AWS Bedrock or Google Vertex AI:
@@ -162,6 +182,9 @@ serviceAccount:
 | `replicaCount` | `1` | Pods. More than one needs `storage.type` postgresql or mongodb. |
 | `image.repository` | `enterpilot/gomodel` | |
 | `image.tag` | `""` | Defaults to the chart `appVersion`. |
+| `imagePullSecrets` | `[]` | Pull secrets for the gateway pod and the `helm test` pod. |
+| `testConnection.image.repository` | `curlimages/curl` | Image of the `helm test` pod. |
+| `testConnection.image.tag` | `8.16.0` | |
 | `env` | `{}` | Plain environment variables. |
 | `secretEnv` | `{}` | Secret environment variables. |
 | `extraEnvFrom` | `[]` | Existing Secrets/ConfigMaps loaded as env vars. |

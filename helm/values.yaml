@@ -15,6 +15,15 @@ image:
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
+
+# -- Image of the pod `helm test` runs to check the gateway answers. Point it
+# at your registry when the cluster cannot pull from Docker Hub; the pod uses
+# imagePullSecrets too.
+testConnection:
+  image:
+    repository: curlimages/curl
+    tag: "8.16.0"
+
 nameOverride: ""
 fullnameOverride: ""
 

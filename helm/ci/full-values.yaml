@@ -1,4 +1,10 @@
 # Every optional resource enabled, for template and schema validation.
+imagePullSecrets:
+  - name: registry-credentials
+testConnection:
+  image:
+    repository: registry.internal/mirror/curl
+    tag: "8.16.0"
 env:
   BASE_PATH: /g
   METRICS_ENDPOINT: /internal/metrics
