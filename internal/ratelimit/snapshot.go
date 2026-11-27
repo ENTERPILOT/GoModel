@@ -96,37 +96,38 @@ func (l *limiter) snapshot(rules []Rule) []WindowSnapshot {
 	defer l.mu.Unlock()
 
 	index := indexRules(rules)
-	var changed []ruleKey
-	for _, counters := range []map[ruleKey]*windowCounter{l.requests, l.tokens} {
-		for key, counter := range counters {
-			if !counter.dirty {
-				continue
-			}
-			counter.dirty = false
-			if key.periodSeconds > 0 {
-				changed = append(changed, key)
-			}
-		}
-	}
+	// Swap the set rather than clearing it: a set that once held many keys
+	// keeps its capacity, and walking it would cost that much every time.
+	changed := l.dirty
+	l.dirty = make(map[ruleKey]struct{})
 
 	var out []WindowSnapshot
-	seen := make(map[ruleKey]bool, len(changed))
-	for _, key := range changed {
-		rule, ok := index.lookup(key)
-		if !ok || seen[key] {
+	for key := range changed {
+		requests, tokens := l.requests[key], l.tokens[key]
+		wasDirty := false
+		for _, counter := range []*windowCounter{requests, tokens} {
+			if counter != nil && counter.dirty {
+				counter.dirty = false
+				wasDirty = true
+			}
+		}
+		if !wasDirty || key.periodSeconds <= 0 {
 			continue
 		}
-		seen[key] = true
-		snap := newSnapshot(key, rule)
-		if counter := l.requests[key]; counter != nil {
-			snap.RequestsWindowStart = counter.windowStart
-			snap.RequestsCurrent = counter.current
-			snap.RequestsPrevious = counter.previous
+		rule, ok := index.lookup(key)
+		if !ok {
+			continue
 		}
-		if counter := l.tokens[key]; counter != nil {
-			snap.TokensWindowStart = counter.windowStart
-			snap.TokensCurrent = counter.current
-			snap.TokensPrevious = counter.previous
+		snap := newSnapshot(key, rule)
+		if requests != nil {
+			snap.RequestsWindowStart = requests.windowStart
+			snap.RequestsCurrent = requests.current
+			snap.RequestsPrevious = requests.previous
+		}
+		if tokens != nil {
+			snap.TokensWindowStart = tokens.windowStart
+			snap.TokensCurrent = tokens.current
+			snap.TokensPrevious = tokens.previous
 		}
 		out = append(out, snap)
 	}
@@ -172,10 +173,10 @@ func (l *limiter) unsaved(snapshots []WindowSnapshot) {
 			continue
 		}
 		if counter := l.requests[key]; counter != nil {
-			counter.dirty = true
+			l.markDirty(key, counter)
 		}
 		if counter := l.tokens[key]; counter != nil {
-			counter.dirty = true
+			l.markDirty(key, counter)
 		}
 	}
 }

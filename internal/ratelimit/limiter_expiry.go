@@ -134,6 +134,7 @@ func (l *limiter) pruneCounterExpiries(now int64) bool {
 		case tokenCounter:
 			delete(l.tokens, entry.key.rule)
 		}
+		l.forgetDirty(entry.key.rule)
 		removed++
 	}
 	return len(l.expiries) > 0 && l.expiries[0].expiresAt <= now
