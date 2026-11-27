@@ -399,7 +399,11 @@ zmiennych środowiskowych znajduje się w sekcji [Konfiguracja](/pl/advanced/con
 
 Dashboard administracyjny (`/admin/dashboard`) pokazuje bieżący status każdego
 skonfigurowanego providera w sekcji **Providers Overview** na stronie
-**Overview**.
+**Overview**. Strona **Providers** pokazuje ten sam znacznik statusu w wierszu
+każdego providera, razem z liczbą wykrytych modeli i ostatnim błędem, także dla
+providerów zadeklarowanych w `config.yaml` lub zmiennych środowiskowych
+(oznaczonych **Config**). Wyłączony provider nie jest zarejestrowany do
+routingu, więc jego wiersz nie pokazuje statusu.
 
 <img
   src="/providers/provider-status.png"

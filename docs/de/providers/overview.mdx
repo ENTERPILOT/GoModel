@@ -361,7 +361,10 @@ unter [Konfiguration](/de/advanced/configuration).
 ## Provider-Status
 
 Das Admin-Dashboard (`/admin/dashboard`) zeigt den Live-Status jedes konfigurierten Providers im
-Abschnitt **Providers Overview** der Seite **Overview**.
+Abschnitt **Providers Overview** der Seite **Overview**. Die Seite **Providers** zeigt dieselbe
+Status-Pille in jeder Provider-Zeile, zusammen mit der Zahl der gefundenen Modelle und dem letzten
+Fehler, auch für Provider aus `config.yaml` oder Umgebungsvariablen (markiert mit **Config**). Ein
+deaktivierter Provider ist nicht für das Routing registriert, daher zeigt seine Zeile keinen Status.
 
 <img
   src="/providers/provider-status.png"

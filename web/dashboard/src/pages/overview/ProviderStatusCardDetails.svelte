@@ -205,7 +205,7 @@
   }
 
   /* Health palette: reads identically to the card's status pill (which keeps
-     its half of these rules in ProviderStatusCard.svelte). */
+     its half of these rules in ProviderStatusPill.svelte). */
   .provider-status-health-state.is-healthy {
     color: var(--success);
     border-color: color-mix(in srgb, var(--success) 45%, var(--border));

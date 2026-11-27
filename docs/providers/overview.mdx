@@ -385,7 +385,10 @@ lives in [Configuration](/advanced/configuration).
 
 The admin dashboard (`/admin/dashboard`) shows live status for every
 configured provider in the **Providers Overview** section of the
-**Overview** page.
+**Overview** page. The **Providers** page shows the same status pill on each
+provider row, with the number of discovered models and the most recent error,
+including providers declared in `config.yaml` or env vars (marked **Config**).
+A disabled provider is not registered for routing, so its row shows no status.
 
 <img
   src="/providers/provider-status.png"
