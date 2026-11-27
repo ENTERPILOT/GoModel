@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
@@ -46,8 +45,8 @@ func searchText(errorMessage string) string {
 // in the window. It is best-effort: pg_trgm ships with PostgreSQL but the role
 // may not be allowed to install it, in which case the search keeps its slow
 // path and the reason is logged once. The index builds CONCURRENTLY so an
-// existing large table keeps accepting writes while it builds; a build
-// interrupted midway leaves an invalid index, which is dropped and rebuilt.
+// existing large table keeps accepting writes while it builds (see
+// buildIndexConcurrently).
 func ensureTrigramSearchIndex(ctx context.Context, db sqlx.DB, errorMessage string) {
 	if db.Dialect() != sqlx.PostgreSQL {
 		return
@@ -61,25 +60,11 @@ func ensureTrigramSearchIndex(ctx context.Context, db sqlx.DB, errorMessage stri
 		slog.Warn("requestlog: failed to locate pg_trgm", "error", err)
 		return
 	}
-	var valid *bool
-	if err := db.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass(?)`, trigramSearchIndex).Scan(&valid); err == nil && valid != nil && !*valid {
-		slog.Warn("requestlog: rebuilding interrupted trigram search index")
-		if _, err := db.Exec(ctx, "DROP INDEX "+trigramSearchIndex); err != nil {
-			slog.Warn("requestlog: failed to drop invalid trigram search index", "error", err)
-			return
-		}
-	}
-	if hasTrigramSearchIndex(ctx, db) {
-		return
-	}
 	statement := fmt.Sprintf(`CREATE INDEX CONCURRENTLY IF NOT EXISTS %s ON request_logs USING GIN (%s %s.gin_trgm_ops)`,
 		trigramSearchIndex, searchText(errorMessage), `"`+strings.ReplaceAll(schema, `"`, `""`)+`"`)
-	started := time.Now()
-	if _, err := db.Exec(ctx, statement); err != nil {
-		slog.Warn("requestlog: failed to create trigram search index", "error", err)
-		return
+	if err := buildIndexConcurrently(ctx, db, trigramSearchIndex, statement); err != nil {
+		slog.Warn("requestlog: failed to build trigram search index", "error", err)
 	}
-	slog.Info("requestlog: built trigram search index", "duration", time.Since(started).Round(time.Millisecond))
 }
 
 // hasTrigramSearchIndex reports whether the trigram index exists and is

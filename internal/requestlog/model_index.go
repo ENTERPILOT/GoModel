@@ -53,7 +53,8 @@ func ensureModelIndexesConcurrently(ctx context.Context, db sqlx.DB) {
 		return
 	}
 	for _, index := range modelIndexes(sqlx.PostgreSQL) {
-		if err := buildIndexConcurrently(ctx, db, index); err != nil {
+		create := "CREATE INDEX CONCURRENTLY IF NOT EXISTS " + index.name + " ON request_logs(" + index.columns + ")"
+		if err := buildIndexConcurrently(ctx, db, index.name, create); err != nil {
 			slog.Warn("requestlog: failed to create model index", "index", index.name, "error", err)
 			return
 		}
@@ -63,25 +64,28 @@ func ensureModelIndexesConcurrently(ctx context.Context, db sqlx.DB) {
 	}
 }
 
-// buildIndexConcurrently creates a PostgreSQL index with CREATE INDEX
-// CONCURRENTLY, which keeps the table writable while it builds. A build
-// interrupted midway leaves an invalid index behind; it is dropped and rebuilt.
-func buildIndexConcurrently(ctx context.Context, db sqlx.DB, index requestLogIndex) error {
+// buildIndexConcurrently runs create, a CREATE INDEX CONCURRENTLY IF NOT
+// EXISTS statement for the named PostgreSQL index, which keeps the table
+// writable while it builds. A build interrupted midway leaves an invalid index
+// behind; it is dropped and rebuilt. The drop is CONCURRENTLY too: a plain one
+// waits for every open transaction that has touched request_logs, and every
+// write to the table queues behind it.
+func buildIndexConcurrently(ctx context.Context, db sqlx.DB, name, create string) error {
 	var valid *bool
-	err := db.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass(?)`, index.name).Scan(&valid)
+	err := db.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass(?)`, name).Scan(&valid)
 	switch {
 	case err == nil && valid != nil && *valid:
 		return nil
 	case err == nil && valid != nil:
-		slog.Warn("requestlog: rebuilding interrupted index", "index", index.name)
-		if _, err := db.Exec(ctx, "DROP INDEX "+index.name); err != nil {
+		slog.Warn("requestlog: rebuilding interrupted index", "index", name)
+		if _, err := db.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+name); err != nil {
 			return err
 		}
 	}
 	started := time.Now()
-	if _, err := db.Exec(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS "+index.name+" ON request_logs("+index.columns+")"); err != nil {
+	if _, err := db.Exec(ctx, create); err != nil {
 		return err
 	}
-	slog.Info("requestlog: built index", "index", index.name, "duration", time.Since(started).Round(time.Millisecond))
+	slog.Info("requestlog: built index", "index", name, "duration", time.Since(started).Round(time.Millisecond))
 	return nil
 }
