@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   emptyProviderStatus,
+  isProviderStatusPayload,
   loadProviderPreferences,
   saveDetailsPreference,
   saveCardOverrides,
@@ -378,4 +379,19 @@ test("status pill tooltip combines reason and last error", () => {
     }),
     "recent requests are failing for: gpt-4o\n\nLast error: gpt-4o: authentication_error",
   );
+});
+
+test("isProviderStatusPayload accepts only a body that lists providers", () => {
+  const cases = [
+    { name: "empty gateway", data: { summary: {}, providers: [] }, want: true },
+    { name: "one provider", data: { providers: [{ name: "openai" }] }, want: true },
+    { name: "unparsable body", data: null, want: false },
+    { name: "object without providers", data: { summary: {} }, want: false },
+    { name: "providers not a list", data: { providers: "none" }, want: false },
+    { name: "bare array", data: [], want: false },
+    { name: "string", data: "<html>", want: false },
+  ];
+  for (const { name, data, want } of cases) {
+    assert.equal(isProviderStatusPayload(data), want, name);
+  }
 });
