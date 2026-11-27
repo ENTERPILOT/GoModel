@@ -51,6 +51,7 @@ func converseStreamInput(parts converseParts) *bedrockruntime.ConverseStreamInpu
 	return &bedrockruntime.ConverseStreamInput{
 		ModelId: parts.modelID, Messages: parts.messages, System: parts.system,
 		InferenceConfig: parts.infCfg, ToolConfig: parts.toolCfg,
+		OutputConfig: parts.outputCfg,
 	}
 }
 

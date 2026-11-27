@@ -106,6 +106,9 @@ a provider starts accepting a field.
 | `response_format` of type `text` | Anthropic | 4 | dropped |
 | `response_format` of type `json_schema` | Anthropic | 3 | sent as `output_config.format` |
 | `response_format` of type `json_object` | Anthropic | 3 | sent as a system-prompt instruction |
+| `response_format` of type `text` | Bedrock | 4 | dropped |
+| `response_format` of type `json_schema` | Bedrock | 3 | sent as `outputConfig.textFormat`; an absent or empty schema becomes a system-prompt instruction |
+| `response_format` of type `json_object` | Bedrock | 3 | sent as a system-prompt instruction |
 | `verbosity` | Anthropic | 4 | dropped |
 | `temperature` together with `top_p` | Anthropic | 4 | `top_p` dropped, `temperature` kept |
 | `metadata` | xAI `/responses` | 4 | dropped |
