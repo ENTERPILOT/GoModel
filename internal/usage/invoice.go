@@ -26,8 +26,10 @@ type InvoiceParams struct {
 
 // Invoice is billed usage for a period, one block per customer. Requests,
 // tokens and provider cost cover provider-served requests; billed cost also
-// includes billed response-cache hits, like every other billed view. The
-// period's days start and end at midnight in TimeZone.
+// includes billed response-cache hits, like every other billed view. Requests
+// sent to a non-billable provider stay on its line and in the sums with their
+// provider cost; the markup tap bills them at 0 (ADR-0016). The period's days
+// start and end at midnight in TimeZone.
 type Invoice struct {
 	StartDate string            `json:"start_date,omitempty"`
 	EndDate   string            `json:"end_date,omitempty"`
