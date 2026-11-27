@@ -17,6 +17,9 @@ type resolvedTarget struct {
 	weight    float64
 	// effort is the reasoning effort the redirect forces on this target.
 	effort string
+	// level is the rank of the target's route level under the auto strategy
+	// (see core.RouteLevelRank); zero under every other strategy.
+	level int
 	// explicitProvider records that the declaration named a provider. A
 	// bare "a/b" model may be a slash-shaped model id or a slash-named virtual
 	// model, so only an explicit provider pins the target to a concrete model.
@@ -124,6 +127,7 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 					qualified:        selector.QualifiedModel(),
 					weight:           normalized.Targets[i].Weight,
 					effort:           normalized.Targets[i].ReasoningEffort,
+					level:            core.RouteLevelRank(normalized.Targets[i].Level),
 					explicitProvider: normalized.Targets[i].Provider != "",
 				}
 			}
@@ -168,6 +172,9 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 	}
 	sort.Strings(next.order)
 	if err := validateChains(&next); err != nil {
+		return snapshot{}, err
+	}
+	if err := validateAutoRoutes(&next); err != nil {
 		return snapshot{}, err
 	}
 	return next, nil

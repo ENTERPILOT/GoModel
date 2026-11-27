@@ -25,6 +25,7 @@
 } from "./displayRows.js";
 import {
   aliasRouting,
+  isAutoStrategy,
   maskingFailsOver,
   maskingRoutingKind,
   maskingRoutingLabel,
@@ -39,6 +40,7 @@ import {
     ChevronRight,
     CircleDollarSign,
     Gauge,
+    Layers,
     Pencil,
     PiggyBank,
     Puzzle,
@@ -67,6 +69,7 @@ import {
     cost: PiggyBank,
     failover: ShieldCheck,
     adaptive: Activity,
+    auto: Layers,
     plugin: Puzzle,
   };
   const aliasRoute = $derived(row.is_alias ? aliasRouting(row.alias) : null);
@@ -78,15 +81,23 @@ import {
   const routingKind = $derived(
     row.masking_alias ? maskingRoutingKind(row.masking_alias, globalFailover) : "",
   );
+  // An auto route with the model among its targets picks by level rather
+  // than spreading requests, so it gets its own words.
+  const routedByLevel = $derived(
+    routingKind === "balanced" && isAutoStrategy(row.masking_alias.strategy),
+  );
   const routingPrefix = $derived(
     routingKind === "failover"
       ? m.models_falls_back_to()
-      : routingKind === "balanced"
-        ? m.models_balanced_with()
-        : m.models_redirects_to(),
+      : routedByLevel
+        ? m.models_routed_by_level()
+        : routingKind === "balanced"
+          ? m.models_balanced_with()
+          : m.models_redirects_to(),
   );
   const routingTitle = $derived.by(() => {
     if (routingKind === "failover") return m.models_failover_title();
+    if (routedByLevel) return m.models_auto_title();
     if (routingKind === "balanced") {
       if (!globalFailover) return m.models_balanced_title_failover_global_off();
       return maskingFailsOver(row.masking_alias, globalFailover)
@@ -147,6 +158,8 @@ import {
           <span class="model-kind-icon" role="img" aria-label={routingTitle} title={routingTitle}>
             {#if routingKind === "failover"}
               <Icon icon={ShieldCheck} class="model-kind-icon-svg" />
+            {:else if routedByLevel}
+              <Icon icon={Layers} class="model-kind-icon-svg" />
             {:else if routingKind === "balanced"}
               <Icon icon={Split} class="model-kind-icon-svg" />
             {:else}
@@ -173,7 +186,20 @@ import {
             </span>
           {/if}
           <span class="alias-targets mono" title={aliasRoute.all}>
-            <span aria-hidden="true"><HighlightText text={aliasRoute.targets} needle={modelsStore.filter} /></span>
+            {#if aliasRoute.levels}
+              <!-- An auto route: each target the row names carries its level. -->
+              <span aria-hidden="true">
+                {#each aliasRoute.levels as target, i (i)}
+                  {i > 0 ? ", " : ""}<HighlightText text={target.name} needle={modelsStore.filter} />
+                  {#if target.level}
+                    <span class="alias-target-level">{target.level}</span>
+                  {/if}
+                {/each}
+                {aliasRoute.more > 0 ? " +" + aliasRoute.more : ""}
+              </span>
+            {:else}
+              <span aria-hidden="true"><HighlightText text={aliasRoute.targets} needle={modelsStore.filter} /></span>
+            {/if}
             <span class="alias-targets-full">{m.models_targets()}: {aliasRoute.all}</span>
           </span>
         {/if}
@@ -343,6 +369,17 @@ import {
     white-space: nowrap;
     font-size: 12px;
     color: var(--text-muted);
+  }
+
+  /* The level of one target of an auto route: a small pill after its name. */
+  .alias-target-level {
+    padding: 0 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    text-transform: uppercase;
   }
 
   /* :global so the rule reaches the SVG rendered by the Icon component. */

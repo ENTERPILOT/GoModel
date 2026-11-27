@@ -353,6 +353,9 @@ them. Add more than one target in the editor (**Add target**) and pick a
   a session on the provider whose prompt cache is warm. See
   [Intelligent Routing](/pro/intelligent-routing). On an open-source build the
   strategy falls back to round-robin.
+- **Auto** (`strategy: auto`) routes by level: each target says how capable
+  it is, and a request goes to the lowest level that covers what it needs.
+  See [Route by level](#route-by-level).
 - **Plugin** (`strategy: plugin`) delegates the choice to a loaded
   [routing strategy plugin](/advanced/plugins#routing-strategy-plugins) named
   by `strategy_plugin`, configured per redirect through `strategy_config`.
@@ -375,7 +378,8 @@ A redirect with a single target behaves exactly like a plain alias.
 
 Whatever the strategy, the remaining targets are the redirect's **failover
 chain**: when the chosen target fails with a retryable error, the request is
-retried against the other available targets in the order listed. The editor's
+retried against the other available targets in the order listed (the `auto`
+strategy orders them [by level](#route-by-level) instead). The editor's
 **Failover** checkbox (on by default; `failover: false` as code) switches that
 off for one redirect, so a failed request is answered with the error instead;
 it can also be switched off globally or by the request's workflow. See
@@ -399,6 +403,56 @@ restore stateless balancing — see
 For example, point `smart` at both `openai/gpt-4o` and `anthropic/claude-sonnet-4-6`
 with the round-robin strategy to split load, or at a premium and a budget model
 with the cost strategy to always take the cheaper one.
+
+## Route by level
+
+The `auto` strategy puts models of different capability behind one name, so
+simple requests can go to a small model and demanding ones to a strong one.
+Give every target a `level`: `light`, `normal`, `smart`, or `smartest`, from
+lowest to highest.
+
+```yaml
+virtual_models:
+  - source: claude-auto
+    strategy: auto
+    targets:
+      - { model: anthropic/claude-haiku-5-5, level: light }
+      - { model: anthropic/claude-sonnet-5-5, level: smart }
+      - { model: anthropic/claude-opus-5-5, level: smartest }
+```
+
+GoModel does not decide what a request needs; a classifier does. GoModel Pro's
+[smart routing](/pro/intelligent-routing) is one, and it needs no extra
+configuration for the route. **By default, with no classifier, every request
+goes to the highest level present**, so the route above always uses Opus and
+is safe to declare before a classifier runs. A custom build can bring its own
+classifier: a request rewriter registered through the `ext` package names the
+level in `Result.RouteLevel`, and `ext.AutoRoutesAware` tells it which models
+are auto routes.
+
+- A request goes to the lowest level at or above the level it needs. Levels
+  can be skipped: above, a request that needs `normal` goes to `smart`.
+- When no target at or above that level can serve (provider down, model
+  disabled or denied to the caller, rate limited), the highest level below it
+  serves instead of failing the request.
+- Targets sharing a level are balanced by weighted round-robin, or by
+  [adaptive routing](/pro/intelligent-routing#adaptive-routing) in GoModel
+  Pro. [Session keeping](/features/session-keeping) holds a session on one
+  target per level.
+- Failover tries the rest of the level that served first, then higher levels
+  going up, then lower levels going down.
+- Every target needs a `level`, or saving fails. Other strategies drop levels.
+- An `auto` virtual model cannot route into another `auto` virtual model;
+  saving is rejected. A single-target alias of one works and is routed like
+  the route itself.
+
+The `X-GoModel-Route-Level` response header reports the level of the target
+the route chose first. A failover can still move the request to another level.
+
+Use `auto` when clients should send one model name and each request should
+get a model that matches its difficulty. Without a classifier the lower
+levels serve only as fallbacks, so prefer **Failover** for a plain priority
+list.
 
 ## Reorder targets
 
@@ -542,7 +596,7 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 ```
 
 Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
-`strategy` (`round_robin`, `cost`, or `failover`), `session_affinity` (default `true`; see
+`strategy` (`round_robin`, `cost`, `failover`, or `auto`), `session_affinity` (default `true`; see
 [Session Keeping](/features/session-keeping)), `failover` (default `true`; see
 [Failover](/features/failover)), `user_paths`, `description`,
 `slowdown` (`0` disables inherited slowdown; active factors range from `0.1` to
@@ -550,12 +604,13 @@ Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
 [Set upstream timeouts](#set-upstream-timeouts)), `reasoning_effort` (see [Force a reasoning effort](#force-a-reasoning-effort)),
 `params` and `default_params` (see
 [Set request parameters](#set-request-parameters)), and `enabled`.
-A target has `model` and optional `provider`, `weight`, and `reasoning_effort`
-(see [Set an effort per target](#set-an-effort-per-target)). Its `model` may
+A target has `model` and optional `provider`, `weight`, `reasoning_effort`
+(see [Set an effort per target](#set-an-effort-per-target)), and `level`
+(required with `strategy: auto`; see [Route by level](#route-by-level)). Its `model` may
 name another declared virtual model (see
 [Chain virtual models](#chain-virtual-models)).
 Leave the targets empty to declare an access policy on the `source` selector. An
-invalid declaration (unknown strategy, missing or self-referential target, a
+invalid declaration (unknown strategy, a missing or unknown `level` under `auto`, missing or self-referential target, a
 chain cycle or a chain deeper than 8 virtual models, or a target `provider` that
 matches no configured provider — a typo) fails startup with a clear error
 listing the registered provider names.

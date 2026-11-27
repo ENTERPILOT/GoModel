@@ -552,6 +552,30 @@ func TestUpsertVirtualModelLoadBalanced(t *testing.T) {
 	assert.Empty(t, view.Targets[1].ReasoningEffort)
 }
 
+func TestUpsertVirtualModelAutoStrategyKeepsTargetLevels(t *testing.T) {
+	catalog := newVMTestCatalog()
+	catalog.add("openai/gpt-4o", "openai")
+	catalog.add("groq/llama", "groq")
+	service := newVMService(t, catalog, newVMTestStore(), true)
+	h := NewHandler(nil, nil, WithVirtualModels(service))
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"auto","strategy":"auto","targets":[{"model":"openai/gpt-4o","level":"Smartest"},{"model":"groq/llama","level":"light"}]}`)
+	require.NoError(t, h.UpsertVirtualModel(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	view := echotest.Decode[virtualmodels.View](t, rec)
+	assert.Equal(t, virtualmodels.StrategyAuto, view.Strategy)
+	require.Len(t, view.Targets, 2)
+	assert.Equal(t, "smartest", view.Targets[0].Level)
+	assert.Equal(t, "light", view.Targets[1].Level)
+
+	// Every target of an auto route needs a level.
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"auto","strategy":"auto","targets":[{"model":"openai/gpt-4o","level":"smartest"},{"model":"groq/llama"}]}`)
+	require.NoError(t, h.UpsertVirtualModel(c))
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "needs a level")
+}
+
 func TestUpsertVirtualModelRejectsBlankTargets(t *testing.T) {
 	h := newVMHandler(t)
 

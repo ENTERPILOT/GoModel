@@ -338,6 +338,7 @@ func (b *bootstrap) initServer() error {
 	// generation pointing at the replacement's already-closed request logger.
 	bindAuthenticationEventRecorders(b.cfg.Extensions, requestlog.NewAuthenticationEventRecorder(app.requestLog.Logger))
 	bindRewriterInference(b.cfg.Extensions, b.internalInference)
+	bindRewriterAutoRoutes(b.cfg.Extensions, app.virtualModels.Service)
 	if app.sharedStore != nil {
 		bindSharedStore(b.cfg.Extensions, app.sharedStore)
 	}

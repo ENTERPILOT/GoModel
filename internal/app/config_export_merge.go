@@ -96,7 +96,7 @@ func exportVirtualModels(declared []config.VirtualModelConfig, stored []virtualm
 		// provider and model are the scope its source names, not a destination.
 		for _, target := range model.Targets {
 			entry.Targets = append(entry.Targets, config.VirtualModelTargetConfig{
-				Provider: target.Provider, Model: target.Model, Weight: target.Weight, ReasoningEffort: target.ReasoningEffort,
+				Provider: target.Provider, Model: target.Model, Weight: target.Weight, ReasoningEffort: target.ReasoningEffort, Level: target.Level,
 			})
 		}
 		if !model.Enabled {

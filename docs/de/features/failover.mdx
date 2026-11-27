@@ -22,6 +22,7 @@ welches Ziel zuerst versucht wird:
 | Round-Robin | rotiert über die Ziele (gewichtet) | die übrigen Ziele in der angegebenen Reihenfolge |
 | Niedrigste Kosten | das günstigste verfügbare Ziel | die übrigen Ziele in der angegebenen Reihenfolge |
 | **Failover** | immer das erste verfügbare Ziel | die nächsten Ziele in der angegebenen Reihenfolge |
+| Auto | ein Ziel der niedrigsten [Stufe](/de/features/virtual-models#nach-stufe-routen), die den Request abdeckt | die übrigen Ziele dieser Stufe, dann die höheren Stufen aufsteigend, dann die niedrigeren absteigend |
 
 Wählen Sie **Failover**, wenn die Zielliste eine Prioritätsreihenfolge ist –
 immer das beste Modell verwenden, außer es ist ausgefallen, und erst dann auf

@@ -762,7 +762,7 @@ Wählen Sie die Strategie am virtuellen Modell aus:
 ```yaml
 virtual_models:
   - source: smart-router
-    strategy: plugin                    # round_robin | cost | failover | adaptive | plugin
+    strategy: plugin                    # round_robin | cost | failover | auto | adaptive | plugin
     strategy_plugin: cheapest_healthy   # Plugin-Name; erforderlich bei strategy: plugin
     strategy_config:                    # die Felder des Plugins mit Scope: route; ohne Angabe gelten die Standardwerte
       prefer: cheapest                  # cheapest | fastest
@@ -788,7 +788,7 @@ virtual_models:
 
 Im Dashboard listet das Strategie-Dropdown des Editors für virtuelle Modelle einen Eintrag
 `plugin:<name>` pro geladenem Route-Plugin auf (`VIRTUAL_MODEL_STRATEGIES` in der
-Laufzeitkonfiguration ist `round_robin,cost,failover[,adaptive],plugin:<name>,...`); wird er
+Laufzeitkonfiguration ist `round_robin,cost,failover,auto[,adaptive],plugin:<name>,...`); wird er
 ausgewählt, erscheinen die Route-Felder des Plugins unter der Zieltabelle.
 
 `cheapest_healthy` ist die eingebaute Referenzstrategie (`internal/plugins/builtin/routeexample`).

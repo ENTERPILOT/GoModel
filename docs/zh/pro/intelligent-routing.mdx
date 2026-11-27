@@ -1,9 +1,9 @@
 ---
 title: "智能路由"
-description: "根据请求内容将其路由到简单或困难模型档位，再在该档位内选择最健康、最便宜的提供商。"
+description: "将每个请求发往其所需的模型级别，再在该级别内选择最健康、最便宜的提供商。"
 icon: "route"
 tag: "Pro · Beta"
-keywords: ["GoModel Pro", "智能路由", "模型档位", "自适应路由", "负载均衡", "成本优化", "intelligent routing", "smart routing", "model tiers", "adaptive routing", "load balancing", "cost optimization"]
+keywords: ["GoModel Pro", "智能路由", "自动路由", "路由级别", "自适应路由", "负载均衡", "成本优化", "intelligent routing", "smart routing", "auto routing", "route levels", "adaptive routing", "load balancing", "cost optimization"]
 ---
 
 <Warning>
@@ -12,31 +12,57 @@ keywords: ["GoModel Pro", "智能路由", "模型档位", "自适应路由", "�
 
 ## 概览
 
-智能路由包含两个需要许可证的扩展，可与核心版的[虚拟模型](/zh/features/virtual-models)组合使用：
+智能路由包含两个需要许可证的扩展，可与核心版的[虚拟模型](/zh/features/virtual-models)组合使用。两者都需要 `routing` 授权。
 
-- **智能档位路由**回答的问题是：*这个请求应该使用哪个质量档位？* 它会在选择提供商之前，将已配置的模型别名划分到 `easy` 或 `hard`
-  档位，从而让简短的聊天发往便宜的模型，而推理密集、代码密集或工具密集的任务发往能力强的模型。
-- **自适应路由**回答的问题是：*在该档位内使用哪个提供商？* 它根据观测到的延迟、错误、冷却状态以及配置的成本或延迟目标，从虚拟模型的目标池中选择一个上游目标。
+- **智能分级路由**回答的问题是：*这个请求需要能力多强的模型？* 它对发往使用
+  [`auto` 策略](/zh/features/virtual-models#按级别路由)的虚拟模型的每个请求进行分类，并告诉网关该请求需要哪个级别，
+  从而让简短的聊天发往小模型，而推理密集、代码密集或工具密集的任务发往能力强的模型。
+- **自适应路由**回答的问题是：*在该级别内使用哪个目标？* 它根据观测到的延迟、错误、冷却状态以及配置的成本或延迟目标选择一个上游目标。
 
-两者可以叠加：对 `model: "normal"` 的请求会被改写为 `normal-easy` 或
-`normal-hard`；如果其中任一个是使用 `adaptive`
-策略的虚拟模型，选择器随后会为其挑选最佳提供商。
+两者可以叠加：智能分级路由给出级别，自适应选择器再在路由中属于该级别的目标之间进行选择。
 
-## 智能档位路由
+## 智能分级路由
 
-使用普通的 GoModel 模型名称配置分档别名。档位目标可以是具体模型，也可以是虚拟模型：
+路由就是使用 `strategy: auto` 的虚拟模型。每个目标声明自己的级别（`level`）：`light`、`normal`、`smart` 或
+`smartest`，从低到高。
 
-```bash
-PRO_SMART_ROUTING_ROUTES='{"normal":{"easy":"normal-easy","hard":"normal-hard"}}'
+```yaml
+virtual_models:
+  - source: claude-auto
+    strategy: auto
+    targets:
+      - { model: anthropic/claude-haiku-5-5, level: light }
+      - { model: anthropic/claude-sonnet-5-5, level: smart }
+      - { model: anthropic/claude-opus-5-5, level: smartest }
 ```
 
-只有 `PRO_SMART_ROUTING_ROUTES` 中列出的别名才会被改写；其他所有模型名称都原样通过。如果未配置任何路由，该功能处于空闲状态，启动日志会给出提示。
+无需在 Pro 中做任何配置，路由即可工作。Pro 会对 `/v1/chat/completions`、`/v1/messages` 和 `/v1/responses`
+上模型为自动路由的请求进行分类，无论该路由是被直接指定，还是通过单目标别名指定。随后网关把每个请求发往路由中不低于其所需级别的最低级别；
+网关如何选择目标和进行故障转移，请参阅[按级别路由](/zh/features/virtual-models#按级别路由)。
 
-### 请求如何评分
+没有 Pro 许可证或禁用智能分级路由时，同一个虚拟模型仍可继续工作，并始终使用其最高级别。
 
-分类是确定性的，在进程内运行，不调用任何模型。显式要求推理的请求（`reasoning_effort` 为 medium 或更高，或带有 Anthropic `thinking` 块）会直接进入困难档位。
-否则，请求会累计分数，分数达到或超过
-`PRO_SMART_ROUTING_THRESHOLD`（默认 `4`）时选择困难档位：
+### 请求如何分类
+
+分类按阶段进行，成本最低的阶段在前。在默认设置下只运行前两个阶段，它们都不调用模型。
+
+1. **会话重放。** 当最新一轮不是由人编写时（工具结果、没有新用户输入的 Responses 续接、助手预填充），
+   会沿用会话当前的级别，不进行分类。
+2. **启发式规则。** 不调用模型。
+   - 显式要求推理的请求（reasoning effort 不是 `none` 或 `minimal`，或启用了 Anthropic `thinking`）需要 `smartest`。
+   - 单行的普通提示词需要 `light`：最多 40 个字符、最多 2 条消息，且没有工具、代码、附件、结构化输出或投入程度关键词。
+   - 其他情况由[启发式评分](#启发式评分)决定：低于 `PRO_SMART_ROUTING_THRESHOLD`（默认 `4`）需要 `normal`，
+     达到或超过该值需要 `smart`。
+3. **决策模型**（可选，设置了 `PRO_SMART_ROUTING_DECISION_MODEL` 时）。[决策模型](/zh/advanced/decisions-api)返回每个级别的概率，
+   请求获得路由中累计概率达到 `PRO_SMART_ROUTING_QUALITY_TARGET`（默认 `0.85`）的最低级别。
+   它只在由人编写的轮次上运行，并且只在启发式规则未能给出明确结论时运行。
+4. **裁判模型（judge）**（可选，设置了 `PRO_SMART_ROUTING_JUDGE_MODEL` 时）。由一个聊天模型给出级别。
+   `PRO_SMART_ROUTING_JUDGE` 决定它何时运行：`fallback`（默认）仅在决策结果很接近时运行，即与质量目标相差不超过 `0.1`；
+   `always`；或 `off`。
+
+失败或超时的阶段会回退到已有的结论。路由永远不会导致请求失败。
+
+### 启发式评分
 
 | 信号 | 分数 |
 | --- | --- |
@@ -48,47 +74,99 @@ PRO_SMART_ROUTING_ROUTES='{"normal":{"easy":"normal-easy","hard":"normal-hard"}}
 | 上下文大小 | 达到 2k 字符时 +1，达到 8k 时再 +2，达到 32k 时再 +3 |
 | 对话深度达到 7 条或以上消息 | +1 |
 
-在默认设置下，仅有一小段代码（3 分）会留在简单档位，而代码加上 2k 字符的上下文（4 分）则会升级。降低阈值可将更多流量发往困难档位，提高阈值则可保护便宜档位。
+在默认设置下，仅有一小段代码（3 分）需要 `normal`，而代码加上 2k 字符的上下文（4 分）需要 `smart`。
+降低阈值可将更多流量发往 `smart`，提高阈值则让更多流量留在 `normal`。
 
-### 会话固定
+### 决策模型和裁判模型
 
-所选档位会按路由别名和检测到的会话进行固定（参见
-[会话保持](/zh/features/session-keeping)）。该固定**只升不降**：
-在固定有效期间，对话可以从简单档位升到困难档位，但永远不会被静默降级，因此像“谢谢！”这样的后续消息不会把困难对话打回便宜档位，也不会使其提供商提示词缓存失效。固定在
-`PRO_SMART_ROUTING_SESSION_TTL` 时长内无活动后过期。
+<Note>
+  配置了决策模型或裁判模型后，系统提示词和最新的用户消息（经过截断）会被发送给该模型。两者都不设置即可让路由只使用启发式规则。
+</Note>
 
-### 配置智能档位路由
+这两个阶段都通过网关调用模型，因此这些调用会计入用量、速率限制和预算，在请求日志中记录在
+`<用户路径>/extensions/pro-smart-routing` 下，并且要求调用方的用户路径有权访问该模型。裁判模型请使用不带推理的聊天模型。
 
-| 环境变量 | 默认值 | 用途 |
-| --- | --- | --- |
-| `PRO_SMART_ROUTING_ENABLED` | `true` | 启用智能档位路由。 |
-| `PRO_SMART_ROUTING_ROUTES` | — | 从请求别名到 `easy` 和 `hard` 模型的 JSON 映射。没有路由时该功能处于空闲状态。 |
-| `PRO_SMART_ROUTING_THRESHOLD` | `4` | 分数达到或超过此值时选择困难档位。 |
-| `PRO_SMART_ROUTING_SESSION_TTL` | `30m` | 只升不降的会话固定的滑动有效期。 |
+### 会话
+
+在检测到的会话内（参见[会话保持](/zh/features/session-keeping)），路由的级别只升不降：
+对话可以从 `normal` 升到 `smart`，但像“谢谢！”这样的后续消息永远不会把它降回去。
+这可以保护为该对话提供服务的模型的提供商提示词缓存。会话的级别在其最后一个请求之后经过
+`PRO_SMART_ROUTING_SESSION_TTL`（默认 `30m`）过期。
 
 ### 覆盖和检查决策
 
-发送 `X-GoModel-Smart-Routing: off` 可为单个请求跳过分类，
-发送 `X-GoModel-Tier: easy` 或 `X-GoModel-Tier: hard` 可强制指定其档位，且不改变会话固定。
+| 请求头 | 作用 |
+| --- | --- |
+| `X-GoModel-Smart-Routing: off` | 为单个请求跳过分类；此时路由使用其最高级别。 |
+| `X-GoModel-Tier: light`（或 `normal`、`smart`、`smartest`） | 为单个请求强制指定级别。`easy` 和 `hard` 仍被接受，分别表示路由的最低和最高级别。 |
 
-每个经过路由的响应都会报告该决策：
+每个经过分类的响应都会报告该决策：
 
 ```http
-X-GoModel-Pro-Tier: hard
-X-GoModel-Pro-Tier-Target: normal-hard
+X-GoModel-Pro-Tier: smart
+X-GoModel-Pro-Tier-Stage: heuristic
 X-GoModel-Pro-Tier-Score: 5
+X-GoModel-Route-Level: smart
 ```
 
-同样的判定及其原因会记录在请求日志的修订详情中。
-Prometheus 以 `gomodel_pro_smartroute_` 前缀公开请求、升级和评分指标；评分直方图是根据真实流量调整阈值的工具。
+| 响应头 | 含义 |
+| --- | --- |
+| `X-GoModel-Pro-Tier` | 请求需要的级别。 |
+| `X-GoModel-Pro-Tier-Stage` | 做出决定的阶段：`replay`、`heuristic`、`decision`、`judge` 或 `override`。 |
+| `X-GoModel-Pro-Tier-Score` | 启发式评分。 |
+| `X-GoModel-Route-Level` | 由网关设置：路由最初选中的目标的级别。当路由在该级别没有可用目标时，它与 `X-GoModel-Pro-Tier` 不同；故障转移仍可能转移请求。 |
 
-## 自适应路由
+该决策还会记录在请求日志的修订详情中。Prometheus 指标使用 `gomodel_pro_smartroute_` 前缀；评分直方图是根据真实流量调整阈值的工具。
 
-自适应路由用一个感知健康状况的选择器取代了核心版的 `round_robin` 和 `cost` 策略。它在启动时为整个网关注册一次，但**只有配置了 `strategy: adaptive` 的虚拟模型才会使用它**——其他所有虚拟模型保持原有策略。
+### 配置智能分级路由
+
+| 环境变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `PRO_SMART_ROUTING_ENABLED` | `true` | 启用智能分级路由。 |
+| `PRO_SMART_ROUTING_THRESHOLD` | `4` | 启发式评分达到或超过此值时，请求需要 `smart` 而不是 `normal`。 |
+| `PRO_SMART_ROUTING_SESSION_TTL` | `30m` | 会话在最后一个请求之后保持其级别的时长。 |
+| `PRO_SMART_ROUTING_DECISION_MODEL` | — | 决策阶段使用的模型。未设置时跳过该阶段。 |
+| `PRO_SMART_ROUTING_DECISION_TIMEOUT` | `1500ms` | 决策模型的时间限制。 |
+| `PRO_SMART_ROUTING_QUALITY_TARGET` | `0.85` | 决策阶段中一个级别必须达到的累计概率。提高它会偏向更高的级别，降低它可节省更多成本。 |
+| `PRO_SMART_ROUTING_JUDGE_MODEL` | — | 裁判阶段使用的聊天模型。未设置时跳过该阶段。 |
+| `PRO_SMART_ROUTING_JUDGE` | `fallback` | 裁判模型何时运行：`fallback`、`always` 或 `off`。 |
+| `PRO_SMART_ROUTING_JUDGE_TIMEOUT` | `4s` | 裁判模型的时间限制。 |
+
+### 已知限制
+
+[提示词压缩](/zh/pro/compression)的排除项（`PRO_COMPRESSION_EXCLUDE_MODELS`）匹配的是请求的模型，对自动路由而言就是路由的名称，
+而不是最终提供服务的模型。像 `ollama/*` 这样的 glob 不会覆盖路由发往 Ollama 目标的请求；请改为列出路由的名称。
+
+### 旧版路由
+
+在自动路由出现之前，路由是在 Pro 中通过 `PRO_SMART_ROUTING_ROUTES` 声明的，它是一个从模型名称到 `easy` 模型和 `hard` 模型的 JSON 映射。
+这种方式仍可照常工作，但已弃用：
+
+```bash
+PRO_SMART_ROUTING_ROUTES='{"normal":{"easy":"normal-easy","hard":"normal-hard"}}'
+```
+
+旧版路由会改写请求的模型：要求推理的请求，或启发式评分达到阈值的请求，发往 `hard` 模型，其他请求发往 `easy` 模型。
+它的响应还带有 `X-GoModel-Pro-Tier-Target`，即请求被改写成的模型。请用等效的虚拟模型替换该路由：
 
 ```yaml
 virtual_models:
-  - source: normal-hard
+  - source: normal
+    strategy: auto
+    targets:
+      - { model: normal-easy, level: normal }
+      - { model: normal-hard, level: smartest }
+```
+
+当一个模型名称既是旧版路由又是自动路由时，自动路由优先，因此可以先添加虚拟模型，之后再移除该变量。
+
+## 自适应路由
+
+自适应路由用一个感知健康状况的选择器取代了核心版的 `round_robin` 和 `cost` 策略。它在启动时为整个网关注册一次，但**只有配置了 `strategy: adaptive` 的虚拟模型才会使用它**，此外 `strategy: auto` 的路由会用它在同一级别的目标之间进行选择。其他所有虚拟模型保持原有策略。
+
+```yaml
+virtual_models:
+  - source: opus-pool
     strategy: adaptive
     targets:
       - { model: anthropic/claude-opus-4-6 }

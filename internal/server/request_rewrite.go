@@ -47,6 +47,7 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, requestLogger req
 
 			changed := false
 			tokensSaved := 0
+			routeLevel := ""
 			feedbackObservers := make([]ext.ResponseFeedbackObserver, 0, len(rewriters))
 			for _, rw := range rewriters {
 				res, rwErr := rw.Rewrite(c.Request().Context(), in)
@@ -64,6 +65,9 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, requestLogger req
 				}
 				if res != nil {
 					applyRewriteResponseHeaders(c, res.ResponseHeader)
+					if res.RouteLevel != "" {
+						routeLevel = res.RouteLevel
+					}
 				}
 				if res == nil || res.Body == nil {
 					// The rewriter ran and left the request alone. Record the
@@ -87,6 +91,10 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, requestLogger req
 					req := c.Request()
 					c.SetRequest(req.WithContext(core.WithRewriteTokensSaved(req.Context(), tokensSaved)))
 				}
+			}
+			if routeLevel != "" {
+				req := c.Request()
+				c.SetRequest(req.WithContext(core.WithRouteLevel(req.Context(), routeLevel)))
 			}
 			if len(feedbackObservers) > 0 {
 				setResponseFeedbackObservers(c, feedbackObservers)

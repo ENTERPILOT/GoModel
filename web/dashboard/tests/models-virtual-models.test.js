@@ -976,9 +976,9 @@ test("editing a redirect preserves a provider prefix on a multi-slash model name
   });
   assert.equal(primaryModel, "groq/openai/gpt-oss-120b");
   // Stored targets without an explicit weight surface the neutral default of 1,
-  // and without a reasoning effort an empty one.
+  // and without a reasoning effort or a level an empty one.
   assert.deepEqual(extraTargets, [
-    { provider: "openrouter", model: "openrouter/openai/gpt-4o", weight: 1, reasoning_effort: "" },
+    { provider: "openrouter", model: "openrouter/openai/gpt-4o", weight: 1, reasoning_effort: "", level: "" },
   ]);
 
   const { payload } = buildVirtualModelSavePayload(
@@ -1519,27 +1519,37 @@ test("the target column labels show exactly when the rows show their controls", 
     {
       name: "plain alias",
       form: { target_model: "openai/gpt-4o", targets: [], strategy: "round_robin" },
-      want: { effort: false, weight: false },
+      want: { effort: false, level: false, weight: false },
     },
     {
       name: "single target that already sets an effort",
       form: { target_model: "openai/gpt-4o", target_reasoning_effort: "high", targets: [], strategy: "round_robin" },
-      want: { effort: true, weight: false },
+      want: { effort: true, level: false, weight: false },
     },
     {
       name: "several targets under round-robin",
       form: { target_model: "openai/gpt-4o", targets: [{ model: "groq/llama", weight: 1 }], strategy: "round_robin" },
-      want: { effort: true, weight: true },
+      want: { effort: true, level: false, weight: true },
     },
     {
       name: "several targets under failover",
       form: { target_model: "openai/gpt-4o", targets: [{ model: "groq/llama" }], strategy: "failover" },
-      want: { effort: true, weight: false },
+      want: { effort: true, level: false, weight: false },
+    },
+    {
+      name: "several targets under auto",
+      form: { target_model: "openai/gpt-4o", targets: [{ model: "groq/llama", weight: 1 }], strategy: "auto" },
+      want: { effort: true, level: true, weight: true },
+    },
+    {
+      name: "one target under auto, where the strategy does not apply yet",
+      form: { target_model: "openai/gpt-4o", targets: [], strategy: "auto" },
+      want: { effort: false, level: false, weight: false },
     },
     {
       name: "empty first row with a second row",
       form: { target_model: "", targets: [{ model: "", weight: 1 }], strategy: "round_robin" },
-      want: { effort: true, weight: true },
+      want: { effort: true, level: false, weight: true },
     },
   ];
   for (const { name, form, want } of cases) {

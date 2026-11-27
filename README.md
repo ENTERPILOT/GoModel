@@ -215,7 +215,7 @@ for the full list of settings.
 [GoModel Pro](https://gomodel.enterpilot.io/docs/pro/overview?utm_source=readme) is the commercial build: the same gateway, configuration, and dashboard, with licensed extensions.
 
 - [Prompt compression](https://gomodel.enterpilot.io/docs/pro/compression?utm_source=readme) - remove repeated and structural context before it reaches the provider, without changing the request shape
-- [Intelligent routing](https://gomodel.enterpilot.io/docs/pro/intelligent-routing?utm_source=readme) - classify each request as easy or hard, then pick the healthiest and cheapest provider in that tier
+- [Intelligent routing](https://gomodel.enterpilot.io/docs/pro/intelligent-routing?utm_source=readme) - send each request to the model level it needs, then pick the healthiest and cheapest provider at that level
 - [OIDC single sign-on](https://gomodel.enterpilot.io/docs/pro/sso?utm_source=readme) - protect the dashboard with your identity provider using Authorization Code flow with PKCE
 
 More in the documentation...

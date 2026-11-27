@@ -111,7 +111,7 @@ models:
 #       min_p: 0.0
 #       repetition_penalty: 1.0
 #   - source: smart # weighted round-robin load balancer
-#     strategy: round_robin # round_robin (default) | cost | failover | adaptive (uses a routing extension when registered; otherwise falls back to round_robin) | plugin (see smart-router below)
+#     strategy: round_robin # round_robin (default) | cost | failover | auto (routes by target level; see claude-auto below) | adaptive (uses a routing extension when registered; otherwise falls back to round_robin) | plugin (see smart-router below)
 #     targets:
 #       - { model: openai/gpt-4o, weight: 2 }
 #       - { model: anthropic/claude-sonnet-4-6 }
@@ -132,6 +132,12 @@ models:
 #       - { model: gpt-4o }
 #       - { model: azure/gpt-4o }
 #       - { model: gemini/gemini-2.5-pro, reasoning_effort: low } # per-target effort: beats the entry's own reasoning_effort for this target
+#   - source: claude-auto # auto: route by level; a request goes to the lowest level at or above the one it needs
+#     strategy: auto # without a classifier (a request rewriter extension such as GoModel Pro smart routing) every request uses the highest level
+#     targets: # every target needs a level: light | normal | smart | smartest (lowest to highest)
+#       - { model: anthropic/claude-haiku-5-5, level: light }
+#       - { model: anthropic/claude-sonnet-5-5, level: smart }
+#       - { model: anthropic/claude-opus-5-5, level: smartest }
 #   - source: smart-router # plugin: a routing-strategy plugin picks the target; weights are ignored
 #     strategy: plugin
 #     strategy_plugin: cheapest_healthy # built in; GET /admin/plugins lists loaded plugins with kind "route"

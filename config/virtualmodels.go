@@ -17,9 +17,10 @@ type VirtualModelConfig struct {
 
 	// Strategy selects load balancing across multiple targets: "round_robin"
 	// (default), "cost", "failover", "adaptive" (delegates to a registered
-	// routing extension and falls back to round_robin without one), or
-	// "plugin" (delegates to the routing-strategy plugin named by
-	// StrategyPlugin). Ignored for single-target aliases and access policies.
+	// routing extension and falls back to round_robin without one), "auto"
+	// (routes by the level each target declares), or "plugin" (delegates to
+	// the routing-strategy plugin named by StrategyPlugin). Ignored for
+	// single-target aliases and access policies.
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
 
 	// StrategyPlugin names the routing-strategy plugin used when Strategy is
@@ -97,12 +98,15 @@ type VirtualModelConfig struct {
 // id (with Provider set) or a "provider/model" selector. Weight biases the
 // round_robin strategy and defaults to 1. ReasoningEffort forces the reasoning
 // effort of requests sent to this target, beating the entry's own
-// ReasoningEffort; empty keeps that one, or the client's value.
+// ReasoningEffort; empty keeps that one, or the client's value. Level says how
+// capable the target is ("light", "normal", "smart", or "smartest"); the auto
+// strategy requires it and every other strategy ignores it.
 type VirtualModelTargetConfig struct {
 	Provider        string  `yaml:"provider,omitempty" json:"provider,omitempty"`
 	Model           string  `yaml:"model" json:"model"`
 	Weight          float64 `yaml:"weight,omitempty" json:"weight,omitempty"`
 	ReasoningEffort string  `yaml:"reasoning_effort,omitempty" json:"reasoning_effort,omitempty"`
+	Level           string  `yaml:"level,omitempty" json:"level,omitempty"`
 }
 
 const envVirtualModels = "VIRTUAL_MODELS"

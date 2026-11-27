@@ -11272,6 +11272,9 @@ const docTemplate = `{
         "admin.virtualModelTargetRequest": {
             "type": "object",
             "properties": {
+                "level": {
+                    "type": "string"
+                },
                 "model": {
                     "type": "string"
                 },
@@ -15662,6 +15665,9 @@ const docTemplate = `{
         "virtualmodels.Target": {
             "type": "object",
             "properties": {
+                "level": {
+                    "type": "string"
+                },
                 "model": {
                     "type": "string"
                 },

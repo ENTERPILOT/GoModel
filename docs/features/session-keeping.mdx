@@ -75,6 +75,11 @@ saturated, the strategy picks again and the session re-pins — a session is
 never glued to a dead target, and the all-saturated honest-429 behavior is
 unchanged.
 
+Under the `auto` strategy a session keeps one target per
+[level](/features/virtual-models#route-by-level): a conversation that moves to
+another level sticks to a target there, and finds its earlier target again
+when it comes back.
+
 Under the `adaptive` strategy the pin is handed to the route selector, which
 decides on every request whether the session keeps it — whenever more than
 one target is viable. (With a single viable target there is nothing to

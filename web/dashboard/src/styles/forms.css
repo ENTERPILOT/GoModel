@@ -165,9 +165,9 @@
   color: var(--text-muted);
 }
 
-/* One load-balancing target row: model selector, reasoning effort, weight,
-   and remove button. The head row above the targets labels those columns, so
-   both share the column widths. */
+/* One load-balancing target row: model selector, level (auto strategy only),
+   reasoning effort, weight, and remove button. The head row above the targets
+   labels those columns, so both share the column widths. */
 .vm-target-row,
 .vm-target-head {
   display: flex;
@@ -180,7 +180,7 @@
   min-width: 0;
 }
 
-:is(.vm-target-row, .vm-target-head) .vm-target-effort {
+:is(.vm-target-row, .vm-target-head) :is(.vm-target-effort, .vm-target-level) {
   flex: 0 0 108px;
   width: 108px;
 }
@@ -217,7 +217,7 @@
   }
 
   /* A row with columns always takes two lines: the model picker, then its
-     effort, weight, and remove controls. The column labels above the list
+     level, effort, weight, and remove controls. The column labels above the list
      cannot line up with that, so each control shows its own instead. The
      picker's basis stops short of the full width so rounding cannot push it
      below the drag handle; it grows to fill the line. */
@@ -229,10 +229,17 @@
     flex-basis: calc(100% - 8px);
   }
 
-  .vm-target-columns .vm-target-effort {
-    flex: 1 1 96px;
+  /* The basis is small enough that level, effort, weight, and remove still
+     share one line on a 360px phone; the selects grow into what is left. */
+  .vm-target-columns :is(.vm-target-effort, .vm-target-level) {
+    flex: 1 1 64px;
     width: auto;
     min-width: 0;
+  }
+
+  /* "smartest", the default level, is the longest value on the line. */
+  .vm-target-columns .vm-target-level {
+    flex-grow: 2;
   }
 
   .vm-target-columns .vm-target-remove {
@@ -245,6 +252,7 @@
   }
 
   .vm-target-head .vm-target-effort,
+  .vm-target-head .vm-target-level,
   .vm-target-head .vm-target-weight,
   .vm-target-remove-space {
     display: none;

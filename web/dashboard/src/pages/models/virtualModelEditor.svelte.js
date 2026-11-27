@@ -26,6 +26,7 @@ import {
 } from "./routing.js";
 import {
   aliasFormTargets,
+  applyDefaultLevels,
   buildVirtualModelSavePayload,
   defaultVirtualModelForm,
   formatParamsJSON,
@@ -77,7 +78,10 @@ class VirtualModelEditorStore {
       model: "",
       weight: 1,
       reasoning_effort: "",
+      level: "",
     });
+    // Under the auto strategy the new row starts at the default level.
+    applyDefaultLevels(this.vmForm);
   }
 
   removeVmTarget(index) {
@@ -167,12 +171,14 @@ class VirtualModelEditorStore {
 
   // setVmStrategy applies a dropdown choice. Switching to another plugin
   // resets strategy_config to that plugin's route-field defaults; leaving the
-  // plugin strategy keeps nothing plugin-specific.
+  // plugin strategy keeps nothing plugin-specific. Switching to auto gives
+  // every target without a level the default one.
   setVmStrategy(value) {
     const parsed = parseStrategyDropdownValue(value);
     const previousPlugin = this.vmForm.strategy_plugin;
     this.vmForm.strategy = parsed.strategy;
     this.vmForm.strategy_plugin = parsed.strategy_plugin;
+    applyDefaultLevels(this.vmForm);
     if (parsed.strategy !== "plugin") {
       this.vmForm.strategy_config = {};
       return;
@@ -301,6 +307,7 @@ class VirtualModelEditorStore {
       primaryModel,
       primaryWeight,
       primaryReasoningEffort,
+      primaryLevel,
       extraTargets,
     } = aliasFormTargets(alias);
     this.vmForm = {
@@ -309,6 +316,7 @@ class VirtualModelEditorStore {
       target_model: primaryModel,
       target_weight: primaryWeight,
       target_reasoning_effort: primaryReasoningEffort,
+      target_level: primaryLevel,
       targets: extraTargets,
       strategy: alias.strategy || "round_robin",
       strategy_plugin: String(alias.strategy_plugin || "").trim(),
@@ -367,13 +375,20 @@ class VirtualModelEditorStore {
     // strategy, so adding a target makes a fallback for this model rather than
     // silently replacing it. An existing redirect over the model is shown as
     // saved.
-    const { primaryModel, primaryWeight, primaryReasoningEffort, extraTargets } =
+    const {
+      primaryModel,
+      primaryWeight,
+      primaryReasoningEffort,
+      primaryLevel,
+      extraTargets,
+    } =
       override && Array.isArray(override.targets) && override.targets.length > 0
         ? aliasFormTargets(override)
         : {
             primaryModel: selector,
             primaryWeight: 1,
             primaryReasoningEffort: "",
+            primaryLevel: "",
             extraTargets: [],
           };
     this.vmForm = {
@@ -382,6 +397,7 @@ class VirtualModelEditorStore {
       target_model: primaryModel,
       target_weight: primaryWeight,
       target_reasoning_effort: primaryReasoningEffort,
+      target_level: primaryLevel,
       targets: extraTargets,
       strategy: (override && override.strategy) || "failover",
       strategy_plugin: String((override && override.strategy_plugin) || "").trim(),

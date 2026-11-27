@@ -328,7 +328,7 @@ func dashboardUserPathHeader(cfg *config.Config) string {
 // route-selector extension is actually registered. Every loaded
 // routing-strategy plugin adds one "plugin:<name>" entry.
 func dashboardVirtualModelStrategies(adaptiveRouting bool, routePlugins []string) string {
-	strategies := []string{virtualmodels.StrategyRoundRobin, virtualmodels.StrategyCost, virtualmodels.StrategyFailover}
+	strategies := []string{virtualmodels.StrategyRoundRobin, virtualmodels.StrategyCost, virtualmodels.StrategyFailover, virtualmodels.StrategyAuto}
 	if adaptiveRouting {
 		strategies = append(strategies, virtualmodels.StrategyAdaptive)
 	}

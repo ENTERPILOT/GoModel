@@ -420,6 +420,43 @@ func TestResolveRequestModelCarriesResolvedTimeouts(t *testing.T) {
 	assert.Zero(t, resolution.Timeouts, "a resolver without the timeouts contract inherits")
 }
 
+// requestRouteLevelResolver stands in for a virtual model using the "auto"
+// strategy: it reports the level it chose while it resolves.
+type requestRouteLevelResolver struct {
+	requestAliasResolver
+	level string
+}
+
+func (r requestRouteLevelResolver) ResolveModelRouteForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, []string, bool, error) {
+	selector, changed, err := r.ResolveModel(requested)
+	if changed {
+		core.ReportServedRouteLevel(ctx, core.RouteLevelRank(r.level))
+	}
+	return selector, nil, changed, err
+}
+
+func TestResolveRequestModelCarriesRouteLevel(t *testing.T) {
+	resolver := requestRouteLevelResolver{
+		requestAliasResolver: requestAliasResolver{"auto": {Provider: "openai", Model: "gpt-4o"}},
+		level:                core.RouteLevelSmart,
+	}
+
+	resolution, err := ResolveRequestModelWithAuthorizer(
+		context.Background(), newRequestRefreshProvider(1), resolver, nil,
+		core.NewRequestedModelSelector("auto", ""),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, core.RouteLevelSmart, resolution.RouteLevel)
+
+	// A request no virtual model redirected has no route level to report.
+	resolution, err = ResolveRequestModelWithAuthorizer(
+		context.Background(), newRequestRefreshProvider(1), resolver, nil,
+		core.NewRequestedModelSelector("openai/gpt-4o", ""),
+	)
+	require.NoError(t, err)
+	assert.Empty(t, resolution.RouteLevel)
+}
+
 func TestResolveExecutionRouteReturnsVirtualModelPath(t *testing.T) {
 	resolver := requestRouteResolver{
 		requestAliasResolver: requestAliasResolver{"team": {Provider: "openai", Model: "gpt-4o"}},

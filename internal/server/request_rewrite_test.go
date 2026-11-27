@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -668,4 +669,45 @@ func TestRequestRewriteMiddlewareNoSavingsLeavesContextZero(t *testing.T) {
 	err := mw(next)(c)
 	require.NoError(t, err)
 	require.Equal(t, 0, got)
+}
+
+func TestRequestRewriteMiddlewareCarriesRouteLevel(t *testing.T) {
+	tests := []struct {
+		name   string
+		levels []string // one rewriter per entry; "" sets no level
+		want   string
+	}{
+		{name: "level reaches model resolution", levels: []string{ext.RouteLevelLight}, want: ext.RouteLevelLight},
+		{name: "last rewriter to set one wins", levels: []string{ext.RouteLevelLight, ext.RouteLevelSmart, ""}, want: ext.RouteLevelSmart},
+		{name: "unknown level is dropped", levels: []string{"genius"}, want: ""},
+		{name: "no level set", levels: []string{""}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rewriters := make([]ext.RequestRewriter, len(tt.levels))
+			for i, level := range tt.levels {
+				rewriters[i] = &stubRewriter{
+					name: "level",
+					rewrite: func(ext.Input) (*ext.Result, error) {
+						// No body: a rewriter may name a level and leave the
+						// request unchanged.
+						return &ext.Result{RouteLevel: level}, nil
+					},
+				}
+			}
+			body := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`
+			c, _ := echotest.Post(t, "/v1/chat/completions", body)
+
+			var got, forwarded string
+			handler := RequestRewriteMiddleware(rewriters, nil)(func(c *echo.Context) error {
+				got = core.RouteLevelFromContext(c.Request().Context())
+				raw, err := io.ReadAll(c.Request().Body)
+				forwarded = string(raw)
+				return err
+			})
+			require.NoError(t, handler(c))
+			assert.Equal(t, tt.want, got)
+			assert.JSONEq(t, body, forwarded)
+		})
+	}
 }

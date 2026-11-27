@@ -8,8 +8,9 @@
 //
 // Registered components can also receive core dependencies by implementing
 // an optional interface: AuthenticationEventRecorderAware for the request
-// log, and SharedStoreAware for a small key/value store kept in the
-// configured storage backend and shared by every replica on it.
+// log, SharedStoreAware for a small key/value store kept in the configured
+// storage backend and shared by every replica on it, and AutoRoutesAware for
+// the virtual models that route by level.
 package ext
 
 import (
@@ -72,6 +73,13 @@ type Result struct {
 	// aggregates both as rewrite savings. Leave zero when the rewrite does
 	// not shrink the prompt.
 	TokensSaved int
+	// RouteLevel is the lowest route level that may serve the request: one
+	// of the RouteLevel constants. A virtual model using the "auto" strategy
+	// sends the request to its lowest level at or above it; without one the
+	// route uses its highest level. Every other model ignores it. It is
+	// independent of Body, so a rewriter can set it and leave the request
+	// unchanged. When several rewriters set it, the last one wins.
+	RouteLevel string
 }
 
 // RequestRewriter rewrites raw JSON request bodies at ingress, after

@@ -133,8 +133,16 @@ func resolveAndStoreRequestModelResolution(
 		return nil, err
 	}
 	storeRequestModelResolution(c, resolution)
+	if resolution.RouteLevel != "" {
+		c.Response().Header().Set(routeLevelHeader, resolution.RouteLevel)
+	}
 	return resolution, nil
 }
+
+// routeLevelHeader reports the level of the target a virtual model using the
+// "auto" strategy chose first for the request. A failover may still move the
+// request to a target of another level.
+const routeLevelHeader = "X-GoModel-Route-Level"
 
 func enrichRequestLogEntryWithRequestedModel(c *echo.Context, requested core.RequestedModelSelector) {
 	if c == nil {

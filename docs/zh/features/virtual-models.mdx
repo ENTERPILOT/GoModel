@@ -141,6 +141,8 @@ virtual_models:
 - **Adaptive**（自适应，GoModel Pro）选择观测到的延迟、错误率和价格最优的目标，避开受速率限制或正在失败的目标，
   并将会话保持在提示词缓存已预热的提供商上。请参阅[智能路由](/zh/pro/intelligent-routing)。在开源版本中，
   该策略会回退为轮询。
+- **Auto**（自动，`strategy: auto`）按级别路由：每个目标声明自己的能力级别，请求会发往能满足其需求的最低级别。
+  请参阅[按级别路由](#按级别路由)。
 - **Plugin**（插件，`strategy: plugin`）将选择委托给一个已加载的、由 `strategy_plugin` 指定名称的
   [路由策略插件](/zh/advanced/plugins#路由策略插件)，并通过 `strategy_config` 为每个重定向单独配置。
   内置的 `cheapest_healthy` 优先选择近期错误率可接受的最便宜（或最快）目标。权重不适用；如果插件失败或缺失，
@@ -154,7 +156,7 @@ virtual_models:
 只有一个目标的重定向，其行为与普通别名完全相同。
 
 无论采用哪种策略，其余目标都构成该重定向的**故障转移链**：当所选目标以可重试的错误失败时，请求会按列表顺序
-在其他可用目标上重试。编辑器中的 **Failover** 复选框（默认勾选；在代码中为 `failover: false`）可以为单个重定向
+在其他可用目标上重试（`auto` 策略则[按级别](#按级别路由)排序）。编辑器中的 **Failover** 复选框（默认勾选；在代码中为 `failover: false`）可以为单个重定向
 关闭此行为，这样失败的请求会直接返回错误；也可以全局关闭，或通过请求的工作流关闭。关于触发重试的错误，
 以及如何通过覆盖真实模型为其添加故障转移链，请参阅[故障转移](/zh/features/failover)。
 
@@ -171,6 +173,41 @@ virtual_models:
 
 例如，可以使用轮询策略将 `smart` 同时指向 `openai/gpt-4o` 和 `anthropic/claude-sonnet-4-6` 来分担负载，
 或者使用成本策略将其指向一个高端模型和一个经济型模型，从而始终选择更便宜的那个。
+
+## 按级别路由
+
+`auto` 策略把能力不同的模型放在同一个名称之后，这样简单的请求可以发往小模型，要求高的请求发往强模型。
+为每个目标设置 `level`（级别）：`light`、`normal`、`smart` 或 `smartest`，从低到高。
+
+```yaml
+virtual_models:
+  - source: claude-auto
+    strategy: auto
+    targets:
+      - { model: anthropic/claude-haiku-5-5, level: light }
+      - { model: anthropic/claude-sonnet-5-5, level: smart }
+      - { model: anthropic/claude-opus-5-5, level: smartest }
+```
+
+GoModel 本身不判断请求需要什么，这由分类器决定。GoModel Pro 的[智能分级路由](/zh/pro/intelligent-routing)就是一个分类器，
+并且无需为该路由做任何额外配置。**默认情况下，没有分类器时，每个请求都会发往现有的最高级别**，
+因此上面的路由始终使用 Opus，可以在分类器运行之前放心声明。自定义构建可以自带分类器：通过 `ext` 包注册的请求改写器
+在 `Result.RouteLevel` 中给出级别，`ext.AutoRoutesAware` 则告诉它哪些模型是自动路由。
+
+- 请求会发往不低于其所需级别的最低级别。级别可以跳过：在上面的例子中，需要 `normal` 的请求会发往 `smart`。
+- 当该级别及以上没有目标能提供服务时（提供商宕机、模型被禁用或调用方无权使用、触发速率限制），
+  由其下方的最高级别提供服务，而不是让请求失败。
+- 同一级别的目标之间使用加权轮询进行均衡，在 GoModel Pro 中则使用[自适应路由](/zh/pro/intelligent-routing#自适应路由)。
+  [会话保持](/zh/features/session-keeping)会让会话在每个级别上各固定一个目标。
+- 故障转移先尝试提供服务的那个级别的其余目标，然后依次向上尝试更高的级别，再依次向下尝试更低的级别。
+- 每个目标都必须有 `level`，否则保存失败。其他策略会丢弃级别。
+- 使用 `auto` 的虚拟模型不能路由到另一个使用 `auto` 的虚拟模型，保存会被拒绝。
+  指向这类路由的单目标别名可以正常工作，并按路由本身的方式进行路由。
+
+响应头 `X-GoModel-Route-Level` 报告路由最初选中的目标的级别。故障转移仍可能把请求转移到其他级别。
+
+当客户端只应发送一个模型名称，而每个请求应获得与其难度匹配的模型时，请使用 `auto`。
+没有分类器时，较低的级别只充当后备，因此单纯的优先级列表请选择 **Failover**。
 
 ## 调整目标顺序
 
@@ -280,12 +317,13 @@ virtual_models:
 VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/gpt-4o"},{"model":"groq/llama-3.3-70b"}]}]
 ```
 
-每个条目接受 `source`、单个 `target`（简写）或 `targets` 列表、`strategy`（`round_robin`、`cost` 或
-`failover`）、`session_affinity`（默认 `true`；参见[会话保持](/zh/features/session-keeping)）、
+每个条目接受 `source`、单个 `target`（简写）或 `targets` 列表、`strategy`（`round_robin`、`cost`、`failover` 或
+`auto`）、`session_affinity`（默认 `true`；参见[会话保持](/zh/features/session-keeping)）、
 `failover`（默认 `true`；参见[故障转移](/zh/features/failover)）、`user_paths`、`description`、
 `slowdown`（`0` 表示禁用继承的减速；有效系数范围为 `0.1` 到 `10`）、`reasoning_effort`（参见[强制推理强度](#强制推理强度)）、`params` 和 `default_params`（参见[设置请求参数](#设置请求参数)）以及 `enabled`。
+在 `strategy: auto` 下，每个目标都必须设置 `level`（参见[按级别路由](#按级别路由)）。
 目标的 `model` 可以指定另一个已声明的虚拟模型（参见[链式虚拟模型](#链式虚拟模型)）。
-将目标留空即可在 `source` 选择器上声明访问策略。无效的声明（未知策略、缺失或自引用的目标、链中存在循环或链深度
+将目标留空即可在 `source` 选择器上声明访问策略。无效的声明（未知策略、`auto` 下缺失或未知的 `level`、缺失或自引用的目标、链中存在循环或链深度
 超过 8 个虚拟模型，或目标的 `provider` 与任何已配置的提供商都不匹配，即拼写错误）会导致启动失败，
 并给出列出已注册提供商名称的明确错误信息。
 

@@ -24,6 +24,9 @@ type RequestModelResolution struct {
 	// reach ResolvedSelector, outermost first. It is empty when no virtual
 	// model applied.
 	VirtualModelPath []string
+	// RouteLevel is the level of the target a virtual model using the "auto"
+	// strategy chose for this request. It is empty for every other request.
+	RouteLevel string
 
 	// resolvedQualified and resolvedRoute memoize the derived selector strings
 	// (see CacheDerivedSelectors). cachedSelector and cachedProviderName record

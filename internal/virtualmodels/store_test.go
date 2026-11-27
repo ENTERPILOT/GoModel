@@ -18,7 +18,7 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 
 		redirect := VirtualModel{
 			Source:          "fast",
-			Targets:         []Target{{Provider: "openai", Model: "gpt-4o", ReasoningEffort: "high"}},
+			Targets:         []Target{{Provider: "openai", Model: "gpt-4o", ReasoningEffort: "high", Level: "smart"}},
 			Description:     "primary",
 			Slowdown:        new(0.4),
 			Timeout:         new(30),
