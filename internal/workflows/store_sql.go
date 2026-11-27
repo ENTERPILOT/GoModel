@@ -164,7 +164,26 @@ func (s *SQLStore) Create(ctx context.Context, input CreateInput) (*Version, err
 
 // EnsureManagedDefaultGlobal publishes the managed default workflow unless the
 // active global version is already it, or was authored by an operator.
+//
+// Gateways that start together race to publish it: the unique indexes let one
+// insert through and refuse the others. A refused caller reads again and
+// finds the version the winner published, as the MongoDB store does.
 func (s *SQLStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error) {
+	var lastErr error
+	for range 5 {
+		version, err := s.ensureManagedDefaultGlobal(ctx, input, workflowHash)
+		if err == nil {
+			return version, nil
+		}
+		if !sqlx.IsUniqueViolation(err) {
+			return nil, err
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("ensure managed default workflow after concurrent retries: %w", lastErr)
+}
+
+func (s *SQLStore) ensureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error) {
 	var created *Version
 	err := s.db.InTx(ctx, func(q sqlx.Querier) error {
 		active, hasActive, err := activeGlobalVersion(ctx, q)

@@ -504,3 +504,22 @@ func TestSchemaToleratesConcurrentApplication(t *testing.T) {
 		}
 	})
 }
+
+func TestIsUniqueViolationRecognizesARepeatedKey(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		db = newConformanceDB(t, db)
+		insert := `INSERT INTO conformance (id, flag, updated_at) VALUES (?, FALSE, 1)`
+		_, err := db.Exec(ctx, insert, "a")
+		require.NoError(t, err)
+
+		_, err = db.Exec(ctx, insert, "a")
+		require.Error(t, err)
+		assert.True(t, sqlx.IsUniqueViolation(err), err.Error())
+
+		_, err = db.Exec(ctx, `INSERT INTO conformance (id, flag, updated_at) VALUES (?, FALSE, NULL)`, "b")
+		require.Error(t, err)
+		assert.False(t, sqlx.IsUniqueViolation(err), err.Error())
+		assert.False(t, sqlx.IsUniqueViolation(nil))
+	})
+}

@@ -106,9 +106,8 @@ func TestCeilingHoldsThroughAnthropicThinkingRoom(t *testing.T) {
 	}
 }
 
-// Native Messages forwarding sends the client's body verbatim, so an explicit
-// thinking budget above the ceiling level's own budget must send the request
-// through the translated pipeline, which sends that level's budget.
+// An explicit thinking budget above the ceiling level's own budget is lowered
+// to that level's budget in the body native Messages forwarding sends.
 func TestCeilingBoundsNativeMessagesThinkingBudget(t *testing.T) {
 	tests := []struct {
 		name       string

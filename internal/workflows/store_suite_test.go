@@ -2,7 +2,9 @@ package workflows
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -232,5 +234,45 @@ func TestStoreEnsureManagedDefaultGlobalLeavesOperatorVersionAlone(t *testing.T)
 		require.NoError(t, err)
 		require.Len(t, active, 1)
 		assert.Equal(t, operator.ID, active[0].ID)
+	})
+}
+
+// Gateways that start together all publish the managed default at once, on
+// an empty database or after its definition changed. Every one of them must
+// come up, and each definition is published once.
+func TestStoreEnsureManagedDefaultGlobalSurvivesConcurrentStarts(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		input := CreateInput{
+			Name:        ManagedDefaultGlobalName,
+			Description: ManagedDefaultGlobalDescription,
+			Payload:     testWorkflowPayload(),
+			Managed:     true,
+			Activate:    true,
+		}
+
+		// The first round also opens the pool's connections, so the later
+		// ones start their transactions together.
+		const rounds = 5
+		for round := 1; round <= rounds; round++ {
+			hash := fmt.Sprintf("hash-%d", round)
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			for range 8 {
+				wg.Go(func() {
+					<-start
+					_, err := store.EnsureManagedDefaultGlobal(ctx, input, hash)
+					assert.NoError(t, err)
+				})
+			}
+			close(start)
+			wg.Wait()
+
+			active, err := store.ListActive(ctx)
+			require.NoError(t, err)
+			require.Len(t, active, 1)
+			assert.Equal(t, hash, active[0].WorkflowHash)
+			assert.Equal(t, round, active[0].Version)
+		}
 	})
 }
