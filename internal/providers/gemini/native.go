@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 	"mime"
 	"net/http"
 	"net/url"
@@ -959,11 +960,12 @@ func copyJSONNumber(raw json.RawMessage, cfg map[string]any, key string) {
 // copyGeminiSeed forwards seed as generationConfig.seed. Gemini declares it
 // int32 and answers HTTP 400 for anything else, while OpenAI clients may send
 // any integer, so a seed that is not a whole number in the int32 range is
-// dropped rather than failing the request.
+// dropped rather than failing the request. Whole numbers written as 42.0 or
+// 1e2 are accepted.
 func copyGeminiSeed(raw json.RawMessage, cfg map[string]any) {
 	text := strings.Trim(string(bytes.TrimSpace(raw)), `"`)
-	seed, err := strconv.ParseInt(text, 10, 32)
-	if err != nil {
+	seed, err := strconv.ParseFloat(text, 64)
+	if err != nil || seed != math.Trunc(seed) || seed < math.MinInt32 || seed > math.MaxInt32 {
 		return
 	}
 	cfg["seed"] = int32(seed)
