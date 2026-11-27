@@ -250,8 +250,11 @@ Chat Completions, Responses API i Anthropic Messages API. Limity nie
 wyłączają natywnego przekazywania requestu Messages do Anthropic: jeśli bez
 nich byłby przekazany natywnie, a przekracza limity, jego `max_tokens`, budżet
 thinking i `output_config.effort` są obniżane w przekazywanym body, a pozostałe
-pola i nagłówki `anthropic-beta` zostają zachowane. Przy
-limicie `none` jego thinking jest wyłączany przez
+pola i nagłówki `anthropic-beta` zostają zachowane. Request, który korzysta z
+cache odpowiedzi, failover, wymuszonego reasoning effort lub parametrów
+requestu albo z guardraila lub pluginu, który go przepisuje, idzie jak dotąd
+ścieżką tłumaczoną i tam jest obniżany. Przy limicie `none` thinking requestu
+przekazywanego natywnie jest wyłączany przez
 `thinking: {"type": "disabled"}`; model, który zawsze myśli (Fable 5.x,
 Mythos 5.x, Opus 5.5), dostaje zamiast tego `low`, tak jak na ścieżce
 tłumaczonej. Znane ograniczenie: Sonnet 5.5 odrzuca `disabled`, więc taki

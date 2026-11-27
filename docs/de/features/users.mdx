@@ -265,8 +265,11 @@ Anthropic Messages API. Obergrenzen nehmen einen Messages-Request nicht von
 der nativen Weiterleitung an Anthropic: Würde er ohne sie nativ weitergeleitet
 und liegt er über den Obergrenzen, werden `max_tokens`, das Thinking-Budget
 und `output_config.effort` im weitergeleiteten Body gesenkt; seine übrigen
-Felder und seine `anthropic-beta`-Header bleiben erhalten. Unter einer
-Obergrenze `none` wird sein
+Felder und seine `anthropic-beta`-Header bleiben erhalten. Ein Request, der
+den Response-Cache, Failover, einen erzwungenen Reasoning-Effort oder
+Request-Parameter oder eine Guardrail oder ein Plugin nutzt, das ihn
+umschreibt, nimmt wie bisher den übersetzten Pfad und wird dort gesenkt. Unter
+einer Obergrenze `none` wird bei einem nativ weitergeleiteten Request das
 Thinking mit `thinking: {"type": "disabled"}` ausgeschaltet; ein Modell, das
 immer denkt (Fable 5.x, Mythos 5.x, Opus 5.5), erhält stattdessen `low`, wie auf
 dem übersetzten Pfad. Bekannte Einschränkung: Sonnet 5.5 lehnt `disabled` ab,

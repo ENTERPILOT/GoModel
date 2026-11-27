@@ -251,7 +251,10 @@ not take a Messages request off native forwarding to Anthropic: where it
 would be forwarded natively without them, one above the ceilings has its
 `max_tokens`, thinking budget, and `output_config.effort` lowered in the
 forwarded body, and keeps its other members and its `anthropic-beta` headers.
-Under a `none` ceiling its thinking is turned off
+A request that uses the response cache, failover, a forced reasoning effort or
+request parameters, or a guardrail or plugin that rewrites it takes the
+translated path as before, and is lowered there. Under a `none` ceiling a
+natively forwarded request's thinking is turned off
 with `thinking: {"type": "disabled"}`; a model that always thinks (Fable 5.x,
 Mythos 5.x, Opus 5.5) gets `low` instead, as on the translated path. Known
 limit: Sonnet 5.5 rejects `disabled`, so such a request to it fails with
