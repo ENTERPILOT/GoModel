@@ -575,7 +575,7 @@ type RouteStrategy interface {
 ```yaml
 virtual_models:
   - source: smart-router
-    strategy: plugin                    # round_robin | cost | failover | adaptive | plugin
+    strategy: plugin                    # round_robin | cost | failover | auto | adaptive | plugin
     strategy_plugin: cheapest_healthy   # 插件名称；使用 strategy: plugin 时必填
     strategy_config:                    # 插件中 Scope: route 的字段；省略时使用默认值
       prefer: cheapest                  # cheapest | fastest
@@ -595,7 +595,7 @@ virtual_models:
   或返回的目标不在可用池中时，GoModel 会回退到加权轮询，并为每个虚拟模型记录一条警告。
 
 在控制台中，虚拟模型编辑器的策略下拉列表会为每个已加载的路由插件列出一个
-`plugin:<name>` 条目（运行时配置中的 `VIRTUAL_MODEL_STRATEGIES` 为 `round_robin,cost,failover[,adaptive],plugin:<name>,...`）；
+`plugin:<name>` 条目（运行时配置中的 `VIRTUAL_MODEL_STRATEGIES` 为 `round_robin,cost,failover,auto[,adaptive],plugin:<name>,...`）；
 选择后，会在目标表格下方显示该插件的路由字段。
 
 `cheapest_healthy` 是内置的参考策略

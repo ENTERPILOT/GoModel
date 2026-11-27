@@ -80,6 +80,11 @@ die Session wird neu gepinnt – eine Session klebt nie an einem toten Ziel, und
 das ehrliche 429-Verhalten bei vollständiger Auslastung aller Ziele bleibt
 unverändert.
 
+Bei der Strategie `auto` behält eine Session ein Ziel pro
+[Stufe](/de/features/virtual-models#nach-stufe-routen): Eine Unterhaltung, die
+auf eine andere Stufe wechselt, bleibt dort bei einem Ziel und findet ihr
+früheres Ziel wieder, wenn sie zurückkehrt.
+
 Bei der Strategie `adaptive` wird der Pin an den Route-Selector übergeben, der
 bei jedem Request entscheidet, ob die Session ihn behält – sofern mehr als ein
 Ziel infrage kommt. (Bei nur einem infrage kommenden Ziel gibt es nichts zu

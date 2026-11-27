@@ -71,6 +71,8 @@ func (e *InternalDecisionsExecutor) Decide(ctx context.Context, body []byte) (an
 		ctx = core.WithRequestOrigin(ctx, core.RequestOriginGuardrail)
 	}
 	ctx = gateway.WithAttemptRecorder(ctx)
+	// The level belongs to the request that triggered this call, not to it.
+	ctx = core.WithoutRouteLevel(ctx)
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
 	requested := core.NewRequestedModelSelector(req.Model, "")

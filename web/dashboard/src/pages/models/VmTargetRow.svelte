@@ -2,15 +2,18 @@
   // One target row of the virtual-model editor. The primary target and the
   // extra {#each} rows share this shape; two or more rows make the redirect
   // a load balancer (weights show only for round-robin) and let each target
-  // force its own reasoning effort. The ☰ handle drags
+  // force its own reasoning effort; under the auto strategy each target also
+  // names its level. The ☰ handle drags
   // a row onto another row to reorder the list; keyboard users get the same
   // via ArrowUp/ArrowDown on the focused handle.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { virtualModelEditor as vm } from "./virtualModelEditor.svelte.js";
+  import { ROUTE_LEVELS } from "./routing.js";
   import {
     moveFormTarget,
+    vmFormShowLevels,
     vmFormShowTargetEffort,
     vmFormShowWeights,
     REASONING_EFFORT_LEVELS,
@@ -28,6 +31,9 @@
     // reasoningEffort is the effort forced on requests sent to this target;
     // empty keeps the virtual model's own, or the client's.
     reasoningEffort = $bindable(""),
+    // level is how capable the target is; the auto strategy routes by it and
+    // requires it, every other strategy hides it.
+    level = $bindable(""),
     id = undefined,
     placeholder = "openai/gpt-4o",
     showRemove = true,
@@ -41,11 +47,12 @@
   let moveHandle = $state(null);
 
   const showEffort = $derived(vmFormShowTargetEffort(vm.vmForm, reasoningEffort));
+  const showLevel = $derived(vmFormShowLevels(vm.vmForm));
   const showWeight = $derived(vmFormShowWeights(vm.vmForm));
   // A row that shows a column lays out as one: without a remove button it
   // keeps that button's width free, so its controls line up with the other
   // rows and with the column labels above them.
-  const showColumns = $derived(showEffort || showWeight);
+  const showColumns = $derived(showLevel || showEffort || showWeight);
 
   // After a keyboard move the editor asks for focus at the moved row's new
   // index; grab it here so repeated arrows walk the same model, not whatever
@@ -140,6 +147,23 @@
   />
   <!-- Each control carries its own label for phones, where the row wraps and
        the column labels above the list cannot line up with it. -->
+  {#if showLevel}
+    <label class="vm-target-level">
+      <span class="form-field-label vm-target-cell-label">{m.models_target_level_column()}</span>
+      <select
+        class="form-select"
+        title={m.models_target_level_help()}
+        bind:value={level}
+        disabled={vm.vmFormManaged}
+        required
+        aria-label={m.models_target_level()}
+      >
+        {#each ROUTE_LEVELS as option (option)}
+          <option value={option}>{option}</option>
+        {/each}
+      </select>
+    </label>
+  {/if}
   {#if showEffort}
     <label class="vm-target-effort">
       <span class="form-field-label vm-target-cell-label">{m.models_target_effort_column()}</span>

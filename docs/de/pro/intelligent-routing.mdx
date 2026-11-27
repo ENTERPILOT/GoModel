@@ -1,9 +1,9 @@
 ---
 title: "Intelligentes Routing"
-description: "Leiten Sie jeden Request anhand seines Inhalts an eine einfache oder anspruchsvolle Modellstufe weiter und wählen Sie innerhalb dieser Stufe den gesündesten und günstigsten Provider."
+description: "Senden Sie jeden Request an die Modellstufe, die er braucht, und wählen Sie auf dieser Stufe den gesündesten und günstigsten Provider."
 icon: "route"
 tag: "Pro · Beta"
-keywords: ["GoModel Pro", "intelligentes Routing", "intelligent routing", "Smart Routing", "Modellstufen", "model tiers", "adaptives Routing", "adaptive routing", "Load Balancing", "Kostenoptimierung"]
+keywords: ["GoModel Pro", "intelligentes Routing", "intelligent routing", "Smart Routing", "Auto-Routing", "Modellstufen", "route levels", "adaptives Routing", "adaptive routing", "Load Balancing", "Kostenoptimierung"]
 ---
 
 <Warning>
@@ -15,40 +15,88 @@ keywords: ["GoModel Pro", "intelligentes Routing", "intelligent routing", "Smart
 ## Übersicht
 
 Intelligentes Routing umfasst zwei lizenzierte Erweiterungen, die mit den
-[virtuellen Modellen](/de/features/virtual-models) des Core zusammenspielen:
+[virtuellen Modellen](/de/features/virtual-models) des Core zusammenspielen.
+Beide benötigen die Berechtigung `routing`.
 
-- **Smart Tier Routing** beantwortet die Frage *Welche Qualitätsstufe verdient dieser
-  Request?* Es ordnet einen konfigurierten Modell-Alias vor der Provider-Auswahl der Stufe `easy` oder `hard`
-  zu, sodass kurzer Chat an ein günstiges Modell geht und
-  Reasoning-, Code- oder Tool-intensive Arbeit an ein leistungsstarkes.
-- **Adaptives Routing** beantwortet die Frage *Welcher Provider innerhalb dieser Stufe?* Es wählt
-  aus dem Pool eines virtuellen Modells ein Upstream-Ziel anhand der beobachteten Latenz,
-  Fehler, Cooldowns und des konfigurierten Kosten- oder Latenzziels.
+- **Smart Routing** beantwortet die Frage *Wie leistungsfähig muss das Modell
+  für diesen Request sein?* Es klassifiziert jeden Request für ein virtuelles
+  Modell mit der
+  [Strategie `auto`](/de/features/virtual-models#nach-stufe-routen) und teilt
+  dem Gateway mit, welche Stufe der Request braucht, sodass kurzer Chat an ein
+  kleines Modell geht und Reasoning-, Code- oder Tool-intensive Arbeit an ein
+  leistungsstarkes.
+- **Adaptives Routing** beantwortet die Frage *Welches Ziel auf dieser Stufe?*
+  Es wählt ein Upstream-Ziel anhand der beobachteten Latenz, Fehler, Cooldowns
+  und des konfigurierten Kosten- oder Latenzziels.
 
-Beide lassen sich kombinieren: Ein Request für `model: "normal"` wird zu `normal-easy` oder
-`normal-hard` umgeschrieben, und ist eines davon ein virtuelles Modell mit der Strategie
-`adaptive`, wählt der Selektor anschließend den besten Provider dafür.
+Beide lassen sich kombinieren: Smart Routing nennt die Stufe, und innerhalb
+dieser Stufe der Route wählt der adaptive Selektor unter den Zielen, die sie
+teilen.
 
-## Smart Tier Routing
+## Smart Routing
 
-Konfigurieren Sie einen gestuften Alias mit gewöhnlichen GoModel-Modellnamen. Die Ziele der Stufen können
-konkrete Modelle oder virtuelle Modelle sein:
+Eine Route ist ein virtuelles Modell mit `strategy: auto`. Jedes Ziel
+deklariert seine Stufe (`level`): `light`, `normal`, `smart` oder `smartest`,
+von der niedrigsten zur höchsten.
 
-```bash
-PRO_SMART_ROUTING_ROUTES='{"normal":{"easy":"normal-easy","hard":"normal-hard"}}'
+```yaml
+virtual_models:
+  - source: claude-auto
+    strategy: auto
+    targets:
+      - { model: anthropic/claude-haiku-5-5, level: light }
+      - { model: anthropic/claude-sonnet-5-5, level: smart }
+      - { model: anthropic/claude-opus-5-5, level: smartest }
 ```
 
-Nur in `PRO_SMART_ROUTING_ROUTES` aufgeführte Aliase werden umgeschrieben; jeder andere
-Modellname wird unverändert durchgereicht. Sind keine Routen konfiguriert, ist das Feature
-inaktiv, und beim Start wird ein Hinweis protokolliert.
+In Pro muss nichts konfiguriert werden, damit eine Route funktioniert. Pro
+klassifiziert Requests an `/v1/chat/completions`, `/v1/messages` und
+`/v1/responses`, deren Modell eine Auto-Route ist, direkt benannt oder über
+einen Alias mit einem einzigen Ziel. Das Gateway sendet dann jeden Request an
+die niedrigste Stufe der Route, die mindestens der benötigten entspricht; unter
+[Nach Stufe routen](/de/features/virtual-models#nach-stufe-routen) steht, wie
+es ein Ziel wählt und Failover durchführt.
 
-### Wie ein Request bewertet wird
+Ohne Pro-Lizenz oder bei deaktiviertem Smart Routing funktioniert dasselbe
+virtuelle Modell weiter und verwendet immer seine höchste Stufe.
 
-Die Klassifizierung ist deterministisch, läuft im Prozess und ruft kein Modell auf. Ein
-Request, der explizit Reasoning anfordert (`reasoning_effort` ab medium
-oder ein Anthropic-`thinking`-Block), geht direkt an die Stufe `hard`.
-Andernfalls sammelt der Request Punkte, und ein Wert ab
-`PRO_SMART_ROUTING_THRESHOLD` (Standardwert `4`) wählt die Stufe `hard`:
+### Wie ein Request klassifiziert wird
+
+Die Klassifizierung läuft in Phasen ab, die günstigste zuerst. Mit den
+Standardwerten laufen nur die ersten beiden, und keine davon ruft ein Modell
+auf.
+
+1. **Session-Replay.** Wenn der letzte Turn nicht von einem Menschen stammt
+   (ein Tool-Ergebnis, eine Responses-Fortsetzung ohne neue Benutzereingabe,
+   ein Assistant-Prefill), wird die aktuelle Stufe der Session wiederverwendet
+   und nichts klassifiziert.
+2. **Heuristiken.** Kein Modellaufruf.
+   - Eine explizite Reasoning-Anforderung (ein Reasoning-Effort außer `none`
+     oder `minimal` oder aktiviertes Anthropic-`thinking`) braucht `smartest`.
+   - Ein einzeiliger, einfacher Prompt braucht `light`: höchstens 40 Zeichen
+     und 2 Nachrichten, ohne Tools, Code, Anhänge, Structured Output oder
+     Aufwands-Schlüsselwörter.
+   - Andernfalls entscheidet die
+     [heuristische Bewertung](#heuristische-bewertung): Unter
+     `PRO_SMART_ROUTING_THRESHOLD` (Standardwert `4`) braucht der Request
+     `normal`, ab diesem Wert `smart`.
+3. **Decision-Modell** (optional, wenn `PRO_SMART_ROUTING_DECISION_MODEL`
+   gesetzt ist). Ein [Decision-Modell](/de/advanced/decisions-api) liefert die
+   Wahrscheinlichkeit jeder Stufe, und der Request erhält die niedrigste Stufe
+   der Route, deren kumulierte Wahrscheinlichkeit
+   `PRO_SMART_ROUTING_QUALITY_TARGET` (Standardwert `0.85`) erreicht. Es läuft
+   nur bei Turns, die ein Mensch geschrieben hat, und nur, wenn die Heuristiken
+   nicht eindeutig waren.
+4. **Judge** (optional, wenn `PRO_SMART_ROUTING_JUDGE_MODEL` gesetzt ist). Ein
+   Chat-Modell benennt die Stufe. `PRO_SMART_ROUTING_JUDGE` legt fest, wann es
+   läuft: `fallback` (Standardwert) nur, wenn die Entscheidung knapp war, also
+   innerhalb von `0.1` um das Qualitätsziel; `always`; oder `off`.
+
+Eine Phase, die fehlschlägt oder ihr Zeitlimit überschreitet, fällt auf die
+bereits vorliegende Antwort zurück. Routing lässt nie einen Request
+fehlschlagen.
+
+### Heuristische Bewertung
 
 | Signal | Punkte |
 | --- | --- |
@@ -60,57 +108,127 @@ Andernfalls sammelt der Request Punkte, und ein Wert ab
 | Kontextgröße | +1 ab 2k Zeichen, weitere +2 ab 8k, weitere +3 ab 32k |
 | Thread-Tiefe von 7 oder mehr Nachrichten | +1 |
 
-Mit den Standardwerten bleibt ein kurzes Code-Snippet allein (3) auf der Stufe `easy`, während
-Code plus 2k Zeichen Kontext (4) eskaliert. Senken Sie den Schwellenwert, um
-mehr Traffic an die Stufe `hard` zu senden, oder erhöhen Sie ihn, um die günstige Stufe zu schützen.
+Mit den Standardwerten braucht ein kurzes Code-Snippet allein (3) `normal`,
+während Code plus 2k Zeichen Kontext (4) `smart` braucht. Senken Sie den
+Schwellenwert, um mehr Traffic an `smart` zu senden, oder erhöhen Sie ihn, um
+mehr auf `normal` zu halten.
 
-### Session-Pinning
+### Decision- und Judge-Modelle
 
-Die gewählte Stufe wird pro gerouteten Alias und erkannter Session festgehalten (siehe
-[Session Keeping](/de/features/session-keeping)). Das Pinning **eskaliert nur**:
-Eine Unterhaltung kann bei aktivem Pin von `easy` zu `hard` wechseln, wird aber nie
-stillschweigend herabgestuft. Eine Folgenachricht wie „thanks!“ kann eine anspruchsvolle
-Unterhaltung daher nicht auf die günstige Stufe zurückwerfen oder ihren Prompt-Cache beim Provider ungültig machen. Der
-Pin läuft nach `PRO_SMART_ROUTING_SESSION_TTL` Inaktivität ab.
+<Note>
+  Ist ein Decision- oder Judge-Modell konfiguriert, werden der System-Prompt
+  und die letzte Benutzernachricht (gekürzt) an dieses Modell gesendet. Lassen
+  Sie beide ungesetzt, damit das Routing rein heuristisch bleibt.
+</Note>
 
-### Smart Tier Routing konfigurieren
+Beide Phasen rufen das Modell über das Gateway auf. Die Aufrufe zählen daher
+für Usage, Rate-Limits und Budgets, erscheinen im Request-Log unter
+`<User-Path>/extensions/pro-smart-routing` und setzen voraus, dass der
+User-Path des Aufrufers Zugriff auf das Modell hat. Verwenden Sie als Judge
+ein Chat-Modell ohne Reasoning.
 
-| Umgebungsvariable | Standardwert | Zweck |
-| --- | --- | --- |
-| `PRO_SMART_ROUTING_ENABLED` | `true` | Aktiviert Smart Tier Routing. |
-| `PRO_SMART_ROUTING_ROUTES` | — | JSON-Map von angefragten Aliasen auf `easy`- und `hard`-Modelle. Ohne Routen bleibt das Feature inaktiv. |
-| `PRO_SMART_ROUTING_THRESHOLD` | `4` | Ein Wert ab dieser Schwelle wählt die Stufe `hard`. |
-| `PRO_SMART_ROUTING_SESSION_TTL` | `30m` | Gleitende Lebensdauer eines nur eskalierenden Session-Pins. |
+### Sessions
+
+Innerhalb einer erkannten Session (siehe
+[Session Keeping](/de/features/session-keeping)) steigt die Stufe einer Route
+nur: Eine Unterhaltung kann von `normal` zu `smart` wechseln, aber eine
+Folgenachricht wie „thanks!“ stuft sie nie zurück. Das schützt den Prompt-Cache
+des Providers für das Modell, das die Unterhaltung bedient. Die Stufe der
+Session läuft `PRO_SMART_ROUTING_SESSION_TTL` (Standardwert `30m`) nach ihrem
+letzten Request ab.
 
 ### Eine Entscheidung überschreiben und prüfen
 
-Senden Sie `X-GoModel-Smart-Routing: off`, um die Klassifizierung für einen Request zu umgehen,
-oder `X-GoModel-Tier: easy` bzw. `X-GoModel-Tier: hard`, um seine Stufe zu erzwingen, ohne
-den Session-Pin zu ändern.
+| Request-Header | Wirkung |
+| --- | --- |
+| `X-GoModel-Smart-Routing: off` | Überspringt die Klassifizierung für einen Request; die Route verwendet dann ihre höchste Stufe. |
+| `X-GoModel-Tier: light` (oder `normal`, `smart`, `smartest`) | Erzwingt die Stufe für einen Request. `easy` und `hard` werden weiterhin akzeptiert und bedeuten die niedrigste bzw. höchste Stufe der Route. |
 
-Jede geroutete Response meldet die Entscheidung:
+Jede klassifizierte Response meldet die Entscheidung:
 
 ```http
-X-GoModel-Pro-Tier: hard
-X-GoModel-Pro-Tier-Target: normal-hard
+X-GoModel-Pro-Tier: smart
+X-GoModel-Pro-Tier-Stage: heuristic
 X-GoModel-Pro-Tier-Score: 5
+X-GoModel-Route-Level: smart
 ```
 
-Dasselbe Urteil samt Begründung wird im Revisions-Detail des Request-Logs erfasst.
-Prometheus stellt Metriken zu Requests, Eskalationen und Bewertungen unter dem Präfix
-`gomodel_pro_smartroute_` bereit; mit dem Histogramm der Bewertungen stimmen Sie
-den Schwellenwert auf echten Traffic ab.
+| Response-Header | Bedeutung |
+| --- | --- |
+| `X-GoModel-Pro-Tier` | Die Stufe, die der Request braucht. |
+| `X-GoModel-Pro-Tier-Stage` | Die Phase, die entschieden hat: `replay`, `heuristic`, `decision`, `judge` oder `override`. |
+| `X-GoModel-Pro-Tier-Score` | Die heuristische Bewertung. |
+| `X-GoModel-Route-Level` | Vom Gateway gesetzt: die Stufe des Ziels, das die Route zuerst gewählt hat. Sie weicht von `X-GoModel-Pro-Tier` ab, wenn die Route auf dieser Stufe kein verfügbares Ziel hat, und ein Failover kann den Request noch verschieben. |
+
+Die Entscheidung wird außerdem im Revisions-Detail des Request-Logs erfasst.
+Prometheus-Metriken tragen das Präfix `gomodel_pro_smartroute_`; mit dem
+Histogramm der Bewertungen stimmen Sie den Schwellenwert auf echten Traffic ab.
+
+### Smart Routing konfigurieren
+
+| Umgebungsvariable | Standardwert | Zweck |
+| --- | --- | --- |
+| `PRO_SMART_ROUTING_ENABLED` | `true` | Aktiviert Smart Routing. |
+| `PRO_SMART_ROUTING_THRESHOLD` | `4` | Heuristische Bewertung, ab der ein Request `smart` statt `normal` braucht. |
+| `PRO_SMART_ROUTING_SESSION_TTL` | `30m` | Wie lange eine Session ihre Stufe nach ihrem letzten Request behält. |
+| `PRO_SMART_ROUTING_DECISION_MODEL` | — | Modell für die Decision-Phase. Ungesetzt wird die Phase übersprungen. |
+| `PRO_SMART_ROUTING_DECISION_TIMEOUT` | `1500ms` | Zeitlimit für das Decision-Modell. |
+| `PRO_SMART_ROUTING_QUALITY_TARGET` | `0.85` | Kumulierte Wahrscheinlichkeit, die eine Stufe in der Decision-Phase erreichen muss. Erhöhen Sie den Wert, um höhere Stufen zu bevorzugen, oder senken Sie ihn, um mehr zu sparen. |
+| `PRO_SMART_ROUTING_JUDGE_MODEL` | — | Chat-Modell für die Judge-Phase. Ungesetzt wird die Phase übersprungen. |
+| `PRO_SMART_ROUTING_JUDGE` | `fallback` | Wann der Judge läuft: `fallback`, `always` oder `off`. |
+| `PRO_SMART_ROUTING_JUDGE_TIMEOUT` | `4s` | Zeitlimit für den Judge. |
+
+### Bekannte Einschränkungen
+
+Ausschlüsse der [Prompt-Komprimierung](/de/pro/compression)
+(`PRO_COMPRESSION_EXCLUDE_MODELS`) werden mit dem angefragten Modell
+abgeglichen; bei einer Auto-Route ist das der Name der Route, nicht das Modell,
+das den Request am Ende bedient. Ein Glob wie `ollama/*` erfasst keine
+Requests, die eine Route an ein Ollama-Ziel sendet; führen Sie stattdessen den
+Namen der Route auf.
+
+### Legacy-Routen
+
+Vor den Auto-Routen wurde eine Route in Pro mit `PRO_SMART_ROUTING_ROUTES`
+deklariert, einer JSON-Map von einem Modellnamen auf ein `easy`- und ein
+`hard`-Modell. Das funktioniert unverändert weiter und ist veraltet
+(deprecated):
+
+```bash
+PRO_SMART_ROUTING_ROUTES='{"normal":{"easy":"normal-easy","hard":"normal-hard"}}'
+```
+
+Eine Legacy-Route schreibt das angefragte Modell um: Ein Request, der Reasoning
+anfordert oder dessen heuristische Bewertung den Schwellenwert erreicht, geht
+an das `hard`-Modell, jeder andere an das `easy`-Modell. Ihre Responses tragen
+zusätzlich `X-GoModel-Pro-Tier-Target`, das Modell, auf das der Request
+umgeschrieben wurde. Ersetzen Sie die Route durch das äquivalente virtuelle
+Modell:
+
+```yaml
+virtual_models:
+  - source: normal
+    strategy: auto
+    targets:
+      - { model: normal-easy, level: normal }
+      - { model: normal-hard, level: smartest }
+```
+
+Ist ein Modellname sowohl eine Legacy-Route als auch eine Auto-Route, gewinnt
+die Auto-Route. Sie können also zuerst das virtuelle Modell anlegen und die
+Variable danach entfernen.
 
 ## Adaptives Routing
 
 Adaptives Routing ersetzt die Core-Strategien `round_robin` und `cost` durch einen
 zustandsbewussten Selektor. Er wird beim Start einmal für das gesamte
 Gateway registriert, aber **nur virtuelle Modelle, die mit `strategy: adaptive` konfiguriert sind, verwenden
-ihn** – jedes andere virtuelle Modell behält seine Strategie.
+ihn**, dazu Routen mit `strategy: auto`, die damit unter den Zielen einer Stufe
+wählen. Jedes andere virtuelle Modell behält seine Strategie.
 
 ```yaml
 virtual_models:
-  - source: normal-hard
+  - source: opus-pool
     strategy: adaptive
     targets:
       - { model: anthropic/claude-opus-4-6 }

@@ -293,6 +293,9 @@ wählen Sie eine **Strategie**:
   Ziele zurück und hält eine Session bei dem Provider, dessen Prompt-Cache warm
   ist. Siehe [Intelligentes Routing](/de/pro/intelligent-routing). In einem
   Open-Source-Build fällt die Strategie auf Round-robin zurück.
+- **Auto** (`strategy: auto`) routet nach Stufe: Jedes Ziel gibt an, wie
+  leistungsfähig es ist, und ein Request geht an die niedrigste Stufe, die
+  seinen Bedarf abdeckt. Siehe [Nach Stufe routen](#nach-stufe-routen).
 - **Plugin** (`strategy: plugin`) überlässt die Auswahl einem geladenen
   [Routing-Strategie-Plugin](/de/advanced/plugins#routing-strategie-plugins), das
   über `strategy_plugin` benannt und pro Redirect über `strategy_config`
@@ -318,7 +321,8 @@ Ein Redirect mit einem einzigen Ziel verhält sich genau wie ein einfacher Alias
 Unabhängig von der Strategie bilden die übrigen Ziele die **Failover-Kette** des
 Redirects: Wenn das gewählte Ziel mit einem Fehler fehlschlägt, für den ein
 Retry möglich ist, wird der Request gegen die anderen verfügbaren Ziele in der
-aufgeführten Reihenfolge wiederholt. Die Checkbox **Failover** im Editor
+aufgeführten Reihenfolge wiederholt (die Strategie `auto` ordnet sie
+stattdessen [nach Stufe](#nach-stufe-routen)). Die Checkbox **Failover** im Editor
 (standardmäßig aktiviert; `failover: false` als Code) schaltet das für einen
 Redirect ab, sodass ein fehlgeschlagener Request stattdessen mit dem Fehler
 beantwortet wird; sie kann auch global oder über den Workflow des Requests
@@ -344,6 +348,62 @@ Richten Sie zum Beispiel `smart` mit der Round-robin-Strategie sowohl auf
 `openai/gpt-4o` als auch auf `anthropic/claude-sonnet-4-6`, um die Last
 aufzuteilen, oder mit der Kostenstrategie auf ein Premium- und ein günstiges
 Modell, um immer das günstigere zu nehmen.
+
+## Nach Stufe routen
+
+Die Strategie `auto` stellt Modelle unterschiedlicher Leistungsfähigkeit hinter
+einen Namen, sodass einfache Requests an ein kleines Modell und anspruchsvolle
+an ein starkes gehen können. Geben Sie jedem Ziel ein `level` (eine Stufe):
+`light`, `normal`, `smart` oder `smartest`, von der niedrigsten zur höchsten.
+
+```yaml
+virtual_models:
+  - source: claude-auto
+    strategy: auto
+    targets:
+      - { model: anthropic/claude-haiku-5-5, level: light }
+      - { model: anthropic/claude-sonnet-5-5, level: smart }
+      - { model: anthropic/claude-opus-5-5, level: smartest }
+```
+
+GoModel entscheidet nicht selbst, was ein Request braucht; das übernimmt ein
+Klassifikator. Das [Smart Routing](/de/pro/intelligent-routing) von GoModel Pro
+ist einer und braucht für die Route keine zusätzliche Konfiguration. **Ohne
+Klassifikator geht standardmäßig jeder Request an die höchste vorhandene
+Stufe**, sodass die Route oben immer Opus verwendet und gefahrlos deklariert
+werden kann, bevor ein Klassifikator läuft. Ein eigener Build kann einen
+eigenen Klassifikator mitbringen: Ein über das Paket `ext` registrierter
+Request-Rewriter nennt die Stufe in `Result.RouteLevel`, und
+`ext.AutoRoutesAware` teilt ihm mit, welche Modelle Auto-Routen sind.
+
+- Ein Request geht an die niedrigste Stufe, die mindestens der benötigten
+  entspricht. Stufen dürfen fehlen: Oben geht ein Request, der `normal`
+  braucht, an `smart`.
+- Kann kein Ziel auf oder über dieser Stufe den Request bedienen (Provider
+  ausgefallen, Modell deaktiviert oder dem Aufrufer verweigert, Rate-Limit
+  erreicht), bedient ihn die höchste Stufe darunter, statt dass der Request
+  fehlschlägt.
+- Ziele derselben Stufe werden per gewichtetem Round-robin verteilt, in GoModel
+  Pro per [adaptivem Routing](/de/pro/intelligent-routing#adaptives-routing).
+  [Session Keeping](/de/features/session-keeping) hält eine Session pro Stufe
+  bei einem Ziel.
+- Failover versucht zuerst die übrigen Ziele der Stufe, die bedient hat, dann
+  die höheren Stufen aufsteigend, dann die niedrigeren absteigend.
+- Jedes Ziel braucht ein `level`, sonst schlägt das Speichern fehl. Andere
+  Strategien verwerfen Stufen.
+- Ein virtuelles Modell mit `auto` kann nicht in ein anderes virtuelles Modell
+  mit `auto` routen; das Speichern wird abgelehnt. Ein Alias mit einem einzigen
+  Ziel auf eine solche Route funktioniert und wird wie die Route selbst
+  geroutet.
+
+Der Response-Header `X-GoModel-Route-Level` meldet die Stufe des Ziels, das die
+Route zuerst gewählt hat. Ein Failover kann den Request noch auf eine andere
+Stufe verschieben.
+
+Verwenden Sie `auto`, wenn Clients einen einzigen Modellnamen senden sollen und
+jeder Request ein Modell erhalten soll, das zu seiner Schwierigkeit passt. Ohne
+Klassifikator dienen die niedrigeren Stufen nur als Fallback; für eine reine
+Prioritätsliste ist **Failover** die bessere Wahl.
 
 ## Ziele neu anordnen
 
@@ -499,7 +559,7 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 ```
 
 Jeder Eintrag akzeptiert `source`, ein einzelnes `target` (Kurzform) oder eine
-`targets`-Liste, `strategy` (`round_robin`, `cost` oder `failover`),
+`targets`-Liste, `strategy` (`round_robin`, `cost`, `failover` oder `auto`),
 `session_affinity` (Standardwert `true`; siehe
 [Session Keeping](/de/features/session-keeping)), `failover` (Standardwert
 `true`; siehe [Failover](/de/features/failover)), `user_paths`, `description`,
@@ -508,10 +568,13 @@ bis `10`), `reasoning_effort` (siehe
 [Reasoning-Effort erzwingen](#reasoning-effort-erzwingen)), `params` und
 `default_params` (siehe
 [Request-Parameter setzen](#request-parameter-setzen)) und `enabled`.
+Unter `strategy: auto` braucht jedes Ziel ein `level` (siehe
+[Nach Stufe routen](#nach-stufe-routen)).
 Ein Ziel-`model` kann ein anderes deklariertes virtuelles Modell nennen (siehe
 [Virtuelle Modelle verketten](/de/features/virtual-models#virtuelle-modelle-verketten)).
 Lassen Sie die Ziele leer, um eine Zugriffsrichtlinie für den `source`-Selektor
-zu deklarieren. Eine ungültige Deklaration (unbekannte Strategie, fehlendes oder
+zu deklarieren. Eine ungültige Deklaration (unbekannte Strategie, ein fehlendes
+oder unbekanntes `level` unter `auto`, fehlendes oder
 selbstreferenzierendes Ziel, ein Kettenzyklus oder eine Kette, die tiefer als
 8 virtuelle Modelle ist, oder ein Ziel-`provider`, der keinem konfigurierten
 Provider entspricht – ein Tippfehler) lässt den Start mit einer eindeutigen

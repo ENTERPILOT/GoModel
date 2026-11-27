@@ -303,6 +303,9 @@ requesty. Dodaj w edytorze więcej niż jeden cel (**Add target**) i wybierz
   sesję u providera, którego prompt cache jest rozgrzany. Zobacz
   [Inteligentny routing](/pl/pro/intelligent-routing). W buildzie open source
   ta strategia przechodzi na round-robin.
+- **Auto** (`strategy: auto`) kieruje według poziomu: każdy cel deklaruje, jak
+  mocny jest, a request trafia na najniższy poziom, który pokrywa jego
+  potrzeby. Zobacz [Routing według poziomu](#routing-według-poziomu).
 - **Plugin** (`strategy: plugin`) deleguje wybór do załadowanego
   [pluginu strategii routingu](/pl/advanced/plugins#pluginy-strategii-routingu) wskazanego
   przez `strategy_plugin`, konfigurowanego per przekierowanie przez `strategy_config`.
@@ -325,7 +328,8 @@ Przekierowanie z jednym celem zachowuje się dokładnie jak zwykły alias.
 
 Niezależnie od strategii pozostałe cele tworzą **łańcuch failoveru**
 przekierowania: gdy wybrany cel zawiedzie z błędem kwalifikującym się do ponowienia, request jest
-ponawiany na pozostałych dostępnych celach w kolejności z listy. Pole wyboru
+ponawiany na pozostałych dostępnych celach w kolejności z listy (strategia
+`auto` układa je zamiast tego [według poziomu](#routing-według-poziomu)). Pole wyboru
 **Failover** w edytorze (domyślnie włączone; `failover: false` w kodzie) wyłącza to
 dla jednego przekierowania, więc nieudany request otrzymuje w odpowiedzi błąd;
 można je też wyłączyć globalnie lub przez workflow requestu. Zobacz
@@ -349,6 +353,59 @@ przywrócić bezstanowe równoważenie – zobacz
 Na przykład skieruj `smart` jednocześnie na `openai/gpt-4o` i `anthropic/claude-sonnet-4-6`
 ze strategią round-robin, aby rozłożyć obciążenie, albo na model premium i budżetowy
 ze strategią kosztową, aby zawsze wybierać tańszy.
+
+## Routing według poziomu
+
+Strategia `auto` umieszcza pod jedną nazwą modele o różnych możliwościach, więc
+proste requesty mogą trafiać do małego modelu, a wymagające do mocnego. Nadaj
+każdemu celowi `level` (poziom): `light`, `normal`, `smart` lub `smartest`, od
+najniższego do najwyższego.
+
+```yaml
+virtual_models:
+  - source: claude-auto
+    strategy: auto
+    targets:
+      - { model: anthropic/claude-haiku-5-5, level: light }
+      - { model: anthropic/claude-sonnet-5-5, level: smart }
+      - { model: anthropic/claude-opus-5-5, level: smartest }
+```
+
+GoModel sam nie decyduje, czego potrzebuje request; robi to klasyfikator.
+Jednym z nich jest [smart routing](/pl/pro/intelligent-routing) w GoModel Pro,
+który nie wymaga dla trasy żadnej dodatkowej konfiguracji. **Domyślnie, bez
+klasyfikatora, każdy request trafia na najwyższy obecny poziom**, więc trasa
+powyżej zawsze używa Opusa i można ją bezpiecznie zadeklarować, zanim
+klasyfikator zacznie działać. Własny build może dostarczyć własny klasyfikator:
+request rewriter zarejestrowany przez pakiet `ext` podaje poziom w
+`Result.RouteLevel`, a `ext.AutoRoutesAware` informuje go, które modele są
+trasami auto.
+
+- Request trafia na najniższy poziom równy potrzebnemu lub wyższy. Poziomy
+  można pomijać: powyżej request, który potrzebuje `normal`, trafia na `smart`.
+- Gdy żaden cel na tym poziomie lub wyższym nie może obsłużyć requestu
+  (provider nie działa, model jest wyłączony lub zabroniony dla wywołującego,
+  wyczerpany limit żądań), obsługuje go najwyższy poziom poniżej, zamiast
+  kończyć request błędem.
+- Cele o tym samym poziomie są równoważone ważonym round-robin, a w GoModel Pro
+  przez [adaptive routing](/pl/pro/intelligent-routing#adaptive-routing).
+  [Utrzymywanie sesji](/pl/features/session-keeping) trzyma sesję na jednym
+  celu na każdym poziomie.
+- Failover próbuje najpierw pozostałych celów poziomu, który obsłużył request,
+  potem wyższych poziomów w górę, a potem niższych w dół.
+- Każdy cel musi mieć `level`, inaczej zapis się nie powiedzie. Inne strategie
+  usuwają poziomy.
+- Model wirtualny ze strategią `auto` nie może kierować do innego modelu
+  wirtualnego ze strategią `auto`; zapis jest odrzucany. Alias z jednym celem
+  wskazujący taką trasę działa i jest kierowany tak jak sama trasa.
+
+Nagłówek odpowiedzi `X-GoModel-Route-Level` podaje poziom celu, który trasa
+wybrała jako pierwszy. Failover może jeszcze przenieść request na inny poziom.
+
+Używaj `auto`, gdy klienci mają wysyłać jedną nazwę modelu, a każdy request ma
+dostać model dopasowany do swojej trudności. Bez klasyfikatora niższe poziomy
+służą tylko jako zapas, więc dla zwykłej listy priorytetów wybierz
+**Failover**.
 
 ## Zmiana kolejności celów
 
@@ -491,7 +548,7 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 ```
 
 Każdy wpis przyjmuje `source`, pojedynczy `target` (skrót) lub listę `targets`,
-`strategy` (`round_robin`, `cost` lub `failover`), `session_affinity` (domyślnie `true`; zobacz
+`strategy` (`round_robin`, `cost`, `failover` lub `auto`), `session_affinity` (domyślnie `true`; zobacz
 [Utrzymywanie sesji](/pl/features/session-keeping)), `failover` (domyślnie `true`; zobacz
 [Failover](/pl/features/failover)), `user_paths`, `description`,
 `slowdown` (`0` wyłącza odziedziczone spowolnienie; aktywne współczynniki mieszczą się w zakresie od `0.1` do
@@ -499,12 +556,15 @@ Każdy wpis przyjmuje `source`, pojedynczy `target` (skrót) lub listę `targets
 [Wymuszanie reasoning effort](#wymuszanie-reasoning-effort)), `params` i
 `default_params` (zobacz
 [Ustawianie parametrów żądania](#ustawianie-parametrów-żądania)) oraz `enabled`.
-Cel ma `model` oraz opcjonalne `provider`, `weight` i `reasoning_effort` (zobacz
-[Ustawianie effort dla każdego celu](#ustawianie-effort-dla-każdego-celu)). Jego
+Cel ma `model` oraz opcjonalne `provider`, `weight`, `reasoning_effort` (zobacz
+[Ustawianie effort dla każdego celu](#ustawianie-effort-dla-każdego-celu)) i `level`
+(wymagany przy `strategy: auto`; zobacz
+[Routing według poziomu](#routing-według-poziomu)). Jego
 `model` może wskazywać inny zadeklarowany model wirtualny (zobacz
 [Łączenie modeli wirtualnych w łańcuchy](#łączenie-modeli-wirtualnych-w-łańcuchy)).
 Zostaw cele puste, aby zadeklarować politykę dostępu dla selektora `source`.
-Nieprawidłowa deklaracja (nieznana strategia, brakujący lub odwołujący się do samego siebie cel,
+Nieprawidłowa deklaracja (nieznana strategia, brakujący lub nieznany `level` przy `auto`,
+brakujący lub odwołujący się do samego siebie cel,
 cykl w łańcuchu lub łańcuch głębszy niż 8 modeli wirtualnych albo `provider` celu, który
 nie pasuje do żadnego skonfigurowanego providera – literówka) powoduje błąd startu z czytelnym komunikatem
 wypisującym nazwy zarejestrowanych providerów.

@@ -2,6 +2,7 @@ package virtualmodels
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,9 +12,21 @@ import (
 
 // roundRobin holds a monotonic request counter per redirect source. It lives on
 // the Service (not the snapshot) so load-balancing position survives the periodic
-// snapshot swaps that reload virtual models from storage.
+// snapshot swaps that reload virtual models from storage. A redirect using the
+// auto strategy keeps one counter per level (see levelKey), so traffic at one
+// level does not shift the rotation of another.
 type roundRobin struct {
-	counters sync.Map // source -> *atomic.Uint64
+	counters sync.Map // source, or levelKey(source, level) -> *atomic.Uint64
+}
+
+// levelSeparator joins a redirect source or a session id with a level name
+// in the per-level keys of the auto strategy. NUL cannot appear in either.
+const levelSeparator = "\x00"
+
+// levelKey scopes a redirect source or a session id to one level of an auto
+// route.
+func levelKey(key string, level int) string {
+	return key + levelSeparator + core.RouteLevelName(level)
 }
 
 // next returns the current counter for source and advances it. The first call for
@@ -32,6 +45,7 @@ func (r *roundRobin) prune(active map[string]*redirectEntry) {
 			r.counters.Delete(key)
 			return true
 		}
+		source, _, _ = strings.Cut(source, levelSeparator)
 		if _, exists := active[source]; !exists {
 			r.counters.Delete(key)
 		}
@@ -76,11 +90,40 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 	// admission and receives an honest 429 with Retry-After (or defers to
 	// failover) instead of the all-targets-down error path.
 	pool := s.targetsWithCapacity(snap, entry, supported, allowed)
+	auto := normalizeStrategy(entry.strategy) == StrategyAuto
 	if len(pool) == 0 {
 		// This target is selected only to reach admission and produce the 429.
 		// Do not run affinity resolution: a transient capacity burst must not
 		// discard or replace the target that actually served the session.
+		if auto {
+			supported = levelPool(supported, core.RouteLevelRank(core.RouteLevelFromContext(ctx)))
+			core.ReportServedRouteLevel(ctx, supported[0].level)
+		}
 		return s.concreteTarget(ctx, snap, entry, supported[0], sessionID, path)
+	}
+	// rotation keys the round-robin counter, pinSession the session's pin,
+	// and configured counts the targets the strategy chooses among. Under
+	// the auto strategy all three are scoped to the chosen level.
+	rotation, pinSession, configured := entry.vm.Source, sessionID, len(entry.targets)
+	if auto {
+		// The auto strategy first narrows the pool to one level; everything
+		// below then balances, pins and consults the selector inside it. A
+		// session keeps one pin per level: a conversation that changes level
+		// must not be held on, or keep overwriting, the target of the level
+		// it left, and one that comes back finds the target whose prompt
+		// cache it warmed.
+		pool = levelPool(pool, core.RouteLevelRank(core.RouteLevelFromContext(ctx)))
+		level := pool[0].level
+		core.ReportServedRouteLevel(ctx, level)
+		rotation, configured = levelKey(rotation, level), 0
+		for _, target := range entry.targets {
+			if target.level == level {
+				configured++
+			}
+		}
+		if sessionID != "" {
+			pinSession = levelKey(sessionID, level)
+		}
 	}
 
 	// selectorChoice consults the route selector, reporting false when there
@@ -96,7 +139,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 			return resolvedTarget{}, false
 		}
 		switch normalizeStrategy(entry.strategy) {
-		case StrategyAdaptive:
+		case StrategyAdaptive, StrategyAuto:
 			return s.adaptiveTarget(entry, sessionID, pinned, pool)
 		case StrategyPlugin:
 			return s.pluginTarget(ctx, entry, sessionID, pinned, pool)
@@ -120,9 +163,9 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		case StrategyCost:
 			return s.cheapestTarget(snap, entry, pool, allowed)
 		default:
-			// Round robin, and adaptive or plugin whose selector had no
-			// usable answer.
-			return pool[weightedIndex(pool, s.balancer.next(entry.vm.Source))]
+			// Round robin, and adaptive, auto or plugin whose selector had
+			// no usable answer.
+			return pool[weightedIndex(pool, s.balancer.next(rotation))]
 		}
 	}
 	// Affinity is keyed to the redirect's CONFIGURED shape, not the targets
@@ -130,14 +173,14 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 	// outage, startup) the session must still pin its serving target, or the
 	// strategy could move an active conversation once the others come back.
 	// Failover is deterministic (always the primary), so it never pins.
-	affinity := sessionID != "" && entry.sessionAffinity() && len(entry.targets) > 1 &&
+	affinity := sessionID != "" && entry.sessionAffinity() && configured > 1 &&
 		normalizeStrategy(entry.strategy) != StrategyFailover
 	if affinity {
 		viable := func(candidate string) bool {
 			_, ok := poolTarget(pool, candidate)
 			return ok
 		}
-		pinned, hasPin := s.sticky.lookup(entry.vm.Source, sessionID, viable)
+		pinned, hasPin := s.sticky.lookup(entry.vm.Source, pinSession, viable)
 
 		// Whether a pin still holds is a health question, and under the
 		// adaptive strategy the selector is the only party that can answer
@@ -155,7 +198,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		// shown, so two concurrent requests of one session leave together on
 		// one target instead of each committing its own answer.
 		if choice, ok := selectorChoice(pinned); ok {
-			qualified := s.sticky.repin(entry.vm.Source, sessionID, pinned, choice.qualified)
+			qualified := s.sticky.repin(entry.vm.Source, pinSession, pinned, choice.qualified)
 			if target, found := poolTarget(pool, qualified); found {
 				return s.concreteTarget(ctx, snap, entry, target, sessionID, path)
 			}
@@ -177,7 +220,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		// resolve rechecks the pin atomically in case another first request
 		// selected and pinned a target concurrently.
 		choice := pick()
-		qualified := s.sticky.resolve(entry.vm.Source, sessionID,
+		qualified := s.sticky.resolve(entry.vm.Source, pinSession,
 			viable,
 			choice.qualified,
 		)

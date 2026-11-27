@@ -51,7 +51,7 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 	}
 	if !validStrategy(vm.Strategy) {
 		return VirtualModel{}, nil, newValidationError(
-			fmt.Sprintf("unknown load-balancing strategy %q (use %q, %q, %q, %q, or %q)", vm.Strategy, StrategyRoundRobin, StrategyCost, StrategyFailover, StrategyAdaptive, StrategyPlugin), nil)
+			fmt.Sprintf("unknown load-balancing strategy %q (use %q, %q, %q, %q, %q, or %q)", vm.Strategy, StrategyRoundRobin, StrategyCost, StrategyFailover, StrategyAdaptive, StrategyAuto, StrategyPlugin), nil)
 	}
 	if vm.Strategy == StrategyPlugin {
 		if vm.StrategyPlugin == "" {
@@ -87,6 +87,9 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 			return VirtualModel{}, nil, err
 		}
 		target.ReasoningEffort = effort
+		if target.Level, err = normalizeTargetLevel(vm.Strategy, target); err != nil {
+			return VirtualModel{}, nil, err
+		}
 		selector, err := target.selector()
 		if err != nil {
 			return VirtualModel{}, nil, newValidationError("invalid target selector: "+err.Error(), err)
@@ -326,4 +329,35 @@ func selectorString(providerName, model string) string {
 
 func scopeKindFor(selector, providerName, model string) modelselectors.ScopeKind {
 	return modelselectors.ScopeKindFor(selector, providerName, model)
+}
+
+// normalizeTargetLevel returns the level a target keeps under strategy. The
+// auto strategy routes by level, so each of its targets must name one; every
+// other strategy ignores levels, and dropping them keeps a row switched away
+// from auto tidy.
+func normalizeTargetLevel(strategy string, target Target) (string, error) {
+	if strategy != StrategyAuto {
+		return "", nil
+	}
+	level := strings.ToLower(strings.TrimSpace(target.Level))
+	if core.RouteLevelRank(level) == 0 {
+		name := strings.TrimSpace(target.Model)
+		if level == "" {
+			return "", newValidationError(fmt.Sprintf(
+				"target %q needs a level under the %q strategy (use %s)", name, StrategyAuto, quotedRouteLevels()), nil)
+		}
+		return "", newValidationError(fmt.Sprintf(
+			"target %q has unknown level %q (use %s)", name, target.Level, quotedRouteLevels()), nil)
+	}
+	return level, nil
+}
+
+// quotedRouteLevels lists the route levels for an error message.
+func quotedRouteLevels() string {
+	levels := core.RouteLevels()
+	quoted := make([]string, len(levels))
+	for i, level := range levels {
+		quoted[i] = fmt.Sprintf("%q", level)
+	}
+	return strings.Join(quoted[:len(quoted)-1], ", ") + ", or " + quoted[len(quoted)-1]
 }

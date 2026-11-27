@@ -1,9 +1,9 @@
 ---
 title: "Inteligentny routing"
-description: "Kieruj każdy request do łatwego lub trudnego poziomu modeli na podstawie jego treści, a następnie wybieraj najzdrowszego i najtańszego providera w ramach tego poziomu."
+description: "Kieruj każdy request na poziom modeli, którego potrzebuje, a następnie wybieraj najzdrowszego i najtańszego providera na tym poziomie."
 icon: "route"
 tag: "Pro · Beta"
-keywords: ["GoModel Pro", "inteligentny routing", "intelligent routing", "smart routing", "poziomy modeli", "model tiers", "adaptive routing", "routing adaptacyjny", "load balancing", "optymalizacja kosztów", "cost optimization"]
+keywords: ["GoModel Pro", "inteligentny routing", "intelligent routing", "smart routing", "auto routing", "poziomy modeli", "route levels", "adaptive routing", "routing adaptacyjny", "load balancing", "optymalizacja kosztów", "cost optimization"]
 ---
 
 <Warning>
@@ -15,40 +15,84 @@ keywords: ["GoModel Pro", "inteligentny routing", "intelligent routing", "smart 
 ## Przegląd
 
 Inteligentny routing składa się z dwóch licencjonowanych rozszerzeń, które współpracują z
-[modelami wirtualnymi](/pl/features/virtual-models) z Core:
+[modelami wirtualnymi](/pl/features/virtual-models) z Core. Oba wymagają
+uprawnienia `routing`.
 
-- **Smart tier routing** odpowiada na pytanie: *na jaki poziom jakości zasługuje ten
-  request?* Klasyfikuje skonfigurowany alias modelu do poziomu `easy` lub `hard`
-  przed wyborem providera, więc krótki czat trafia do taniego modelu, a
-  praca wymagająca intensywnego rozumowania, kodu lub narzędzi – do mocnego.
-- **Adaptive routing** odpowiada na pytanie: *który provider w ramach tego poziomu?* Wybiera
-  cel upstream z puli modelu wirtualnego na podstawie obserwowanych opóźnień,
-  błędów, okresów cooldownu i skonfigurowanego celu kosztowego lub opóźnieniowego.
+- **Smart routing** odpowiada na pytanie: *jak mocnego modelu potrzebuje ten
+  request?* Klasyfikuje każdy request do modelu wirtualnego ze
+  [strategią `auto`](/pl/features/virtual-models#routing-według-poziomu) i
+  przekazuje gatewayowi, jakiego poziomu request potrzebuje, więc krótki czat
+  trafia do małego modelu, a praca wymagająca intensywnego rozumowania, kodu
+  lub narzędzi – do mocnego.
+- **Adaptive routing** odpowiada na pytanie: *który cel na tym poziomie?*
+  Wybiera cel upstream na podstawie obserwowanych opóźnień, błędów, okresów
+  cooldownu i skonfigurowanego celu kosztowego lub opóźnieniowego.
 
-Oba mechanizmy się nakładają: request o `model: "normal"` jest przepisywany na `normal-easy` lub
-`normal-hard`, a jeśli którykolwiek z nich jest modelem wirtualnym ze strategią `adaptive`,
-selektor wybiera dla niego najlepszego providera.
+Oba mechanizmy się nakładają: smart routing wskazuje poziom, a w obrębie tego
+poziomu trasy selektor adaptacyjny wybiera spośród celów, które go dzielą.
 
-## Smart tier routing
+## Smart routing
 
-Skonfiguruj alias z poziomami, używając zwykłych nazw modeli GoModel. Celami poziomów mogą
-być konkretne modele lub modele wirtualne:
+Trasa to model wirtualny ze `strategy: auto`. Każdy cel deklaruje swój poziom
+(`level`): `light`, `normal`, `smart` lub `smartest`, od najniższego do
+najwyższego.
 
-```bash
-PRO_SMART_ROUTING_ROUTES='{"normal":{"easy":"normal-easy","hard":"normal-hard"}}'
+```yaml
+virtual_models:
+  - source: claude-auto
+    strategy: auto
+    targets:
+      - { model: anthropic/claude-haiku-5-5, level: light }
+      - { model: anthropic/claude-sonnet-5-5, level: smart }
+      - { model: anthropic/claude-opus-5-5, level: smartest }
 ```
 
-Przepisywane są tylko aliasy wymienione w `PRO_SMART_ROUTING_ROUTES`; każda inna
-nazwa modelu przechodzi bez zmian. Bez skonfigurowanych tras funkcja jest
-bezczynna, a logi startowe wyświetlają podpowiedź.
+Aby trasa działała, w Pro nie trzeba niczego konfigurować. Pro klasyfikuje
+requesty na `/v1/chat/completions`, `/v1/messages` i `/v1/responses`, których
+model jest trasą auto, wskazaną bezpośrednio lub przez alias z jednym celem.
+Gateway wysyła następnie każdy request na najniższy poziom trasy równy
+potrzebnemu lub wyższy; sekcja
+[Routing według poziomu](/pl/features/virtual-models#routing-według-poziomu)
+opisuje, jak wybiera cel i wykonuje failover.
 
-### Jak oceniany jest request
+Bez licencji Pro albo z wyłączonym smart routingiem ten sam model wirtualny
+działa dalej i zawsze używa swojego najwyższego poziomu.
 
-Klasyfikacja jest deterministyczna, działa w procesie i nie wywołuje żadnego modelu.
-Request, który jawnie prosi o reasoning (`reasoning_effort` medium lub
-wyższy albo blok `thinking` Anthropic), trafia od razu do poziomu hard.
-W przeciwnym razie request zbiera punkty, a wynik równy lub wyższy od
-`PRO_SMART_ROUTING_THRESHOLD` (domyślnie `4`) wybiera poziom hard:
+### Jak klasyfikowany jest request
+
+Klasyfikacja przebiega etapami, od najtańszego. Przy wartościach domyślnych
+działają tylko dwa pierwsze i żaden z nich nie wywołuje modelu.
+
+1. **Powtórzenie z sesji.** Gdy ostatniej tury nie napisał człowiek (wynik
+   narzędzia, kontynuacja Responses bez nowego wejścia użytkownika, prefill
+   asystenta), używany jest bieżący poziom sesji i nic nie jest klasyfikowane.
+2. **Heurystyki.** Bez wywołania modelu.
+   - Jawna prośba o reasoning (reasoning effort inny niż `none` lub `minimal`
+     albo włączony `thinking` Anthropic) wymaga `smartest`.
+   - Jednolinijkowy, prosty prompt wymaga `light`: najwyżej 40 znaków i
+     2 wiadomości, bez narzędzi, kodu, załączników, structured output i słów
+     kluczowych wysiłku.
+   - W pozostałych przypadkach decyduje
+     [wynik heurystyczny](#wynik-heurystyczny): poniżej
+     `PRO_SMART_ROUTING_THRESHOLD` (domyślnie `4`) request wymaga `normal`, od
+     tej wartości wzwyż – `smart`.
+3. **Model decyzyjny** (opcjonalnie, gdy ustawiono
+   `PRO_SMART_ROUTING_DECISION_MODEL`). [Model decyzyjny](/pl/advanced/decisions-api)
+   zwraca prawdopodobieństwo każdego poziomu, a request dostaje najniższy
+   poziom trasy, którego skumulowane prawdopodobieństwo osiąga
+   `PRO_SMART_ROUTING_QUALITY_TARGET` (domyślnie `0.85`). Działa tylko dla tur
+   napisanych przez człowieka i tylko wtedy, gdy heurystyki nie były
+   rozstrzygające.
+4. **Sędzia (judge)** (opcjonalnie, gdy ustawiono
+   `PRO_SMART_ROUTING_JUDGE_MODEL`). Model czatowy wskazuje poziom.
+   `PRO_SMART_ROUTING_JUDGE` określa, kiedy działa: `fallback` (domyślnie)
+   tylko wtedy, gdy decyzja była na styk, czyli w odległości do `0.1` od celu
+   jakości; `always`; albo `off`.
+
+Etap, który zawiedzie lub przekroczy limit czasu, wraca do odpowiedzi, która
+już jest. Routing nigdy nie powoduje błędu requestu.
+
+### Wynik heurystyczny
 
 | Sygnał | Punkty |
 | --- | --- |
@@ -60,57 +104,121 @@ W przeciwnym razie request zbiera punkty, a wynik równy lub wyższy od
 | Rozmiar kontekstu | +1 przy 2k znaków, kolejne +2 przy 8k, kolejne +3 przy 32k |
 | Głębokość wątku 7 lub więcej wiadomości | +1 |
 
-Przy wartościach domyślnych sam krótki fragment kodu (3) pozostaje na poziomie easy, a
-kod plus 2k znaków kontekstu (4) eskaluje. Obniż próg, aby wysyłać
-więcej ruchu na poziom hard, lub podnieś go, aby chronić tani poziom.
+Przy wartościach domyślnych sam krótki fragment kodu (3) wymaga `normal`, a
+kod plus 2k znaków kontekstu (4) wymaga `smart`. Obniż próg, aby wysyłać więcej
+ruchu na `smart`, lub podnieś go, aby więcej zostawało na `normal`.
 
-### Przypinanie sesji
+### Model decyzyjny i sędzia
 
-Wybrany poziom jest przypinany per kierowany alias i wykryta sesja (zobacz
-[Utrzymywanie sesji](/pl/features/session-keeping)). Przypięcie działa **tylko w górę**:
-rozmowa może przejść z easy na hard, gdy przypięcie jest aktywne, ale nigdy
-nie zostaje po cichu zdegradowana, więc kolejna wiadomość w rodzaju „thanks!” nie może przerzucić trudnej
-rozmowy na tani poziom ani unieważnić prompt cache jej providera.
-Przypięcie wygasa po `PRO_SMART_ROUTING_SESSION_TTL` bezczynności.
+<Note>
+  Gdy skonfigurowano model decyzyjny lub model sędziego, do tego modelu
+  wysyłane są prompt systemowy i ostatnia wiadomość użytkownika (skrócone).
+  Zostaw oba nieustawione, aby routing pozostał wyłącznie heurystyczny.
+</Note>
 
-### Konfiguracja smart tier routing
+Oba etapy wywołują model przez gateway, więc wywołania liczą się do usage,
+limitów żądań i budżetów, pojawiają się w logu requestów pod
+`<ścieżka użytkownika>/extensions/pro-smart-routing` i wymagają, aby ścieżka
+użytkownika wywołującego miała dostęp do modelu. Jako sędziego użyj modelu
+czatowego bez reasoningu.
 
-| Zmienna środowiskowa | Wartość domyślna | Przeznaczenie |
-| --- | --- | --- |
-| `PRO_SMART_ROUTING_ENABLED` | `true` | Włącza smart tier routing. |
-| `PRO_SMART_ROUTING_ROUTES` | — | Mapa JSON z żądanych aliasów na modele `easy` i `hard`. Bez tras funkcja pozostaje bezczynna. |
-| `PRO_SMART_ROUTING_THRESHOLD` | `4` | Wynik równy tej wartości lub wyższy wybiera poziom hard. |
-| `PRO_SMART_ROUTING_SESSION_TTL` | `30m` | Przesuwany czas życia przypięcia sesji działającego tylko w górę. |
+### Sesje
+
+W obrębie wykrytej sesji (zobacz
+[Utrzymywanie sesji](/pl/features/session-keeping)) poziom trasy może tylko
+rosnąć: rozmowa może przejść z `normal` na `smart`, ale kolejna wiadomość
+w rodzaju „thanks!” nigdy nie cofa jej niżej. Chroni to prompt cache providera
+dla modelu, który obsługuje rozmowę. Poziom sesji wygasa po
+`PRO_SMART_ROUTING_SESSION_TTL` (domyślnie `30m`) od jej ostatniego requestu.
 
 ### Nadpisywanie i podgląd decyzji
 
-Wyślij `X-GoModel-Smart-Routing: off`, aby pominąć klasyfikację dla jednego requestu,
-lub `X-GoModel-Tier: easy` albo `X-GoModel-Tier: hard`, aby wymusić jego poziom bez
-zmiany przypięcia sesji.
+| Nagłówek requestu | Działanie |
+| --- | --- |
+| `X-GoModel-Smart-Routing: off` | Pomija klasyfikację dla jednego requestu; trasa używa wtedy swojego najwyższego poziomu. |
+| `X-GoModel-Tier: light` (lub `normal`, `smart`, `smartest`) | Wymusza poziom dla jednego requestu. `easy` i `hard` są nadal akceptowane i oznaczają najniższy i najwyższy poziom trasy. |
 
-Każda kierowana odpowiedź raportuje decyzję:
+Każda sklasyfikowana odpowiedź raportuje decyzję:
 
 ```http
-X-GoModel-Pro-Tier: hard
-X-GoModel-Pro-Tier-Target: normal-hard
+X-GoModel-Pro-Tier: smart
+X-GoModel-Pro-Tier-Stage: heuristic
 X-GoModel-Pro-Tier-Score: 5
+X-GoModel-Route-Level: smart
 ```
 
-Ten sam werdykt i jego uzasadnienie są zapisywane w szczegółach rewizji w logu requestów.
-Prometheus udostępnia metryki requestów, eskalacji i wyników pod
-prefiksem `gomodel_pro_smartroute_`; histogram wyników służy do strojenia
-progu na podstawie rzeczywistego ruchu.
+| Nagłówek odpowiedzi | Znaczenie |
+| --- | --- |
+| `X-GoModel-Pro-Tier` | Poziom, którego potrzebuje request. |
+| `X-GoModel-Pro-Tier-Stage` | Etap, który zdecydował: `replay`, `heuristic`, `decision`, `judge` lub `override`. |
+| `X-GoModel-Pro-Tier-Score` | Wynik heurystyczny. |
+| `X-GoModel-Route-Level` | Ustawiany przez gateway: poziom celu, który trasa wybrała jako pierwszy. Różni się od `X-GoModel-Pro-Tier`, gdy trasa nie ma dostępnego celu na tym poziomie, a failover może jeszcze przenieść request. |
+
+Decyzja jest też zapisywana w szczegółach rewizji w logu requestów. Metryki
+Prometheus mają prefiks `gomodel_pro_smartroute_`; histogram wyników służy do
+strojenia progu na podstawie rzeczywistego ruchu.
+
+### Konfiguracja smart routingu
+
+| Zmienna środowiskowa | Wartość domyślna | Przeznaczenie |
+| --- | --- | --- |
+| `PRO_SMART_ROUTING_ENABLED` | `true` | Włącza smart routing. |
+| `PRO_SMART_ROUTING_THRESHOLD` | `4` | Wynik heurystyczny, od którego request wymaga `smart` zamiast `normal`. |
+| `PRO_SMART_ROUTING_SESSION_TTL` | `30m` | Jak długo sesja zachowuje swój poziom po ostatnim requeście. |
+| `PRO_SMART_ROUTING_DECISION_MODEL` | — | Model dla etapu decyzyjnego. Bez ustawienia etap jest pomijany. |
+| `PRO_SMART_ROUTING_DECISION_TIMEOUT` | `1500ms` | Limit czasu dla modelu decyzyjnego. |
+| `PRO_SMART_ROUTING_QUALITY_TARGET` | `0.85` | Skumulowane prawdopodobieństwo, które poziom musi osiągnąć w etapie decyzyjnym. Podnieś je, aby preferować wyższe poziomy, lub obniż, aby oszczędzać więcej. |
+| `PRO_SMART_ROUTING_JUDGE_MODEL` | — | Model czatowy dla etapu sędziego. Bez ustawienia etap jest pomijany. |
+| `PRO_SMART_ROUTING_JUDGE` | `fallback` | Kiedy działa sędzia: `fallback`, `always` lub `off`. |
+| `PRO_SMART_ROUTING_JUDGE_TIMEOUT` | `4s` | Limit czasu dla sędziego. |
+
+### Znane ograniczenia
+
+Wykluczenia [kompresji promptów](/pl/pro/compression)
+(`PRO_COMPRESSION_EXCLUDE_MODELS`) są dopasowywane do żądanego modelu, którym
+dla trasy auto jest nazwa trasy, a nie model, który ostatecznie obsługuje
+request. Glob taki jak `ollama/*` nie obejmuje requestów, które trasa wysyła do
+celu Ollama; zamiast tego podaj nazwę trasy.
+
+### Trasy legacy
+
+Przed trasami auto trasę deklarowało się w Pro zmienną
+`PRO_SMART_ROUTING_ROUTES`, czyli mapą JSON z nazwy modelu na model `easy`
+i model `hard`. Nadal działa to bez zmian, ale jest przestarzałe (deprecated):
+
+```bash
+PRO_SMART_ROUTING_ROUTES='{"normal":{"easy":"normal-easy","hard":"normal-hard"}}'
+```
+
+Trasa legacy przepisuje żądany model: request, który prosi o reasoning lub
+którego wynik heurystyczny osiąga próg, trafia do modelu `hard`, a każdy inny
+do modelu `easy`. Jej odpowiedzi niosą też `X-GoModel-Pro-Tier-Target`, czyli
+model, na który przepisano request. Zastąp trasę równoważnym modelem
+wirtualnym:
+
+```yaml
+virtual_models:
+  - source: normal
+    strategy: auto
+    targets:
+      - { model: normal-easy, level: normal }
+      - { model: normal-hard, level: smartest }
+```
+
+Gdy nazwa modelu jest jednocześnie trasą legacy i trasą auto, wygrywa trasa
+auto, więc możesz najpierw dodać model wirtualny, a zmienną usunąć później.
 
 ## Adaptive routing
 
 Adaptive routing zastępuje strategie `round_robin` i `cost` z Core
 selektorem uwzględniającym stan zdrowia celów. Jest rejestrowany raz przy starcie dla całego
 gatewaya, ale **używają go tylko modele wirtualne skonfigurowane ze `strategy: adaptive`**
-– każdy inny model wirtualny zachowuje swoją strategię.
+oraz trasy ze `strategy: auto`, które wybierają nim spośród celów jednego
+poziomu. Każdy inny model wirtualny zachowuje swoją strategię.
 
 ```yaml
 virtual_models:
-  - source: normal-hard
+  - source: opus-pool
     strategy: adaptive
     targets:
       - { model: anthropic/claude-opus-4-6 }

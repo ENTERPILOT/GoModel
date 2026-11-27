@@ -69,6 +69,15 @@ const (
 	// recording folds it into the request's usage entry as rewrite savings.
 	rewriteTokensSavedKey contextKey = "rewrite-tokens-saved"
 
+	// routeLevelKey stores the lowest route level that may serve the request,
+	// set by a request rewriter and read by virtual models using the "auto"
+	// strategy.
+	routeLevelKey contextKey = "route-level"
+
+	// servedRouteLevelKey stores where model resolution reports the level an
+	// "auto" virtual model chose (see WithServedRouteLevel).
+	servedRouteLevelKey contextKey = "served-route-level"
+
 	// credentialAllowedModelsKey stores the model allowlist bound to the
 	// authenticated credential (a managed auth key). Empty means unrestricted.
 	credentialAllowedModelsKey contextKey = "credential-allowed-models" //nolint:gosec // G101: context key name, not a credential.

@@ -21,6 +21,7 @@ próbowany jako pierwszy:
 | Round-robin | rotacja między celami (z wagami) | pozostałe cele, w zadeklarowanej kolejności |
 | Lowest cost | najtańszy dostępny cel | pozostałe cele, w zadeklarowanej kolejności |
 | **Failover** | zawsze pierwszy dostępny cel | kolejne cele, w zadeklarowanej kolejności |
+| Auto | cel z najniższego [poziomu](/pl/features/virtual-models#routing-według-poziomu), który pokrywa request | pozostałe cele tego poziomu, potem wyższe poziomy w górę, potem niższe w dół |
 
 Wybierz **Failover**, gdy lista celów jest kolejnością priorytetów — zawsze używaj
 najlepszego modelu, chyba że nie działa, i dopiero wtedy przechodź kaskadowo do zapasowych.

@@ -78,6 +78,11 @@ niedostępny lub nasycony, strategia wybiera ponownie, a sesja zostaje
 przepięta – sesja nigdy nie jest przyklejona do martwego targetu, a zachowanie
 „uczciwego 429”, gdy wszystkie targety są nasycone, pozostaje bez zmian.
 
+W strategii `auto` sesja utrzymuje jeden target na każdym
+[poziomie](/pl/features/virtual-models#routing-według-poziomu): rozmowa, która
+przechodzi na inny poziom, trzyma się tam jednego targetu, a po powrocie
+odnajduje swój wcześniejszy target.
+
 W strategii `adaptive` przypięcie jest przekazywane selektorowi tras, który
 przy każdym requeście decyduje, czy sesja je zachowuje – zawsze, gdy więcej niż
 jeden target jest dostępny. (Przy jednym dostępnym targecie nie ma z czego

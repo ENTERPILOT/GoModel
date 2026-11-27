@@ -73,6 +73,7 @@ func configTargets(entry config.VirtualModelConfig) []Target {
 				Model:           target.Model,
 				Weight:          target.Weight,
 				ReasoningEffort: target.ReasoningEffort,
+				Level:           target.Level,
 			})
 		}
 		return targets

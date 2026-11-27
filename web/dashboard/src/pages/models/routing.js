@@ -27,13 +27,41 @@ function parseWeight(value) {
   return parsed;
 }
 
-// targetEntry builds a {provider?, model, weight?, reasoning_effort?} API
-// target from the qualified name the editor shows, attaching weight only when
-// it parses to a positive number and the reasoning effort only when one is
-// set. An explicit provider is kept (it pins the target to a concrete model,
-// where a bare name may reach a virtual model) and split off the name again,
-// since the backend stores the two separately.
-export function targetEntry(model, weightValue, provider = "", effort = "") {
+// ROUTE_LEVELS are the levels a target of an "auto" virtual model may have,
+// lowest first. The auto strategy sends each request to the lowest level that
+// covers what the request needs, and an unclassified request to the highest.
+export const ROUTE_LEVELS = ["light", "normal", "smart", "smartest"];
+
+// DEFAULT_ROUTE_LEVEL is what a target gets when the operator has not chosen:
+// the highest level, so a target is never handed easier work than intended
+// until the operator says it is a lighter model.
+export const DEFAULT_ROUTE_LEVEL = "smartest";
+
+// routeLevel normalizes a level the way the backend does (case and
+// surrounding space ignored); anything that is not a route level is "".
+export function routeLevel(value) {
+  const level = String(value || "").trim().toLowerCase();
+  return ROUTE_LEVELS.includes(level) ? level : "";
+}
+
+// isAutoStrategy reports whether strategy routes by level.
+export function isAutoStrategy(strategy) {
+  return String(strategy || "").trim().toLowerCase() === "auto";
+}
+
+// targetEntry builds a {provider?, model, weight?, reasoning_effort?, level?}
+// API target from the qualified name the editor shows, attaching weight only
+// when it parses to a positive number and the reasoning effort and level only
+// when one is set. An explicit provider is kept (it pins the target to a
+// concrete model, where a bare name may reach a virtual model) and split off
+// the name again, since the backend stores the two separately.
+export function targetEntry(
+  model,
+  weightValue,
+  provider = "",
+  effort = "",
+  level = "",
+) {
   const pinned = String(provider || "").trim();
   const name = String(model || "").trim();
   const entry = pinned
@@ -47,11 +75,16 @@ export function targetEntry(model, weightValue, provider = "", effort = "") {
   if (reasoningEffort) {
     entry.reasoning_effort = reasoningEffort;
   }
+  const targetLevel = routeLevel(level);
+  if (targetLevel) {
+    entry.level = targetLevel;
+  }
   return entry;
 }
 
 // collectExtraTargets normalizes the additional-target rows into API targets,
-// dropping blanks and invalid weights.
+// dropping blanks and invalid weights. A row's level rides along; the save
+// path keeps it only under the auto strategy.
 export function collectExtraTargets(rows) {
   const safeRows = Array.isArray(rows) ? rows : [];
   const targets = [];
@@ -59,7 +92,13 @@ export function collectExtraTargets(rows) {
     const model = String((row && row.model) || "").trim();
     if (model) {
       targets.push(
-        targetEntry(model, row.weight, row.provider, row.reasoning_effort),
+        targetEntry(
+          model,
+          row.weight,
+          row.provider,
+          row.reasoning_effort,
+          row.level,
+        ),
       );
     }
   }
@@ -77,6 +116,8 @@ export function strategyLabel(strategy, pluginName = "") {
       return m.models_strategy_name_failover();
     case "adaptive":
       return m.models_strategy_name_adaptive();
+    case "auto":
+      return m.models_strategy_name_auto();
     case "plugin":
       return String(pluginName || "").trim() || m.models_strategy_name_plugin();
     case "round_robin":
@@ -129,6 +170,7 @@ const STRATEGY_OPTION_LABELS = {
   cost: m.models_strategy_cost(),
   adaptive: m.models_strategy_adaptive(),
   failover: m.models_strategy_failover(),
+  auto: m.models_strategy_auto(),
 };
 
 function strategyOptionLabel(value) {
@@ -174,6 +216,9 @@ export function mapRedirectView(view) {
     }
     if (entry.reasoning_effort) {
       mapped.reasoning_effort = entry.reasoning_effort;
+    }
+    if (entry.level) {
+      mapped.level = entry.level;
     }
     return mapped;
   });
@@ -265,6 +310,23 @@ function aliasTargets(alias) {
   return single ? [single] : [];
 }
 
+// leveledTargets lists the targets of an auto redirect with the level each
+// has, and [] for every other redirect, whose targets have none.
+function leveledTargets(alias) {
+  if (!alias || !isAutoStrategy(alias.strategy)) return [];
+  return (Array.isArray(alias.targets) ? alias.targets : [])
+    .map((target) => ({
+      name: qualifyTarget(target),
+      level: routeLevel(target && target.level),
+    }))
+    .filter((target) => target.name);
+}
+
+// leveledName is a target as plain text carries it: "model (level)".
+export function leveledName(target) {
+  return target.level ? target.name + " (" + target.level + ")" : target.name;
+}
+
 // targetListLabel joins targets for a table cell, truncating long lists.
 function targetListLabel(targets, separator, limit = 3) {
   const shown = targets.slice(0, limit);
@@ -272,19 +334,34 @@ function targetListLabel(targets, separator, limit = 3) {
   return shown.join(separator) + (more > 0 ? " +" + more : "");
 }
 
+// ROW_TARGET_LIMIT is how many targets a virtual model's list row names.
+const ROW_TARGET_LIMIT = 2;
+
 // aliasRouting describes a virtual model for its list row: the strategy that
 // picks among its targets (kind "" for a plain alias, which has one target and
 // nothing to pick), the targets as the row shows them, and the full list. The
 // row names two targets, so name, strategy, and targets stay on one line.
+// An auto route says each target's level: in the text, and as `levels` (the
+// named targets) with `more` (how many the row leaves out) for the row to
+// draw them as badges.
 export function aliasRouting(alias) {
   const targets = aliasTargets(alias);
   if (targets.length > 1) {
-    return {
+    const routing = {
       kind: String(alias.strategy || "").toLowerCase() || "round_robin",
       label: strategyLabel(alias.strategy, alias.strategy_plugin),
-      targets: targetListLabel(targets, ", ", 2),
+      targets: targetListLabel(targets, ", ", ROW_TARGET_LIMIT),
       all: targets.join(", "),
     };
+    const leveled = leveledTargets(alias);
+    if (leveled.length > 0) {
+      const names = leveled.map(leveledName);
+      routing.targets = targetListLabel(names, ", ", ROW_TARGET_LIMIT);
+      routing.all = names.join(", ");
+      routing.levels = leveled.slice(0, ROW_TARGET_LIMIT);
+      routing.more = leveled.length - routing.levels.length;
+    }
+    return routing;
   }
   const target = (alias && alias.resolved_model) || targets[0] || "—";
   return { kind: "", label: "", targets: target, all: target };
@@ -343,7 +420,8 @@ export function maskingFailsOver(alias, globalFailover = true) {
 
 // maskingRoutingLabel is the secondary line next to the kind's prefix: the
 // fallbacks in order, the balancing peers with the strategy, or the redirect
-// destination.
+// destination. An auto route lists every target with its level, the model
+// itself included: the model's own level decides which requests it serves.
 export function maskingRoutingLabel(alias, kind) {
   const source = normalizedAliasName(alias && alias.name);
   const others = aliasTargets(alias).filter(
@@ -352,12 +430,17 @@ export function maskingRoutingLabel(alias, kind) {
   switch (kind) {
     case "failover":
       return targetListLabel(others, " → ");
-    case "balanced":
+    case "balanced": {
+      const leveled = leveledTargets(alias);
       return (
-        targetListLabel(others, ", ") +
+        targetListLabel(
+          leveled.length > 0 ? leveled.map(leveledName) : others,
+          ", ",
+        ) +
         " · " +
         strategyLabel(alias && alias.strategy, alias && alias.strategy_plugin)
       );
+    }
     default:
       return aliasTargetLabel(alias);
   }

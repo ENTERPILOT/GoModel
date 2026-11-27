@@ -12,6 +12,7 @@
   import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import {
     vmFormHasPrimaryTarget,
+    vmFormMissingTopLevel,
     vmFormShowBalancingOptions,
     vmFormStrategyPending,
     vmFormTargetColumns,
@@ -110,13 +111,16 @@
   <div class="form-field">
     <div class="vm-target-head">
       <span class="form-field-label vm-target-model">{m.models_targets()}</span>
+      {#if columns.level}
+        <span class="form-field-label vm-target-level">{m.models_target_level_column()}</span>
+      {/if}
       {#if columns.effort}
         <span class="form-field-label vm-target-effort">{m.models_target_effort_column()}</span>
       {/if}
       {#if columns.weight}
         <span class="form-field-label vm-target-weight">{m.models_weight()}</span>
       {/if}
-      {#if columns.effort || columns.weight}
+      {#if columns.level || columns.effort || columns.weight}
         <span class="vm-target-remove-space" aria-hidden="true"></span>
       {/if}
     </div>
@@ -128,6 +132,7 @@
       bind:model={vm.vmForm.target_model}
       bind:weight={vm.vmForm.target_weight}
       bind:reasoningEffort={vm.vmForm.target_reasoning_effort}
+      bind:level={vm.vmForm.target_level}
       showRemove={vmFormHasPrimaryTarget(vm.vmForm)}
       onremove={() => vm.removePrimaryTarget()}
     />
@@ -140,6 +145,7 @@
         bind:model={target.model}
         bind:weight={target.weight}
         bind:reasoningEffort={target.reasoning_effort}
+        bind:level={target.level}
         onremove={() => vm.removeVmTarget(index)}
       />
     {/each}
@@ -154,6 +160,14 @@
         <span>{m.models_add_target()}</span>
       </button>
     </div>
+    <!-- The auto strategy routes by the level each target names; say how, and
+         warn (without blocking the save) when no target has the top level. -->
+    {#if columns.level}
+      <span class="form-hint">{m.models_auto_help()}</span>
+      {#if vmFormMissingTopLevel(vm.vmForm)}
+        <span class="form-hint vm-level-warning" role="status">{m.models_auto_no_top_level()}</span>
+      {/if}
+    {/if}
   </div>
 
   {@const summary = vm.vmRoutingSummary()}
@@ -438,7 +452,8 @@
     margin: 0;
   }
 
-  .vm-routing-replaces {
+  .vm-routing-replaces,
+  .vm-level-warning {
     color: var(--warning);
   }
 </style>

@@ -21,6 +21,7 @@ first:
 | Round-robin | rotates across targets (weighted) | the other targets, in declared order |
 | Lowest cost | the cheapest available target | the other targets, in declared order |
 | **Failover** | the first available target, always | the next targets, in declared order |
+| Auto | a target of the lowest [level](/features/virtual-models#route-by-level) that covers the request | the rest of that level, then higher levels going up, then lower levels going down |
 
 Pick **Failover** when the target list is a priority order — always use the
 best model unless it is down, and only then cascade to the backups.

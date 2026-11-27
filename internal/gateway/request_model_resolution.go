@@ -88,6 +88,10 @@ func ResolveRequestModelWithAuthorizer(
 	requested core.RequestedModelSelector,
 ) (*core.RequestModelResolution, error) {
 	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
+	// A virtual model using the "auto" strategy reports the level it chose
+	// here. A resolution repeated after a provider refresh reports again, so
+	// the level always belongs to the selector that is kept.
+	ctx, served := core.WithServedRouteLevel(ctx)
 
 	resolvedSelector, route, aliasApplied, err := resolveExecutionRoute(ctx, provider, resolver, requested)
 	refreshed := false
@@ -170,6 +174,9 @@ func ResolveRequestModelWithAuthorizer(
 	}
 	if timeoutsResolver, ok := resolver.(ModelTimeoutsResolver); ok {
 		resolution.Timeouts = timeoutsResolver.ResolveTimeouts(ctx, requested, resolvedSelector, route)
+	}
+	if aliasApplied {
+		resolution.RouteLevel = served.Level
 	}
 	resolution.CacheDerivedSelectors()
 	return resolution, nil

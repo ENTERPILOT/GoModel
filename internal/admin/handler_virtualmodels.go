@@ -19,7 +19,8 @@ import (
 // target_model (or its alias target) or targets makes the row a redirect; absence makes it an access
 // policy. A single target_model is a plain alias; multiple targets are load
 // balanced across by strategy ("round_robin", "cost", "failover", "adaptive",
-// or "plugin" with strategy_plugin naming the routing-strategy plugin).
+// "auto", or "plugin" with strategy_plugin naming the routing-strategy
+// plugin).
 type upsertVirtualModelRequest struct {
 	Source      string `json:"source"`
 	OldSource   string `json:"old_source,omitempty"`
@@ -66,12 +67,15 @@ type upsertVirtualModelRequest struct {
 // bare id (with provider set) or a "provider/model" selector. Weight biases the
 // round_robin strategy and defaults to 1. ReasoningEffort forces the reasoning
 // effort of requests sent to this target, beating the virtual model's own
-// reasoning_effort.
+// reasoning_effort. Level ("light", "normal", "smart", or "smartest") is
+// required on every target under the "auto" strategy and dropped under every
+// other.
 type virtualModelTargetRequest struct {
 	Provider        string  `json:"provider,omitempty"`
 	Model           string  `json:"model"`
 	Weight          float64 `json:"weight,omitempty"`
 	ReasoningEffort string  `json:"reasoning_effort,omitempty"`
+	Level           string  `json:"level,omitempty"`
 }
 
 type deleteVirtualModelRequest struct {
@@ -267,6 +271,7 @@ func buildVirtualModelTargets(req upsertVirtualModelRequest) ([]virtualmodels.Ta
 			}
 			target.Weight = t.Weight
 			target.ReasoningEffort = t.ReasoningEffort
+			target.Level = t.Level
 			targets = append(targets, target)
 		}
 		// A targets list with only blank entries is a malformed redirect, not an

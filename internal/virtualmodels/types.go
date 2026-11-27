@@ -36,11 +36,17 @@ import (
 // redirect sends to this target, as the first attempt or as a failover leg. It
 // beats the redirect's own ReasoningEffort; whatever the target names (a
 // chained virtual model, a model policy) still beats it.
+//
+// Level says how capable the target is: "light", "normal", "smart", or
+// "smartest". The auto strategy requires it on every target and sends each
+// request to the lowest level that covers what the request needs; every other
+// strategy drops it.
 type Target struct {
 	Provider        string  `json:"provider,omitempty" bson:"provider,omitempty"`
 	Model           string  `json:"model" bson:"model"`
 	Weight          float64 `json:"weight,omitempty" bson:"weight,omitempty"`
 	ReasoningEffort string  `json:"reasoning_effort,omitempty" bson:"reasoning_effort,omitempty"`
+	Level           string  `json:"level,omitempty" bson:"level,omitempty"`
 }
 
 // selector returns the concrete selector this target points to.
@@ -128,6 +134,17 @@ const (
 	// When the plugin is missing, misconfigured, declines, panics, or times
 	// out, the redirect falls back to weighted round robin.
 	StrategyPlugin = "plugin"
+	// StrategyAuto routes by level. Every target carries a Level, and a
+	// request goes to the lowest level at or above the one the request needs,
+	// which a request rewriter names (ext.Result.RouteLevel). A request no
+	// rewriter classified goes to the highest level, so the strategy is safe
+	// without a classifier: it then always uses the most capable targets.
+	// When no target at or above the needed level can serve, the highest
+	// level below it does. Targets sharing a level are balanced by weighted
+	// round robin, or by the adaptive route selector when one is registered.
+	// Failover tries the rest of the level first, then higher levels, then
+	// lower ones.
+	StrategyAuto = "auto"
 )
 
 // normalizeStrategy lower-cases and defaults a strategy string. An empty value
@@ -143,7 +160,7 @@ func normalizeStrategy(strategy string) string {
 // validStrategy reports whether strategy names a supported load-balancing mode.
 func validStrategy(strategy string) bool {
 	switch normalizeStrategy(strategy) {
-	case StrategyRoundRobin, StrategyCost, StrategyAdaptive, StrategyFailover, StrategyPlugin:
+	case StrategyRoundRobin, StrategyCost, StrategyAdaptive, StrategyFailover, StrategyPlugin, StrategyAuto:
 		return true
 	default:
 		return false

@@ -11,8 +11,12 @@ import {
 
 import {
   collectExtraTargets,
+  DEFAULT_ROUTE_LEVEL,
+  isAutoStrategy,
+  leveledName,
   paramsObject,
   qualifyTarget,
+  routeLevel,
   strategyLabel,
   strategyUsesWeights,
   targetEntry,
@@ -67,6 +71,9 @@ export function defaultVirtualModelForm() {
     target_weight: 1,
     // Reasoning effort forced on the first target; extra rows carry their own.
     target_reasoning_effort: "",
+    // Level of the first target under the "auto" strategy; extra rows carry
+    // their own. Kept (but not sent) under every other strategy.
+    target_level: "",
     targets: [],
     strategy: "round_robin",
     // A "plugin" strategy names its routing plugin and carries that plugin's
@@ -216,6 +223,7 @@ export function flattenFormTargets(form) {
       model: String(form.target_model || "").trim(),
       weight: normalizedTargetWeight(form.target_weight),
       reasoning_effort: String(form.target_reasoning_effort || ""),
+      level: String(form.target_level || ""),
     });
   }
   if (Array.isArray(form.targets)) {
@@ -225,6 +233,7 @@ export function flattenFormTargets(form) {
         model: String((target && target.model) || ""),
         weight: normalizedTargetWeight((target && target.weight)),
         reasoning_effort: String((target && target.reasoning_effort) || ""),
+        level: String((target && target.level) || ""),
       });
     }
   }
@@ -248,11 +257,13 @@ export function moveFormTarget(form, from, to) {
   form.target_model = first.model || "";
   form.target_weight = normalizedTargetWeight(first.weight);
   form.target_reasoning_effort = first.reasoning_effort;
+  form.target_level = first.level;
   form.targets = list.slice(1).map((row) => ({
     provider: row.provider || "",
     model: row.model || "",
     weight: normalizedTargetWeight(row.weight),
     reasoning_effort: row.reasoning_effort,
+    level: row.level,
   }));
   return true;
 }
@@ -376,12 +387,49 @@ export function vmFormShowTargetEffort(form, effort) {
   return vmFormHasExtraTargetRows(form) || Boolean(effort);
 }
 
+// vmFormShowLevels: a target's level only means something under the auto
+// strategy, which — like every strategy — applies from the second target on.
+export function vmFormShowLevels(form) {
+  return vmFormHasExtraTargetRows(form) && isAutoStrategy(form && form.strategy);
+}
+
+// applyDefaultLevels gives every target row of an auto form that has no level
+// the default one, so neither switching a virtual model to auto nor adding a
+// row leaves a target the backend would refuse. A level the operator already
+// chose is kept, and so are the levels of a form that is switched away from
+// auto and back. Under any other strategy it does nothing.
+export function applyDefaultLevels(form) {
+  if (!form || !isAutoStrategy(form.strategy)) return;
+  form.target_level = routeLevel(form.target_level) || DEFAULT_ROUTE_LEVEL;
+  for (const target of Array.isArray(form.targets) ? form.targets : []) {
+    if (target) {
+      target.level = routeLevel(target.level) || DEFAULT_ROUTE_LEVEL;
+    }
+  }
+}
+
+// vmFormMissingTopLevel reports an auto form none of whose targets has the
+// highest level. That saves and works — the hardest requests then go to the
+// highest level listed — but is worth a warning, as it is easy to do by
+// accident. Rows without a model are not targets and do not count.
+export function vmFormMissingTopLevel(form) {
+  if (!vmFormShowLevels(form)) return false;
+  const targets = flattenFormTargets(form).filter(
+    (target) => target.model.trim() !== "",
+  );
+  return (
+    targets.length > 0 &&
+    !targets.some((target) => routeLevel(target.level) === DEFAULT_ROUTE_LEVEL)
+  );
+}
+
 // vmFormTargetColumns: which column labels sit above the target rows. They
 // follow the rows: with one row only its own effort can show the dropdown,
 // with more every row has it.
 export function vmFormTargetColumns(form) {
   return {
     effort: vmFormShowTargetEffort(form, form && form.target_reasoning_effort),
+    level: vmFormShowLevels(form),
     weight: vmFormShowWeights(form),
   };
 }
@@ -408,6 +456,26 @@ export function vmRoutingSummary(form, sourceIsModel) {
     ...collectExtraTargets(form && form.targets).map(qualifyTarget),
   );
   if (!source || targets.length === 0) return { text: "", replaces: false };
+
+  // An auto route does not spread requests evenly: it picks by level, so its
+  // summary names each target's level instead of a balancing strategy.
+  if (targets.length > 1 && isAutoStrategy(form.strategy)) {
+    const levels = [];
+    if (primary) levels.push(form.target_level);
+    levels.push(
+      ...collectExtraTargets(form.targets).map((target) => target.level),
+    );
+    const leveled = targets
+      .map((name, index) => leveledName({ name, level: routeLevel(levels[index]) }))
+      .join(", ");
+    const shadows = sourceIsModel && !targets.includes(source);
+    return {
+      text: shadows
+        ? m.models_summary_replaced_auto({ source, targets: leveled })
+        : m.models_summary_auto({ source, targets: leveled }),
+      replaces: shadows,
+    };
+  }
 
   const strategy = strategyLabel(form.strategy, form.strategy_plugin);
   const failover = isFailoverStrategy(form && form.strategy);
@@ -488,12 +556,14 @@ export function removePrimaryTarget(form) {
     form.target_model = next.model || "";
     form.target_weight = next.weight || 1;
     form.target_reasoning_effort = next.reasoning_effort || "";
+    form.target_level = next.level || "";
     return;
   }
   form.target_provider = "";
   form.target_model = "";
   form.target_weight = 1;
   form.target_reasoning_effort = "";
+  form.target_level = "";
 }
 
 // aliasFormTargets maps a stored alias onto the editor's primary/extra target
@@ -508,11 +578,13 @@ export function aliasFormTargets(alias) {
       primaryModel: qualifyTarget(lbTargets[0]),
       primaryWeight: lbTargets[0].weight || 1,
       primaryReasoningEffort: lbTargets[0].reasoning_effort || "",
+      primaryLevel: lbTargets[0].level || "",
       extraTargets: lbTargets.slice(1).map((target) => ({
         provider: target.provider || "",
         model: qualifyTarget(target),
         weight: target.weight || 1,
         reasoning_effort: target.reasoning_effort || "",
+        level: target.level || "",
       })),
     };
   }
@@ -524,6 +596,7 @@ export function aliasFormTargets(alias) {
         : (alias && alias.target_model) || "",
     primaryWeight: 1,
     primaryReasoningEffort: "",
+    primaryLevel: "",
     extraTargets: [],
   };
 }
@@ -604,14 +677,22 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
           form.target_weight,
           form.target_provider,
           form.target_reasoning_effort,
+          form.target_level,
         ),
       );
     }
     targets.push(...extraTargets);
+    // Only the auto strategy reads levels, and it applies from two targets
+    // on; everywhere else a level left on a row is not sent.
+    const strategy = form.strategy || "round_robin";
+    if (!(targets.length > 1 && isAutoStrategy(strategy))) {
+      for (const target of targets) {
+        delete target.level;
+      }
+    }
     if (targets.length > 1) {
       // Multiple targets load balance; carry the chosen strategy. Strategies
       // that ignore weight drop it rather than persist a value with no effect.
-      const strategy = form.strategy || "round_robin";
       payload.targets = strategyUsesWeights(strategy)
         ? targets
         : targets.map(weightless);
@@ -672,13 +753,16 @@ export function buildAliasTogglePayload(alias) {
       payload.failover = false;
     }
     // Strategies that ignore weight persist weight-less targets — same
-    // contract as the editor save path.
+    // contract as the editor save path. An auto route needs every target's
+    // level back, or the backend refuses the toggle.
+    const auto = isAutoStrategy(payload.strategy);
     const targets = lbTargets.map((target) =>
       targetEntry(
         qualifyTarget(target),
         target.weight,
         target.provider,
         target.reasoning_effort,
+        auto ? target.level : "",
       ),
     );
     payload.targets = strategyUsesWeights(payload.strategy)

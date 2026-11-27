@@ -14,7 +14,9 @@ import (
 // available targets, in declared order and descending chained virtual models,
 // minus the model the request was sent to first. The redirect's strategy only
 // chooses that first target; every other available target is a failover leg,
-// so a load balancer and a priority list fail over the same way. A redirect
+// so a load balancer and a priority list fail over the same way. The auto
+// strategy alone reorders the legs by level (see snapshot.failoverOrder), so
+// a retry stays on models at least as capable while any remain. A redirect
 // with failover switched off, and requests that did not go through a redirect,
 // have no chain; a redirect whose single target is a chained redirect keeps
 // that subtree's leaves as its chain — except a request that named its
@@ -31,7 +33,7 @@ func (s *Service) ResolveFailovers(resolution *core.RequestModelResolution, _ co
 	}
 	seen := map[string]struct{}{resolution.ResolvedQualifiedModel(): {}}
 	chain := make([]core.ModelSelector, 0, len(entry.targets))
-	for _, leaf := range snap.leafTargets(entry, s.catalog) {
+	for _, leaf := range snap.failoverLeaves(entry, core.RouteLevelRank(resolution.RouteLevel), s.catalog) {
 		if _, dup := seen[leaf.qualified]; dup {
 			continue
 		}

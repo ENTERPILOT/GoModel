@@ -15943,6 +15943,9 @@
       "admin.virtualModelTargetRequest": {
         "type": "object",
         "properties": {
+          "level": {
+            "type": "string"
+          },
           "model": {
             "type": "string"
           },
@@ -20373,6 +20376,9 @@
       "virtualmodels.Target": {
         "type": "object",
         "properties": {
+          "level": {
+            "type": "string"
+          },
           "model": {
             "type": "string"
           },

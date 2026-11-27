@@ -122,7 +122,7 @@ test("target helpers tolerate a null or malformed form", () => {
   // Non-array targets still surfaces the primary row; moveFormTarget refuses
   // because it cannot build a contiguous list.
   assert.deepEqual(flattenFormTargets({ target_model: "a", targets: "bad" }), [
-    { provider: "", model: "a", weight: 1, reasoning_effort: "" },
+    { provider: "", model: "a", weight: 1, reasoning_effort: "", level: "" },
   ]);
   assert.equal(moveFormTarget(null, 0, 1), false);
   assert.equal(

@@ -18,10 +18,10 @@ func TestDashboardVirtualModelStrategies_IncludesRoutePlugins(t *testing.T) {
 		plugins         []string
 		want            string
 	}{
-		{name: "no plugins", want: "round_robin,cost,failover"},
-		{name: "plugins appended", plugins: []string{"cheapest_healthy", " latency_aware "}, want: "round_robin,cost,failover,plugin:cheapest_healthy,plugin:latency_aware"},
-		{name: "adaptive before plugins", adaptiveRouting: true, plugins: []string{"cheapest_healthy"}, want: "round_robin,cost,failover,adaptive,plugin:cheapest_healthy"},
-		{name: "blank names skipped", plugins: []string{"", "x"}, want: "round_robin,cost,failover,plugin:x"},
+		{name: "no plugins", want: "round_robin,cost,failover,auto"},
+		{name: "plugins appended", plugins: []string{"cheapest_healthy", " latency_aware "}, want: "round_robin,cost,failover,auto,plugin:cheapest_healthy,plugin:latency_aware"},
+		{name: "adaptive before plugins", adaptiveRouting: true, plugins: []string{"cheapest_healthy"}, want: "round_robin,cost,failover,auto,adaptive,plugin:cheapest_healthy"},
+		{name: "blank names skipped", plugins: []string{"", "x"}, want: "round_robin,cost,failover,auto,plugin:x"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

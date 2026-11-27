@@ -386,3 +386,27 @@ func TestInternalChatCompletionExecutor_MarshalFailureFallsBackToNoCacheDispatch
 	require.Equal(t, "chatcmpl-internal-marshal-fallback", resp.ID)
 	require.Equal(t, 1, provider.chatCalls)
 }
+
+// The route level a rewriter worked out belongs to the user's request. A
+// model call the gateway makes on that request's behalf (a guardrail or a
+// plugin calling a model) must not inherit it: its own auto route would
+// otherwise be served from the level of the request that triggered it.
+func TestInternalChatCompletionExecutor_DropsTheCallersRouteLevel(t *testing.T) {
+	provider := &contextCapturingProvider{
+		supportedModels: []string{"rewrite-model"},
+		providerTypes:   map[string]string{"rewrite-model": "openai"},
+		response: &core.ChatResponse{
+			ID: "chatcmpl-internal-level", Model: "rewrite-model", Provider: "openai",
+			Choices: []core.Choice{{Message: core.ResponseMessage{Role: "assistant", Content: "ok"}, FinishReason: "stop"}},
+		},
+	}
+	executor := NewInternalChatCompletionExecutor(provider, InternalChatCompletionExecutorConfig{})
+
+	ctx := core.WithRouteLevel(context.Background(), core.RouteLevelLight)
+	_, err := executor.ChatCompletion(ctx, &core.ChatRequest{
+		Model:    "rewrite-model",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	require.Empty(t, core.RouteLevelFromContext(provider.capturedCtx))
+}

@@ -614,8 +614,8 @@ func TestDashboardRuntimeConfig_VirtualModelStrategies(t *testing.T) {
 		adaptiveRouting bool
 		want            string
 	}{
-		{name: "core strategies without a route selector", adaptiveRouting: false, want: "round_robin,cost,failover"},
-		{name: "adaptive offered with a route selector", adaptiveRouting: true, want: "round_robin,cost,failover,adaptive"},
+		{name: "core strategies without a route selector", adaptiveRouting: false, want: "round_robin,cost,failover,auto"},
+		{name: "adaptive offered with a route selector", adaptiveRouting: true, want: "round_robin,cost,failover,auto,adaptive"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
