@@ -899,6 +899,8 @@ func TestHostEndsASessionItCannotRecheckForLong(t *testing.T) {
 	a := newReplica(t, unreadable, Options{ConfigServers: servers}, clock)
 	b := newReplica(t, shared, Options{ConfigServers: servers}, clock)
 	sessionID := initializeRawSession(t, a.url+"/mcp", nil)
+	hosted, ok := a.binding(sessionID)
+	require.True(t, ok)
 
 	unreadable.fail.Store(true)
 	require.Equal(t, http.StatusNoContent, rawMCPDelete(t, b.url+"/mcp", withSession(nil, sessionID)))
@@ -908,6 +910,10 @@ func TestHostEndsASessionItCannotRecheckForLong(t *testing.T) {
 	clock.Advance(sessionUnverifiedLimit / 2)
 	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(nil, sessionID)),
 		"the host ends a session it has not rechecked for the limit")
+	// The host closes the session in the background; until it has, a request
+	// that finds no shared record still reaches it.
+	require.Eventually(t, func() bool { return !hasSessions(hosted.server) }, 5*time.Second, 5*time.Millisecond,
+		"the hosted session is closed, not only unbound")
 
 	clock.Advance(sessionCloseMarkLifetime)
 	unreadable.fail.Store(false)
