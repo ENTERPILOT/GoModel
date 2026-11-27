@@ -3,6 +3,7 @@ package sqlx
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -37,13 +38,13 @@ func execSchema(ctx context.Context, q Querier, dialect Dialect, statements []st
 // spelling (see addColumnStatement), because replicas starting together can
 // all see a column missing and race to add it.
 func AddColumns(ctx context.Context, db DB, statements ...string) error {
-	pending, err := missingColumnStatements(ctx, db, statements)
+	dialect := db.Dialect()
+	pending, err := missingColumnStatements(ctx, db, dialect, statements)
 	if err != nil {
 		return err
 	}
-	dialect := db.Dialect()
 	for _, statement := range pending {
-		_, err := db.Exec(ctx, dialect.addColumnStatement(statement))
+		err := execAddColumn(ctx, db, dialect.addColumnStatement(statement))
 		if err != nil && !IsDuplicateColumnError(err) {
 			return fmt.Errorf("apply migration %q: %w", statement, err)
 		}
@@ -51,10 +52,32 @@ func AddColumns(ctx context.Context, db DB, statements ...string) error {
 	return nil
 }
 
+// execAddColumn runs one column migration. On PostgreSQL it bounds the wait
+// for the table lock (see postgresDB.changeSchema), one transaction per
+// statement so a tolerated duplicate-column error ends only its own.
+func execAddColumn(ctx context.Context, db DB, statement string) error {
+	p, ok := db.(*postgresDB)
+	if !ok {
+		_, err := db.Exec(ctx, statement)
+		return err
+	}
+	return p.changeSchema(ctx, func(q Querier) error {
+		// Checked again under the lock, on every attempt: a replica that
+		// queued here behind another one finds the column added, and must
+		// not queue for the table to add nothing.
+		pending, err := missingColumnStatements(ctx, q, PostgreSQL, []string{statement})
+		if err != nil || len(pending) == 0 {
+			return err
+		}
+		_, err = q.Exec(ctx, statement)
+		return err
+	})
+}
+
 // missingColumnStatements drops the statements whose column already exists,
 // reading each table's columns at most once.
-func missingColumnStatements(ctx context.Context, db DB, statements []string) ([]string, error) {
-	existing := make(map[string]map[string]bool)
+func missingColumnStatements(ctx context.Context, q Querier, dialect Dialect, statements []string) ([]string, error) {
+	existing := make(map[string][]string)
 	pending := make([]string, 0, len(statements))
 	for _, statement := range statements {
 		table, column, ok := parseAddColumn(statement)
@@ -65,12 +88,12 @@ func missingColumnStatements(ctx context.Context, db DB, statements []string) ([
 		columns, seen := existing[table]
 		if !seen {
 			var err error
-			if columns, err = Columns(ctx, db, table); err != nil {
+			if columns, err = ColumnNames(ctx, q, dialect, table); err != nil {
 				return nil, err
 			}
 			existing[table] = columns
 		}
-		if !columns[column] {
+		if !slices.Contains(columns, column) {
 			pending = append(pending, statement)
 		}
 	}

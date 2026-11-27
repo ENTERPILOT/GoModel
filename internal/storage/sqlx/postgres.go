@@ -14,7 +14,8 @@ import (
 // Queries arrive with `?` placeholders and are rebound to $1, $2, ... on the
 // way through.
 type postgresDB struct {
-	session pgSession
+	session  pgSession
+	lockWait lockWait
 }
 
 // pgSession is the part of *pgxpool.Pool and *pgxpool.Conn postgresDB uses.
@@ -28,7 +29,7 @@ func NewPostgreSQL(pool *pgxpool.Pool) (DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("connection pool is required")
 	}
-	return &postgresDB{session: pool}, nil
+	return &postgresDB{session: pool, lockWait: defaultLockWait}, nil
 }
 
 // NewPostgreSQLConn wraps one pooled connection, for store code that must
@@ -39,7 +40,7 @@ func NewPostgreSQLConn(conn *pgxpool.Conn) (DB, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("connection is required")
 	}
-	return &postgresDB{session: conn}, nil
+	return &postgresDB{session: conn, lockWait: defaultLockWait}, nil
 }
 
 func (p *postgresDB) Dialect() Dialect { return PostgreSQL }
@@ -68,7 +69,8 @@ func (p *postgresDB) QueryRow(ctx context.Context, query string, args ...any) Ro
 	return pgQueryRow(ctx, p.session, query, args...)
 }
 
-// postgresSchemaLockKey is the advisory lock every Schema call takes. One key
+// postgresSchemaLockKey is the advisory lock every schema change takes; a
+// Schema call that finds nothing to change takes none. One key
 // for the whole gateway is deliberate: each store's DDL is short, and the
 // alternative (a key per store) buys nothing while making the lock easy to
 // forget in a new store.
@@ -82,12 +84,25 @@ const postgresSchemaLockKey int64 = 0x676f6d6f64656c
 // fresh database hit exactly that. The transaction-scoped lock serializes
 // them: the second replica waits, then finds every table present.
 // PostgreSQL DDL is transactional, so a failure leaves nothing half-applied.
+//
+// Indexes that already exist are skipped, and the rest wait only briefly for
+// a table lock; see postgres_schema.go.
 func (p *postgresDB) Schema(ctx context.Context, statements ...string) error {
-	return p.InTx(ctx, func(q Querier) error {
-		if _, err := q.Exec(ctx, "SELECT pg_advisory_xact_lock(?)", postgresSchemaLockKey); err != nil {
-			return fmt.Errorf("acquire schema lock: %w", err)
+	// Checked without the lock first, so that a start against an up-to-date
+	// schema takes none.
+	pending, err := pendingSchema(ctx, p, statements)
+	if err != nil || len(pending) == 0 {
+		return err
+	}
+	return p.changeSchema(ctx, func(q Querier) error {
+		// Checked again under the lock, on every attempt: a replica that
+		// queued here behind another one finds the index built, and must not
+		// queue for the table to create nothing.
+		pending, err := pendingSchema(ctx, q, statements)
+		if err != nil {
+			return err
 		}
-		return execSchema(ctx, q, PostgreSQL, statements)
+		return execSchema(ctx, q, PostgreSQL, pending)
 	})
 }
 
