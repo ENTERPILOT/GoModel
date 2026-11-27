@@ -261,11 +261,12 @@ Obergrenzen greifen nach den [Overrides virtueller Modelle](/de/features/virtual
 bei jedem Versuch, auch bei Failover-Versuchen, und begrenzen daher auch einen
 Effort oder ein `max_tokens`, das ein virtuelles Modell erzwingt oder als
 Standard setzt. Sie gelten für Chat Completions, die Responses API und die
-Anthropic Messages API. Ein Messages-Request an ein Anthropic-Modell wird
-weiterhin nativ weitergeleitet: Liegt er über den Obergrenzen, werden
-`max_tokens`, das Thinking-Budget und `output_config.effort` im
-weitergeleiteten Body gesenkt, und alles andere bleibt, wie es gesendet wurde,
-auch `anthropic-beta`-Header. Unter einer Obergrenze `none` wird sein
+Anthropic Messages API. Obergrenzen nehmen einen Messages-Request nicht von
+der nativen Weiterleitung an Anthropic: Würde er ohne sie nativ weitergeleitet
+und liegt er über den Obergrenzen, werden `max_tokens`, das Thinking-Budget
+und `output_config.effort` im weitergeleiteten Body gesenkt; seine übrigen
+Felder und seine `anthropic-beta`-Header bleiben erhalten. Unter einer
+Obergrenze `none` wird sein
 Thinking mit `thinking: {"type": "disabled"}` ausgeschaltet; ein Modell, das
 immer denkt (Fable 5.x, Mythos 5.x, Opus 5.5), erhält stattdessen `low`, wie auf
 dem übersetzten Pfad. Bekannte Einschränkung: Sonnet 5.5 lehnt `disabled` ab,

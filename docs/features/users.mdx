@@ -246,11 +246,12 @@ and the capped `max_tokens` bounds what it spends. Claude Opus 4.6 and Sonnet
 Ceilings apply after [virtual model overrides](/features/virtual-models#force-a-reasoning-effort),
 on every attempt, including failover legs, so they also bound an effort or a
 `max_tokens` that a virtual model forces or defaults. They apply to Chat
-Completions, the Responses API, and the Anthropic Messages API. A Messages
-request to an Anthropic model is still forwarded natively: one above the
-ceilings has its `max_tokens`, thinking budget, and `output_config.effort`
-lowered in the forwarded body, and keeps everything else it sent, including
-`anthropic-beta` headers. Under a `none` ceiling its thinking is turned off
+Completions, the Responses API, and the Anthropic Messages API. Ceilings do
+not take a Messages request off native forwarding to Anthropic: where it
+would be forwarded natively without them, one above the ceilings has its
+`max_tokens`, thinking budget, and `output_config.effort` lowered in the
+forwarded body, and keeps its other members and its `anthropic-beta` headers.
+Under a `none` ceiling its thinking is turned off
 with `thinking: {"type": "disabled"}`; a model that always thinks (Fable 5.x,
 Mythos 5.x, Opus 5.5) gets `low` instead, as on the translated path. Known
 limit: Sonnet 5.5 rejects `disabled`, so such a request to it fails with

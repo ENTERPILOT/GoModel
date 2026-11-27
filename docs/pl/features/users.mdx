@@ -246,11 +246,11 @@ Claude Opus 4.6 i Sonnet 4.6 przyjmują `max`, ale nie `xhigh`, więc przy limic
 Limity działają po [nadpisaniach modeli wirtualnych](/pl/features/virtual-models#wymuszanie-reasoning-effort),
 przy każdej próbie, także przy próbach failover, więc ograniczają też effort
 lub `max_tokens`, które model wirtualny wymusza albo ustawia domyślnie. Dotyczą
-Chat Completions, Responses API i Anthropic Messages API. Request Messages do
-modelu Anthropic jest nadal przekazywany natywnie: gdy przekracza limity, jego
-`max_tokens`, budżet thinking i `output_config.effort` są obniżane w
-przekazywanym body, a cała reszta zostaje taka, jak ją wysłano, łącznie z
-nagłówkami `anthropic-beta`. Przy
+Chat Completions, Responses API i Anthropic Messages API. Limity nie
+wyłączają natywnego przekazywania requestu Messages do Anthropic: jeśli bez
+nich byłby przekazany natywnie, a przekracza limity, jego `max_tokens`, budżet
+thinking i `output_config.effort` są obniżane w przekazywanym body, a pozostałe
+pola i nagłówki `anthropic-beta` zostają zachowane. Przy
 limicie `none` jego thinking jest wyłączany przez
 `thinking: {"type": "disabled"}`; model, który zawsze myśli (Fable 5.x,
 Mythos 5.x, Opus 5.5), dostaje zamiast tego `low`, tak jak na ścieżce
