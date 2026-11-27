@@ -10,6 +10,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/modeldata"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -148,6 +149,51 @@ func TestListModels_AppliesGlobalOverrideToConcreteModels(t *testing.T) {
 	row := body[0]
 	require.Equal(t, []string{"/team/global"}, row.Access.UserPaths)
 	require.Nil(t, row.Access.Override)
+}
+
+func TestListModels_ScopedCallerSeesOnlyItsUserPaths(t *testing.T) {
+	tests := []struct {
+		name         string
+		scope        string
+		userPaths    []string
+		wantPaths    []string
+		wantEnabled  bool
+		wantOverride bool
+	}{
+		{name: "global sees every path", userPaths: []string{"/team/alpha", "/team/beta"}, wantPaths: []string{"/team/alpha", "/team/beta"}, wantEnabled: true, wantOverride: true},
+		{name: "siblings hidden", scope: scopeAlpha, userPaths: []string{"/team/alpha", "/team/beta", "/team/alphabet"}, wantPaths: []string{scopeAlpha}, wantEnabled: true},
+		{name: "descendants kept", scope: scopeAlpha, userPaths: []string{"/team/alpha/bob", "/team/beta"}, wantPaths: []string{"/team/alpha/bob"}, wantEnabled: true},
+		{name: "ancestor reported as scope root", scope: scopeAlpha, userPaths: []string{"/team", "/org"}, wantPaths: []string{scopeAlpha}, wantEnabled: true},
+		{name: "unreachable model reported disabled", scope: scopeAlpha, userPaths: []string{"/team/beta"}, wantEnabled: false},
+		{name: "unrestricted model unchanged", scope: scopeAlpha, wantEnabled: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := newVMModelRegistry(t)
+			service := newVMServiceForRegistry(t, registry, true, virtualmodels.VirtualModel{
+				Source:      "openai/gpt-4o",
+				UserPaths:   tt.userPaths,
+				Description: "policy note",
+				Enabled:     true,
+			})
+
+			h := NewHandler(nil, registry, WithVirtualModels(service))
+			c, rec := scopedRequest(t, http.MethodGet, "/admin/models", "", tt.scope)
+			require.NoError(t, h.ListModels(c))
+			require.Equal(t, http.StatusOK, rec.Code)
+
+			body := echotest.Decode[[]modelInventoryResponse](t, rec)
+			require.Len(t, body, 1)
+			access := body[0].Access
+			assert.Equal(t, tt.wantPaths, access.UserPaths)
+			assert.Equal(t, tt.wantEnabled, access.EffectiveEnabled)
+			assert.Equal(t, tt.wantOverride, access.Override != nil)
+			if tt.scope != "" {
+				assert.NotContains(t, rec.Body.String(), "/team/beta")
+				assert.NotContains(t, rec.Body.String(), "policy note")
+			}
+		})
+	}
 }
 
 func newLayeredModelRegistry(t *testing.T) *providers.ModelRegistry {

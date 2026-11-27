@@ -64,6 +64,7 @@ func (h *Handler) ListModels(c *echo.Context) error {
 		models = []providers.ModelWithProvider{}
 	}
 	access := h.modelAccessResolver()
+	scope := requestScope(c)
 	response := make([]modelInventoryResponse, 0, len(models))
 	for _, model := range models {
 		selector := core.ModelSelector{
@@ -72,11 +73,44 @@ func (h *Handler) ListModels(c *echo.Context) error {
 		}
 		response = append(response, modelInventoryResponse{
 			ModelWithProvider: model,
-			Access:            access(selector),
+			Access:            scopedModelAccess(scope, access(selector)),
 		})
 	}
 
 	return c.JSON(http.StatusOK, response)
+}
+
+// scopedModelAccess narrows a model's access view to what a user-path scoped
+// credential may see. Access rows are gateway-wide configuration and name
+// other tenants' user paths, so a scoped caller gets neither the policy row
+// nor those paths: only the paths inside its subtree remain, and a path that
+// grants the whole subtree (the scope root or an ancestor) is reported as the
+// scope root. A model restricted to paths that never reach the subtree is
+// reported as disabled, since no request under the scope can use it.
+func scopedModelAccess(scope core.AccessScope, access modelAccessResponse) modelAccessResponse {
+	if scope.Global() {
+		return access
+	}
+	access.Override = nil
+	if len(access.UserPaths) == 0 {
+		return access
+	}
+	visible := make([]string, 0, len(access.UserPaths))
+	for _, userPath := range access.UserPaths {
+		switch {
+		case core.UserPathContains(userPath, scope.UserPath):
+			visible = append(visible, scope.UserPath)
+		case scope.Allows(userPath):
+			visible = append(visible, userPath)
+		}
+	}
+	slices.Sort(visible)
+	access.UserPaths = slices.Compact(visible)
+	if len(access.UserPaths) == 0 {
+		access.UserPaths = nil
+		access.EffectiveEnabled = false
+	}
+	return access
 }
 
 // modelAccessResolver returns a function that produces the access view for a
