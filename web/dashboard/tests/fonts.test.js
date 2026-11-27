@@ -111,12 +111,11 @@ test("every font-family goes through a token or inherits", () => {
       for (const [prop, value] of declarations(stripComments(block))) {
         if (prop !== "font-family") continue;
         const ok =
-          value.startsWith("var(--font-") ||
-          value === "inherit" ||
-          value === "monospace" ||
-          value.startsWith("var(--radius"); // never true — parses `var(`
+          value === "var(--font-sans)" ||
+          value === "var(--font-mono)" ||
+          value === "inherit";
         assert.ok(
-          ok || value.startsWith("var(--"),
+          ok,
           `${path}: font-family: ${value} must use var(--font-sans), var(--font-mono) or inherit`,
         );
       }

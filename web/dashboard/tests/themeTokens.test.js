@@ -79,7 +79,7 @@ function resolve(map, name) {
 
 /* ── color maths ─────────────────────────────────────────────────────────── */
 
-function parseColor(expr) {
+function parseColor(expr, map = null) {
   const text = expr.trim();
   let m = /^#([0-9a-f]{6})$/i.exec(text);
   if (m) {
@@ -101,6 +101,28 @@ function parseColor(expr) {
     return {
       rgb: [Number(m[1]), Number(m[2]), Number(m[3])],
       alpha: m[4] === undefined ? 1 : Number(m[4]),
+    };
+  }
+  // color-mix(in srgb, <color> <p>%, <color>) — the status tints use it to
+  // stay opaque (the flash toasts float over page content, so a translucent
+  // background would let it bleed through). Inner var() references are
+  // resolved through the theme's token map; inputs with their own commas
+  // (raw rgba()) are not supported by this simple branch.
+  m = /^color-mix\(\s*in\s+srgb\s*,\s*(\S+)\s+([\d.]+)%\s*,\s*(\S+)\s*\)$/i.exec(
+    text,
+  );
+  if (m && map) {
+    const input = (token) => {
+      const alias = /^var\(\s*(--[\w-]+)\s*\)$/.exec(token);
+      return parseColor(alias ? resolve(map, alias[1]) : token, map);
+    };
+    const c1 = input(m[1]);
+    const c2 = input(m[3]);
+    if (!c1 || !c2) return null;
+    const p = Math.min(Math.max(Number(m[2]), 0), 100) / 100;
+    return {
+      rgb: c1.rgb.map((c, i) => c * p + c2.rgb[i] * (1 - p)),
+      alpha: c1.alpha * p + c2.alpha * (1 - p),
     };
   }
   return null;
@@ -136,8 +158,8 @@ function contrast(a, b) {
 
 /** Contrast of a foreground token painted on a background token. */
 function ratio(map, fgName, bgName) {
-  const fg = parseColor(resolve(map, fgName));
-  const bg = parseColor(resolve(map, bgName));
+  const fg = parseColor(resolve(map, fgName), map);
+  const bg = parseColor(resolve(map, bgName), map);
   assert.ok(fg, `${fgName} does not resolve to a color: ${resolve(map, fgName)}`);
   assert.ok(bg, `${bgName} does not resolve to a color: ${resolve(map, bgName)}`);
   // A translucent background has to be composited over the surface it sits
@@ -202,12 +224,14 @@ function checkPairs(theme, pairs) {
 }
 
 /* The focus indicator is a non-text UI element: WCAG 1.4.11 asks 3:1, not
-   the 4.5:1 that text needs. Two rings, because a hue can never clear 3:1
-   against its own ramp: --primary-ring sits on the page and the cards,
-   --ring-on-fill sits on the filled buttons' own fill. */
+   the 4.5:1 that text needs. One ring color, --primary-ring, for every
+   control: a zero-offset box-shadow ring is drawn OUTSIDE the border box,
+   so its pixels sit on the surrounding surfaces — page, card, overlay —
+   and that is what the ring must contrast with. (The earlier two-token
+   split judged filled-button rings against the button's own fill and set
+   the ring equal to the page color there: an invisible indicator.) */
 const NON_TEXT = 3;
-const RING_SURFACES = ["--bg", "--bg-surface", "--bg-surface-hover"];
-const FILL_SURFACES = ["--primary", "--primary-hover", "--primary-active"];
+const RING_SURFACES = ["--bg", "--bg-surface", "--bg-surface-hover", "--bg-popup"];
 
 function checkRing(theme, ringName, surfaces) {
   for (const surface of surfaces) {
@@ -222,7 +246,6 @@ function checkRing(theme, ringName, surfaces) {
 test("the focus rings clear the non-text contrast floor", () => {
   for (const theme of [LIGHT, DARK]) {
     checkRing(theme, "--primary-ring", RING_SURFACES);
-    checkRing(theme, "--ring-on-fill", FILL_SURFACES);
   }
 });
 
@@ -266,7 +289,6 @@ test("the tokens the audit found broken are defined", () => {
     "--meter-label",
     "--switch-thumb",
     "--primary-ring",
-    "--ring-on-fill",
     "--primary-hover",
     "--primary-active",
   ]) {
@@ -279,6 +301,11 @@ test("the tokens the audit found broken are defined", () => {
   // --info carried five unrelated meanings; it is now split and gone.
   assert.equal(DARK.has("--info"), false);
   assert.equal(LIGHT.has("--info"), false);
+  // --ring-on-fill judged the filled-button ring against the button's own
+  // fill; the ring is drawn outside the border box and must contrast with
+  // the surrounding surfaces, which --primary-ring does everywhere.
+  assert.equal(DARK.has("--ring-on-fill"), false);
+  assert.equal(LIGHT.has("--ring-on-fill"), false);
 });
 
 test("chart tokens stay literal colors", () => {

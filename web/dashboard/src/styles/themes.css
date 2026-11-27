@@ -131,24 +131,29 @@
      a text/icon color, so it points at the text-safe tier, not --primary. */
   --accent: var(--primary-text);
   --accent-strong: var(--primary-8);
-  /* Focus ring (DESIGN.md §5.1). Solid primary-8 clears 3:1 — WCAG 1.4.11's
-     focus-indicator floor — against every neutral surface in this theme
-     (worst: 6.84:1 over bg-4), with no alpha compositing to reason about.
-     Translucent formulas (Arco's rgba(primary-6,.35), or 65% mixes) were
-     measured at 1–2:1 and dropped. The one surface a hue can never clear
-     3:1 against is its own ramp, so a filled button uses --ring-on-fill
-     (the page color, ≥4.79:1 against all three primary fills). */
+  /* Focus ring (DESIGN.md §5.1) — the ONE ring color for every control,
+     filled buttons included. A zero-offset box-shadow ring is drawn outside
+     the border box, so its pixels sit on the SURROUNDING surface (page,
+     card, popup), not on the button's own fill; solid primary-8 clears 3:1
+     — WCAG 1.4.11's focus-indicator floor — against all of those surfaces
+     in this theme (worst: 6.84:1 over bg-4), with no alpha compositing to
+     reason about. An earlier --ring-on-fill token judged the ring against
+     the fill and equalled the page color there — an invisible indicator. */
   --primary-ring: var(--primary-8);
-  --ring-on-fill: var(--bg);
   --success: var(--success-6);
   --success-text: var(--success-7);
-  --success-bg: rgba(39, 195, 70, 0.18);
+  /* Status tints are OPAQUE: composited over --bg-popup (the overlay
+     surface) so page content cannot bleed through the flash toasts, which
+     float above the page at z-index 120. The mix lands within a couple of
+     RGB points of the old translucent-over-surface result, so pills and
+     alerts on opaque surfaces look unchanged. */
+  --success-bg: color-mix(in srgb, var(--success-6) 18%, var(--bg-popup));
   --warning: var(--warning-6);
   --warning-text: var(--warning-7);
-  --warning-bg: rgba(255, 150, 38, 0.18);
+  --warning-bg: color-mix(in srgb, var(--warning-6) 18%, var(--bg-popup));
   --danger: var(--danger-6);
   --danger-text: var(--danger-7);
-  --danger-bg: rgba(247, 105, 101, 0.18);
+  --danger-bg: color-mix(in srgb, var(--danger-6) 18%, var(--bg-popup));
   --link: var(--primary-text);
   /* Categorical channel — the "currently executing" workflow node and the
      provider-scope hue. Cyan-6 in dark mode reads at 9.8:1 on the page. */
@@ -318,14 +323,12 @@
   --on-dark-fill: #ffffff;
   --accent: var(--primary-text);
   --accent-strong: var(--primary-7);
-  /* Same two ring tokens as the dark theme (see there): primary-8 is
-     ≥10.29:1 on every neutral surface, and --bg is ≥4.89:1 against all
-     three primary fills. The inverted ramp makes the same level the
-     near-black navy here that it makes the pale periwinkle in dark —
-     both sit two steps from their fill and clear the indicator floor
-     easily. */
+  /* Same single ring token as the dark theme (see there): primary-8 is
+     ≥10.29:1 on every neutral surface. The inverted ramp makes the same
+     level the near-black navy here that it makes the pale periwinkle in
+     dark — both sit two steps from their fill and clear the indicator
+     floor easily against the surfaces the ring is painted on. */
   --primary-ring: var(--primary-8);
-  --ring-on-fill: var(--bg);
   /* Light mode takes the *text-safe* tier of each status ramp (level-8 /
      level-7). Arco's level-6 green is only 2.78:1 on white, and the
      dashboard paints status colours as text all over the place. */

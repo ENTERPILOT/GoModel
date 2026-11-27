@@ -324,7 +324,9 @@ td.col-price {
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
-    width: 70px;
+    /* Two 32px icon buttons + the 8px gap: 72px. 70px wrapped the second
+       button onto its own line. */
+    width: 72px;
     gap: 8px;
   }
 }

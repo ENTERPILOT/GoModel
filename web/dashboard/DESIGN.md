@@ -281,7 +281,7 @@ Arco 的 tag / alert 规则是 **level-1 做底 + 高等级做字**，而不是�
 
 ### 5.1 交互状态
 
-- **焦点**：所有可聚焦控件统一 `--primary` 边框 + 2px 外环。输入类用 `:focus`（点进去就该看得见），按钮与其余控件用 `:focus-visible`（鼠标点击不画环）。环有两个 token：`--primary-ring`（primary-8 实色，对所有中性底 ≥6.84:1）与 `--ring-on-fill`（页面底色，用于填充按钮——环像素落在按钮自己的填充上，同色相无法对自己过 3:1）。
+- **焦点**：所有可聚焦控件统一 `--primary` 边框 + 2px 外环。输入类用 `:focus`（点进去就该看得见），按钮与其余控件用 `:focus-visible`（鼠标点击不画环）。环只有一个 token：`--primary-ring`（primary-8 实色）。外环由零偏移 box-shadow 画出，落在边框盒**外侧**的周围表面上（页面 / 卡片 / 浮层），深色主题对所有这些底 ≥6.84:1、浅色 ≥10.29:1。曾被分出的 `--ring-on-fill` 把填充按钮的环画成页面底色——环在页面底上完全不可见（CodeRabbit 在 #1618 复核时发现），已废除。
 - **悬停**：行悬停用 `--bg-surface-hover`；链接 / 文字按钮用 `--primary-text`；填充按钮用 `--primary-hover`。
 - **按下**：填充按钮用 `--primary-active`；按压瞬间关掉过渡（Arco `.arco-btn:active { transition: none }`），状态变化不等动画。
 - **禁用**：`--disabled-opacity`（0.45）+ `--text-disabled` 文字 + `not-allowed` 光标，全应用一致；不参与对比度判定（WCAG 豁免）。
@@ -393,7 +393,7 @@ Arco 还定义了 `--border-radius-large: 8px`，但编译产物里**没有任�
 | 8 | **深色主题的状态色停在 level-6，浅色主题升到 level-8** | level-6 在深底上够用（6.71 / 7.21 / 5.36:1），在浅底上不够（2.78 / 2.57 / 3.71:1）。与其按主题挑不同的"正确色阶"，不如让 token 本身在两个主题下都安全 |
 | 9 | **深色主题的 `--accent-strong` 取 primary-8 而非 primary-7** | `--accent` 已指向 primary-7；强调色必须真的"更强"，深色下"更强"= 更亮（8.26:1） |
 | 10 | **填充按钮的 hover/active 取 primary-7 / primary-8，而非 Arco 的 5 / 7** | Arco 用白字，其深色 hover 填充 `#306FFF` 上白字仅 4.36:1、浅色 `#4080FF` 上白字仅 3.71:1，都低于 AA。本项目深色主题用深色字（`--on-fill`），两主题都取"文字安全侧"的 7/8 级——色阶方向相反，7 级在深色是更亮一档、在浅色是更暗一档，两边都 ≥6.8:1 |
-| 11 | **焦点环分两个 token：`--primary-ring`（primary-8 实色）与 `--ring-on-fill`（页面底色）** | Arco 的环（深色 `rgba(primary-6,.35)` / 浅色实心 primary-3）实测只有 ~1.6:1，达不到 WCAG 1.4.11 焦点指示器的 3:1。同一色相无法对自己色阶过 3:1，所以填色按钮的环改用页面底色（对三档填充 ≥4.79:1），其余控件用 primary-8 实色（对所有中性底 ≥6.84:1） |
+| 11 | **焦点环统一用 `--primary-ring`（primary-8 实色）** | Arco 的环（深色 `rgba(primary-6,.35)` / 浅色实心 primary-3）实测只有 ~1.6:1，达不到 WCAG 1.4.11 焦点指示器的 3:1。环像素画在边框盒外侧的周围表面上，primary-8 对页面 / 卡片 / 浮层全部 ≥6.84:1（深）、≥10.29:1（浅）。曾按「环落在填充上」分出过 `--ring-on-fill`（页面底色），导致填充按钮在页面底上环不可见，已统一并废除 |
 | 12 | **Arco 自身的两个组件度量不落在 4px 栅格上：按钮横向内边距 15px、表格单元格纵向内边距 9px** | 4px 栅格管的是**应用自己的布局间距**（间隙、内边距、外边距），不是从 Arco 实测来的组件度量——整个设计体系的对齐基准就是这些实测值（§5 开头："全部取自 Arco 编译产物实测值"）。改成 16px / 8px 会让按钮不再是 Arco 的按钮、表格不再是 Arco 的表格，1px 的收益抵不上这个代价。守卫测试 `tests/designGrid.test.js` 对这两处**逐条列出豁免**（文件 + 选择器 + 完整声明），其余任何越界值都会报错 |
 
 ---
@@ -422,8 +422,9 @@ Arco 还定义了 `--border-radius-large: 8px`，但编译产物里**没有任�
 2. **改 `src/lib/stores/ui.svelte.js` 的 `themeStore`**
    - `apply()` 在 `system` 模式下也写入 `data-theme`（解析后的实际模式），不再移除属性。
    - 监听 `matchMedia("(prefers-color-scheme: dark)")` 的 `change`，系统切换时重写 `data-theme` 并 bump `tick`（图表随之重建）—— 保持 D12 的实时跟随能力。
-3. **`index.html` 加首屏主题脚本**
+3. **`public/theme-init.js` 首屏主题脚本**
    - 在样式表之前同步解析 `localStorage.gomodel_theme` 与 `prefers-color-scheme`，写入 `data-theme`，避免首屏闪一下错误配色。
+   - 必须是外部脚本（index.html 以 `%BASE_URL%theme-init.js` 同步引入）：网关 CSP 的 `script-src` 只 hash-放行 Go 注入的 runtime globals，内联版会在真实实例上被拦（§10 复核时由 console 证实）。
 4. **修对比度不达标的状态样式**（D11）
    - `page-globals.css` `.auth-key-status-active` / `.auth-key-status-inactive`、`.copy-feedback-btn-copied` → `--success-bg` / `--success-text` / `--danger-bg` / `--danger-text`。
    - `forms.css` `.alias-kind-badge` → `--primary-text`。
@@ -460,8 +461,8 @@ Arco 还定义了 `--border-radius-large: 8px`，但编译产物里**没有任�
 4. **reduced-motion 全局兜底**（`base.css`）：动画时长、迭代次数、过渡时长、滚动行为全部归零；组件级"直接隐藏装饰"的规则保留。
 5. **守卫测试扩容**（`tests/themeTokens.test.js`）
    - 新增 `--on-fill` 对 `--primary-hover` / `--primary-active` 两组断言（文字压在悬停/按下填充上）。
-   - 新增焦点环断言：3:1 的非文本门槛（WCAG 1.4.11），两个环各查 3 个 / 3 个底色。
-   - 新增 token 存在性断言：`--primary-ring`、`--ring-on-fill`、`--primary-hover`、`--primary-active`。
+   - 新增焦点环断言：3:1 的非文本门槛（WCAG 1.4.11），`--primary-ring` 查 4 个底色（页面 / 卡片 / 悬停 / 浮层）。
+   - 新增 token 存在性断言：`--primary-ring`、`--primary-hover`、`--primary-active`；并断言 `--ring-on-fill` 已删除。
 
 ### 8.4 P3 落地清单（已实施）
 
@@ -542,7 +543,7 @@ P4 后复测：svelte-check 零错误，1044 项测试通过（新增字体守�
 - [x] 浏览器实测（Playwright，真实构建产物）：浅色主按钮环 `rgb(247,248,250) 0 0 0 2px`、默认按钮 `rgb(7,44,166)`、链接 `rgb(7,44,166) 2px solid`；深色主题 token 解析为 `#93BEFF` / `#17171A`，页面上的分段控件走全局兜底得到 `rgb(147,190,255) 2px solid`
 - [x] "受限"模型标记为中性灰，与主操作蓝明确可区分
 - [x] `npm run build` 通过，产物中含新样式
-- [x] P2 后复测：svelte-check 零错误、1035 项测试通过（含 token 守卫 6 项）、构建产物含 `--primary-ring` 与 `--ring-on-fill`
+- [x] P2 后复测：svelte-check 零错误、1035 项测试通过（含 token 守卫 6 项）、构建产物含 `--primary-ring`
 - [x] 圆角收敛为四个 token（184 处 `border-radius` 全部改写），间距全部落在 4px 栅格上（337 处越界改写，仅保留 1px / 2px 光学微调与 §7 #12 的两处 Arco 度量）
 - [x] 栅格守卫测试（`tests/designGrid.test.js`）能复现回归：注入 `border-radius: 7px` / `gap: 6px` 报错；把按钮的 `0 15px` 改成 `0 17px`（豁免不再匹配）同样报错
 - [x] P4：全应用零个 `text-transform: uppercase`（守卫测试断言）；`--font-sans` 含 CJK 字族、`--font-mono` 落地，15 处引用真正解析；表单控件改为继承字体栈，页面无 Arial 残留；字体守卫测试（`tests/fonts.test.js`）能复现回归：注入 `text-transform: uppercase` 或硬编码字栈报错

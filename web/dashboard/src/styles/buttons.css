@@ -24,10 +24,10 @@
    level 7/8) instead of Arco's 5/7, because Arco keeps white text and its
    own hover fills drop below AA against white. Themes.css documents why the
    same two levels work in both themes (the ramps invert). Keyboard focus is
-   a 2px outer ring: --primary-ring on neutral surfaces, --ring-on-fill for
-   the filled variants, whose ring pixels land on the button's own fill —
-   a hue can never clear 3:1 against its own ramp (themes.css documents the
-   measurements). */
+   a 2px outer ring: --primary-ring everywhere, filled variants included —
+   a zero-offset box-shadow is drawn outside the border box, so the ring's
+   pixels sit on the surrounding surface (page, card, popup), where
+   primary-8 clears 3:1 in both themes. */
 .btn {
   padding: 0 15px;
   height: 32px;
@@ -109,12 +109,15 @@
   border-color: color-mix(in srgb, var(--danger) 88%, #000 16%);
 }
 
-/* Filled variants: the ring lands on the button's own fill, so it takes the
-
-   page color instead of the hue ramp (≥4.79:1 dark / ≥4.89:1 light). */
+/* Filled variants use the same ring as everything else: the ring pixels
+   sit on the surrounding surface (page, card, popup — the shadow is drawn
+   outside the border box), where --primary-ring clears 3:1 in both
+   themes (≥6.84:1 dark / ≥10.29:1 light). Judging the ring against the
+   button's own fill was the old --ring-on-fill design; it made the ring
+   equal to the page color there and invisible to keyboard users. */
 .btn-primary:focus-visible,
 .btn-danger:focus-visible {
-  box-shadow: 0 0 0 2px var(--ring-on-fill);
+  box-shadow: 0 0 0 2px var(--primary-ring);
 }
 
 .btn-with-icon {
