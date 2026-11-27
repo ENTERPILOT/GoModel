@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 	"mime"
 	"net/http"
 	"net/url"
@@ -859,6 +860,7 @@ func geminiGenerationConfig(req *core.ChatRequest) map[string]any {
 		copyJSONNumber(req.ExtraFields.Lookup("top_k"), cfg, "topK")
 		copyJSONNumber(req.ExtraFields.Lookup("candidate_count"), cfg, "candidateCount")
 	}
+	copyGeminiSeed(req.ExtraFields.Lookup("seed"), cfg)
 	// presence_penalty and frequency_penalty are never forwarded: every
 	// current generateContent model (Gemini 2.5, 3.x, 4, Gemma 4, the image
 	// models) answers HTTP 400 "Penalty is not enabled for this model", and
@@ -953,6 +955,20 @@ func copyJSONNumber(raw json.RawMessage, cfg map[string]any, key string) {
 			cfg[key] = parsed
 		}
 	}
+}
+
+// copyGeminiSeed forwards seed as generationConfig.seed. Gemini declares it
+// int32 and answers HTTP 400 for anything else, while OpenAI clients may send
+// any integer, so a seed that is not a whole number in the int32 range is
+// dropped rather than failing the request. Whole numbers written as 42.0 or
+// 1e2 are accepted.
+func copyGeminiSeed(raw json.RawMessage, cfg map[string]any) {
+	text := strings.Trim(string(bytes.TrimSpace(raw)), `"`)
+	seed, err := strconv.ParseFloat(text, 64)
+	if err != nil || seed != math.Trunc(seed) || seed < math.MinInt32 || seed > math.MaxInt32 {
+		return
+	}
+	cfg["seed"] = int32(seed)
 }
 
 // maxStopSequences is the longest stop list Gemini accepts, on the native

@@ -121,3 +121,63 @@ func TestGeminiGenerationConfig_CapsStopSequences(t *testing.T) {
 		})
 	}
 }
+
+// seed is part of generateContent's GenerationConfig and is not one of the
+// sampling parameters Gemini 3 dropped, so it is forwarded for every model.
+func TestGeminiGenerationConfig_ForwardsSeed(t *testing.T) {
+	for _, model := range []string{"gemini-2.5-flash", "gemini-3.8-flash", "gemma-4-31b-it"} {
+		t.Run(model, func(t *testing.T) {
+			var req core.ChatRequest
+			body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}],"seed":7}`, model)
+			require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+			cfg := geminiGenerationConfig(&req)
+
+			assert.Equal(t, int32(7), cfg["seed"])
+		})
+	}
+}
+
+// Gemini's seed is int32; a seed it would answer HTTP 400 for is dropped.
+func TestGeminiGenerationConfig_SeedRange(t *testing.T) {
+	tests := []struct {
+		seed string
+		want any
+	}{
+		{seed: `0`, want: int32(0)},
+		{seed: `-5`, want: int32(-5)},
+		{seed: `"42"`, want: int32(42)},
+		{seed: `2147483647`, want: int32(2147483647)},
+		{seed: `-2147483648`, want: int32(-2147483648)},
+		{seed: `42.0`, want: int32(42)},
+		{seed: `1e2`, want: int32(100)},
+		{seed: `2147483647.0`, want: int32(2147483647)},
+		{seed: `2147483648`},
+		{seed: `2147483647.5`},
+		{seed: `1e10`},
+		{seed: `1.5e0`},
+		{seed: `"NaN"`},
+		{seed: `"Inf"`},
+		{seed: `-2147483649`},
+		{seed: `9223372036854775807`},
+		{seed: `1.5`},
+		{seed: `"abc"`},
+		{seed: `null`},
+		{seed: `true`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.seed, func(t *testing.T) {
+			var req core.ChatRequest
+			body := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],"seed":` + tt.seed + `}`
+			require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+			cfg := geminiGenerationConfig(&req)
+
+			if tt.want == nil {
+				assert.NotContains(t, cfg, "seed")
+				return
+			}
+			assert.Equal(t, tt.want, cfg["seed"])
+		})
+	}
+}
