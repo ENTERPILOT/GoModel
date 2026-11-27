@@ -68,6 +68,30 @@ virtual_models:
     target: kimicode/kimi-for-coding
 ```
 
+## Tool-Schemas
+
+Kimi validiert die `parameters` jedes Tools gegen Moonshot Flavored JSON Schema, eine
+Teilmenge von JSON Schema. Ein einziges Tool außerhalb davon lässt den gesamten Request mit
+`400 ... is not a valid moonshot flavored json schema` scheitern. GoModel schreibt die
+Konstrukte, die der Validator ablehnt, vor dem Weiterleiten um, und zwar bei
+`/v1/chat/completions`, `/v1/responses` und `/v1/messages`. Schemas von MCP-Servern und
+Agent-Frameworks funktionieren dadurch unverändert:
+
+| Vom Client gesendet | An Kimi weitergeleitet |
+| --- | --- |
+| `enum` ohne `type` | `type` wird aus den Werten abgeleitet; Werte mehrerer Typen werden zu typisierten `anyOf`-Zweigen |
+| Tupel-`items` (ein Array von Schemas) | Ein Schema, das jedes der Elemente akzeptiert |
+| Boolesches Schema (`true`, `false`) für eine Property, `items`, einen `anyOf`-Zweig oder eine Definition | `{}`, `{"not": {}}` |
+| `type` oder `enum` neben `anyOf` | Wandert in die Zweige |
+| `type` oder `enum` neben `$ref` | Entfernt; es gilt die referenzierte Definition |
+| `required`-Namen, die in `properties` fehlen | Entfernt |
+
+Schlüsselwörter, die Kimi akzeptiert und ignoriert, etwa `oneOf`, `const` und `format`,
+werden unverändert weitergeleitet. Ein Schema, das sich nicht reparieren lässt, etwa eines
+mit einem nicht auflösbaren `$ref`, wird wie gesendet weitergeleitet, und Kimi kann es
+weiterhin ablehnen. `response_format`-Schemas und Passthrough-Requests werden nicht
+umgeschrieben.
+
 ## Embeddings
 
 Kimi Code stellt `bge_m3_embed` für Embeddings bereit, dieses Modell ist Upstream jedoch
