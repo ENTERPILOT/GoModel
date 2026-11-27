@@ -63,7 +63,7 @@ func ensureTrigramSearchIndex(ctx context.Context, db sqlx.DB, errorMessage stri
 	statement := fmt.Sprintf(`CREATE INDEX CONCURRENTLY IF NOT EXISTS %s ON request_logs USING GIN (%s %s.gin_trgm_ops)`,
 		trigramSearchIndex, searchText(errorMessage), `"`+strings.ReplaceAll(schema, `"`, `""`)+`"`)
 	if err := buildIndexConcurrently(ctx, db, trigramSearchIndex, statement); err != nil {
-		slog.Warn("requestlog: failed to create trigram search index", "error", err)
+		slog.Warn("requestlog: failed to build trigram search index", "error", err)
 	}
 }
 
