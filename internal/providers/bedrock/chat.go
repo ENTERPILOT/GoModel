@@ -55,6 +55,7 @@ func converseInput(parts converseParts) *bedrockruntime.ConverseInput {
 	return &bedrockruntime.ConverseInput{
 		ModelId: parts.modelID, Messages: parts.messages, System: parts.system,
 		InferenceConfig: parts.infCfg, ToolConfig: parts.toolCfg,
+		OutputConfig: parts.outputCfg,
 	}
 }
 
@@ -121,11 +122,12 @@ func isCachePointValidationError(err error) bool {
 // converseParts holds the shared pieces of a Converse / ConverseStream request
 // so the two API entry points can stay otherwise independent.
 type converseParts struct {
-	modelID  *string
-	system   []brtypes.SystemContentBlock
-	messages []brtypes.Message
-	infCfg   *brtypes.InferenceConfiguration
-	toolCfg  *brtypes.ToolConfiguration
+	modelID   *string
+	system    []brtypes.SystemContentBlock
+	messages  []brtypes.Message
+	infCfg    *brtypes.InferenceConfiguration
+	toolCfg   *brtypes.ToolConfiguration
+	outputCfg *brtypes.OutputConfig
 }
 
 // buildConverseParts translates a core.ChatRequest into the Bedrock Converse
@@ -181,6 +183,10 @@ func buildConverseParts(req *core.ChatRequest) (converseParts, error) {
 		return converseParts{}, err
 	}
 	parts.toolCfg = toolCfg
+
+	if err := applyResponseFormat(&parts, req.ExtraFields); err != nil {
+		return converseParts{}, err
+	}
 
 	return parts, nil
 }
