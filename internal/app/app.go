@@ -84,6 +84,7 @@ type App struct {
 	sharedStore         *sharedstore.Store // nil unless an extension or MCP session sharing takes it
 	versionCheck        *versioncheck.Checker
 	extensionAuth       bool
+	dashboardURL        string // empty unless this generation serves the dashboard
 
 	// registered records every successfully initialized subsystem in
 	// construction order, together with the teardown path that owns it. It is
@@ -175,6 +176,12 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		}
 	}
 	return b.app, nil
+}
+
+// DashboardURL returns the address of the admin dashboard on this machine, or
+// "" when this generation does not serve it.
+func (a *App) DashboardURL() string {
+	return a.dashboardURL
 }
 
 // Router returns the core.RoutableProvider for request routing.

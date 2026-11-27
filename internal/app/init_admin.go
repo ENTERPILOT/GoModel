@@ -109,7 +109,8 @@ func (b *bootstrap) initAdmin() error {
 			if adminCfg.UIEnabled && dashHandler != nil {
 				serverCfg.AdminUIEnabled = true
 				serverCfg.DashboardHandler = dashHandler
-				slog.Info("admin UI enabled", "url", fmt.Sprintf("%s://localhost:%s%s", appCfg.Server.Scheme(), appCfg.Server.Port, config.JoinBasePath(appCfg.Server.BasePath, "/admin/dashboard")))
+				app.dashboardURL = fmt.Sprintf("%s://localhost:%s%s", appCfg.Server.Scheme(), appCfg.Server.Port, config.JoinBasePath(appCfg.Server.BasePath, "/admin/dashboard"))
+				slog.Info("admin UI enabled", "url", app.dashboardURL)
 			}
 		}
 	} else {
