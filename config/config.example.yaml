@@ -12,7 +12,7 @@
 server:
   port: "8080"
   base_path: "/" # env: BASE_PATH; set to "/g" to serve the gateway under https://example.com/g/
-  master_key: "your-secret-key"
+  # master_key: "" # env: GOMODEL_MASTER_KEY; generate one with `openssl rand -hex 32`. Unset turns off master key authentication; without managed keys or an authentication extension the gateway is then open. Startup fails on the template placeholders your-secret-key, your-secret-key-here and my-secret-key and warns on a key shorter than 16 characters
   master_key_disabled: false # env: MASTER_KEY_DISABLED; true forgets the master key, leaving managed gateway API keys and any configured authentication extension as the only credentials. The gateway then requires a credential on every request and keeps the admin API gated, so issue one with dashboard access first
   auth_key_prefix: "sk_gom_" # env: AUTH_KEY_PREFIX; prefix of newly issued managed API keys, up to 32 ASCII letters, digits, "_" and "-"; empty keeps the default. Keys issued under an earlier prefix keep working
   body_size_limit: "10M"

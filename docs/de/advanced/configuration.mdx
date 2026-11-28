@@ -43,7 +43,7 @@ Der gängigste Weg, GoModel zu konfigurieren. Setzen Sie eine der folgenden Vari
 | -------------------- | ----------------------------------------------------- | ---------------------- |
 | `PORT`               | Port des HTTP-Servers                                      | `8080`                 |
 | `BASE_PATH`          | Präfix des Mount-Pfads, zum Beispiel `/g`                   | `/`                    |
-| `GOMODEL_MASTER_KEY` | Authentifizierungsschlüssel zur Absicherung des Gateways           | _(leer, unsicherer Modus)_ |
+| `GOMODEL_MASTER_KEY` | Authentifizierungsschlüssel zur Absicherung des Gateways. Erzeugen Sie ihn mit `openssl rand -hex 32`; der Start schlägt bei den Vorlagen-Platzhaltern `your-secret-key`, `your-secret-key-here` und `my-secret-key` fehl und warnt bei einem Schlüssel mit weniger als 16 Zeichen, etwa dem lokalen Beispiel `change-me` aus den Anleitungen. Mit `MASTER_KEY_DISABLED=true` wird der Schlüssel ungeprüft verworfen | _(leer, unsicherer Modus)_ |
 | `MASTER_KEY_DISABLED` | Schaltet die Authentifizierung per Master-Key ab, sodass nur noch [verwaltete Keys](/de/features/users) und Authentifizierungserweiterungen als Zugangsdaten gelten | `false`                |
 | `AUTH_KEY_PREFIX`    | Präfix neu ausgestellter [verwalteter Keys](/de/features/users); bestehende Keys bleiben gültig | `sk_gom_`              |
 | `GOMODEL_DEMO_MODE`  | Aktiviert Warnungen für öffentliche Demos in den Logs und im Dashboard  | `false`                |
@@ -783,7 +783,7 @@ server:
   port: "3000"
   base_path: "/g"
   user_path_header: "X-GoModel-User-Path"
-  master_key: "my-secret-key"
+  master_key: "${env:GOMODEL_MASTER_KEY}"
 
 cache:
   model:
