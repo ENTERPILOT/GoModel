@@ -22,7 +22,7 @@
 #
 # Run with plugins mounted:
 #   docker run -v "$PWD/plugins:/app/plugins:ro" -e PLUGINS_ENABLED=true -e PLUGINS_SEARCH_PATHS=/app/plugins ... gomodel:plugins
-FROM golang:1.27.4-bookworm AS builder
+FROM golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea AS builder
 
 WORKDIR /app
 
@@ -53,7 +53,7 @@ WORKDIR /src
 ENTRYPOINT ["/gomodel", "plugin", "build"]
 
 # Runtime stage: glibc, CA certificates, nonroot user, nothing else.
-FROM gcr.io/distroless/base-debian12:nonroot
+FROM gcr.io/distroless/base-debian12:nonroot@sha256:7f0c72cd138b442ae0deeb69c08b1acf5525439ba251a49ad93c320a061567e5
 
 LABEL io.modelcontextprotocol.server.name="io.github.ENTERPILOT/gomodel"
 
