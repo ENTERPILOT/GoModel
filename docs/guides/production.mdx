@@ -186,9 +186,10 @@ volume, restrict access, and classify backups accordingly.
   `authorization`, `api-key`, `apikey`, `secret`, `password`, `signature` or
   `jwt`. `Idempotency-Key` and `Sec-WebSocket-Key` are kept.
 - **Set `GOMODEL_MASTER_KEY`.** If it is empty and no managed keys exist, every
-  request is allowed through unauthenticated, and `/admin/*` is added to the
-  auth skip list as a lockout-recovery path. An internet-reachable gateway in
-  that state hands anyone the full admin API.
+  request is allowed through unauthenticated. `/admin/*` then answers only
+  callers on the gateway's own machine, unless
+  `ADMIN_ALLOW_UNAUTHENTICATED_REMOTE=true` opens it to every address, which
+  hands anyone who can reach the gateway the full admin API.
 
 ### TLS
 

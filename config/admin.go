@@ -12,6 +12,13 @@ type AdminConfig struct {
 	// Default: true
 	UIEnabled bool `yaml:"ui_enabled" env:"ADMIN_UI_ENABLED"`
 
+	// AllowUnauthenticatedRemote serves the admin API to callers on other
+	// machines while it has no credential to check: no master key, no managed
+	// key, and no authentication extension. Off, such a gateway serves the
+	// admin API only to loopback callers that did not come through a proxy.
+	// Default: false
+	AllowUnauthenticatedRemote bool `yaml:"allow_unauthenticated_remote" env:"ADMIN_ALLOW_UNAUTHENTICATED_REMOTE"`
+
 	// LiveLogsEnabled controls whether the dashboard opens a realtime log stream.
 	// Default: true
 	LiveLogsEnabled bool `yaml:"live_logs_enabled" env:"DASHBOARD_LIVE_LOGS_ENABLED"`

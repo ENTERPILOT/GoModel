@@ -52,7 +52,10 @@
 **Docker**
 
 ```bash
+export GOMODEL_MASTER_KEY="$(openssl rand -hex 32)"
+echo "$GOMODEL_MASTER_KEY" # the dashboard asks for this key
 docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY \
   -v gomodel_data:/app/data \
   enterpilot/gomodel
 ```
@@ -88,6 +91,7 @@ http://localhost:8080/admin/dashboard
 ```bash
 curl http://localhost:8080/v1/responses \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -d '{
     "model": "gpt-5-chat-latest",
     "input": "Hello!"

@@ -140,6 +140,7 @@ func (b *bootstrap) initServerConfig() error {
 		BasePath:                        appCfg.Server.BasePath,
 		MasterKey:                       appCfg.Server.MasterKey,
 		MasterKeyDisabled:               appCfg.Server.MasterKeyDisabled,
+		AdminAllowUnauthenticatedRemote: appCfg.Admin.AllowUnauthenticatedRemote,
 		Authenticator:                   app.authKeys.Service,
 		MetricsEnabled:                  appCfg.Metrics.Enabled,
 		MetricsEndpoint:                 appCfg.Metrics.Endpoint,

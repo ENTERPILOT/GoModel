@@ -50,6 +50,13 @@ models:
   configured_provider_models_mode: "allowlist" # env: CONFIGURED_PROVIDER_MODELS_MODE; "allowlist" (default) exposes only configured models and reads upstream /models only for their metadata, "fallback" uses configured lists only when upstream /models is unavailable/empty, "merge" adds configured models on top of the upstream inventory (for models a provider serves but does not list)
   allowlist_upstream_metadata: true # env: ALLOWLIST_UPSTREAM_METADATA; in allowlist mode, read upstream /models only to fill in metadata for configured models (never adds models). false stops that call; GOMODEL_OFFLINE=true forces it off
 
+# Admin API and dashboard. Without a master key, a managed key, or an
+# authentication extension, the admin API answers only this machine (a
+# loopback peer with no forwarding header) until the first managed key exists;
+# under `docker run -p` or behind a proxy, set a master key instead.
+# admin:
+#   allow_unauthenticated_remote: false # env: ADMIN_ALLOW_UNAUTHENTICATED_REMOTE; true serves that unauthenticated admin API to every address, only on a network you trust
+
 # Tagging based on headers: label every request from the listed headers. Labels
 # are recorded in usage tracking and request logs. A header value can carry several
 # labels split by `delimiter` (default: ","). `prefix` is trimmed from each

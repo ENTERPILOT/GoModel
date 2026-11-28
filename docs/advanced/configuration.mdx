@@ -163,12 +163,17 @@ derives from it: it fails against the gateway, against
 `/admin`. A key left in the environment or `config.yaml` is inert rather than
 an error, which is what makes the switch safe to flip ahead of removing it.
 
-Disabling is not the same as leaving `GOMODEL_MASTER_KEY` empty, which runs the
-gateway unauthenticated and opens `/admin/*` so the dashboard can bootstrap its
-first managed key. Unless an authentication extension is configured,
-`/admin/*` stays open even after managed keys exist, and GoModel logs a
-security warning at startup while it does, so set a master key or disable it
-as soon as the first key with dashboard access is issued. A disabled master
+Disabling is not the same as leaving `GOMODEL_MASTER_KEY` empty. With no master
+key, no managed key, and no authentication extension, the gateway runs
+unauthenticated, and `/admin/*` answers only callers on the same machine — a
+loopback peer whose request carries no forwarding header — so the dashboard can
+bootstrap the first managed key. Under `docker run -p` or behind a proxy,
+requests do not arrive from loopback, so set a master key there. Set
+`ADMIN_ALLOW_UNAUTHENTICATED_REMOTE=true` to serve the unauthenticated admin API
+to every address instead, only on a network you trust; GoModel logs which mode
+applies at startup. The first managed key closes `/admin/*`: from then on it
+needs the master key or a managed key with dashboard access. If no such key is
+left, set `GOMODEL_MASTER_KEY` and restart to get back in. A disabled master
 key fails closed instead: every request
 needs a credential, and the admin API stays behind one carrying dashboard
 access. Issue that credential before flipping the switch — with no master key,
@@ -505,6 +510,7 @@ workflow enforcement.
 | ------------------------------------- | ------------------------------------------------ | ------- |
 | `ADMIN_ENDPOINTS_ENABLED`             | Enable the admin REST API                        | `true`  |
 | `ADMIN_UI_ENABLED`                    | Enable the admin dashboard UI                    | `true`  |
+| `ADMIN_ALLOW_UNAUTHENTICATED_REMOTE`  | Serve the admin API to other machines while no master key, managed key, or authentication extension exists | `false` |
 | `DASHBOARD_LIVE_LOGS_ENABLED`         | Stream realtime dashboard request/usage previews | `true`  |
 | `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | In-memory replay window for live dashboard events | `10000` |
 | `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Max events replayed to one reconnecting client   | `1000`  |
