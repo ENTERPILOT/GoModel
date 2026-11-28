@@ -46,3 +46,33 @@ func TestSpecFromConfigMapsAccessPolicy(t *testing.T) {
 	assert.Equal(t, []string{"search"}, spec.AllowedTools)
 	assert.Equal(t, "Bearer x", spec.Headers["Authorization"])
 }
+
+func TestSpecFromConfigMapsToolCache(t *testing.T) {
+	t.Parallel()
+	cfg := config.MCPServerConfig{
+		URL:   "https://mcp.example.com/mcp",
+		Cache: config.MCPToolCacheConfig{TTL: 300, Tools: []string{"search"}},
+	}
+
+	spec := SpecFromConfig("docs", cfg)
+
+	assert.Equal(t, 5*time.Minute, spec.CacheTTL)
+	assert.Equal(t, []string{"search"}, spec.CacheTools)
+	assert.Zero(t, SpecFromConfig("plain", config.MCPServerConfig{URL: cfg.URL}).CacheTTL, "caching is off unless configured")
+
+	// The spec owns its list: later edits to the config must not leak in.
+	cfg.Cache.Tools[0] = "mutated"
+	assert.Equal(t, []string{"search"}, spec.CacheTools)
+	cfg.Cache.Tools[0] = "search"
+
+	// A changed cache policy is a changed spec, but gateway policy only: it
+	// is applied in place, without a redial.
+	cfg.Cache.TTL = 60
+	shorter := SpecFromConfig("docs", cfg)
+	assert.False(t, spec.equal(shorter))
+	assert.True(t, spec.withoutAccessPolicy().equal(shorter.withoutAccessPolicy()))
+	cfg.Cache = config.MCPToolCacheConfig{TTL: 300, Tools: []string{"fetch"}}
+	otherTools := SpecFromConfig("docs", cfg)
+	assert.False(t, spec.equal(otherTools))
+	assert.True(t, spec.withoutAccessPolicy().equal(otherTools.withoutAccessPolicy()))
+}

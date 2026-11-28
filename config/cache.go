@@ -8,10 +8,26 @@ import (
 	"strings"
 )
 
-// CacheConfig holds model and response cache configuration.
+// CacheConfig holds model, response, and MCP tool-result cache configuration.
 type CacheConfig struct {
 	Model    ModelCacheConfig    `yaml:"model"`
 	Response ResponseCacheConfig `yaml:"response"`
+	MCP      MCPCacheConfig      `yaml:"mcp"`
+}
+
+// MCPCacheConfig selects where cached MCP tool results are kept. Caching
+// itself is opted into per server with mcp.servers.<name>.cache. Without a
+// Redis URL the results are kept in process memory, local to each instance.
+type MCPCacheConfig struct {
+	Redis RedisMCPConfig `yaml:"redis"`
+}
+
+// RedisMCPConfig holds the Redis connection for cached MCP tool results. The
+// URL is shared via REDIS_URL like the other caches; use YAML for a separate
+// Redis instance.
+type RedisMCPConfig struct {
+	URL string `yaml:"url" env:"REDIS_URL" export:"url"`
+	Key string `yaml:"key" env:"REDIS_KEY_MCP"`
 }
 
 // ModelCacheConfig holds cache configuration for model registry.

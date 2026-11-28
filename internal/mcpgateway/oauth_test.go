@@ -258,7 +258,7 @@ func TestOAuthSignInFlow(t *testing.T) {
 	assert.Equal(t, "refresh-2", stored.RefreshToken)
 	assert.Equal(t, "access-2", stored.AccessToken)
 
-	result, err := service.manager.CallTool(ctx, "notion", "echo", json.RawMessage(`{"x":1}`))
+	result, _, err := service.manager.CallTool(ctx, "notion", "echo", json.RawMessage(`{"x":1}`))
 	require.NoError(t, err)
 	assert.False(t, result.IsError)
 
