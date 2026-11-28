@@ -377,6 +377,7 @@ func Load() (*LoadResult, error) {
 	if layer.masterKeyUnresolved && cfg.Server.MasterKey != "" && cfg.Server.MasterKey == yamlMasterKey {
 		return nil, errors.New("server.master_key reads an environment variable that is not set; set it or remove server.master_key")
 	}
+	cfg.Server.Host = NormalizeServerHost(cfg.Server.Host)
 	cfg.Server.BasePath = NormalizeBasePath(cfg.Server.BasePath)
 	cfg.Server.UserPathHeader, err = NormalizeHeaderName(cfg.Server.UserPathHeader, "X-GoModel-User-Path")
 	if err != nil {

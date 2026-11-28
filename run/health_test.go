@@ -39,6 +39,26 @@ func TestHealthProbeURL(t *testing.T) {
 			server:   config.ServerConfig{Port: "8443", BasePath: "/", TLSCertFile: "/tls.crt", TLSKeyFile: "/tls.key"},
 			expected: "https://127.0.0.1:8443/health",
 		},
+		{
+			name:     "configured host",
+			server:   config.ServerConfig{Host: "10.0.0.5", Port: "8080", BasePath: "/"},
+			expected: "http://10.0.0.5:8080/health",
+		},
+		{
+			name:     "configured IPv6 host",
+			server:   config.ServerConfig{Host: "::1", Port: "8080", BasePath: "/"},
+			expected: "http://[::1]:8080/health",
+		},
+		{
+			name:     "unspecified host is probed on loopback",
+			server:   config.ServerConfig{Host: "0.0.0.0", Port: "8080", BasePath: "/"},
+			expected: "http://127.0.0.1:8080/health",
+		},
+		{
+			name:     "unspecified IPv6 host is probed on loopback",
+			server:   config.ServerConfig{Host: "::", Port: "8080", BasePath: "/"},
+			expected: "http://127.0.0.1:8080/health",
+		},
 	}
 
 	for _, tt := range tests {

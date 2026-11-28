@@ -236,8 +236,8 @@ Um den eingehenden User-Path-Header zu ändern, setzen Sie
 Gateway angewendet. Dabei werden die Datei und die Umgebung neu eingelesen und
 das Gateway an Ort und Stelle neu aufgebaut – siehe
 [CLI-Betrieb](/de/advanced/cli#konfiguration-neu-laden). Lässt sich die neue Datei
-nicht laden, ändert sich nichts. `server.port` und `server.pid_file` sind die
-Ausnahmen: Beide sind für die Lebensdauer des Prozesses festgelegt, daher
+nicht laden, ändert sich nichts. `server.host`, `server.port` und
+`server.pid_file` sind die Ausnahmen: Sie sind für die Lebensdauer des Prozesses festgelegt, daher
 protokolliert ein Reload eine Warnung und behält die laufenden Werte bei, bis
 das Gateway neu gestartet wird.
 

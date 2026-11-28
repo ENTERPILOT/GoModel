@@ -3,6 +3,8 @@ package app
 import (
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -109,7 +111,12 @@ func (b *bootstrap) initAdmin() error {
 			if adminCfg.UIEnabled && dashHandler != nil {
 				serverCfg.AdminUIEnabled = true
 				serverCfg.DashboardHandler = dashHandler
-				slog.Info("admin UI enabled", "url", fmt.Sprintf("%s://localhost:%s%s", appCfg.Server.Scheme(), appCfg.Server.Port, config.JoinBasePath(appCfg.Server.BasePath, "/admin/dashboard")))
+				host := "localhost"
+				if !appCfg.Server.BindsAllInterfaces() {
+					host = appCfg.Server.Host
+				}
+				dashboardURL := url.URL{Scheme: appCfg.Server.Scheme(), Host: net.JoinHostPort(host, appCfg.Server.Port), Path: config.JoinBasePath(appCfg.Server.BasePath, "/admin/dashboard")}
+				slog.Info("admin UI enabled", "url", dashboardURL.String())
 			}
 		}
 	} else {

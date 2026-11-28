@@ -222,3 +222,57 @@ func TestServerTLSReferencesResolvingEmptyFail(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadServerHost(t *testing.T) {
+	tests := []struct {
+		name        string
+		env         map[string]string
+		configYAML  string
+		wantHost    string
+		wantAddress string
+	}{
+		{name: "unset binds every interface", wantAddress: ":8080"},
+		{name: "env var sets the host", env: map[string]string{"SERVER_HOST": "127.0.0.1"}, wantHost: "127.0.0.1", wantAddress: "127.0.0.1:8080"},
+		{name: "YAML sets the host", configYAML: "server:\n  host: 10.0.0.5\n  port: \"9090\"\n", wantHost: "10.0.0.5", wantAddress: "10.0.0.5:9090"},
+		{name: "env var overrides YAML", env: map[string]string{"SERVER_HOST": "localhost"}, configYAML: "server:\n  host: 10.0.0.5\n", wantHost: "localhost", wantAddress: "localhost:8080"},
+		{name: "IPv6 address", env: map[string]string{"SERVER_HOST": "::1"}, wantHost: "::1", wantAddress: "[::1]:8080"},
+		{name: "bracketed IPv6 address", env: map[string]string{"SERVER_HOST": " [::1] "}, wantHost: "::1", wantAddress: "[::1]:8080"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			withTempDir(t, func(dir string) {
+				if tt.configYAML != "" {
+					require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(tt.configYAML), 0o600))
+				}
+				result, err := Load()
+				require.NoError(t, err)
+				server := result.Config.Server
+				assert.Equal(t, tt.wantHost, server.Host)
+				assert.Equal(t, tt.wantAddress, server.ListenAddress())
+			})
+		})
+	}
+}
+
+func TestServerBindsAllInterfaces(t *testing.T) {
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{host: "", want: true},
+		{host: "0.0.0.0", want: true},
+		{host: "::", want: true},
+		{host: "127.0.0.1", want: false},
+		{host: "::1", want: false},
+		{host: "localhost", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			assert.Equal(t, tt.want, ServerConfig{Host: tt.host}.BindsAllInterfaces())
+		})
+	}
+}

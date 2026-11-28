@@ -49,17 +49,17 @@ func runReadyProbe(timeout time.Duration) error {
 // probeClient returns the client the probes reach the local listener with.
 //
 // Over TLS it does not verify the server certificate: the probe dials its own
-// process on loopback, and a certificate issued for the service name rarely
-// lists 127.0.0.1. It presents no client certificate, even under mTLS: the
-// health endpoints answer without one, so the probe never reads the
-// certificate files and a failed rotation, which the listener survives on its
-// last good certificate, cannot fail it.
+// process on loopback or on the address it binds, and a certificate issued for
+// the service name rarely lists either. It presents no client certificate,
+// even under mTLS: the health endpoints answer without one, so the probe never
+// reads the certificate files and a failed rotation, which the listener
+// survives on its last good certificate, cannot fail it.
 func probeClient(server config.ServerConfig, timeout time.Duration) *http.Client {
 	client := &http.Client{Timeout: timeout}
 	if !server.TLSEnabled() {
 		return client
 	}
-	//nolint:gosec // Loopback probe of this process; see the comment above.
+	//nolint:gosec // Local probe of this process; see the comment above.
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = tlsConfig
@@ -79,10 +79,20 @@ func probeURL(server config.ServerConfig, path string) string {
 
 	u := url.URL{
 		Scheme: server.Scheme(),
-		Host:   net.JoinHostPort("127.0.0.1", port),
+		Host:   net.JoinHostPort(probeHost(server), port),
 		Path:   config.JoinBasePath(server.BasePath, path),
 	}
 	return u.String()
+}
+
+// probeHost is the address a probe dials to reach the local listener: the
+// configured bind address, or loopback when the listener binds every
+// interface.
+func probeHost(server config.ServerConfig) string {
+	if server.BindsAllInterfaces() {
+		return "127.0.0.1"
+	}
+	return server.Host
 }
 
 func checkHealthEndpoint(ctx context.Context, client *http.Client, endpoint string) error {
