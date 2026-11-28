@@ -120,6 +120,24 @@ func TestStreamConverterToolCall(t *testing.T) {
 	assert.Equal(t, "tool_use", events[5]["delta"].(map[string]any)["stop_reason"], "message_delta = %+v", events[5]["delta"])
 }
 
+func TestStreamConverterTruncatedToolCallStopReason(t *testing.T) {
+	for finish, want := range map[string]string{"length": "max_tokens", "content_filter": "refusal"} {
+		t.Run(finish, func(t *testing.T) {
+			chatStream := strings.Join([]string{
+				`data: {"id":"chatcmpl-3","model":"gpt","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"get_weather","arguments":"{\"city\":"}}]}}]}`,
+				`data: {"choices":[{"delta":{},"finish_reason":"` + finish + `"}]}`,
+				`data: [DONE]`,
+				"",
+			}, "\n\n")
+
+			events := drainConverter(t, chatStream)
+			require.Contains(t, eventTypes(events), "content_block_start")
+			delta := events[len(events)-2]["delta"].(map[string]any)
+			assert.Equal(t, want, delta["stop_reason"])
+		})
+	}
+}
+
 // closeTracker records whether Close was called on the underlying stream.
 type closeTracker struct {
 	io.Reader
