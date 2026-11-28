@@ -76,6 +76,12 @@ providers:
     api_key: "${BEDROCK_MANTLE_API_KEY}"
 ```
 
+A provider saved in the dashboard uses the host's `AWS_BEARER_TOKEN_BEDROCK` or
+AWS credentials only for an AWS Region or a Bedrock endpoint hosted by AWS, over
+HTTPS on the default port, such as `bedrock-mantle.{region}.api.aws`. For any
+other base URL, such as a proxy, save an API key with the provider. Providers
+declared in `config.yaml` or environment variables are not restricted.
+
 ## Call GPT-5.6
 
 <CodeGroup>

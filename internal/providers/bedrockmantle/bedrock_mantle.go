@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -53,6 +54,12 @@ type Provider struct {
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	keys := opts.Keyring(cfg.APIKey)
 	if keys.Len() == 0 {
+		// A provider saved through the admin API gets the host's AWS
+		// credentials only for AWS's own Bedrock endpoints (see
+		// providers.ProviderConfig.Managed).
+		if cfg.Managed && strings.TrimSpace(cfg.BaseURL) != "" && !providers.IsBedrockEndpoint(cfg.BaseURL) {
+			return &Provider{configErr: providers.ErrHostAWSCredentialsWithheld}
+		}
 		keys = providers.NewKeyring(os.Getenv("AWS_BEARER_TOKEN_BEDROCK"))
 	}
 

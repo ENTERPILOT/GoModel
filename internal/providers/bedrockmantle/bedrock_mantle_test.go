@@ -201,3 +201,75 @@ func TestNew_UsesTheFactoryTransport(t *testing.T) {
 	assert.Equal(t, int32(1), calls.Load(), "request must travel through the factory-supplied client")
 	assert.Equal(t, "Bearer secret", capture.Last(t).Header.Get("Authorization"))
 }
+
+// TestNew_HostCredentialDestination pins where the host's AWS credentials may
+// go. A provider declared in config.yaml or the environment keeps sending
+// them wherever the operator points it. One saved through the admin API sends
+// them to AWS's own Bedrock endpoints only: against any other base URL it
+// needs an API key of its own.
+func TestNew_HostCredentialDestination(t *testing.T) {
+	const custom = "https://mantle-proxy.example.com"
+	const sigV4 = "AWS4-HMAC-SHA256"
+	tests := []struct {
+		name     string
+		managed  bool
+		baseURL  string
+		ownKey   string
+		envToken string
+		wantHost string // empty: the provider refuses every request
+		want     string
+	}{
+		{name: "declared, env token, custom endpoint", baseURL: custom, envToken: "env-token", wantHost: "mantle-proxy.example.com", want: "Bearer env-token"},
+		{name: "declared, SigV4, custom endpoint", baseURL: custom, wantHost: "mantle-proxy.example.com", want: sigV4},
+		{name: "declared, env token, http endpoint", baseURL: "http://mantle-proxy.internal:8080", envToken: "env-token", wantHost: "mantle-proxy.internal:8080", want: "Bearer env-token"},
+		{name: "managed, env token, custom endpoint", managed: true, baseURL: custom, envToken: "env-token"},
+		{name: "managed, SigV4, custom endpoint", managed: true, baseURL: custom},
+		{name: "managed, own key, custom endpoint", managed: true, baseURL: custom, ownKey: "own-key", envToken: "env-token", wantHost: "mantle-proxy.example.com", want: "Bearer own-key"},
+		{name: "managed, env token, AWS lookalike host", managed: true, baseURL: "https://bedrock-mantle.us-east-1.api.aws.example.com", envToken: "env-token"},
+		{name: "managed, env token, AWS endpoint on another port", managed: true, baseURL: "https://bedrock-mantle.us-east-1.api.aws:8443", envToken: "env-token"},
+		{name: "managed, SigV4, AWS endpoint over http", managed: true, baseURL: "http://bedrock-mantle.us-east-1.api.aws"},
+		{name: "managed, env token, default endpoint", managed: true, envToken: "env-token", wantHost: "bedrock-mantle.us-east-1.api.aws", want: "Bearer env-token"},
+		{name: "managed, SigV4, region", managed: true, baseURL: "eu-west-1", wantHost: "bedrock-mantle.eu-west-1.api.aws", want: sigV4},
+		{name: "managed, env token, AWS endpoint", managed: true, baseURL: "https://bedrock-mantle.eu-west-1.api.aws/v1", envToken: "env-token", wantHost: "bedrock-mantle.eu-west-1.api.aws", want: "Bearer env-token"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AWS_BEARER_TOKEN_BEDROCK", tt.envToken)
+			t.Setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
+			t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+			t.Setenv("AWS_SESSION_TOKEN", "")
+			t.Setenv("AWS_PROFILE", "")
+			t.Setenv("BEDROCK_MANTLE_REGION", "")
+			t.Setenv("AWS_REGION", "us-east-1")
+			t.Setenv("AWS_CONFIG_FILE", "/dev/null")
+			t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null")
+
+			// The recorder answers in place of the endpoint, so a test can name
+			// an AWS host without reaching it.
+			var hosts, auth []string
+			client := &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				hosts = append(hosts, r.URL.Host)
+				auth = append(auth, r.Header.Get("Authorization"))
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"data":[]}`)),
+					Request:    r,
+				}, nil
+			})}
+			p := New(providers.ProviderConfig{Managed: tt.managed, APIKey: tt.ownKey, BaseURL: tt.baseURL}, providers.ProviderOptions{HTTPClient: client})
+			_, err := p.ListModels(context.Background())
+
+			if tt.wantHost == "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "only sent to AWS's Bedrock endpoints")
+				assert.Empty(t, hosts, "a refused provider must not send requests")
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, auth, 1)
+			assert.Equal(t, tt.wantHost, hosts[0])
+			assert.True(t, strings.HasPrefix(auth[0], tt.want), "Authorization = %q", auth[0])
+		})
+	}
+}
