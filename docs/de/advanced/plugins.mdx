@@ -670,7 +670,10 @@ Hinweise für Autoren:
   ```
 - Fügen Sie `Summarize(config json.RawMessage) string` hinzu, um in der Guardrail-Liste eine
   einzeilige Zusammenfassung darzustellen, und `Normalize(config) (json.RawMessage, error)`, um
-  eine Konfiguration vor dem Speichern zu kanonisieren. Beides ist optional.
+  eine Konfiguration vor dem Speichern zu kanonisieren. Mit
+  `ValidateSave(config json.RawMessage) error` lehnen Sie beim Speichern einer Instanz eine
+  Konfiguration ab, die `Init` bei einer bereits gespeicherten Instanz noch toleriert. Alle drei
+  sind optional.
 - Implementieren Sie `pluginapi.HealthChecker` (`Health(ctx) error`), wenn eine Instanz von etwas
   außerhalb des Prozesses abhängt, etwa einem Klassifikator-Sidecar. GoModel prüft dies außerhalb
   des Request-Pfads, sobald die Instanz erstellt ist, und bei jeder Guardrail-Aktualisierung

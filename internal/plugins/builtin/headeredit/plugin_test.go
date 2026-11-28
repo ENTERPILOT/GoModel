@@ -57,7 +57,7 @@ func TestInitErrors(t *testing.T) {
 		{"wrong type", `{"request_set": 5}`, "request_set must be text or a list of strings"},
 		{"set without colon", `{"request_set": "X-Team"}`, `request_set line 1: expected "Name: value"`},
 		{"remove with colon", `{"response_remove": "X-Team: a"}`, "response_remove line 1: expected a bare header name"},
-		{"invalid name", `{"response_set": "X Team: a"}`, `invalid header name "X Team"`},
+		{"invalid name", `{"response_set": "X Team: a"}`, "response_set line 1: invalid header name"},
 		{"empty name", `{"response_set": ": a"}`, "empty header name"},
 		{"line number", `{"request_set": "X-A: 1\n\n# comment\nbroken"}`, "request_set line 4"},
 	}
