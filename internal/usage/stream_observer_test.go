@@ -409,6 +409,39 @@ data: [DONE]
 	assert.Equal(t, "resp-123", entry.ProviderID)
 }
 
+// TestStreamUsageObserverResponsesAPIFailed verifies usage is still logged
+// when a stream ends with response.failed.
+func TestStreamUsageObserverResponsesAPIFailed(t *testing.T) {
+	streamData := `event: response.created
+data: {"type":"response.created","response":{"id":"resp-123","object":"response","status":"in_progress","model":"gpt-5"}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"Hel"}
+
+event: response.failed
+data: {"type":"response.failed","response":{"id":"resp-123","object":"response","status":"failed","model":"gpt-5","error":{"code":"overloaded_error","message":"Overloaded"},"output":[],"usage":{"input_tokens":15,"output_tokens":2,"total_tokens":17}}}
+
+`
+	logger := &trackingLogger{enabled: true}
+	stream := streaming.NewObservedSSEStream(
+		io.NopCloser(strings.NewReader(streamData)),
+		NewStreamUsageObserver(logger, "gpt-5", "openai", "req-resp-failed", "/v1/responses", nil),
+	)
+	_, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	err = stream.Close()
+	require.NoError(t, err)
+
+	entries := logger.getEntries()
+	require.Len(t, entries, 1)
+
+	entry := entries[0]
+	assert.Equal(t, 15, entry.InputTokens)
+	assert.Equal(t, 2, entry.OutputTokens)
+	assert.Equal(t, 17, entry.TotalTokens)
+	assert.Equal(t, "resp-123", entry.ProviderID)
+}
+
 func TestStreamUsageObserverResponsesAPIWithDetailedUsage(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
 	observer := NewStreamUsageObserver(logger, "gpt-5", "openai", "req-resp-detailed", "/v1/responses", nil)
