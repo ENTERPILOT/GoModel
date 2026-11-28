@@ -61,6 +61,12 @@ type AuthMiddlewareConfig struct {
 	// what keeps a gateway whose master key was turned off closed rather than
 	// wide open once its managed keys are gone.
 	RequireCredential bool
+	// DashboardLogin authenticates the dashboard's username and password
+	// sessions. Unlike RequestAuthenticators it does not make the whole
+	// gateway require a credential: where nothing else is configured it
+	// guards the admin API alone, so turning the login on leaves model API
+	// access as it was.
+	DashboardLogin ext.RequestAuthenticator
 }
 
 // escapedSkipPaths puts configured skip paths in the escaped form requests are
@@ -91,11 +97,17 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 	requiredPaths := escapedSkipPaths(cfg.RequiredPaths)
 	userPathHeaderName := configuredUserPathHeaderName(cfg.UserPathHeader)
 	hasRequestAuthenticator := hasRequestAuthenticators(requestAuthenticators)
+	dashboardLogin := !requestAuthenticatorIsNil(cfg.DashboardLogin)
+	if dashboardLogin {
+		requestAuthenticators = append(slices.Clone(requestAuthenticators), cfg.DashboardLogin)
+	}
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			// If no auth mechanism is configured, allow all requests unless the
-			// deployment asked for a credential regardless.
-			if !cfg.RequireCredential && masterKey == "" && (authenticator == nil || !authenticator.Enabled()) && !hasRequestAuthenticator {
+			// deployment asked for a credential regardless. The dashboard login
+			// is a mechanism for the admin API only.
+			if !cfg.RequireCredential && masterKey == "" && (authenticator == nil || !authenticator.Enabled()) && !hasRequestAuthenticator &&
+				(!dashboardLogin || !isAdminRequest(c.Request())) {
 				requestlog.EnrichEntryWithAuthMethod(c, requestlog.AuthMethodNoKey)
 				setInteractionContinuationAllowed(c, true)
 				return next(c)
@@ -210,6 +222,17 @@ func transportOwnedUserPath(req *http.Request, headerName string) string {
 		return ""
 	}
 	return userPath
+}
+
+// isAdminRequest reports whether the request addresses the admin API or the
+// dashboard. It reads the path both decoded and as sent, so neither spelling
+// of an admin route is taken for a model route.
+func isAdminRequest(req *http.Request) bool {
+	return isAdminPath(req.URL.Path) || isAdminPath(req.URL.EscapedPath())
+}
+
+func isAdminPath(path string) bool {
+	return path == "/admin" || strings.HasPrefix(path, "/admin/")
 }
 
 func hasRequestAuthenticators(authenticators []ext.RequestAuthenticator) bool {

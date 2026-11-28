@@ -454,6 +454,16 @@ metrics:
     # "{other}" ("/{other}" for user paths).
     max_values: 100
 
+# Admin API and dashboard. Both are on by default. Setting a password turns on
+# the dashboard login: the dashboard then asks for this username and password
+# instead of an API key, and the admin API requires a credential even without a
+# master key. Model API access does not change.
+# admin:
+#   endpoints_enabled: true # env: ADMIN_ENDPOINTS_ENABLED
+#   ui_enabled: true # env: ADMIN_UI_ENABLED
+#   username: "admin" # env: DASHBOARD_USERNAME
+#   password: "${file:/run/secrets/dashboard-password}" # env: DASHBOARD_PASSWORD
+
 # OpenTelemetry export (traces and metrics over OTLP). The settings below
 # mirror the standard OTEL_* environment variables; a variable set in the
 # environment wins over the YAML value. Less common settings (per-signal

@@ -41,22 +41,39 @@ type Handler struct {
 	basePath  string
 }
 
+// Options are the runtime settings the handler hands to the SPA.
+type Options struct {
+	// BasePath is the URL path prefix the app is mounted under.
+	BasePath string
+	// DemoMode renders the demo warning.
+	DemoMode bool
+	// PasswordLogin makes the SPA ask for the dashboard username and password
+	// instead of an API key.
+	PasswordLogin bool
+}
+
+// New creates a dashboard handler.
+func New(opts Options) (*Handler, error) {
+	return newHandler(content, opts)
+}
+
 // NewWithBasePath creates a dashboard handler for an app mounted under basePath.
 func NewWithBasePath(basePath string) (*Handler, error) {
-	return NewWithDemoMode(basePath, false)
+	return New(Options{BasePath: basePath})
 }
 
 // NewWithDemoMode creates a dashboard handler and controls whether the demo
 // warning is rendered by the SPA.
 func NewWithDemoMode(basePath string, demoMode bool) (*Handler, error) {
-	return newHandler(content, basePath, demoMode)
+	return New(Options{BasePath: basePath, DemoMode: demoMode})
 }
 
 // newHandler builds a handler over assets, which holds static/dist.
-func newHandler(assets fs.FS, basePath string, demoMode bool) (*Handler, error) {
-	basePath = config.NormalizeBasePath(basePath)
+func newHandler(assets fs.FS, opts Options) (*Handler, error) {
+	opts.BasePath = config.NormalizeBasePath(opts.BasePath)
+	basePath := opts.BasePath
 
-	indexHTML, err := buildIndexHTML(assets, basePath, demoMode)
+	indexHTML, err := buildIndexHTML(assets, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +89,7 @@ func newHandler(assets fs.FS, basePath string, demoMode bool) (*Handler, error) 
 
 	return &Handler{
 		indexHTML: indexHTML,
-		csp:       contentSecurityPolicy(runtimeGlobals(basePath, demoMode)),
+		csp:       contentSecurityPolicy(runtimeGlobals(opts)),
 		assets:    staticSub,
 		staticFS: http.StripPrefix(
 			"/admin/static/",
@@ -86,7 +103,8 @@ func newHandler(assets fs.FS, basePath string, demoMode bool) (*Handler, error) 
 // runtime globals the app reads on boot, and rewrites asset URLs when the app
 // is mounted under a base path. It fails when the dashboard has not been
 // built: static/dist is generated, not committed.
-func buildIndexHTML(assets fs.FS, basePath string, demoMode bool) ([]byte, error) {
+func buildIndexHTML(assets fs.FS, opts Options) ([]byte, error) {
+	basePath := opts.BasePath
 	raw, err := fs.ReadFile(assets, "static/dist/index.html")
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -101,7 +119,7 @@ func buildIndexHTML(assets fs.FS, basePath string, demoMode bool) ([]byte, error
 		html = strings.ReplaceAll(html, `"/admin/static/`, `"`+prefixed)
 	}
 
-	globals := "<script>" + runtimeGlobals(basePath, demoMode) + "</script>"
+	globals := "<script>" + runtimeGlobals(opts) + "</script>"
 	if !strings.Contains(html, "<head>") {
 		return nil, fmt.Errorf("dashboard index.html has no <head> element")
 	}
@@ -113,10 +131,10 @@ func buildIndexHTML(assets fs.FS, basePath string, demoMode bool) ([]byte, error
 // runtimeGlobals is the inline script that hands the SPA its runtime
 // settings. It is the page's only inline script, so the Content-Security-Policy
 // allows it by hash.
-func runtimeGlobals(basePath string, demoMode bool) string {
+func runtimeGlobals(opts Options) string {
 	return fmt.Sprintf(
-		`window.GOMODEL_BASE_PATH=%q;window.GOMODEL_VERSION=%q;window.GOMODEL_DEMO_MODE=%t;`,
-		basePath, version.Info(), demoMode,
+		`window.GOMODEL_BASE_PATH=%q;window.GOMODEL_VERSION=%q;window.GOMODEL_DEMO_MODE=%t;window.GOMODEL_PASSWORD_LOGIN=%t;`,
+		opts.BasePath, version.Info(), opts.DemoMode, opts.PasswordLogin,
 	)
 }
 

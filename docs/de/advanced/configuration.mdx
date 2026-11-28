@@ -551,6 +551,8 @@ Zuordnungsregeln und die Durchsetzung in Workflows.
 | ------------------------------------- | ------------------------------------------------ | ------- |
 | `ADMIN_ENDPOINTS_ENABLED`             | Aktiviert die Admin-REST-API                        | `true`  |
 | `ADMIN_UI_ENABLED`                    | Aktiviert die Oberfläche des Admin-Dashboards                    | `true`  |
+| `DASHBOARD_USERNAME`                  | Benutzername für die [Dashboard-Anmeldung](#dashboard-anmeldung) | `admin` |
+| `DASHBOARD_PASSWORD`                  | Passwort für die Dashboard-Anmeldung; ist es gesetzt, ist die Anmeldung aktiv (erfordert `ADMIN_ENDPOINTS_ENABLED=true`) | _(leer, Anmeldung aus)_ |
 | `DASHBOARD_LIVE_LOGS_ENABLED`         | Streamt Echtzeit-Vorschauen von Request-Logs und Nutzung ins Dashboard | `true`  |
 | `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | Replay-Fenster im Arbeitsspeicher für Live-Ereignisse im Dashboard | `10000` |
 | `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Maximale Anzahl an Ereignissen, die einem sich neu verbindenden Client erneut gesendet werden   | `1000`  |
@@ -562,6 +564,55 @@ Datenbank abgeschlossen ist. Die gespeicherten Request-Log- und Nutzungstabellen
 bleiben die maßgebliche Quelle; verbindet sich ein Browser mit einem Cursor
 außerhalb des Replay-Fensters neu, lädt das Dashboard die Daten über die
 regulären REST-APIs neu.
+
+#### Dashboard-Anmeldung
+
+Ohne Passwort fragt das Dashboard nach einem API-Key (dem Master-Key oder einem
+verwalteten Key mit Dashboard-Zugriff). Ist `GOMODEL_MASTER_KEY` leer, ist es
+stattdessen offen, es sei denn, der Master-Key ist
+[deaktiviert](#master-key-deaktivieren) oder eine
+Authentifizierungs-Extension ist konfiguriert. Setzen Sie
+`DASHBOARD_PASSWORD`, um sich stattdessen mit Benutzernamen und Passwort
+anzumelden, sodass die Personen, die das Dashboard nutzen, den Master-Key nicht
+benötigen:
+
+```bash
+DASHBOARD_PASSWORD=change-me
+```
+
+```yaml
+admin:
+  username: admin # der Standardwert
+  password: ${file:/run/secrets/dashboard-password}
+```
+
+Die Anmeldung startet eine 24-stündige Sitzung, die in einem `HttpOnly`-Cookie
+mit `SameSite=Strict` liegt. Eine Sitzung hat dieselben Rechte wie ein
+verwalteter Key mit Dashboard-Zugriff und ohne User-Path: alles im Dashboard, außer
+[Secret-Referenzen](/de/advanced/secret-references#im-dashboard-verwaltete-zugangsdaten)
+hinzuzufügen, solange ein Master-Key konfiguriert ist.
+
+- Die Anmeldung schützt die Admin-API (`/admin/*`), die alles liefert, was das
+  Dashboard anzeigt; die Seite selbst lädt weiterhin ohne Zugangsdaten. Mit
+  gesetztem Passwort verlangt die Admin-API auch dann Zugangsdaten, wenn
+  `GOMODEL_MASTER_KEY` leer ist, statt offen zu bleiben.
+- Der Zugriff auf die Modell-API ändert sich nicht. Master-Key und verwaltete
+  API-Keys funktionieren weiterhin, auch auf `/admin/*`, und ein Gateway ohne
+  beides beantwortet Modell-Requests weiterhin ohne Zugangsdaten. Eine Sitzung
+  authentifiziert außerdem die Modell-Requests, die der Playground des
+  Dashboards sendet.
+- Zehn fehlgeschlagene Anmeldungen von einer Client-Adresse sperren diese
+  Adresse für bis zu 15 Minuten; jedes Replikat zählt für sich. An- und
+  Abmeldungen werden im Request-Log festgehalten.
+- Sitzungen sind zustandslos: Replikate, die mit demselben Benutzernamen und
+  Passwort gestartet wurden, akzeptieren die Sitzungen der anderen. Eine
+  Änderung eines der beiden Werte beendet alle Sitzungen. Die Abmeldung löscht
+  das Cookie nur in diesem Browser.
+- Stellen Sie das Dashboard über HTTPS bereit, damit Passwort und
+  Sitzungs-Cookie bei der Übertragung verschlüsselt sind.
+
+Dies ist ein gemeinsamer Login. Für eine eigene Anmeldung pro Person nutzen Sie
+[OIDC SSO](/de/pro/sso).
 
 #### HTTP-Client
 

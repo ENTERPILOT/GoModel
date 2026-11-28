@@ -34,6 +34,8 @@ Admin REST API 端点（`/admin/*`）接受以下两种凭据作为 Bearer Token
 - **`GOMODEL_MASTER_KEY`**——始终拥有管理权限。
 - **具有控制台访问权限的托管 API 密钥**——托管密钥默认创建时*不带*控制台访问权限，因此分发给模型流量使用的密钥无法读取请求日志、签发新密钥或修改网关设置。使用缺少该权限的托管密钥发起的请求会返回 `403`，错误码为 `dashboard_access_denied`。
 
+也可以用用户名和密码代替密钥打开控制台：设置 [`DASHBOARD_PASSWORD`](/zh/advanced/configuration#控制台登录)。登录（向 `POST /admin/session` 发送 `username` 和 `password`）后，浏览器会获得一个会话 Cookie，`/admin/*` 接受它来代替 Bearer Token；`DELETE /admin/session` 用于退出登录。
+
 <CodeGroup>
 
 ```bash curl

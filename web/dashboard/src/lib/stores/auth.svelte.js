@@ -4,6 +4,7 @@
 // under an older key so they cannot clobber fresh data ("stale auth").
 
 import { authenticationResponseMetadata } from "./external-auth.js";
+import { passwordLoginEnabled } from "./password-login.js";
 
 const API_KEY_STORAGE_KEY = "gomodel_api_key";
 
@@ -27,6 +28,11 @@ class AuthStore {
   externalLoginURL = $state("");
   externalLogoutURL = $state("");
   externalUser = $state("");
+  // Username and password login: whether the gateway offers it, and who is
+  // signed in. The session cookie is HttpOnly, so the username is all the
+  // dashboard knows about it.
+  passwordLogin = passwordLoginEnabled();
+  sessionUser = $state("");
   generation = $state(0);
   // Incremented whenever the whole dashboard should re-fetch (key change,
   // timezone change, runtime refresh). Pages watch this in an $effect.
@@ -55,17 +61,48 @@ class AuthStore {
     }
   }
 
-  selectExternalAuthentication() {
+  #forgetApiKey() {
     this.apiKey = "";
     try {
       localStorage.removeItem(API_KEY_STORAGE_KEY);
     } catch {
       // The in-memory key is still cleared when storage is unavailable.
     }
+  }
+
+  selectExternalAuthentication() {
+    this.#forgetApiKey();
     this.generation++;
     this.authError = false;
     this.authErrorMessage = "";
     this.needsAuth = true;
+  }
+
+  // asksForPassword reports whether the dashboard should ask for the
+  // username and password rather than an API key.
+  asksForPassword() {
+    return this.passwordLogin && !this.hasApiKey();
+  }
+
+  // startSession applies a successful sign-in. The stored API key goes: a
+  // bearer header outranks the session cookie on every request.
+  startSession(username) {
+    this.#forgetApiKey();
+    this.sessionUser = username;
+    this.generation++;
+    this.authError = false;
+    this.authErrorMessage = "";
+    this.needsAuth = false;
+    this.closeDialog();
+    this.refresh();
+  }
+
+  // endSession applies a sign-out. The refresh re-fetches without the
+  // cookie, which locks the dashboard again.
+  endSession() {
+    this.sessionUser = "";
+    this.generation++;
+    this.refresh();
   }
 
   openDialog() {
@@ -130,6 +167,8 @@ class AuthStore {
     this.authError = true;
     this.authErrorMessage = message;
     this.needsAuth = true;
+    // A session that stopped authenticating has expired.
+    this.sessionUser = "";
     this.openDialog();
     return true;
   }

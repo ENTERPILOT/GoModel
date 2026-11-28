@@ -427,7 +427,7 @@ func (a *App) logStartupInfo() {
 		// reports the posture, and warns when it leaves nothing to authenticate
 		// with, because then every request is rejected.
 		slog.Info("master key authentication disabled", "master_key_disabled", true)
-		if !managedKeysConfigured && !a.extensionAuth {
+		if !managedKeysConfigured && !a.extensionAuth && !cfg.Admin.LoginEnabled() {
 			slog.Warn("SECURITY NOTICE: master key disabled with no other credential configured - every request will be rejected",
 				"recommendation", "create a managed gateway API key, or unset MASTER_KEY_DISABLED to use the master key again")
 		}
@@ -443,13 +443,13 @@ func (a *App) logStartupInfo() {
 		slog.Info("authentication enabled", "mode", "master_key+managed_keys", "managed_key_total", a.authKeys.Service.Total(), "managed_key_active", a.authKeys.Service.ActiveCount())
 	case managedKeysConfigured:
 		slog.Info("authentication enabled", "mode", "managed_keys", "managed_key_total", a.authKeys.Service.Total(), "managed_key_active", a.authKeys.Service.ActiveCount())
-		if !cfg.Server.MasterKeyDisabled && cfg.Admin.EndpointsEnabled {
-			// Without a master key the admin API stays open for bootstrap
-			// (see server.New), even though model endpoints now require a
-			// managed key.
+		if !cfg.Server.MasterKeyDisabled && cfg.Admin.EndpointsEnabled && !cfg.Admin.LoginEnabled() {
+			// Without a master key or a dashboard login the admin API stays
+			// open for bootstrap (see server.New), even though model
+			// endpoints now require a managed key.
 			slog.Warn("SECURITY WARNING: admin API is reachable without authentication",
 				"security_risk", "any caller that can reach this port can create API keys and change providers",
-				"recommendation", "set GOMODEL_MASTER_KEY, or set MASTER_KEY_DISABLED=true once a managed key with dashboard access exists")
+				"recommendation", "set GOMODEL_MASTER_KEY or DASHBOARD_PASSWORD, or set MASTER_KEY_DISABLED=true once a managed key with dashboard access exists")
 		}
 	case cfg.Server.MasterKeyDisabled:
 		// Reported above; no master key means no authentication only when one

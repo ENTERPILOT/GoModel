@@ -3135,6 +3135,100 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/session": {
+            "get": {
+                "description": "Reports whether the request carries an active dashboard session cookie. Registered only when the dashboard login is configured.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Describe the dashboard session",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dashboardlogin.sessionResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Exchanges the configured dashboard username and password for a session cookie that authenticates the dashboard and the admin API. Registered only when the dashboard login is configured.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Sign in to the dashboard",
+                "parameters": [
+                    {
+                        "description": "Dashboard username and password",
+                        "name": "credentials",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dashboardlogin.credentials"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dashboardlogin.sessionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Clears the dashboard session cookie. Registered only when the dashboard login is configured.",
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Sign out of the dashboard",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
         "/admin/tagging/settings": {
             "get": {
                 "produces": [
@@ -13644,6 +13738,32 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "dashboardlogin.credentials": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "dashboardlogin.sessionResponse": {
+            "type": "object",
+            "properties": {
+                "authenticated": {
+                    "type": "boolean"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "username": {
+                    "description": "Username and ExpiresAt are present only for an active session.",
                     "type": "string"
                 }
             }

@@ -36,6 +36,8 @@ Endpointy Admin REST API (`/admin/*`) akceptują dwa rodzaje danych uwierzytelni
 - **`GOMODEL_MASTER_KEY`** – zawsze ma dostęp administracyjny.
 - **Zarządzany klucz API z dostępem do dashboardu** – zarządzane klucze są domyślnie tworzone *bez* dostępu do dashboardu, więc klucz wydany na ruch do modeli nie może czytać logu requestów, wydawać nowych kluczy ani zmieniać ustawień gatewaya. Requesty wykonane zarządzanym kluczem bez tego dostępu zwracają `403` z kodem błędu `dashboard_access_denied`.
 
+Dashboard można też otworzyć nazwą użytkownika i hasłem zamiast klucza: ustaw [`DASHBOARD_PASSWORD`](/pl/advanced/configuration#logowanie-do-dashboardu). Zalogowanie (`POST /admin/session` z polami `username` i `password`) daje przeglądarce ciasteczko sesji, które `/admin/*` akceptuje zamiast tokena Bearer; `DELETE /admin/session` wylogowuje.
+
 <CodeGroup>
 
 ```bash curl

@@ -67,6 +67,9 @@ const saved = await sendJSON("/admin/foo", "POST", payload, { label: "save foo" 
   pure page logic and its `node:test` suite import them from there directly.
 - `apiFetch(path, options)` is the raw escape hatch (SSE, blobs); it adds auth
   + timezone headers and the base path. Never call `fetch` on `/admin/...`.
+- `$lib/api/session.js` signs in and out of the username and password login
+  (`/admin/session`). The session is an HttpOnly cookie, so requests need no
+  header for it; `auth.passwordLogin` says whether the gateway offers it.
 - **CRUD stores use `$lib/api/adminCrud.js`**: `loadAdminList` /
   `sendAdminMutation` reduce a request to an outcome object with the guard
   ladder applied in the one correct order (stale first, then

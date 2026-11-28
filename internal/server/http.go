@@ -24,6 +24,7 @@ import (
 	batchstore "github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/dashboardlogin"
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
@@ -125,6 +126,7 @@ type Config struct {
 	AdminUIEnabled                  bool                                   // Whether admin dashboard UI is enabled
 	AdminHandler                    *admin.Handler                         // Admin API handler (nil if disabled)
 	DashboardHandler                *dashboard.Handler                     // Dashboard UI handler (nil if disabled)
+	DashboardLogin                  *dashboardlogin.Handler                // Optional: dashboard username and password login; its sessions guard the admin API
 	SwaggerEnabled                  bool                                   // Whether to expose the Swagger UI at /swagger/index.html
 	ResponseCacheMiddleware         *responsecache.ResponseCacheMiddleware // Optional: response cache middleware for cacheable endpoints
 	GuardrailsHash                  string                                 // Optional: SHA-256 hash of active guardrail rules; stored in context post-patch for semantic cache
@@ -155,6 +157,12 @@ func (c *Config) effectiveMasterKey() string {
 		return ""
 	}
 	return c.MasterKey
+}
+
+// dashboardLoginEnabled reports whether the dashboard's username and password
+// login is served. It guards the admin API, so it needs one to guard.
+func dashboardLoginEnabled(cfg *Config) bool {
+	return cfg != nil && cfg.DashboardLogin != nil && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil
 }
 
 // ReadinessProbe verifies that a dependency the gateway owns is reachable.
@@ -320,8 +328,15 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// the dashboard can recover managed-key access instead of locking itself
 	// out. A master key that was deliberately turned off is not an absent one:
 	// that deployment wants managed keys enforced, admin API included.
-	if cfg != nil && cfg.effectiveMasterKey() == "" && !cfg.MasterKeyDisabled && !hasRequestAuthenticators(cfg.RequestAuthenticators) && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
+	// A dashboard login is that recovery path, so with one the admin API
+	// stays behind it.
+	dashboardLogin := dashboardLoginEnabled(cfg)
+	if cfg != nil && cfg.effectiveMasterKey() == "" && !cfg.MasterKeyDisabled && !hasRequestAuthenticators(cfg.RequestAuthenticators) && !dashboardLogin && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
 		authSkipPaths = append(authSkipPaths, "/admin/*")
+	}
+	// Signing in is how a browser gets its credential.
+	if dashboardLogin {
+		authSkipPaths = append(authSkipPaths, dashboardlogin.SessionPath)
 	}
 	// The MCP OAuth callback is reached by a browser redirect from an
 	// authorization server, without the dashboard's bearer token; its
@@ -447,9 +462,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// Authentication (skips public paths)
 	// Register by authenticator presence; its Enabled state can change at runtime.
-	authMiddlewareRegistered := cfg != nil && (cfg.effectiveMasterKey() != "" || cfg.Authenticator != nil || hasRequestAuthenticators(cfg.RequestAuthenticators) || cfg.MasterKeyDisabled)
+	authMiddlewareRegistered := cfg != nil && (cfg.effectiveMasterKey() != "" || cfg.Authenticator != nil || hasRequestAuthenticators(cfg.RequestAuthenticators) || cfg.MasterKeyDisabled || dashboardLogin)
 	if authMiddlewareRegistered {
-		e.Use(NewAuthMiddleware(AuthMiddlewareConfig{
+		authConfig := AuthMiddlewareConfig{
 			MasterKey:             cfg.effectiveMasterKey(),
 			Authenticator:         cfg.Authenticator,
 			RequestAuthenticators: cfg.RequestAuthenticators,
@@ -457,7 +472,11 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 			RequiredPaths:         authRequiredPaths,
 			UserPathHeader:        userPathHeaderName,
 			RequireCredential:     cfg.MasterKeyDisabled,
-		}))
+		}
+		if dashboardLogin {
+			authConfig.DashboardLogin = cfg.DashboardLogin.Authenticator()
+		}
+		e.Use(NewAuthMiddleware(authConfig))
 	}
 
 	// The body is read only once the caller is authenticated: a request
@@ -638,6 +657,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		// DashboardConfig moved within /admin from /dashboard/config to
 		// /runtime/config; preserve the historical legacy path explicitly.
 		legacy.GET("/dashboard/config", cfg.AdminHandler.DashboardConfig)
+	}
+	if dashboardLogin {
+		cfg.DashboardLogin.RegisterRoutes(e)
 	}
 
 	// Admin dashboard UI routes (behind ADMIN_UI_ENABLED flag)
