@@ -210,6 +210,12 @@ otherwise. A subset that names no declared function is rejected with a 400.
 
 `allowed_tools` exists so a client can send the same tool list on every turn and keep its prompt cache. Narrowing changes the tool definitions sent upstream, and on Claude models they come before the system prompt in the cached prefix, so a subset that changes between turns invalidates the cache.
 
+## Images and other content
+
+In user and tool messages, `image_url` parts with a base64 `data:` URL (PNG,
+JPEG, GIF or WebP) are sent as Converse image blocks. Remote image URLs and
+`file`, `input_audio` and `video_url` parts are rejected with a 400.
+
 ## Not yet integrated
 
 - Bedrock embeddings — the `InvokeModel` embedding path is model-specific and

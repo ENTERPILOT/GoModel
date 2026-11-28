@@ -109,6 +109,8 @@ a provider starts accepting a field.
 | `response_format` of type `text` | Bedrock | 4 | dropped |
 | `response_format` of type `json_schema` | Bedrock | 3 | sent as `outputConfig.textFormat`; an absent or empty schema becomes a system-prompt instruction |
 | `response_format` of type `json_object` | Bedrock | 3 | sent as a system-prompt instruction |
+| `image_url` part with a base64 `data:` URL (user and tool messages) | Bedrock | 3 | sent as a Converse image block |
+| remote `image_url`, `file`, `input_audio`, `video_url` parts (user and tool messages) | Bedrock | 5 | rejected with a 400 |
 | `verbosity` | Anthropic | 4 | dropped |
 | `temperature` together with `top_p` | Anthropic | 4 | `top_p` dropped, `temperature` kept |
 | `metadata` | xAI `/responses` | 4 | dropped |
