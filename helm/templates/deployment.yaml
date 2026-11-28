@@ -77,6 +77,10 @@ spec:
           env:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- with .Values.startupProbe }}
+          startupProbe:
+            {{- include "gomodel.httpProbe" (dict "root" $ "probe" . "schemeFrom" ($.Values.livenessProbe | default $.Values.readinessProbe)) | nindent 12 }}
+          {{- end }}
           {{- with .Values.livenessProbe }}
           livenessProbe:
             {{- include "gomodel.httpProbe" (dict "root" $ "probe" .) | nindent 12 }}

@@ -122,7 +122,7 @@ HTTPRoute paths follow automatically.
 
 For pod-to-pod HTTPS without an ingress, mount a certificate Secret through
 `extraVolumes`/`extraVolumeMounts` and set `env.SERVER_TLS_CERT_FILE` and
-`env.SERVER_TLS_KEY_FILE`; both probes (unless a probe sets its own
+`env.SERVER_TLS_KEY_FILE`; the probes (unless a probe sets its own
 `httpGet.scheme`), `helm test` and the port-forward install notes switch to
 HTTPS on their own. The ServiceMonitor scrapes
 plain HTTP, so define your own with `scheme: https`. With mTLS
@@ -187,6 +187,7 @@ serviceAccount:
 | `autoscaling.enabled` | `false` | HPA on CPU (70%) and optionally memory. |
 | `podDisruptionBudget.enabled` | `true` | Created only when more than one pod can run. |
 | `terminationGracePeriodSeconds` | `45` | Covers GoModel's 30s drain. |
+| `startupProbe` | `/health`, up to 5 minutes | Holds off the liveness probe during a slow start, such as a PostgreSQL replica waiting for another one to build an index. Raise `failureThreshold` if a start needs longer; `null` disables it. Follows the liveness probe's `httpGet.scheme` unless it sets one. |
 | `livenessProbe` / `readinessProbe` | `/health`, `/health/ready` | Readiness fails while storage is down. |
 | `podSecurityContext` / `securityContext` | non-root 65532, read-only FS | Writable: `/app/data`, `/app/.cache`, and `/tmp` (emptyDir, SQLite temp files). |
 | `extraVolumes` / `extraVolumeMounts` | `[]` | CA bundles, local model catalogs, … |
