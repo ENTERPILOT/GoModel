@@ -159,7 +159,8 @@ Provider-Umgebungsvariablen: `OPENROUTER_EU_MODEL_FILTER_INCLUDE` konfiguriert
 Die effektive Rangfolge lautet:
 
 1. Umgebungsvariablen
-2. optionale `config/config.yaml` oder `config.yaml`
+2. optionale `config/config.yaml` oder `config.yaml`, samt den Dateien, die sie
+   [einbindet](#datei-aufteilen)
 3. eingebaute Standardwerte aus dem Code
 
 `.env` ist keine eigene Prioritätsebene, sondern lediglich ein bequemer Weg,
@@ -240,6 +241,99 @@ nicht laden, ändert sich nichts. `server.port` und `server.pid_file` sind die
 Ausnahmen: Beide sind für die Lebensdauer des Prozesses festgelegt, daher
 protokolliert ein Reload eine Warnung und behält die laufenden Werte bei, bis
 das Gateway neu gestartet wird.
+
+## Datei aufteilen
+
+Standardmäßig besteht die Konfiguration aus einer Datei. Wird sie zu groß, um
+sie am Stück zu prüfen, oder gehören Provider-Schlüssel in ein Kubernetes-Secret
+und der Rest in eine ConfigMap, listen Sie weitere Dateien unter `include` in
+`config.yaml` auf:
+
+```yaml
+# config/config.yaml
+include:
+  - providers.yaml
+  - "secrets/*.yaml"
+
+server:
+  port: "8080"
+```
+
+```yaml
+# config/providers.yaml
+providers:
+  openai-eu:
+    type: openai
+    base_url: https://eu.api.openai.com/v1
+```
+
+```yaml
+# config/secrets/openai-eu.yaml
+providers:
+  openai-eu:
+    api_key: "sk-..."
+```
+
+GoModel liest `config.yaml`, danach jede eingebundene Datei in der angegebenen
+Reihenfolge, und führt sie zu einer Konfiguration zusammen:
+
+- **Pfade** sind relativ zum Verzeichnis von `config.yaml`; absolute Pfade
+  funktionieren ebenfalls. `${VAR}` wird in den Einträgen und in jeder
+  eingebundenen Datei aufgelöst.
+- **Muster** (`*`, `?`, `[...]`) benennen alle passenden Dateien, gelesen in
+  Namensreihenfolge. Ein Muster ohne Treffer, auch wenn das Verzeichnis fehlt,
+  ist kein Fehler. Ein Eintrag ohne Muster benennt genau eine Datei, die
+  vorhanden sein muss.
+- **Abschnitte werden Schlüssel für Schlüssel zusammengeführt**, in jeder
+  Tiefe: Jede Datei kann Provider hinzufügen, und ein Provider kann wie oben
+  über mehrere Dateien verteilt sein.
+- **Ein Wert oder eine Liste wird nur in einer Datei gesetzt.** Setzt eine
+  zweite Datei denselben Schlüssel, bricht der Start ab, statt einen Gewinner
+  zu wählen. Ein leer gelassener Schlüssel (`providers:` ohne Inhalt) zählt
+  nicht. Auch ein Abschnitt mit YAML-Anker oder Merge-Key (`&name`, `<<`)
+  bleibt in einer Datei.
+- **Nur `config.yaml` darf `include` enthalten.** Eingebundene Dateien können
+  keine weiteren einbinden.
+
+Jede Datei wird für sich geparst und auf unbekannte Schlüssel geprüft, daher
+nennen diese Fehler Datei und Zeile. Das gilt auch für eine Einstellung, die
+zwei Dateien setzen, etwa eine `base_url`, die oben in der Secrets-Datei
+ergänzt wird:
+
+```text
+failed to parse config/secrets/openai-eu.yaml: line 5: providers.openai-eu.base_url is already set in config/providers.yaml (line 5); a setting can be set in only one config file
+```
+
+Umgebungsvariablen überschreiben weiterhin jede Datei, `gomodel --reload` liest
+alle neu ein, und `gomodel config export` gibt das zusammengeführte Ergebnis als
+eine Datei ohne `include` aus. Beim Start listet `config file loaded` die
+gelesenen Dateien unter `included` auf.
+
+<Warning>
+  Legen Sie die Dateien, die ein Muster erfasst, in ein eigenes Verzeichnis.
+  `"*.yaml"` neben `config.yaml` erfasst auch jede andere YAML-Datei dort, und
+  das Docker-Image enthält `/app/config/config.example.yaml`.
+</Warning>
+
+Mit dem Helm-Chart binden Sie das Secret neben `config.yaml` ein:
+
+```yaml
+config: |
+  include: ["secrets/*.yaml"]
+  providers:
+    openai-eu:
+      type: openai
+      base_url: https://eu.api.openai.com/v1
+
+extraVolumes:
+  - name: provider-keys
+    secret:
+      secretName: gomodel-provider-keys # jeder Schlüssel ist eine der Dateien oben
+extraVolumeMounts:
+  - name: provider-keys
+    mountPath: /app/config/secrets
+    readOnly: true
+```
 
 ## Docker
 
