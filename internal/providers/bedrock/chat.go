@@ -245,11 +245,13 @@ func convertMessages(messages []core.Message) ([]brtypes.SystemContentBlock, []b
 			}
 			pendingToolResults = append(pendingToolResults, block)
 		case "user":
-			text := core.ExtractTextContent(msg.Content)
-			if text == "" {
+			blocks, err := convertContent(msg.Content)
+			if err != nil {
+				return nil, nil, err
+			}
+			if len(blocks) == 0 {
 				continue
 			}
-			blocks := []brtypes.ContentBlock{&brtypes.ContentBlockMemberText{Value: text}}
 			if isGatewayCachePoint(msg.ExtraFields) {
 				blocks = append(blocks, &brtypes.ContentBlockMemberCachePoint{Value: brtypes.CachePointBlock{Type: brtypes.CachePointTypeDefault}})
 			}
@@ -313,9 +315,22 @@ func convertToolResultMessage(msg core.Message) (brtypes.ContentBlock, error) {
 	if toolID == "" {
 		return nil, core.NewInvalidRequestError("tool message is missing tool_call_id", nil)
 	}
-	text := core.ExtractTextContent(msg.Content)
-	content := []brtypes.ToolResultContentBlock{
-		&brtypes.ToolResultContentBlockMemberText{Value: text},
+	blocks, err := convertContent(msg.Content)
+	if err != nil {
+		return nil, err
+	}
+	content := make([]brtypes.ToolResultContentBlock, 0, len(blocks))
+	for _, block := range blocks {
+		switch b := block.(type) {
+		case *brtypes.ContentBlockMemberText:
+			content = append(content, &brtypes.ToolResultContentBlockMemberText{Value: b.Value})
+		case *brtypes.ContentBlockMemberImage:
+			content = append(content, &brtypes.ToolResultContentBlockMemberImage{Value: b.Value})
+		}
+	}
+	// An empty tool output is still sent as an (empty) text result.
+	if len(content) == 0 {
+		content = append(content, &brtypes.ToolResultContentBlockMemberText{})
 	}
 	return &brtypes.ContentBlockMemberToolResult{
 		Value: brtypes.ToolResultBlock{
