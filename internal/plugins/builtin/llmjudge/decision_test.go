@@ -115,7 +115,7 @@ func TestDecisionEngineUnclearAnswers(t *testing.T) {
 		}}
 	}
 
-	p := newPlugin(t, `{"model": "jev/jev-latest"}`, answer(&pluginapi.DecisionResult{Answers: []pluginapi.Answer{{Type: pluginapi.AnswerRefusal}}}, nil))
+	p := newPlugin(t, `{"model": "jev/jev-latest", "on_unclear": "warn"}`, answer(&pluginapi.DecisionResult{Answers: []pluginapi.Answer{{Type: pluginapi.AnswerRefusal}}}, nil))
 	d, err := p.OnPrompt(context.Background(), plugintest.Exchange(prompt(), nil))
 	require.NoError(t, err)
 	assert.Equal(t, pluginapi.ActionWarn, d.Action)
@@ -215,5 +215,5 @@ func TestDecisionEngineResponsesAndCache(t *testing.T) {
 
 func TestSummarizeEngine(t *testing.T) {
 	p := New()
-	assert.Equal(t, "jev/jev-latest, block, target auto, unclear: warn, engine decision", p.(*Plugin).Summarize([]byte(`{"model": "jev/jev-latest", "engine": "decision"}`)))
+	assert.Equal(t, "jev/jev-latest, block, target auto, unclear: block, engine decision", p.(*Plugin).Summarize([]byte(`{"model": "jev/jev-latest", "engine": "decision"}`)))
 }
