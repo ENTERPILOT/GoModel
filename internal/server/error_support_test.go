@@ -121,6 +121,44 @@ func TestHandleError_EnrichesRequestLogEntryWithGatewayErrorCode(t *testing.T) {
 	require.Equal(t, "budget_exceeded", entry.Data.ErrorCode)
 }
 
+// An upstream error message is part of the provider's response body, so the
+// request log entry stores it only where bodies are logged. The client still
+// receives it, and the entry keeps the error type, code and status.
+func TestHandleError_LoggedUpstreamErrorMessageFollowsBodyLogging(t *testing.T) {
+	const upstreamMessage = "Invalid input: the user's prompt"
+	tests := []struct {
+		name string
+		cfg  requestlog.Config
+		want string
+	}{
+		{name: "bodies off", cfg: requestlog.Config{Enabled: true}, want: requestlog.UpstreamErrorMessageWithheld},
+		{name: "bodies on", cfg: requestlog.Config{Enabled: true, LogBodies: true}, want: upstreamMessage},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, rec := echotest.Post(t, "/v1/chat/completions", nil)
+			upstream := core.ParseProviderError("openai", http.StatusBadRequest,
+				[]byte(`{"error":{"message":"`+upstreamMessage+`","code":"invalid_value"}}`), nil)
+
+			var entry *requestlog.LogEntry
+			handler := requestlog.Middleware(&requestModelLiveLogger{cfg: tt.cfg})(func(c *echo.Context) error {
+				entry, _ = c.Get(string(requestlog.LogEntryKey)).(*requestlog.LogEntry)
+				return handleError(c, upstream)
+			})
+			require.NoError(t, handler(c))
+
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), upstreamMessage, "the client still receives the provider's message")
+			require.NotNil(t, entry)
+			assert.Equal(t, tt.want, entry.Data.ErrorMessage)
+			assert.Equal(t, string(core.ErrorTypeInvalidRequest), entry.ErrorType)
+			assert.Equal(t, "invalid_value", entry.Data.ErrorCode)
+			assert.Equal(t, "openai", entry.Data.ErrorProvider)
+			assert.Equal(t, http.StatusBadRequest, entry.StatusCode)
+		})
+	}
+}
+
 func TestHandleError_ClassifiesClientCancellation(t *testing.T) {
 	tests := []struct {
 		name          string

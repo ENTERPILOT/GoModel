@@ -47,6 +47,8 @@ func requestLogAttemptsFromGateway(ctx context.Context) []requestlog.AttemptSnap
 			DurationNs:      attempt.DurationNs,
 			ResponseBody:    requestlog.CaptureAttemptResponseBody(attempt.ResponseBody),
 			ResponseHeaders: requestlog.RedactAttemptResponseHeaders(attempt.ResponseHeaders),
+
+			UpstreamErrorMessage: attempt.UpstreamErrorMessage,
 		})
 	}
 	return attempts

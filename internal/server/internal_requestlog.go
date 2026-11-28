@@ -91,7 +91,7 @@ func finishInternalRequestLogEntry(logger requestlog.LoggerInterface, ctx contex
 			entry.ErrorType = string(gatewayErr.Type)
 			entry.StatusCode = gatewayErr.HTTPStatusCode()
 			if entry.Data != nil {
-				entry.Data.ErrorMessage = gatewayErr.Message
+				entry.Data.ErrorMessage = requestlog.GatewayErrorMessage(gatewayErr, cfg.ForPath(x.path))
 				if gatewayErr.Code != nil {
 					entry.Data.ErrorCode = *gatewayErr.Code
 				}
