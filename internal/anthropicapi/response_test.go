@@ -121,6 +121,10 @@ func TestFromChatResponseStopReasons(t *testing.T) {
 		// is forced via tool_choice.
 		{name: "stop_with_tool_calls", finish: "stop", toolCalls: true, want: "tool_use"},
 		{name: "empty_with_tool_calls", finish: "", toolCalls: true, want: "tool_use"},
+		// A truncated or filtered reply keeps its own reason: the tool call may
+		// be incomplete, so the client must not treat it as ready to run.
+		{name: "length_with_tool_calls", finish: "length", toolCalls: true, want: "max_tokens"},
+		{name: "content_filter_with_tool_calls", finish: "content_filter", toolCalls: true, want: "refusal"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
