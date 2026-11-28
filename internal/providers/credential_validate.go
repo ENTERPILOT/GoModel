@@ -37,6 +37,9 @@ func validateCredential(cred ManagedProviderCredential, schema CredentialSchema)
 	if err := validateCredentialAPIKeys(cred, schema); err != nil {
 		return err
 	}
+	if err := validateCredentialBaseURL(cred); err != nil {
+		return err
+	}
 	if err := validateCredentialProxyURL(cred); err != nil {
 		return err
 	}
