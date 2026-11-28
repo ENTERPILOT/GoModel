@@ -97,7 +97,8 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 			// deployment asked for a credential regardless.
 			if !cfg.RequireCredential && masterKey == "" && (authenticator == nil || !authenticator.Enabled()) && !hasRequestAuthenticator {
 				requestlog.EnrichEntryWithAuthMethod(c, requestlog.AuthMethodNoKey)
-				setInteractionContinuationAllowed(c, true)
+				ctx := context.WithValue(c.Request().Context(), interactionContinuationAllowedKey{}, true)
+				c.SetRequest(c.Request().WithContext(config.RestrictSecretReferences(ctx)))
 				return next(c)
 			}
 
@@ -115,10 +116,12 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 					prefix := strings.TrimSuffix(skipPath, "*")
 					if strings.HasPrefix(requestPath, prefix) {
 						requestlog.EnrichEntryWithAuthMethod(c, requestlog.AuthMethodNoKey)
+						restrictSecretReferences(c)
 						return next(c)
 					}
 				} else if requestPath == skipPath {
 					requestlog.EnrichEntryWithAuthMethod(c, requestlog.AuthMethodNoKey)
+					restrictSecretReferences(c)
 					return next(c)
 				}
 			}
@@ -153,7 +156,7 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 					authResult, err := authenticator.Authenticate(c.Request().Context(), token)
 					if err == nil {
 						applyAuthKeyResult(c, authResult, userPathHeaderName)
-						restrictSecretReferences(c, masterKey)
+						restrictSecretReferencesBelowMasterKey(c, masterKey)
 						return next(c)
 					}
 
@@ -181,7 +184,7 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 				if err := applyExtensionAuthResult(c, result, userPathHeaderName); err != nil {
 					return writeGatewayError(c, extensionAuthenticationError(c))
 				}
-				restrictSecretReferences(c, masterKey)
+				restrictSecretReferencesBelowMasterKey(c, masterKey)
 				return next(c)
 			}
 
@@ -305,16 +308,34 @@ func AdminAccessMiddleware() echo.MiddlewareFunc {
 	}
 }
 
-// restrictSecretReferences keeps a credential other than the master key from
-// adding or changing secret references in admin-saved entities while a master
-// key is configured (see config.RestrictSecretReferences). Without a master
-// key, dashboard credentials are the gateway's top credentials and keep
-// saving references.
-func restrictSecretReferences(c *echo.Context, masterKey string) {
+// restrictSecretReferencesBelowMasterKey keeps an authenticated credential
+// other than the master key from adding or changing secret references in
+// admin-saved entities while a master key is configured. Without a master
+// key, an authenticated dashboard credential is the gateway's top credential
+// and keeps saving references.
+func restrictSecretReferencesBelowMasterKey(c *echo.Context, masterKey string) {
 	if masterKey == "" {
 		return
 	}
+	restrictSecretReferences(c)
+}
+
+// restrictSecretReferences marks the request so admin saves accept only the
+// secret references an entity already holds (see
+// config.RestrictSecretReferences). Every request let through without an
+// authenticated identity is marked, whether or not a master key is configured.
+func restrictSecretReferences(c *echo.Context) {
 	c.SetRequest(c.Request().WithContext(config.RestrictSecretReferences(c.Request().Context())))
+}
+
+// restrictSecretReferencesMiddleware marks every request it sees. It guards
+// the admin API when no authentication middleware is registered, where no
+// request has an identity.
+func restrictSecretReferencesMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		restrictSecretReferences(c)
+		return next(c)
+	}
 }
 
 func extensionAuthenticationError(c *echo.Context) *core.GatewayError {
