@@ -19,9 +19,10 @@ Point GoModel at the directory and list the files to load:
 plugins:
   enabled: true                        # PLUGINS_ENABLED=true (default: false; GUARDRAILS_ENABLED=true implies it)
   search_paths: ["./plugins"]          # PLUGINS_SEARCH_PATHS=./plugins
+  require_sha256: true                 # PLUGINS_REQUIRE_SHA256=true (default: false): refuse files without a pin
   load:
     - file: keyword_block.so
-      sha256: "<shasum -a 256 plugins/keyword_block.so>"   # optional pin
+      sha256: "<shasum -a 256 plugins/keyword_block.so>"
 ```
 
 Loading needs a cgo-enabled GoModel on Linux, macOS, or FreeBSD:
@@ -119,4 +120,5 @@ Rules of thumb:
 - Pin the GoModel version in `go.mod` to the host's release and rebuild on
   every GoModel or Go upgrade; make it a CI step.
 - Treat a `.so` as trusted code: loading one is equivalent to changing the
-  binary. Keep `search_paths` root-owned and pin `sha256` in production.
+  binary. In production keep `search_paths` root-owned, pin `sha256`, and set
+  `require_sha256: true`.

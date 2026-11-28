@@ -157,6 +157,71 @@ func TestLoad_FailsBeforeOpening(t *testing.T) {
 	}
 }
 
+func TestLoad_RequireSHA256(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "x.so"), "not a shared object")
+	sum := sha256.Sum256([]byte("not a shared object"))
+	pinned := config.PluginFileConfig{File: "x.so", SHA256: hex.EncodeToString(sum[:])}
+	const unpinned = "has no sha256 pin"
+
+	tests := []struct {
+		name       string
+		require    bool
+		load       []config.PluginFileConfig
+		wantErr    string
+		wantNotErr string
+	}{
+		{
+			name:    "unpinned entry is refused",
+			require: true,
+			load:    []config.PluginFileConfig{{File: "x.so"}},
+			wantErr: `plugins.load[0]: plugin file "x.so" ` + unpinned,
+		},
+		{
+			name:    "unpinned absolute path is refused",
+			require: true,
+			load:    []config.PluginFileConfig{{File: filepath.Join(dir, "x.so")}},
+			wantErr: unpinned,
+		},
+		{
+			name:    "a bare prefix is not a pin",
+			require: true,
+			load:    []config.PluginFileConfig{{File: "x.so", SHA256: " sha256: "}},
+			wantErr: unpinned,
+		},
+		{
+			name:    "refused before an earlier pinned file is opened",
+			require: true,
+			load:    []config.PluginFileConfig{pinned, {File: "y.so"}},
+			wantErr: `plugins.load[1]: plugin file "y.so" ` + unpinned,
+		},
+		{
+			name:    "a pinned entry is still verified",
+			require: true,
+			load:    []config.PluginFileConfig{{File: "x.so", SHA256: strings.Repeat("a", 64)}},
+			wantErr: "sha256 mismatch",
+		},
+		{
+			name:       "unpinned entries load by default",
+			load:       []config.PluginFileConfig{{File: "x.so"}},
+			wantErr:    "plugins.load[0]",
+			wantNotErr: unpinned,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(config.PluginsConfig{SearchPaths: []string{dir}, RequireSHA256: tt.require, Load: tt.load})
+			// x.so is not a real shared object, so loading always fails; the
+			// message says how far it got.
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+			if tt.wantNotErr != "" {
+				assert.NotContains(t, err.Error(), tt.wantNotErr)
+			}
+		})
+	}
+}
+
 func TestBuildFlags(t *testing.T) {
 	settings := []debug.BuildSetting{
 		{Key: "-trimpath", Value: "true"},

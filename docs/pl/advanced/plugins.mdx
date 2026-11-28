@@ -441,14 +441,23 @@ Reguły z `config.yaml` są wstawiane do zarządzanego domyślnego workflow na p
 ```yaml
 plugins:
   search_paths: ["/etc/gomodel/plugins"]   # PLUGINS_SEARCH_PATHS, rozdzielone przecinkami; domyślnie: puste
+  require_sha256: true                     # PLUGINS_REQUIRE_SHA256; domyślnie: false
   load:
     - file: acme_guard.so                  # względem ścieżki wyszukiwania albo bezwzględna
-      sha256: "3b1f..."                    # opcjonalne przypięcie; niezgodność przerywa start
+      sha256: "3b1f..."                    # przypięcie; niezgodność przerywa start
 ```
 
 Względna wartość `file` musi wskazywać plik wewnątrz jednej ze `search_paths` (linki symboliczne
 są rozwijane i sprawdzane). Plik, którego nie da się rozwiązać, zweryfikować lub otworzyć,
 powoduje błąd startu ze wskazaniem pliku.
+
+Przypinaj każdy plik przez `sha256`: pełny 64-znakowy digest zapisany przy budowaniu lub pobieraniu
+pliku (`sha256sum acme_guard.so` na Linuksie, `shasum -a 256 acme_guard.so` na macOS). Nie obliczaj
+przypięcia z wdrożonego pliku przy starcie, bo pasowałoby też do podmienionego pliku. Wpis bez
+przypięcia jest ładowany bez sprawdzenia, chyba że `require_sha256` ma wartość `true` – wtedy
+powoduje błąd startu. Domyślnie jest to `false`; włącz to ustawienie na produkcji. Digest jest
+sprawdzany przy starcie, tuż przed otwarciem pliku, więc utrzymuj też `search_paths` jako
+zapisywalne tylko dla roota: plik podmieniony między sprawdzeniem a otwarciem nie zostanie wykryty.
 
 Instalacje bez `config.yaml` mogą podać te same wpisy przez
 zmienne środowiskowe: `PLUGINS_LOAD` to rozdzielona przecinkami lista wartości `file`, każda
@@ -457,6 +466,13 @@ następuje dokładnie 64 znaki szesnastkowe, rozpoczyna przypięcie digestu; ka�
 to nazwa pliku. Gdy zmienna nie jest pusta, zastępuje listę
 `plugins.load` z `config.yaml` (env > config, jak każda inna
 wartość konfigurowalna przez zmienne środowiskowe).
+
+```bash
+export PLUGINS_ENABLED=true
+export PLUGINS_SEARCH_PATHS=/etc/gomodel/plugins
+export PLUGINS_REQUIRE_SHA256=true
+export PLUGINS_LOAD="acme_guard.so=$ACME_GUARD_SHA256"   # digest zapisany przy budowaniu
+```
 
 `GUARDRAILS_ENABLED` pozostaje przełącznikiem decydującym, czy skonfigurowane
 instancje działają na ruchu.
@@ -503,8 +519,9 @@ Zasady ustala pakiet `plugin` w Go i są one surowe:
 - **Brak wyładowywania**: plik `.so` pozostaje załadowany do restartu. Zmiana załadowanego pliku
   zaczyna działać po restarcie; edycja konfiguracji instancji ponownie uruchamia `Init` na
   nowej wartości bez restartu.
-- **Zaufany kod**: załadowanie `.so` jest równoważne zmianie pliku binarnego. Utrzymuj
-  `search_paths` jako należące do roota i przypinaj `sha256` na produkcji.
+- **Zaufany kod**: załadowanie `.so` jest równoważne zmianie pliku binarnego. Na produkcji
+  utrzymuj `search_paths` jako należące do roota, przypinaj `sha256` i ustaw
+  `require_sha256: true`.
 
 ### Budowanie i inspekcja
 
