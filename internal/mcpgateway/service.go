@@ -164,7 +164,11 @@ var ErrServerNotVisible = errors.New("server is not available for this user path
 // per the MCP session-hijacking guidance.
 type sessionBinding struct {
 	authKeyID string
-	userPath  string
+	// principalID is the identity an extension authenticator established,
+	// or "" for any other caller. Such an identity carries no auth key ID, so
+	// it is what tells two of them on one user path apart.
+	principalID string
+	userPath    string
 	// endpoint identifies the endpoint the session was opened on: a pinned
 	// server slug, virtualBindingPrefix plus a virtual server name, or "" for
 	// the aggregated endpoint.
@@ -201,8 +205,15 @@ type sessionBinding struct {
 
 // boundTo reports whether a request's identity and endpoint are the ones the
 // session was opened under.
-func (b sessionBinding) boundTo(authKeyID, userPath, endpoint string) bool {
-	return b.authKeyID == authKeyID && b.userPath == userPath && b.endpoint == endpoint
+func (b sessionBinding) boundTo(authKeyID, principalID, userPath, endpoint string) bool {
+	return b.authKeyID == authKeyID && b.principalID == principalID && b.userPath == userPath && b.endpoint == endpoint
+}
+
+// requestPrincipalID returns the identity an extension authenticator
+// established for the request, or "" for any other caller.
+func requestPrincipalID(ctx context.Context) string {
+	authentication, _ := ext.AuthenticationFromContext(ctx)
+	return authentication.PrincipalID
 }
 
 // Options configures NewService.
@@ -693,6 +704,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 
 	userPath := core.UserPathFromContext(r.Context())
 	authKeyID := core.GetAuthKeyID(r.Context())
+	principalID := requestPrincipalID(r.Context())
 
 	virtual := ""
 	if s.servedVirtual(pinnedServer) {
@@ -715,7 +727,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	var resumed *resumedSession
 	sessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id"))
 	if sessionID != "" {
-		admission, host := s.admitSession(r.Context(), sessionID, authKeyID, userPath, bindingEndpoint, r.Method == http.MethodDelete)
+		admission, host := s.admitSession(r.Context(), sessionID, authKeyID, principalID, userPath, bindingEndpoint, r.Method == http.MethodDelete)
 		switch admission {
 		case sessionRejected:
 			// A different principal presented this session ID, or the session
@@ -760,9 +772,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 
 // requestScope captures the visibility inputs of one downstream session.
 type requestScope struct {
-	authKeyID string
-	userPath  string
-	pinned    string
+	authKeyID   string
+	principalID string
+	userPath    string
+	pinned      string
 	// virtual names the virtual server whose members bound the view.
 	virtual   string
 	include   map[string]struct{}
@@ -788,8 +801,9 @@ func (scope requestScope) bindingEndpoint() string {
 
 func (s *Service) scopeFromRequest(r *http.Request) requestScope {
 	scope := requestScope{
-		authKeyID: core.GetAuthKeyID(r.Context()),
-		userPath:  core.UserPathFromContext(r.Context()),
+		authKeyID:   core.GetAuthKeyID(r.Context()),
+		principalID: requestPrincipalID(r.Context()),
+		userPath:    core.UserPathFromContext(r.Context()),
 	}
 	if pinned, ok := r.Context().Value(pinnedServerKey{}).(string); ok {
 		scope.pinned = pinned
@@ -851,7 +865,7 @@ func (s *Service) newSessionServer(scope requestScope) (*mcp.Server, map[string]
 		},
 		GetSessionID: func() string {
 			id := rand.Text()
-			s.bindSession(id, scope.authKeyID, scope.userPath, scope.bindingEndpoint(), scope.discovery, aliases, server)
+			s.bindSession(id, scope.authKeyID, scope.principalID, scope.userPath, scope.bindingEndpoint(), scope.discovery, aliases, server)
 			return id
 		},
 	})
@@ -1177,11 +1191,12 @@ func (s *Service) authorizeSessionID(sessionID, upstreamName string) error {
 }
 
 // bindSession records the principal a new session was initialized under.
-func (s *Service) bindSession(sessionID, authKeyID, userPath, endpoint string, discovery bool, toolAliases map[string]string, server *mcp.Server) {
+func (s *Service) bindSession(sessionID, authKeyID, principalID, userPath, endpoint string, discovery bool, toolAliases map[string]string, server *mcp.Server) {
 	now := s.now()
 	s.bindMu.Lock()
 	s.bindings[sessionID] = sessionBinding{
 		authKeyID:          authKeyID,
+		principalID:        principalID,
 		userPath:           userPath,
 		endpoint:           endpoint,
 		lastSeen:           now,
