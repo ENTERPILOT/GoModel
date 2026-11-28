@@ -199,6 +199,18 @@ Volume, beschränken Sie den Zugriff und stufen Sie Backups entsprechend ein.
   hoher Entropie gespeichert, niemals wiederherstellbar. Der Klartext wird
   einmalig bei der Erstellung angezeigt. Das unterscheidet sich bewusst von
   Provider-Zugangsdaten.
+- **Request-Log-Einträge identifizieren einen Client-Key über einen
+  schlüsselabhängigen Fingerabdruck.** `api_key_hash` sind die ersten 16
+  Hex-Zeichen eines HMAC-SHA256 des übermittelten `Authorization`-Headers (ohne
+  das Präfix `Bearer `). Der Schlüssel dafür ist ein zufälliges Secret, das
+  einmal pro Deployment erzeugt und in der Datenbank abgelegt wird
+  (`request_log_api_key_hash_secret` in `runtime_settings`). Der Wert ist innerhalb
+  eines Deployments stabil, gilt für alle Replikas auf derselben Datenbank und
+  lässt sich aus einem Key allein nicht nachrechnen. Einträge aus früheren
+  Versionen behalten ihren bisherigen, ungeschlüsselten Wert, sodass die
+  Einträge eines Keys über das Upgrade hinweg keinen gemeinsamen
+  `api_key_hash` haben. Lässt sich das Secret beim Start nicht laden, fehlt das
+  Feld in den Einträgen und das Gateway protokolliert eine Warnung.
 - **Header mit Client-Zugangsdaten werden vor dem Persistieren geschwärzt.**
   Mit `LOGGING_LOG_HEADERS=true` werden `Authorization`, `x-api-key`, `Cookie`
   und die übrigen Header mit Zugangsdaten beim Schreiben durch `[REDACTED]`
