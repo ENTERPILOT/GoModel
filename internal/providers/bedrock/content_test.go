@@ -1,7 +1,6 @@
 package bedrock
 
 import (
-	"errors"
 	"testing"
 
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
@@ -84,7 +83,7 @@ func TestConvertMessages_RejectsContentItCannotForward(t *testing.T) {
 			t.Run(role+" "+name, func(t *testing.T) {
 				_, _, err := convertMessages([]core.Message{{Role: role, ToolCallID: "call_1", Content: []core.ContentPart{{Type: "text", Text: "look"}, part}}})
 				var gatewayErr *core.GatewayError
-				require.True(t, errors.As(err, &gatewayErr), "err = %v", err)
+				require.ErrorAs(t, err, &gatewayErr)
 				assert.Equal(t, 400, gatewayErr.HTTPStatusCode())
 				assert.Contains(t, gatewayErr.Message, "bedrock")
 			})
