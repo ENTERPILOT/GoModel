@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -289,28 +290,37 @@ func (sc *responsesStreamConverter) appendTerminalEvents() {
 		return
 	}
 	sc.sentDone = true
-	// A body cut before message_start still owes the client the opening
-	// events: stream helpers snapshot the created response before anything else.
-	sc.buffer.AppendString(sc.startResponse())
 	status := "completed"
 	eventName := "response.completed"
 	incompleteReason := "interrupted"
 	if sc.sawStop {
 		incompleteReason = providers.ResponsesIncompleteReason(normalizeAnthropicStopReason(sc.stopReason))
 	}
+	extra := map[string]any{}
 	if incompleteReason != "" {
 		status = "incomplete"
 		eventName = "response.incomplete"
+		extra["incomplete_details"] = map[string]any{"reason": incompleteReason}
 	}
+	sc.buffer.AppendString(sc.finishResponse(eventName, status, status, extra))
+}
+
+// finishResponse closes the items still open with itemStatus and renders the
+// terminal event, carrying the output and usage gathered so far plus the
+// extra response fields.
+func (sc *responsesStreamConverter) finishResponse(eventName, status, itemStatus string, extra map[string]any) string {
+	// A body cut before message_start still owes the client the opening
+	// events: stream helpers snapshot the created response before anything else.
+	opening := sc.startResponse()
 	// A stream cut after a thinking block's signature but before its stop
 	// still holds a block Anthropic accepts back, and this is the client's
 	// only chance to receive it.
-	if extra := sc.thinking.extraContent(); extra != nil {
-		sc.output.SetReasoningExtraContent(extra)
+	if replay := sc.thinking.extraContent(); replay != nil {
+		sc.output.SetReasoningExtraContent(replay)
 	}
-	prefix := sc.output.FinishReasoningOutput(sc.reasoningOutputIndex, status) +
-		sc.output.FinishAssistantOutput(sc.assistantOutputIndex, status) +
-		sc.completePendingToolCalls(status)
+	prefix := sc.output.FinishReasoningOutput(sc.reasoningOutputIndex, itemStatus) +
+		sc.output.FinishAssistantOutput(sc.assistantOutputIndex, itemStatus) +
+		sc.completePendingToolCalls(itemStatus)
 	responseData := map[string]any{
 		"id":         sc.responseID,
 		"object":     "response",
@@ -320,15 +330,12 @@ func (sc *responsesStreamConverter) appendTerminalEvents() {
 		"created_at": sc.createdAt,
 		"output":     sc.output.FinalOutputItems(sc.reasoningOutputIndex, sc.assistantOutputIndex, sc.toolCalls, true),
 	}
-	if incompleteReason != "" {
-		responseData["incomplete_details"] = map[string]any{"reason": incompleteReason}
-	}
+	maps.Copy(responseData, extra)
 	// Include merged usage data captured across message_start/message_delta.
 	if sc.hasUsage {
 		responseData["usage"] = anthropicResponsesUsagePayload(&sc.usage)
 	}
-	sc.buffer.AppendString(prefix)
-	sc.buffer.AppendString(sc.output.FinishResponse(eventName, responseData))
+	return opening + prefix + sc.output.FinishResponse(eventName, responseData)
 }
 
 // startResponse opens the stream with response.created and
@@ -387,14 +394,7 @@ func (sc *responsesStreamConverter) failedEvents(upstream *anthropicError) strin
 	sc.failed = true
 	sc.sentDone = true
 	gatewayErr := anthropicStreamEventError(sc.providerName, upstream)
-	return sc.startResponse() + sc.output.FinishResponse("response.failed", map[string]any{
-		"id":         sc.responseID,
-		"object":     "response",
-		"status":     "failed",
-		"model":      sc.model,
-		"provider":   sc.providerName,
-		"created_at": sc.createdAt,
-		"output":     []map[string]any{},
+	return sc.finishResponse("response.failed", "failed", "incomplete", map[string]any{
 		"error": map[string]any{
 			"code":    *gatewayErr.Code,
 			"message": gatewayErr.Message,

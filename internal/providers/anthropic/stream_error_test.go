@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
@@ -31,6 +32,7 @@ func TestStreamConverter_ErrorEventFailsStream(t *testing.T) {
 
 	out := string(raw)
 	assert.Contains(t, out, `"content":"Hel"`)
+	assert.Contains(t, out, `"error":{`)
 	assert.Contains(t, out, `"message":"Overloaded"`)
 	assert.Contains(t, out, `"code":"overloaded_error"`)
 	assert.NotContains(t, out, "[DONE]")
@@ -50,5 +52,30 @@ func TestResponsesStreamConverter_ErrorEventFailsResponse(t *testing.T) {
 	assert.Contains(t, out, `"code":"overloaded_error"`)
 	assert.NotContains(t, out, "response.completed")
 	assert.NotContains(t, out, "response.incomplete")
+
+	_, data, found := strings.Cut(out, "event: response.failed\ndata: ")
+	require.True(t, found)
+	data, _, _ = strings.Cut(data, "\n")
+	var failed struct {
+		Response struct {
+			Output []struct {
+				Status  string `json:"status"`
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"output"`
+			Usage struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			} `json:"usage"`
+		} `json:"response"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(data), &failed))
+	require.Len(t, failed.Response.Output, 1)
+	assert.Equal(t, "incomplete", failed.Response.Output[0].Status)
+	require.Len(t, failed.Response.Output[0].Content, 1)
+	assert.Equal(t, "Hel", failed.Response.Output[0].Content[0].Text)
+	assert.Equal(t, 3, failed.Response.Usage.InputTokens)
+	assert.Equal(t, 1, failed.Response.Usage.OutputTokens)
 	require.NoError(t, converter.Close())
 }
