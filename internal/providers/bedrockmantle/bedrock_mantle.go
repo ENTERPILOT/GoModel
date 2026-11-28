@@ -51,14 +51,18 @@ type Provider struct {
 // AWS_BEARER_TOKEN_BEDROCK) uses bearer authentication; without one, the AWS
 // SDK default credential chain is used for SigV4 authentication.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	keys := opts.Keyring(cfg.APIKey)
-	if keys.Len() == 0 {
-		keys = providers.NewKeyring(os.Getenv("AWS_BEARER_TOKEN_BEDROCK"))
-	}
-
 	endpoint, err := resolveEndpoint(cfg.BaseURL, cfg.APIMode)
 	if err != nil {
 		return &Provider{configErr: err}
+	}
+
+	// The host's bearer token belongs to whoever runs the gateway, so a
+	// provider saved through the admin API gets it only for AWS's own
+	// endpoints (see providers.ProviderConfig.Managed). Anywhere else it
+	// needs its own key or signs with SigV4.
+	keys := opts.Keyring(cfg.APIKey)
+	if keys.Len() == 0 && (!cfg.Managed || awscfg.IsBedrockEndpoint(endpoint.baseURL)) {
+		keys = providers.NewKeyring(os.Getenv("AWS_BEARER_TOKEN_BEDROCK"))
 	}
 
 	// opts.HTTPClient carries the factory's proxy-aware transport when the
